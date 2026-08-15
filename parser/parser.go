@@ -14,7 +14,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/sqlc-dev/oliphant/ast"
+	"github.com/sqlc-dev/oliphant/internal/emit"
 	"github.com/sqlc-dev/oliphant/internal/lexer"
+	"github.com/sqlc-dev/oliphant/internal/parse"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
 
@@ -56,7 +58,11 @@ func errNotImplemented(name string) error {
 }
 
 func ParseToJSON(input string) (result string, err error) {
-	return "", errNotImplemented("ParseToJSON")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return "", scanErr(perr)
+	}
+	return emit.ParseResult(tree), nil
 }
 
 // ScanToProtobuf lexes the input with the core scanner exactly as
@@ -84,7 +90,11 @@ func ScanToProtobuf(input string) (result []byte, err error) {
 }
 
 func ParseToProtobuf(input string) ([]byte, error) {
-	return nil, errNotImplemented("ParseToProtobuf")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	return proto.Marshal(tree)
 }
 
 func DeparseFromProtobuf(input []byte) (result string, err error) {
