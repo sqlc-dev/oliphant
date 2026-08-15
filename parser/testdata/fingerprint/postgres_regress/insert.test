@@ -1,0 +1,1745 @@
+== 001
+|--
+-- insert with DEFAULT in the target_list
+|--
+create table inserttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing')
+--
+e03396b41b79e87d
+== 002
+insert into inserttest (col1, col2, col3) values (DEFAULT, DEFAULT, DEFAULT)
+--
+d90f509dc90cef61
+== 003
+insert into inserttest (col2, col3) values (3, DEFAULT)
+--
+5083ff8c0fdc3e73
+== 004
+insert into inserttest (col1, col2, col3) values (DEFAULT, 5, DEFAULT)
+--
+d90f509dc90cef61
+== 005
+insert into inserttest values (DEFAULT, 5, 'test')
+--
+c28a79a5c87fe8cf
+== 006
+insert into inserttest values (DEFAULT, 7)
+--
+c28a79a5c87fe8cf
+== 007
+select * from inserttest
+--
+04e0c4416fdf3b19
+== 008
+|--
+-- insert with similar expression / target_list values (all fail)
+|--
+insert into inserttest (col1, col2, col3) values (DEFAULT, DEFAULT)
+--
+d90f509dc90cef61
+== 009
+insert into inserttest (col1, col2, col3) values (1, 2)
+--
+d90f509dc90cef61
+== 010
+insert into inserttest (col1) values (1, 2)
+--
+d50fa82cd8cfdc73
+== 011
+insert into inserttest (col1) values (DEFAULT, DEFAULT)
+--
+d50fa82cd8cfdc73
+== 012
+select * from inserttest
+--
+04e0c4416fdf3b19
+== 013
+|--
+-- VALUES test
+|--
+insert into inserttest values(10, 20, '40'), (-1, 2, DEFAULT),
+    ((select 2), (select i from (values(3)) as foo (i)), 'values are fun!')
+--
+10e94d5228dffd31
+== 014
+select * from inserttest
+--
+04e0c4416fdf3b19
+== 015
+|--
+-- TOASTed value test
+|--
+insert into inserttest values(30, 50, repeat('x', 10000))
+--
+3a1416f391cd0cfb
+== 016
+select col1, col2, char_length(col3) from inserttest
+--
+fe0d78b0c664c935
+== 017
+drop table inserttest
+--
+1bb8f9dd5ef9f6c1
+== 018
+|--
+-- tuple larger than fillfactor
+|--
+CREATE TABLE large_tuple_test (a int, b text) WITH (fillfactor = 10)
+--
+6793a97cb7417883
+== 019
+ALTER TABLE large_tuple_test ALTER COLUMN b SET STORAGE plain
+--
+116c686af6dbf9a2
+== 020
+-- create page w/ free space in range [nearlyEmptyFreeSpace, MaxHeapTupleSize)
+INSERT INTO large_tuple_test (select 1, NULL)
+--
+0a888e2fc3505ba6
+== 021
+-- should still fit on the page
+INSERT INTO large_tuple_test (select 2, repeat('a', 1000))
+--
+9f219d3128e02c9a
+== 022
+SELECT pg_size_pretty(pg_relation_size('large_tuple_test'::regclass, 'main'))
+--
+59f226631f330e7d
+== 023
+-- add small record to the second page
+INSERT INTO large_tuple_test (select 3, NULL)
+--
+0a888e2fc3505ba6
+== 024
+-- now this tuple won't fit on the second page, but the insert should
+-- still succeed by extending the relation
+INSERT INTO large_tuple_test (select 4, repeat('a', 8126))
+--
+9f219d3128e02c9a
+== 025
+DROP TABLE large_tuple_test
+--
+dd8446fd79b9ddf5
+== 026
+|--
+-- check indirection (field/array assignment), cf bug #14265
+|--
+-- these tests are aware that transformInsertStmt has 3 separate code paths
+|--
+
+create type insert_test_type as (if1 int, if2 text[])
+--
+6608aad0be99652a
+== 027
+create table inserttest (f1 int, f2 int[],
+                         f3 insert_test_type, f4 insert_test_type[])
+--
+ee7558ae4007d3c1
+== 028
+insert into inserttest (f2[1], f2[2]) values (1,2)
+--
+2ba19df2ab3b454b
+== 029
+insert into inserttest (f2[1], f2[2]) values (3,4), (5,6)
+--
+2ba19df2ab3b454b
+== 030
+insert into inserttest (f2[1], f2[2]) select 7,8
+--
+c7a80fe94e839e82
+== 031
+insert into inserttest (f2[1], f2[2]) values (1,default)
+--
+2ba19df2ab3b454b
+== 032
+-- not supported
+
+insert into inserttest (f3.if1, f3.if2) values (1,array['foo'])
+--
+158e0feeab91eeff
+== 033
+insert into inserttest (f3.if1, f3.if2) values (1,'{foo}'), (2,'{bar}')
+--
+00195fbe8432e295
+== 034
+insert into inserttest (f3.if1, f3.if2) select 3, '{baz,quux}'
+--
+f705a2ee2cde0a49
+== 035
+insert into inserttest (f3.if1, f3.if2) values (1,default)
+--
+00195fbe8432e295
+== 036
+-- not supported
+
+insert into inserttest (f3.if2[1], f3.if2[2]) values ('foo', 'bar')
+--
+e1a1882c560b357a
+== 037
+insert into inserttest (f3.if2[1], f3.if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+e1a1882c560b357a
+== 038
+insert into inserttest (f3.if2[1], f3.if2[2]) select 'bear', 'beer'
+--
+d6c08c3d9e6f9d12
+== 039
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) values ('foo', 'bar')
+--
+5d791d816e1fa148
+== 040
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+5d791d816e1fa148
+== 041
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) select 'bear', 'beer'
+--
+3d319386c9516881
+== 042
+select * from inserttest
+--
+04e0c4416fdf3b19
+== 043
+-- also check reverse-listing
+create table inserttest2 (f1 bigint, f2 text)
+--
+f7e38b9812510445
+== 044
+create rule irule1 as on insert to inserttest2 do also
+  insert into inserttest (f3.if2[1], f3.if2[2])
+  values (new.f1,new.f2)
+--
+6a834c2821b8413b
+== 045
+create rule irule2 as on insert to inserttest2 do also
+  insert into inserttest (f4[1].if1, f4[1].if2[2])
+  values (1,'fool'),(new.f1,new.f2)
+--
+97627c94c87a9619
+== 046
+create rule irule3 as on insert to inserttest2 do also
+  insert into inserttest (f4[1].if1, f4[1].if2[2])
+  select new.f1, new.f2
+--
+c8c356c27c7d5f09
+== 047
+drop table inserttest2
+--
+0630f6bc91786930
+== 048
+drop table inserttest
+--
+1bb8f9dd5ef9f6c1
+== 049
+-- Make the same tests with domains over the array and composite fields
+
+create domain insert_pos_ints as int[] check (value[1] > 0)
+--
+0287e97d132ef2e2
+== 050
+create domain insert_test_domain as insert_test_type
+  check ((value).if2[1] is not null)
+--
+fe02a3c3c1ac613a
+== 051
+create table inserttesta (f1 int, f2 insert_pos_ints)
+--
+5e0d92c89e0681fe
+== 052
+create table inserttestb (f3 insert_test_domain, f4 insert_test_domain[])
+--
+7df9e543d99bb836
+== 053
+insert into inserttesta (f2[1], f2[2]) values (1,2)
+--
+339b07f2fb85f57b
+== 054
+insert into inserttesta (f2[1], f2[2]) values (3,4), (5,6)
+--
+339b07f2fb85f57b
+== 055
+insert into inserttesta (f2[1], f2[2]) select 7,8
+--
+89e79586fadb0dc1
+== 056
+insert into inserttesta (f2[1], f2[2]) values (1,default)
+--
+339b07f2fb85f57b
+== 057
+-- not supported
+insert into inserttesta (f2[1], f2[2]) values (0,2)
+--
+339b07f2fb85f57b
+== 058
+insert into inserttesta (f2[1], f2[2]) values (3,4), (0,6)
+--
+339b07f2fb85f57b
+== 059
+insert into inserttesta (f2[1], f2[2]) select 0,8
+--
+89e79586fadb0dc1
+== 060
+insert into inserttestb (f3.if1, f3.if2) values (1,array['foo'])
+--
+a1a96a586409cda4
+== 061
+insert into inserttestb (f3.if1, f3.if2) values (1,'{foo}'), (2,'{bar}')
+--
+81f364c8590c1459
+== 062
+insert into inserttestb (f3.if1, f3.if2) select 3, '{baz,quux}'
+--
+600eaeabeaa1ffde
+== 063
+insert into inserttestb (f3.if1, f3.if2) values (1,default)
+--
+81f364c8590c1459
+== 064
+-- not supported
+insert into inserttestb (f3.if1, f3.if2) values (1,array[null])
+--
+a1a96a586409cda4
+== 065
+insert into inserttestb (f3.if1, f3.if2) values (1,'{null}'), (2,'{bar}')
+--
+81f364c8590c1459
+== 066
+insert into inserttestb (f3.if1, f3.if2) select 3, '{null,quux}'
+--
+600eaeabeaa1ffde
+== 067
+insert into inserttestb (f3.if2[1], f3.if2[2]) values ('foo', 'bar')
+--
+ba2a0192044fa395
+== 068
+insert into inserttestb (f3.if2[1], f3.if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+ba2a0192044fa395
+== 069
+insert into inserttestb (f3.if2[1], f3.if2[2]) select 'bear', 'beer'
+--
+7d537f23281ad198
+== 070
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) values (row(1,'{x}'), 'foo', 'bar')
+--
+4b523b369ec206b5
+== 071
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) values (row(1,'{x}'), 'foo', 'bar'), (row(2,'{y}'), 'baz', 'quux')
+--
+4b523b369ec206b5
+== 072
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) select row(1,'{x}')::insert_test_domain, 'bear', 'beer'
+--
+dfeaf6e7135cd8e2
+== 073
+select * from inserttesta
+--
+e93dbfba10ffc917
+== 074
+select * from inserttestb
+--
+46775435500722a0
+== 075
+-- also check reverse-listing
+create table inserttest2 (f1 bigint, f2 text)
+--
+f7e38b9812510445
+== 076
+create rule irule1 as on insert to inserttest2 do also
+  insert into inserttestb (f3.if2[1], f3.if2[2])
+  values (new.f1,new.f2)
+--
+13ca22e32495be99
+== 077
+create rule irule2 as on insert to inserttest2 do also
+  insert into inserttestb (f4[1].if1, f4[1].if2[2])
+  values (1,'fool'),(new.f1,new.f2)
+--
+01a5168ec8c6be34
+== 078
+create rule irule3 as on insert to inserttest2 do also
+  insert into inserttestb (f4[1].if1, f4[1].if2[2])
+  select new.f1, new.f2
+--
+4bbe574e018ffd2e
+== 079
+drop table inserttest2
+--
+0630f6bc91786930
+== 080
+drop table inserttesta
+--
+c8f52674d466b33b
+== 081
+drop table inserttestb
+--
+d955b48a99545215
+== 082
+drop domain insert_pos_ints
+--
+abbbcf01eb8e5cd0
+== 083
+drop domain insert_test_domain
+--
+7999997c95a291cd
+== 084
+-- Verify that multiple inserts to subfields of a domain-over-container
+-- check the domain constraints only on the finished value
+
+create domain insert_nnarray as int[]
+  check (value[1] is not null and value[2] is not null)
+--
+41590eb24d3804aa
+== 085
+create domain insert_test_domain as insert_test_type
+  check ((value).if1 is not null and (value).if2 is not null)
+--
+175aff515da9c932
+== 086
+create table inserttesta (f1 insert_nnarray)
+--
+2a5be955d7b2962f
+== 087
+insert into inserttesta (f1[1]) values (1)
+--
+f872d74c717ba919
+== 088
+-- fail
+insert into inserttesta (f1[1], f1[2]) values (1, 2)
+--
+f872d74c717ba919
+== 089
+create table inserttestb (f1 insert_test_domain)
+--
+3416e6965b18e46c
+== 090
+insert into inserttestb (f1.if1) values (1)
+--
+d9b4bd543ce5c6c4
+== 091
+-- fail
+insert into inserttestb (f1.if1, f1.if2) values (1, '{foo}')
+--
+2a21a933399169aa
+== 092
+drop table inserttesta
+--
+c8f52674d466b33b
+== 093
+drop table inserttestb
+--
+d955b48a99545215
+== 094
+drop domain insert_nnarray
+--
+328939f8dfdde091
+== 095
+drop type insert_test_type cascade
+--
+7e256629f718e8f9
+== 096
+-- direct partition inserts should check partition bound constraint
+create table range_parted (
+	a text,
+	b int
+) partition by range (a, (b+0))
+--
+e2fdae6eec01d781
+== 097
+-- no partitions, so fail
+insert into range_parted values ('a', 11)
+--
+bd87860c049384b6
+== 098
+create table part1 partition of range_parted for values from ('a', 1) to ('a', 10)
+--
+6591e87888f495bd
+== 099
+create table part2 partition of range_parted for values from ('a', 10) to ('a', 20)
+--
+327a94b976bdab76
+== 100
+create table part3 partition of range_parted for values from ('b', 1) to ('b', 10)
+--
+5f9db8256da698f8
+== 101
+create table part4 partition of range_parted for values from ('b', 10) to ('b', 20)
+--
+34d4aad8860283e0
+== 102
+-- fail
+insert into part1 values ('a', 11)
+--
+57e53fa329c8c06f
+== 103
+insert into part1 values ('b', 1)
+--
+57e53fa329c8c06f
+== 104
+-- ok
+insert into part1 values ('a', 1)
+--
+57e53fa329c8c06f
+== 105
+-- fail
+insert into part4 values ('b', 21)
+--
+ce1e91b00b4fd2ff
+== 106
+insert into part4 values ('a', 10)
+--
+ce1e91b00b4fd2ff
+== 107
+-- ok
+insert into part4 values ('b', 10)
+--
+ce1e91b00b4fd2ff
+== 108
+-- fail (partition key a has a NOT NULL constraint)
+insert into part1 values (null)
+--
+57e53fa329c8c06f
+== 109
+-- fail (expression key (b+0) cannot be null either)
+insert into part1 values (1)
+--
+57e53fa329c8c06f
+== 110
+create table list_parted (
+	a text,
+	b int
+) partition by list (lower(a))
+--
+d95b3fa5fe4980ad
+== 111
+create table part_aa_bb partition of list_parted FOR VALUES IN ('aa', 'bb')
+--
+b70e38c6b6aecac1
+== 112
+create table part_cc_dd partition of list_parted FOR VALUES IN ('cc', 'dd')
+--
+4c6b22ef6cccca09
+== 113
+create table part_null partition of list_parted FOR VALUES IN (null)
+--
+729e326f78ff3392
+== 114
+-- fail
+insert into part_aa_bb values ('cc', 1)
+--
+09426113483610fc
+== 115
+insert into part_aa_bb values ('AAa', 1)
+--
+09426113483610fc
+== 116
+insert into part_aa_bb values (null)
+--
+09426113483610fc
+== 117
+-- ok
+insert into part_cc_dd values ('cC', 1)
+--
+8362f64b02fe6eca
+== 118
+insert into part_null values (null, 0)
+--
+93d23b0c4c5375ef
+== 119
+-- check in case of multi-level partitioned table
+create table part_ee_ff partition of list_parted for values in ('ee', 'ff') partition by range (b)
+--
+bf53b18e32599f94
+== 120
+create table part_ee_ff1 partition of part_ee_ff for values from (1) to (10)
+--
+214238fe9a8a63d6
+== 121
+create table part_ee_ff2 partition of part_ee_ff for values from (10) to (20)
+--
+95079263271b0807
+== 122
+-- test default partition
+create table part_default partition of list_parted default
+--
+b7da34d72b5abb74
+== 123
+-- Negative test: a row, which would fit in other partition, does not fit
+-- default partition, even when inserted directly
+insert into part_default values ('aa', 2)
+--
+d2fa48d5ca134368
+== 124
+insert into part_default values (null, 2)
+--
+d2fa48d5ca134368
+== 125
+-- ok
+insert into part_default values ('Zz', 2)
+--
+d2fa48d5ca134368
+== 126
+-- test if default partition works as expected for multi-level partitioned
+-- table as well as when default partition itself is further partitioned
+drop table part_default
+--
+3189fb39930095f9
+== 127
+create table part_xx_yy partition of list_parted for values in ('xx', 'yy') partition by list (a)
+--
+7bbf627bcb20e688
+== 128
+create table part_xx_yy_p1 partition of part_xx_yy for values in ('xx')
+--
+023c380a4c1a0a34
+== 129
+create table part_xx_yy_defpart partition of part_xx_yy default
+--
+1b93ed206c18190c
+== 130
+create table part_default partition of list_parted default partition by range(b)
+--
+2fefa74b2b8d836a
+== 131
+create table part_default_p1 partition of part_default for values from (20) to (30)
+--
+d1356b8ccb996906
+== 132
+create table part_default_p2 partition of part_default for values from (30) to (40)
+--
+f3f27c2cfa44c74b
+== 133
+-- fail
+insert into part_ee_ff1 values ('EE', 11)
+--
+66b3e1cd840a310f
+== 134
+insert into part_default_p2 values ('gg', 43)
+--
+7a39d7c1fcaef418
+== 135
+-- fail (even the parent's, ie, part_ee_ff's partition constraint applies)
+insert into part_ee_ff1 values ('cc', 1)
+--
+66b3e1cd840a310f
+== 136
+insert into part_default values ('gg', 43)
+--
+d2fa48d5ca134368
+== 137
+-- ok
+insert into part_ee_ff1 values ('ff', 1)
+--
+66b3e1cd840a310f
+== 138
+insert into part_ee_ff2 values ('ff', 11)
+--
+c6d929f9537020b3
+== 139
+insert into part_default_p1 values ('cd', 25)
+--
+02e617839186f54d
+== 140
+insert into part_default_p2 values ('de', 35)
+--
+7a39d7c1fcaef418
+== 141
+insert into list_parted values ('ab', 21)
+--
+19bfe2e442d9b5fd
+== 142
+insert into list_parted values ('xx', 1)
+--
+19bfe2e442d9b5fd
+== 143
+insert into list_parted values ('yy', 2)
+--
+19bfe2e442d9b5fd
+== 144
+select tableoid::regclass, * from list_parted
+--
+45072dcbaa54a042
+== 145
+-- Check tuple routing for partitioned tables
+
+-- fail
+insert into range_parted values ('a', 0)
+--
+bd87860c049384b6
+== 146
+-- ok
+insert into range_parted values ('a', 1)
+--
+bd87860c049384b6
+== 147
+insert into range_parted values ('a', 10)
+--
+bd87860c049384b6
+== 148
+-- fail
+insert into range_parted values ('a', 20)
+--
+bd87860c049384b6
+== 149
+-- ok
+insert into range_parted values ('b', 1)
+--
+bd87860c049384b6
+== 150
+insert into range_parted values ('b', 10)
+--
+bd87860c049384b6
+== 151
+-- fail (partition key (b+0) is null)
+insert into range_parted values ('a')
+--
+bd87860c049384b6
+== 152
+-- Check default partition
+create table part_def partition of range_parted default
+--
+ae0d8df5240ac98b
+== 153
+-- fail
+insert into part_def values ('b', 10)
+--
+70d9f6e81ddb76d5
+== 154
+-- ok
+insert into part_def values ('c', 10)
+--
+70d9f6e81ddb76d5
+== 155
+insert into range_parted values (null, null)
+--
+bd87860c049384b6
+== 156
+insert into range_parted values ('a', null)
+--
+bd87860c049384b6
+== 157
+insert into range_parted values (null, 19)
+--
+bd87860c049384b6
+== 158
+insert into range_parted values ('b', 20)
+--
+bd87860c049384b6
+== 159
+select tableoid::regclass, * from range_parted
+--
+c1c64914896eba98
+== 160
+-- ok
+insert into list_parted values (null, 1)
+--
+19bfe2e442d9b5fd
+== 161
+insert into list_parted (a) values ('aA')
+--
+64de958534f2f05f
+== 162
+-- fail (partition of part_ee_ff not found in both cases)
+insert into list_parted values ('EE', 0)
+--
+19bfe2e442d9b5fd
+== 163
+insert into part_ee_ff values ('EE', 0)
+--
+69b7518df5306ddb
+== 164
+-- ok
+insert into list_parted values ('EE', 1)
+--
+19bfe2e442d9b5fd
+== 165
+insert into part_ee_ff values ('EE', 10)
+--
+69b7518df5306ddb
+== 166
+select tableoid::regclass, * from list_parted
+--
+45072dcbaa54a042
+== 167
+-- some more tests to exercise tuple-routing with multi-level partitioning
+create table part_gg partition of list_parted for values in ('gg') partition by range (b)
+--
+4a2bbaa2010c3914
+== 168
+create table part_gg1 partition of part_gg for values from (minvalue) to (1)
+--
+27c84329760355cd
+== 169
+create table part_gg2 partition of part_gg for values from (1) to (10) partition by range (b)
+--
+fdf728357d4837af
+== 170
+create table part_gg2_1 partition of part_gg2 for values from (1) to (5)
+--
+322d52df991bf122
+== 171
+create table part_gg2_2 partition of part_gg2 for values from (5) to (10)
+--
+121628718a55b1d2
+== 172
+create table part_ee_ff3 partition of part_ee_ff for values from (20) to (30) partition by range (b)
+--
+702a4764bbc04464
+== 173
+create table part_ee_ff3_1 partition of part_ee_ff3 for values from (20) to (25)
+--
+3860c81b58b11d71
+== 174
+create table part_ee_ff3_2 partition of part_ee_ff3 for values from (25) to (30)
+--
+ca03805cce23b078
+== 175
+truncate list_parted
+--
+af8310872028daf0
+== 176
+insert into list_parted values ('aa'), ('cc')
+--
+19bfe2e442d9b5fd
+== 177
+insert into list_parted select 'Ff', s.a from generate_series(1, 29) s(a)
+--
+c3ca1fd32a5c47a2
+== 178
+insert into list_parted select 'gg', s.a from generate_series(1, 9) s(a)
+--
+c3ca1fd32a5c47a2
+== 179
+insert into list_parted (b) values (1)
+--
+d75912a14d8514d1
+== 180
+select tableoid::regclass::text, a, min(b) as min_b, max(b) as max_b from list_parted group by 1, 2 order by 1
+--
+09d36f8661a1e2c8
+== 181
+-- direct partition inserts should check hash partition bound constraint
+
+create table hash_parted (
+	a int
+) partition by hash (a part_test_int4_ops)
+--
+51073b4af0e11a7f
+== 182
+create table hpart0 partition of hash_parted for values with (modulus 4, remainder 0)
+--
+8aa965790d94b5ab
+== 183
+create table hpart1 partition of hash_parted for values with (modulus 4, remainder 1)
+--
+3db17d5af131d1be
+== 184
+create table hpart2 partition of hash_parted for values with (modulus 4, remainder 2)
+--
+0869d9e3b6db6c74
+== 185
+create table hpart3 partition of hash_parted for values with (modulus 4, remainder 3)
+--
+cee2cc3f90998560
+== 186
+insert into hash_parted values(generate_series(1,10))
+--
+abb186d018be3e51
+== 187
+-- direct insert of values divisible by 4 - ok;
+insert into hpart0 values(12),(16)
+--
+ecb2eedad54a0cdb
+== 188
+-- fail;
+insert into hpart0 values(11)
+--
+ecb2eedad54a0cdb
+== 189
+-- 11 % 4 -> 3 remainder i.e. valid data for hpart3 partition
+insert into hpart3 values(11)
+--
+c01e9edb31e7c180
+== 190
+-- view data
+select tableoid::regclass as part, a, a%4 as "remainder = a % 4"
+from hash_parted order by part
+--
+1e6fce9511d35402
+== 191
+-- test \d+ output on a table which has both partitioned and unpartitioned
+-- partitions
+
+-- cleanup
+drop table range_parted, list_parted
+--
+8ee46a456c7a71c1
+== 192
+drop table hash_parted
+--
+80758c57bd896694
+== 193
+-- test that a default partition added as the first partition accepts any value
+-- including null
+create table list_parted (a int) partition by list (a)
+--
+cf4d34e7366f83af
+== 194
+create table part_default partition of list_parted default
+--
+b7da34d72b5abb74
+== 195
+insert into part_default values (null)
+--
+d2fa48d5ca134368
+== 196
+insert into part_default values (1)
+--
+d2fa48d5ca134368
+== 197
+insert into part_default values (-1)
+--
+d2fa48d5ca134368
+== 198
+select tableoid::regclass, a from list_parted
+--
+bce3a17d2aacf593
+== 199
+-- cleanup
+drop table list_parted
+--
+a453b4df2d8cab70
+== 200
+-- more tests for certain multi-level partitioning scenarios
+create table mlparted (a int, b int) partition by range (a, b)
+--
+9d2f7e934067ce1b
+== 201
+create table mlparted1 (b int not null, a int not null) partition by range ((b+0))
+--
+baf7dadaf03a8210
+== 202
+create table mlparted11 (like mlparted1)
+--
+db430acc734d0b86
+== 203
+alter table mlparted11 drop a
+--
+49abecde12db9270
+== 204
+alter table mlparted11 add a int
+--
+3c37b20e7bbbac56
+== 205
+alter table mlparted11 drop a
+--
+49abecde12db9270
+== 206
+alter table mlparted11 add a int not null
+--
+f8e2ebb515879934
+== 207
+-- attnum for key attribute 'a' is different in mlparted, mlparted1, and mlparted11
+select attrelid::regclass, attname, attnum
+from pg_attribute
+where attname = 'a'
+ and (attrelid = 'mlparted'::regclass
+   or attrelid = 'mlparted1'::regclass
+   or attrelid = 'mlparted11'::regclass)
+order by attrelid::regclass::text
+--
+0a6ac8047b820e0d
+== 208
+alter table mlparted1 attach partition mlparted11 for values from (2) to (5)
+--
+e992e84cf57135f3
+== 209
+alter table mlparted attach partition mlparted1 for values from (1, 2) to (1, 10)
+--
+dbbfdc8b45577fde
+== 210
+-- check that "(1, 2)" is correctly routed to mlparted11.
+insert into mlparted values (1, 2)
+--
+7ddf6581bc3b971a
+== 211
+select tableoid::regclass, * from mlparted
+--
+f8ec960f9f440dd6
+== 212
+-- check that proper message is shown after failure to route through mlparted1
+insert into mlparted (a, b) values (1, 5)
+--
+88adb4d8c989f2cd
+== 213
+truncate mlparted
+--
+df9bb9cfc11c72be
+== 214
+alter table mlparted add constraint check_b check (b = 3)
+--
+49a9abbc0e5565ed
+== 215
+-- have a BR trigger modify the row such that the check_b is violated
+create function mlparted11_trig_fn()
+returns trigger AS
+$$
+begin
+  NEW.b := 4;
+  return NEW;
+end;
+$$
+language plpgsql
+--
+e5ab3a6452480678
+== 216
+create trigger mlparted11_trig before insert ON mlparted11
+  for each row execute procedure mlparted11_trig_fn()
+--
+e341635cfb85a5e0
+== 217
+-- check that the correct row is shown when constraint check_b fails after
+-- "(1, 2)" is routed to mlparted11 (actually "(1, 4)" would be shown due
+-- to the BR trigger mlparted11_trig_fn)
+insert into mlparted values (1, 2)
+--
+7ddf6581bc3b971a
+== 218
+drop trigger mlparted11_trig on mlparted11
+--
+57bc6aba657b0b51
+== 219
+drop function mlparted11_trig_fn()
+--
+8fa422c4b7377442
+== 220
+-- check that inserting into an internal partition successfully results in
+-- checking its partition constraint before inserting into the leaf partition
+-- selected by tuple-routing
+insert into mlparted1 (a, b) values (2, 3)
+--
+9a585b599b0ae47e
+== 221
+-- check routing error through a list partitioned table when the key is null
+create table lparted_nonullpart (a int, b char) partition by list (b)
+--
+5cbe45f43a0f8a22
+== 222
+create table lparted_nonullpart_a partition of lparted_nonullpart for values in ('a')
+--
+a125b64ebb8a3288
+== 223
+insert into lparted_nonullpart values (1)
+--
+4dde93a0200bf507
+== 224
+drop table lparted_nonullpart
+--
+acb9d901798a62a6
+== 225
+-- check that RETURNING works correctly with tuple-routing
+alter table mlparted drop constraint check_b
+--
+a9624edea174c4e5
+== 226
+create table mlparted12 partition of mlparted1 for values from (5) to (10)
+--
+3982dbbc58350367
+== 227
+create table mlparted2 (b int not null, a int not null)
+--
+03871cfd400ec295
+== 228
+alter table mlparted attach partition mlparted2 for values from (1, 10) to (1, 20)
+--
+b3b78c3d05726c13
+== 229
+create table mlparted3 partition of mlparted for values from (1, 20) to (1, 30)
+--
+8df13680b3ced8d5
+== 230
+create table mlparted4 (like mlparted)
+--
+7b1db19ac6b360dd
+== 231
+alter table mlparted4 drop a
+--
+4ccf8c2dd3dccd85
+== 232
+alter table mlparted4 add a int not null
+--
+6012d4eca3fd65f7
+== 233
+alter table mlparted attach partition mlparted4 for values from (1, 30) to (1, 40)
+--
+8f502c02f8c27939
+== 234
+with ins (a, b, c) as
+  (insert into mlparted (b, a) select s.a, 1 from generate_series(2, 39) s(a) returning tableoid::regclass, *)
+  select a, b, min(c), max(c) from ins group by a, b order by 1
+--
+c556bbfffc37078e
+== 235
+alter table mlparted add c text
+--
+0935c196da9b8039
+== 236
+create table mlparted5 (c text, a int not null, b int not null) partition by list (c)
+--
+e95c777ad5666dde
+== 237
+create table mlparted5a (a int not null, c text, b int not null)
+--
+4a72e187a8ccbed8
+== 238
+alter table mlparted5 attach partition mlparted5a for values in ('a')
+--
+87193d80dca7f02d
+== 239
+alter table mlparted attach partition mlparted5 for values from (1, 40) to (1, 50)
+--
+054cc4d7d8f24fad
+== 240
+alter table mlparted add constraint check_b check (a = 1 and b < 45)
+--
+cd06a0766e5e9421
+== 241
+insert into mlparted values (1, 45, 'a')
+--
+7ddf6581bc3b971a
+== 242
+create function mlparted5abrtrig_func() returns trigger as $$ begin new.c = 'b'; return new; end; $$ language plpgsql
+--
+256179f3fecc8fbc
+== 243
+create trigger mlparted5abrtrig before insert on mlparted5a for each row execute procedure mlparted5abrtrig_func()
+--
+46e110a9c85cdc81
+== 244
+insert into mlparted5 (a, b, c) values (1, 40, 'a')
+--
+cc015eb7d67adea9
+== 245
+drop table mlparted5
+--
+4159ca3ed9acacb2
+== 246
+alter table mlparted drop constraint check_b
+--
+a9624edea174c4e5
+== 247
+-- Check multi-level default partition
+create table mlparted_def partition of mlparted default partition by range(a)
+--
+1f60d14d9e64f34a
+== 248
+create table mlparted_def1 partition of mlparted_def for values from (40) to (50)
+--
+b6868ed6905ccdad
+== 249
+create table mlparted_def2 partition of mlparted_def for values from (50) to (60)
+--
+aff130c4eb6a9b3d
+== 250
+insert into mlparted values (40, 100)
+--
+7ddf6581bc3b971a
+== 251
+insert into mlparted_def1 values (42, 100)
+--
+daab801f6e2d7ad9
+== 252
+insert into mlparted_def2 values (54, 50)
+--
+1f0c2156b3887816
+== 253
+-- fail
+insert into mlparted values (70, 100)
+--
+7ddf6581bc3b971a
+== 254
+insert into mlparted_def1 values (52, 50)
+--
+daab801f6e2d7ad9
+== 255
+insert into mlparted_def2 values (34, 50)
+--
+1f0c2156b3887816
+== 256
+-- ok
+create table mlparted_defd partition of mlparted_def default
+--
+d5709221f8ce6150
+== 257
+insert into mlparted values (70, 100)
+--
+7ddf6581bc3b971a
+== 258
+select tableoid::regclass, * from mlparted_def
+--
+54fec7ae58c2332b
+== 259
+-- Check multi-level tuple routing with attributes dropped from the
+-- top-most parent.  First remove the last attribute.
+alter table mlparted add d int, add e int
+--
+d7b9454977b5ffea
+== 260
+alter table mlparted drop e
+--
+bff0206110acf3e2
+== 261
+create table mlparted5 partition of mlparted
+  for values from (1, 40) to (1, 50) partition by range (c)
+--
+020be8d59304df64
+== 262
+create table mlparted5_ab partition of mlparted5
+  for values from ('a') to ('c') partition by list (c)
+--
+6d6003b7372353ed
+== 263
+-- This partitioned table should remain with no partitions.
+create table mlparted5_cd partition of mlparted5
+  for values from ('c') to ('e') partition by list (c)
+--
+6b8fb258bfe0f17d
+== 264
+create table mlparted5_a partition of mlparted5_ab for values in ('a')
+--
+2984c9f7385931d2
+== 265
+create table mlparted5_b (d int, b int, c text, a int)
+--
+7305946950e57c22
+== 266
+alter table mlparted5_ab attach partition mlparted5_b for values in ('b')
+--
+d8da8c3e3884bc4d
+== 267
+truncate mlparted
+--
+df9bb9cfc11c72be
+== 268
+insert into mlparted values (1, 2, 'a', 1)
+--
+7ddf6581bc3b971a
+== 269
+insert into mlparted values (1, 40, 'a', 1)
+--
+7ddf6581bc3b971a
+== 270
+-- goes to mlparted5_a
+insert into mlparted values (1, 45, 'b', 1)
+--
+7ddf6581bc3b971a
+== 271
+-- goes to mlparted5_b
+insert into mlparted values (1, 45, 'c', 1)
+--
+7ddf6581bc3b971a
+== 272
+-- goes to mlparted5_cd, fails
+insert into mlparted values (1, 45, 'f', 1)
+--
+7ddf6581bc3b971a
+== 273
+-- goes to mlparted5, fails
+select tableoid::regclass, * from mlparted order by a, b, c, d
+--
+001eb5c064fe4fa1
+== 274
+alter table mlparted drop d
+--
+23067d7cf7972df0
+== 275
+truncate mlparted
+--
+df9bb9cfc11c72be
+== 276
+-- Remove the before last attribute.
+alter table mlparted add e int, add d int
+--
+a852b361d4a8f357
+== 277
+alter table mlparted drop e
+--
+bff0206110acf3e2
+== 278
+insert into mlparted values (1, 2, 'a', 1)
+--
+7ddf6581bc3b971a
+== 279
+insert into mlparted values (1, 40, 'a', 1)
+--
+7ddf6581bc3b971a
+== 280
+-- goes to mlparted5_a
+insert into mlparted values (1, 45, 'b', 1)
+--
+7ddf6581bc3b971a
+== 281
+-- goes to mlparted5_b
+insert into mlparted values (1, 45, 'c', 1)
+--
+7ddf6581bc3b971a
+== 282
+-- goes to mlparted5_cd, fails
+insert into mlparted values (1, 45, 'f', 1)
+--
+7ddf6581bc3b971a
+== 283
+-- goes to mlparted5, fails
+select tableoid::regclass, * from mlparted order by a, b, c, d
+--
+001eb5c064fe4fa1
+== 284
+alter table mlparted drop d
+--
+23067d7cf7972df0
+== 285
+drop table mlparted5
+--
+4159ca3ed9acacb2
+== 286
+-- check that message shown after failure to find a partition shows the
+-- appropriate key description (or none) in various situations
+create table key_desc (a int, b int) partition by list ((a+0))
+--
+11cec079cc1c29fb
+== 287
+create table key_desc_1 partition of key_desc for values in (1) partition by range (b)
+--
+e0d0030c0c3b6fc4
+== 288
+create user regress_insert_other_user
+--
+345f24fcaf9b3097
+== 289
+grant select (a) on key_desc_1 to regress_insert_other_user
+--
+6422d1b3265b9eda
+== 290
+grant insert on key_desc to regress_insert_other_user
+--
+e0655cc4bd56552c
+== 291
+set role regress_insert_other_user
+--
+56facc463e2de425
+== 292
+-- no key description is shown
+insert into key_desc values (1, 1)
+--
+c3e660be355c9b77
+== 293
+reset role
+--
+01c32d8f5bb0e22a
+== 294
+grant select (b) on key_desc_1 to regress_insert_other_user
+--
+568fe56e7426aa11
+== 295
+set role regress_insert_other_user
+--
+56facc463e2de425
+== 296
+-- key description (b)=(1) is now shown
+insert into key_desc values (1, 1)
+--
+c3e660be355c9b77
+== 297
+-- key description is not shown if key contains expression
+insert into key_desc values (2, 1)
+--
+c3e660be355c9b77
+== 298
+reset role
+--
+01c32d8f5bb0e22a
+== 299
+revoke all on key_desc from regress_insert_other_user
+--
+161f2e2f54a16726
+== 300
+revoke all on key_desc_1 from regress_insert_other_user
+--
+eda6807b07e52251
+== 301
+drop role regress_insert_other_user
+--
+862b2f2231e9e963
+== 302
+drop table key_desc, key_desc_1
+--
+6c9a3903ee400904
+== 303
+-- test minvalue/maxvalue restrictions
+create table mcrparted (a int, b int, c int) partition by range (a, abs(b), c)
+--
+789384083860d36f
+== 304
+create table mcrparted0 partition of mcrparted for values from (minvalue, 0, 0) to (1, maxvalue, maxvalue)
+--
+1b0d2f795b0cbc4f
+== 305
+create table mcrparted2 partition of mcrparted for values from (10, 6, minvalue) to (10, maxvalue, minvalue)
+--
+2ac37e2b4b5db52b
+== 306
+create table mcrparted4 partition of mcrparted for values from (21, minvalue, 0) to (30, 20, minvalue)
+--
+8189ff9dcb076c3e
+== 307
+-- check multi-column range partitioning expression enforces the same
+-- constraint as what tuple-routing would determine it to be
+create table mcrparted0 partition of mcrparted for values from (minvalue, minvalue, minvalue) to (1, maxvalue, maxvalue)
+--
+6b31ea6f66bcda7c
+== 308
+create table mcrparted1 partition of mcrparted for values from (2, 1, minvalue) to (10, 5, 10)
+--
+4fe84bdb143d72fd
+== 309
+create table mcrparted2 partition of mcrparted for values from (10, 6, minvalue) to (10, maxvalue, maxvalue)
+--
+ecfdf4d687075bd9
+== 310
+create table mcrparted3 partition of mcrparted for values from (11, 1, 1) to (20, 10, 10)
+--
+e9a2a2ea13f3fec5
+== 311
+create table mcrparted4 partition of mcrparted for values from (21, minvalue, minvalue) to (30, 20, maxvalue)
+--
+e6faf40fc74373f2
+== 312
+create table mcrparted5 partition of mcrparted for values from (30, 21, 20) to (maxvalue, maxvalue, maxvalue)
+--
+a46f9d81f988e1bf
+== 313
+-- null not allowed in range partition
+insert into mcrparted values (null, null, null)
+--
+c4958fda2cd99f7b
+== 314
+-- routed to mcrparted0
+insert into mcrparted values (0, 1, 1)
+--
+c4958fda2cd99f7b
+== 315
+insert into mcrparted0 values (0, 1, 1)
+--
+44ad25549f276d2c
+== 316
+-- routed to mcparted1
+insert into mcrparted values (9, 1000, 1)
+--
+c4958fda2cd99f7b
+== 317
+insert into mcrparted1 values (9, 1000, 1)
+--
+e0c114d522172b53
+== 318
+insert into mcrparted values (10, 5, -1)
+--
+c4958fda2cd99f7b
+== 319
+insert into mcrparted1 values (10, 5, -1)
+--
+e0c114d522172b53
+== 320
+insert into mcrparted values (2, 1, 0)
+--
+c4958fda2cd99f7b
+== 321
+insert into mcrparted1 values (2, 1, 0)
+--
+e0c114d522172b53
+== 322
+-- routed to mcparted2
+insert into mcrparted values (10, 6, 1000)
+--
+c4958fda2cd99f7b
+== 323
+insert into mcrparted2 values (10, 6, 1000)
+--
+5ce3bb280b62d163
+== 324
+insert into mcrparted values (10, 1000, 1000)
+--
+c4958fda2cd99f7b
+== 325
+insert into mcrparted2 values (10, 1000, 1000)
+--
+5ce3bb280b62d163
+== 326
+-- no partition exists, nor does mcrparted3 accept it
+insert into mcrparted values (11, 1, -1)
+--
+c4958fda2cd99f7b
+== 327
+insert into mcrparted3 values (11, 1, -1)
+--
+801ee705a4a61d42
+== 328
+-- routed to mcrparted5
+insert into mcrparted values (30, 21, 20)
+--
+c4958fda2cd99f7b
+== 329
+insert into mcrparted5 values (30, 21, 20)
+--
+08e12293e779d914
+== 330
+insert into mcrparted4 values (30, 21, 20)
+--
+418fdb1ff657dab3
+== 331
+-- error
+
+-- check rows
+select tableoid::regclass::text, * from mcrparted order by 1
+--
+766e3bfb3c2ffc20
+== 332
+-- cleanup
+drop table mcrparted
+--
+efe643a525e5235c
+== 333
+-- check that a BR constraint can't make partition contain violating rows
+create table brtrigpartcon (a int, b text) partition by list (a)
+--
+7c947e46ca879149
+== 334
+create table brtrigpartcon1 partition of brtrigpartcon for values in (1)
+--
+35730eaa803d7b14
+== 335
+create or replace function brtrigpartcon1trigf() returns trigger as $$begin new.a := 2; return new; end$$ language plpgsql
+--
+6ff70ff5e360a4ba
+== 336
+create trigger brtrigpartcon1trig before insert on brtrigpartcon1 for each row execute procedure brtrigpartcon1trigf()
+--
+13f63e7e72f71481
+== 337
+insert into brtrigpartcon values (1, 'hi there')
+--
+5141430d7a52de81
+== 338
+insert into brtrigpartcon1 values (1, 'hi there')
+--
+91fa6fae8e1c9f1b
+== 339
+-- check that the message shows the appropriate column description in a
+-- situation where the partitioned table is not the primary ModifyTable node
+create table inserttest3 (f1 text default 'foo', f2 text default 'bar', f3 int)
+--
+fece104236319810
+== 340
+create role regress_coldesc_role
+--
+de77c95fe7baef5e
+== 341
+grant insert on inserttest3 to regress_coldesc_role
+--
+23506ec7ef0b2d17
+== 342
+grant insert on brtrigpartcon to regress_coldesc_role
+--
+3d23cdcb51db2fad
+== 343
+revoke select on brtrigpartcon from regress_coldesc_role
+--
+6088b1ffca7f2027
+== 344
+set role regress_coldesc_role
+--
+56facc463e2de425
+== 345
+with result as (insert into brtrigpartcon values (1, 'hi there') returning 1)
+  insert into inserttest3 (f3) select * from result
+--
+39033cfcd6f8323c
+== 346
+reset role
+--
+01c32d8f5bb0e22a
+== 347
+-- cleanup
+revoke all on inserttest3 from regress_coldesc_role
+--
+9d37b15342d8ac93
+== 348
+revoke all on brtrigpartcon from regress_coldesc_role
+--
+1d2f407017bf43d9
+== 349
+drop role regress_coldesc_role
+--
+b3b3e64c4c86e6ef
+== 350
+drop table inserttest3
+--
+7c3429e9f6fb881c
+== 351
+drop table brtrigpartcon
+--
+9d26f120b7e4a321
+== 352
+drop function brtrigpartcon1trigf()
+--
+3c8a7f5d66b8c053
+== 353
+-- check that "do nothing" BR triggers work with tuple-routing
+create table donothingbrtrig_test (a int, b text) partition by list (a)
+--
+799999370a3ed45e
+== 354
+create table donothingbrtrig_test1 (b text, a int)
+--
+d2ff39798d37a10e
+== 355
+create table donothingbrtrig_test2 (c text, b text, a int)
+--
+8438dd41ec1448a4
+== 356
+alter table donothingbrtrig_test2 drop column c
+--
+174c91d7736f680b
+== 357
+create or replace function donothingbrtrig_func() returns trigger as $$begin raise notice 'b: %', new.b; return NULL; end$$ language plpgsql
+--
+b87463297b858916
+== 358
+create trigger donothingbrtrig1 before insert on donothingbrtrig_test1 for each row execute procedure donothingbrtrig_func()
+--
+36a923e877c871b1
+== 359
+create trigger donothingbrtrig2 before insert on donothingbrtrig_test2 for each row execute procedure donothingbrtrig_func()
+--
+690d9acc3255b133
+== 360
+alter table donothingbrtrig_test attach partition donothingbrtrig_test1 for values in (1)
+--
+fb4f5cb5fef9fb30
+== 361
+alter table donothingbrtrig_test attach partition donothingbrtrig_test2 for values in (2)
+--
+d4f2af805c02d802
+== 362
+insert into donothingbrtrig_test values (1, 'foo'), (2, 'bar')
+--
+ad4b5f8ba6ad16f5
+== 363
+copy donothingbrtrig_test from stdout
+--
+e1bbc2bf15019aae
+== 364
+1	baz
+2	qux
+select tableoid::regclass, * from donothingbrtrig_test
+--
+ERROR: syntax error at or near "1"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 365
+-- cleanup
+drop table donothingbrtrig_test
+--
+b70545cdd4a44699
+== 366
+drop function donothingbrtrig_func()
+--
+58c5789d0ff6310e
+== 367
+-- check multi-column range partitioning with minvalue/maxvalue constraints
+create table mcrparted (a text, b int) partition by range(a, b)
+--
+593a512f8767f95f
+== 368
+create table mcrparted1_lt_b partition of mcrparted for values from (minvalue, minvalue) to ('b', minvalue)
+--
+b22968002895d6e9
+== 369
+create table mcrparted2_b partition of mcrparted for values from ('b', minvalue) to ('c', minvalue)
+--
+6c5ee66473c89498
+== 370
+create table mcrparted3_c_to_common partition of mcrparted for values from ('c', minvalue) to ('common', minvalue)
+--
+a148a82061f4d7f6
+== 371
+create table mcrparted4_common_lt_0 partition of mcrparted for values from ('common', minvalue) to ('common', 0)
+--
+f4f9f9c5fae55b0a
+== 372
+create table mcrparted5_common_0_to_10 partition of mcrparted for values from ('common', 0) to ('common', 10)
+--
+027cd1c0653f1a4b
+== 373
+create table mcrparted6_common_ge_10 partition of mcrparted for values from ('common', 10) to ('common', maxvalue)
+--
+f7435cc09df8f3f4
+== 374
+create table mcrparted7_gt_common_lt_d partition of mcrparted for values from ('common', maxvalue) to ('d', minvalue)
+--
+b89b6cdbc0654ce7
+== 375
+create table mcrparted8_ge_d partition of mcrparted for values from ('d', minvalue) to (maxvalue, maxvalue)
+--
+a6691f85a127acdb
+== 376
+insert into mcrparted values ('aaa', 0), ('b', 0), ('bz', 10), ('c', -10),
+    ('comm', -10), ('common', -10), ('common', 0), ('common', 10),
+    ('commons', 0), ('d', -10), ('e', 0)
+--
+c4958fda2cd99f7b
+== 377
+select tableoid::regclass, * from mcrparted order by a, b
+--
+1fabd4ca78c2216f
+== 378
+drop table mcrparted
+--
+efe643a525e5235c
+== 379
+-- check that wholerow vars in the RETURNING list work with partitioned tables
+create table returningwrtest (a int) partition by list (a)
+--
+40f79f7639e1ac46
+== 380
+create table returningwrtest1 partition of returningwrtest for values in (1)
+--
+6b6a3ea6752d2801
+== 381
+insert into returningwrtest values (1) returning returningwrtest
+--
+fefe98e2486ee404
+== 382
+-- check also that the wholerow vars in RETURNING list are converted as needed
+alter table returningwrtest add b text
+--
+d677dc1fdda11575
+== 383
+create table returningwrtest2 (b text, c int, a int)
+--
+f97d70b5a01a18b7
+== 384
+alter table returningwrtest2 drop c
+--
+7b1d4d34d1905773
+== 385
+alter table returningwrtest attach partition returningwrtest2 for values in (2)
+--
+348d9e83aef9b191
+== 386
+insert into returningwrtest values (2, 'foo') returning returningwrtest
+--
+fefe98e2486ee404
+== 387
+drop table returningwrtest
+--
+fa68c587d70a98ce

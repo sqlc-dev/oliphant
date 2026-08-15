@@ -1,0 +1,1303 @@
+== 001
+|--
+-- UPDATE syntax tests
+|--
+
+CREATE TABLE update_test (
+    a   INT DEFAULT 10,
+    b   INT,
+    c   TEXT
+)
+--
+fa7885a48df1d6d9
+== 002
+CREATE TABLE upsert_test (
+    a   INT PRIMARY KEY,
+    b   TEXT
+)
+--
+1dad4aae4d8c898c
+== 003
+INSERT INTO update_test VALUES (5, 10, 'foo')
+--
+4df8799205242774
+== 004
+INSERT INTO update_test(b, a) VALUES (15, 10)
+--
+ca61b462783af53f
+== 005
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 006
+UPDATE update_test SET a = DEFAULT, b = DEFAULT
+--
+85843bed483dddb5
+== 007
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 008
+-- aliases for the UPDATE target table
+UPDATE update_test AS t SET b = 10 WHERE t.a = 10
+--
+33928b2ef6e3c59c
+== 009
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 010
+UPDATE update_test t SET b = t.b + 10 WHERE t.a = 10
+--
+302ca2f1baa184a9
+== 011
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 012
+-- error, you're not supposed to qualify the target column
+UPDATE update_test t SET t.b = t.b + 10 WHERE t.a = 10
+--
+1c08e559d55fed0b
+== 013
+|--
+-- Test VALUES in FROM
+|--
+
+UPDATE update_test SET a=v.i FROM (VALUES(100, 20)) AS v(i, j)
+  WHERE update_test.b = v.j
+--
+8879cacefbe5f1cf
+== 014
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 015
+-- fail, wrong data type:
+UPDATE update_test SET a = v.* FROM (VALUES(100, 20)) AS v(i, j)
+  WHERE update_test.b = v.j
+--
+6bd27274e608c702
+== 016
+|--
+-- Test multiple-set-clause syntax
+|--
+
+INSERT INTO update_test SELECT a,b+1,c FROM update_test
+--
+a3b71bb76a4052f3
+== 017
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 018
+UPDATE update_test SET (c,b,a) = ('bugle', b+11, DEFAULT) WHERE c = 'foo'
+--
+5c636d975e77ae74
+== 019
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 020
+UPDATE update_test SET (c,b) = ('car', a+b), a = a + 1 WHERE a = 10
+--
+8eb5ab3472090f44
+== 021
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 022
+-- fail, multi assignment to same column:
+UPDATE update_test SET (c,b) = ('car', a+b), b = a + 1 WHERE a = 10
+--
+5bc8acf07431272c
+== 023
+-- uncorrelated sub-select:
+UPDATE update_test
+  SET (b,a) = (select a,b from update_test where b = 41 and c = 'car')
+  WHERE a = 100 AND b = 20
+--
+5ff3f8a4758ec53b
+== 024
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 025
+-- correlated sub-select:
+UPDATE update_test o
+  SET (b,a) = (select a+1,b from update_test i
+               where i.a=o.a and i.b=o.b and i.c is not distinct from o.c)
+--
+463d4830ba9ece5b
+== 026
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 027
+-- fail, multiple rows supplied:
+UPDATE update_test SET (b,a) = (select a+1,b from update_test)
+--
+a4d3b2c20e0585ad
+== 028
+-- set to null if no rows supplied:
+UPDATE update_test SET (b,a) = (select a+1,b from update_test where a = 1000)
+  WHERE a = 11
+--
+4151c0fa91c26ea7
+== 029
+SELECT * FROM update_test
+--
+dddc34ae3748dc0e
+== 030
+-- *-expansion should work in this context:
+UPDATE update_test SET (a,b) = ROW(v.*) FROM (VALUES(21, 100)) AS v(i, j)
+  WHERE update_test.a = v.i
+--
+d6dab22046085ef6
+== 031
+-- you might expect this to work, but syntactically it's not a RowExpr:
+UPDATE update_test SET (a,b) = (v.*) FROM (VALUES(21, 101)) AS v(i, j)
+  WHERE update_test.a = v.i
+--
+e2e58a388ebbbb08
+== 032
+-- if an alias for the target table is specified, don't allow references
+-- to the original table name
+UPDATE update_test AS t SET b = update_test.b + 10 WHERE t.a = 10
+--
+ddd0e33fa65f704e
+== 033
+-- Make sure that we can update to a TOASTed value.
+UPDATE update_test SET c = repeat('x', 10000) WHERE c = 'car'
+--
+8d707eabe4e5b09d
+== 034
+SELECT a, b, char_length(c) FROM update_test
+--
+1e36811f1b94d32e
+== 035
+-- Check multi-assignment with a Result node to handle a one-time filter.
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE update_test t
+  SET (a, b) = (SELECT b, a FROM update_test s WHERE s.a = t.a)
+  WHERE CURRENT_USER = SESSION_USER
+--
+66c7ff85bb141d7d
+== 036
+UPDATE update_test t
+  SET (a, b) = (SELECT b, a FROM update_test s WHERE s.a = t.a)
+  WHERE CURRENT_USER = SESSION_USER
+--
+3b0de5b1805e8686
+== 037
+SELECT a, b, char_length(c) FROM update_test
+--
+1e36811f1b94d32e
+== 038
+-- Test ON CONFLICT DO UPDATE
+
+INSERT INTO upsert_test VALUES(1, 'Boo'), (3, 'Zoo')
+--
+9243c66ed93afa00
+== 039
+-- uncorrelated  sub-select:
+WITH aaa AS (SELECT 1 AS a, 'Foo' AS b) INSERT INTO upsert_test
+  VALUES (1, 'Bar') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b, a FROM aaa) RETURNING *
+--
+0914cf3173f696ef
+== 040
+-- correlated sub-select:
+INSERT INTO upsert_test VALUES (1, 'Baz'), (3, 'Zaz') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Correlated', a from upsert_test i WHERE i.a = upsert_test.a)
+  RETURNING *
+--
+bc0918f48f7e4702
+== 041
+-- correlated sub-select (EXCLUDED.* alias):
+INSERT INTO upsert_test VALUES (1, 'Bat'), (3, 'Zot') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING *
+--
+5b3167e92c86af4a
+== 042
+-- ON CONFLICT using system attributes in RETURNING, testing both the
+-- inserting and updating paths. See bug report at:
+-- https://www.postgresql.org/message-id/73436355-6432-49B1-92ED-1FE4F7E7E100%40finefun.com.au
+INSERT INTO upsert_test VALUES (2, 'Beeble') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING tableoid::regclass, xmin = pg_current_xact_id()::xid AS xmin_correct, xmax = 0 AS xmax_correct
+--
+90c7f1c5fcf93d67
+== 043
+-- currently xmax is set after a conflict - that's probably not good,
+-- but it seems worthwhile to have to be explicit if that changes.
+INSERT INTO upsert_test VALUES (2, 'Brox') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING tableoid::regclass, xmin = pg_current_xact_id()::xid AS xmin_correct, xmax = pg_current_xact_id()::xid AS xmax_correct
+--
+000dc29c82c2c28b
+== 044
+DROP TABLE update_test
+--
+855d6ae126bc9344
+== 045
+DROP TABLE upsert_test
+--
+3fe756a6846db396
+== 046
+-- Test ON CONFLICT DO UPDATE with partitioned table and non-identical children
+
+CREATE TABLE upsert_test (
+    a   INT PRIMARY KEY,
+    b   TEXT
+) PARTITION BY LIST (a)
+--
+b846f860dc930ab8
+== 047
+CREATE TABLE upsert_test_1 PARTITION OF upsert_test FOR VALUES IN (1)
+--
+918a3b1c24353d33
+== 048
+CREATE TABLE upsert_test_2 (b TEXT, a INT PRIMARY KEY)
+--
+1c61e84b20ed10e0
+== 049
+ALTER TABLE upsert_test ATTACH PARTITION upsert_test_2 FOR VALUES IN (2)
+--
+e7186cecddbccf99
+== 050
+INSERT INTO upsert_test VALUES(1, 'Boo'), (2, 'Zoo')
+--
+9243c66ed93afa00
+== 051
+-- uncorrelated sub-select:
+WITH aaa AS (SELECT 1 AS a, 'Foo' AS b) INSERT INTO upsert_test
+  VALUES (1, 'Bar') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b, a FROM aaa) RETURNING *
+--
+0914cf3173f696ef
+== 052
+-- correlated sub-select:
+WITH aaa AS (SELECT 1 AS ctea, ' Foo' AS cteb) INSERT INTO upsert_test
+  VALUES (1, 'Bar'), (2, 'Baz') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT upsert_test.b||cteb, upsert_test.a FROM aaa) RETURNING *
+--
+faf06b09c6b7f05c
+== 053
+DROP TABLE upsert_test
+--
+3fe756a6846db396
+== 054
+---------------------------
+-- UPDATE with row movement
+---------------------------
+
+-- When a partitioned table receives an UPDATE to the partitioned key and the
+-- new values no longer meet the partition's bound, the row must be moved to
+-- the correct partition for the new partition key (if one exists). We must
+-- also ensure that updatable views on partitioned tables properly enforce any
+-- WITH CHECK OPTION that is defined. The situation with triggers in this case
+-- also requires thorough testing as partition key updates causing row
+-- movement convert UPDATEs into DELETE+INSERT.
+
+CREATE TABLE range_parted (
+	a text,
+	b bigint,
+	c numeric,
+	d int,
+	e varchar
+) PARTITION BY RANGE (a, b)
+--
+3cf2d6b9a2778fc7
+== 055
+-- Create partitions intentionally in descending bound order, so as to test
+-- that update-row-movement works with the leaf partitions not in bound order.
+CREATE TABLE part_b_20_b_30 (e varchar, c numeric, a text, b bigint, d int)
+--
+32848f11f38df06d
+== 056
+ALTER TABLE range_parted ATTACH PARTITION part_b_20_b_30 FOR VALUES FROM ('b', 20) TO ('b', 30)
+--
+602993408ba7def1
+== 057
+CREATE TABLE part_b_10_b_20 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY RANGE (c)
+--
+7bd116273630e8e9
+== 058
+CREATE TABLE part_b_1_b_10 PARTITION OF range_parted FOR VALUES FROM ('b', 1) TO ('b', 10)
+--
+0cb01227e0ae6f6f
+== 059
+ALTER TABLE range_parted ATTACH PARTITION part_b_10_b_20 FOR VALUES FROM ('b', 10) TO ('b', 20)
+--
+602993408ba7def1
+== 060
+CREATE TABLE part_a_10_a_20 PARTITION OF range_parted FOR VALUES FROM ('a', 10) TO ('a', 20)
+--
+c08bf10d4679031f
+== 061
+CREATE TABLE part_a_1_a_10 PARTITION OF range_parted FOR VALUES FROM ('a', 1) TO ('a', 10)
+--
+db8e0afb1088d7d2
+== 062
+-- Check that partition-key UPDATE works sanely on a partitioned table that
+-- does not have any child partitions.
+UPDATE part_b_10_b_20 set b = b - 6
+--
+d16294b6ddc8a5b7
+== 063
+-- Create some more partitions following the above pattern of descending bound
+-- order, but let's make the situation a bit more complex by having the
+-- attribute numbers of the columns vary from their parent partition.
+CREATE TABLE part_c_100_200 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY range (abs(d))
+--
+4dd30beff80b9a6b
+== 064
+ALTER TABLE part_c_100_200 DROP COLUMN e, DROP COLUMN c, DROP COLUMN a
+--
+c1e39cccdbf2fa24
+== 065
+ALTER TABLE part_c_100_200 ADD COLUMN c numeric, ADD COLUMN e varchar, ADD COLUMN a text
+--
+097d67c8451320e6
+== 066
+ALTER TABLE part_c_100_200 DROP COLUMN b
+--
+98a7e3c9b4cc0e50
+== 067
+ALTER TABLE part_c_100_200 ADD COLUMN b bigint
+--
+bd795830c6632c31
+== 068
+CREATE TABLE part_d_1_15 PARTITION OF part_c_100_200 FOR VALUES FROM (1) TO (15)
+--
+d3e247243d5ef12b
+== 069
+CREATE TABLE part_d_15_20 PARTITION OF part_c_100_200 FOR VALUES FROM (15) TO (20)
+--
+98243d5e22a5b1d5
+== 070
+ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_100_200 FOR VALUES FROM (100) TO (200)
+--
+1e200cd02de9db86
+== 071
+CREATE TABLE part_c_1_100 (e varchar, d int, c numeric, b bigint, a text)
+--
+5a34af94c70bd406
+== 072
+ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_1_100 FOR VALUES FROM (1) TO (100)
+--
+dc31ea5478b103cf
+== 073
+-- The order of subplans should be in bound order
+EXPLAIN (costs off) UPDATE range_parted set c = c - 50 WHERE c > 97
+--
+2951078f2352ba4c
+== 074
+-- fail, row movement happens only within the partition subtree.
+UPDATE part_c_100_200 set c = c - 20, d = c WHERE c = 105
+--
+7d298c354dbfcbd4
+== 075
+-- fail, no partition key update, so no attempt to move tuple,
+-- but "a = 'a'" violates partition constraint enforced by root partition)
+UPDATE part_b_10_b_20 set a = 'a'
+--
+67bc353bf7f52f31
+== 076
+-- ok, partition key update, no constraint violation
+UPDATE range_parted set d = d - 10 WHERE d > 10
+--
+678d836c6a5c3f44
+== 077
+-- ok, no partition key update, no constraint violation
+UPDATE range_parted set e = d
+--
+43b95131aaa5280f
+== 078
+-- No row found
+UPDATE part_c_1_100 set c = c + 20 WHERE c = 98
+--
+178854292d0dadfe
+== 079
+-- ok, row movement
+UPDATE part_b_10_b_20 set c = c + 20 returning c, b, a
+--
+f7bac46a9dde8d07
+== 080
+-- fail, row movement happens only within the partition subtree.
+UPDATE part_b_10_b_20 set b = b - 6 WHERE c > 116 returning *
+--
+e9c60615fb7f86d8
+== 081
+-- ok, row movement, with subset of rows moved into different partition.
+UPDATE range_parted set b = b - 6 WHERE c > 116 returning a, b + c
+--
+3ad190ca611e2d83
+== 082
+-- Common table needed for multiple test scenarios.
+CREATE TABLE mintab(c1 int)
+--
+6fc336b245f2a599
+== 083
+INSERT into mintab VALUES (120)
+--
+3969aabdbf27dc11
+== 084
+-- update partition key using updatable view.
+CREATE VIEW upview AS SELECT * FROM range_parted WHERE (select c > c1 FROM mintab) WITH CHECK OPTION
+--
+d23e78e4e4b354af
+== 085
+-- ok
+UPDATE upview set c = 199 WHERE b = 4
+--
+b43dd465981f2e97
+== 086
+-- fail, check option violation
+UPDATE upview set c = 120 WHERE b = 4
+--
+b43dd465981f2e97
+== 087
+-- fail, row movement with check option violation
+UPDATE upview set a = 'b', b = 15, c = 120 WHERE b = 4
+--
+c0af277c2d5ada88
+== 088
+-- ok, row movement, check option passes
+UPDATE upview set a = 'b', b = 15 WHERE b = 4
+--
+bc6279b86de924b5
+== 089
+-- cleanup
+DROP VIEW upview
+--
+5d17e9294a9e4328
+== 090
+UPDATE range_parted set c = 95 WHERE a = 'b' and b > 10 and c > 100 returning (range_parted), *
+--
+a170b156ec02369f
+== 091
+CREATE FUNCTION trans_updatetrigfunc() RETURNS trigger LANGUAGE plpgsql AS
+$$
+  begin
+    raise notice 'trigger = %, old table = %, new table = %',
+                 TG_NAME,
+                 (select string_agg(old_table::text, ', ' ORDER BY a) FROM old_table),
+                 (select string_agg(new_table::text, ', ' ORDER BY a) FROM new_table);
+    return null;
+  end;
+$$
+--
+2f96424b9f3e7b7b
+== 092
+CREATE TRIGGER trans_updatetrig
+  AFTER UPDATE ON range_parted REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+57073d7a26ab042a
+== 093
+UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end ) WHERE a = 'b' and b > 10 and c >= 96
+--
+e0e944aaad261f2e
+== 094
+-- Enabling OLD TABLE capture for both DELETE as well as UPDATE stmt triggers
+-- should not cause DELETEd rows to be captured twice. Similar thing for
+-- INSERT triggers and inserted rows.
+CREATE TRIGGER trans_deletetrig
+  AFTER DELETE ON range_parted REFERENCING OLD TABLE AS old_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+2cd40b98e359bfa0
+== 095
+CREATE TRIGGER trans_inserttrig
+  AFTER INSERT ON range_parted REFERENCING NEW TABLE AS new_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+a99ff510199d409a
+== 096
+UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96
+--
+613f387ef5102cad
+== 097
+DROP TRIGGER trans_deletetrig ON range_parted
+--
+5f107766076bba01
+== 098
+DROP TRIGGER trans_inserttrig ON range_parted
+--
+12996a99cedf349c
+== 099
+-- Don't drop trans_updatetrig yet. It is required below.
+
+-- Test with transition tuple conversion happening for rows moved into the
+-- new partition. This requires a trigger that references transition table
+-- (we already have trans_updatetrig). For inserted rows, the conversion
+-- is not usually needed, because the original tuple is already compatible with
+-- the desired transition tuple format. But conversion happens when there is a
+-- BR trigger because the trigger can change the inserted row. So install a
+-- BR triggers on those child partitions where the rows will be moved.
+CREATE FUNCTION func_parted_mod_b() RETURNS trigger AS $$
+BEGIN
+   NEW.b = NEW.b + 1;
+   return NEW;
+END $$ language plpgsql
+--
+4f3ebb0f0ba14cda
+== 100
+CREATE TRIGGER trig_c1_100 BEFORE UPDATE OR INSERT ON part_c_1_100
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+c69d069cdbd541c4
+== 101
+CREATE TRIGGER trig_d1_15 BEFORE UPDATE OR INSERT ON part_d_1_15
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+9c75c88a1b879eda
+== 102
+CREATE TRIGGER trig_d15_20 BEFORE UPDATE OR INSERT ON part_d_15_20
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+3758fd864562f6e4
+== 103
+UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end) WHERE a = 'b' and b > 10 and c >= 96
+--
+e0e944aaad261f2e
+== 104
+UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96
+--
+613f387ef5102cad
+== 105
+UPDATE range_parted set b = 15 WHERE b = 1
+--
+18e2ce7fc0c97110
+== 106
+DROP TRIGGER trans_updatetrig ON range_parted
+--
+a1fb5529ddf4230d
+== 107
+DROP TRIGGER trig_c1_100 ON part_c_1_100
+--
+17a6a09842c449cc
+== 108
+DROP TRIGGER trig_d1_15 ON part_d_1_15
+--
+9e70ac9670ea2cd2
+== 109
+DROP TRIGGER trig_d15_20 ON part_d_15_20
+--
+10db8c8fc2626df8
+== 110
+DROP FUNCTION func_parted_mod_b()
+--
+6672f93bbf816b0a
+== 111
+-- RLS policies with update-row-movement
+-----------------------------------------
+
+ALTER TABLE range_parted ENABLE ROW LEVEL SECURITY
+--
+3fbc3b3e3a4134d9
+== 112
+CREATE USER regress_range_parted_user
+--
+13bb307f086ab0de
+== 113
+GRANT ALL ON range_parted, mintab TO regress_range_parted_user
+--
+5230173dacd8ba24
+== 114
+CREATE POLICY seeall ON range_parted AS PERMISSIVE FOR SELECT USING (true)
+--
+71adc9e36121080c
+== 115
+CREATE POLICY policy_range_parted ON range_parted for UPDATE USING (true) WITH CHECK (c % 2 = 0)
+--
+fa33d9b588bc511b
+== 116
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 117
+-- This should fail with RLS violation error while moving row from
+-- part_a_10_a_20 to part_d_1_15, because we are setting 'c' to an odd number.
+UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 118
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 119
+-- Create a trigger on part_d_1_15
+CREATE FUNCTION func_d_1_15() RETURNS trigger AS $$
+BEGIN
+   NEW.c = NEW.c + 1; -- Make even numbers odd, or vice versa
+   return NEW;
+END $$ LANGUAGE plpgsql
+--
+2b13fd0645ed5e9a
+== 120
+CREATE TRIGGER trig_d_1_15 BEFORE INSERT ON part_d_1_15
+   FOR EACH ROW EXECUTE PROCEDURE func_d_1_15()
+--
+1a96111ba6a3c591
+== 121
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 122
+-- Here, RLS checks should succeed while moving row from part_a_10_a_20 to
+-- part_d_1_15. Even though the UPDATE is setting 'c' to an odd number, the
+-- trigger at the destination partition again makes it an even number.
+UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 123
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 124
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 125
+-- This should fail with RLS violation error. Even though the UPDATE is setting
+-- 'c' to an even number, the trigger at the destination partition again makes
+-- it an odd number.
+UPDATE range_parted set a = 'b', c = 150 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 126
+-- Cleanup
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 127
+DROP TRIGGER trig_d_1_15 ON part_d_1_15
+--
+9d56d85e47b67f74
+== 128
+DROP FUNCTION func_d_1_15()
+--
+151a99d95d41cb3e
+== 129
+-- Policy expression contains SubPlan
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 130
+CREATE POLICY policy_range_parted_subplan on range_parted
+    AS RESTRICTIVE for UPDATE USING (true)
+    WITH CHECK ((SELECT range_parted.c <= c1 FROM mintab))
+--
+cb4076c3547bd4b4
+== 131
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 132
+-- fail, mintab has row with c1 = 120
+UPDATE range_parted set a = 'b', c = 122 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 133
+-- ok
+UPDATE range_parted set a = 'b', c = 120 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 134
+-- RLS policy expression contains whole row.
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 135
+CREATE POLICY policy_range_parted_wholerow on range_parted AS RESTRICTIVE for UPDATE USING (true)
+   WITH CHECK (range_parted = row('b', 10, 112, 1, NULL)::range_parted)
+--
+162f1e105d997cc1
+== 136
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 137
+-- ok, should pass the RLS check
+UPDATE range_parted set a = 'b', c = 112 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 138
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 139
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+532a0ea53df105d9
+== 140
+-- fail, the whole row RLS check should fail
+UPDATE range_parted set a = 'b', c = 116 WHERE a = 'a' and c = 200
+--
+d42bef1077e1b23d
+== 141
+-- Cleanup
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 142
+DROP POLICY policy_range_parted ON range_parted
+--
+7e5d119b586ffee4
+== 143
+DROP POLICY policy_range_parted_subplan ON range_parted
+--
+d209ab3dcbc9bc34
+== 144
+DROP POLICY policy_range_parted_wholerow ON range_parted
+--
+b4662ec41fc563a5
+== 145
+REVOKE ALL ON range_parted, mintab FROM regress_range_parted_user
+--
+7fbe9a6479f2e22c
+== 146
+DROP USER regress_range_parted_user
+--
+f193830d49dd7c48
+== 147
+DROP TABLE mintab
+--
+a7817af2e1cab684
+== 148
+CREATE FUNCTION trigfunc() returns trigger language plpgsql as
+$$
+  begin
+    raise notice 'trigger = % fired on table % during %',
+                 TG_NAME, TG_TABLE_NAME, TG_OP;
+    return null;
+  end;
+$$
+--
+4048ae534c5c137c
+== 149
+-- Triggers on root partition
+CREATE TRIGGER parent_delete_trig
+  AFTER DELETE ON range_parted for each statement execute procedure trigfunc()
+--
+f19de12f51c107a6
+== 150
+CREATE TRIGGER parent_update_trig
+  AFTER UPDATE ON range_parted for each statement execute procedure trigfunc()
+--
+917ef6fc0c11e07f
+== 151
+CREATE TRIGGER parent_insert_trig
+  AFTER INSERT ON range_parted for each statement execute procedure trigfunc()
+--
+417dcfe9ff6db202
+== 152
+-- Triggers on leaf partition part_c_1_100
+CREATE TRIGGER c1_delete_trig
+  AFTER DELETE ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+62c1037975c8a62f
+== 153
+CREATE TRIGGER c1_update_trig
+  AFTER UPDATE ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+b630654e267bed5b
+== 154
+CREATE TRIGGER c1_insert_trig
+  AFTER INSERT ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+56a48e4e54da5625
+== 155
+-- Triggers on leaf partition part_d_1_15
+CREATE TRIGGER d1_delete_trig
+  AFTER DELETE ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+30fcdb53fee17627
+== 156
+CREATE TRIGGER d1_update_trig
+  AFTER UPDATE ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+5d4138c4a718031f
+== 157
+CREATE TRIGGER d1_insert_trig
+  AFTER INSERT ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+db95a79661210c01
+== 158
+-- Triggers on leaf partition part_d_15_20
+CREATE TRIGGER d15_delete_trig
+  AFTER DELETE ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+148e11bc04f54f37
+== 159
+CREATE TRIGGER d15_update_trig
+  AFTER UPDATE ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+538bfa45823af450
+== 160
+CREATE TRIGGER d15_insert_trig
+  AFTER INSERT ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+ec5af3730c7bed5c
+== 161
+-- Move all rows from part_c_100_200 to part_c_1_100. None of the delete or
+-- insert statement triggers should be fired.
+UPDATE range_parted set c = c - 50 WHERE c > 97
+--
+78e20c1987550b72
+== 162
+DROP TRIGGER parent_delete_trig ON range_parted
+--
+9735a733e17bfa59
+== 163
+DROP TRIGGER parent_update_trig ON range_parted
+--
+4580f20881fc1064
+== 164
+DROP TRIGGER parent_insert_trig ON range_parted
+--
+f731e5cccb9bfe16
+== 165
+DROP TRIGGER c1_delete_trig ON part_c_1_100
+--
+dcc8371dad5ec620
+== 166
+DROP TRIGGER c1_update_trig ON part_c_1_100
+--
+75102963a78a4533
+== 167
+DROP TRIGGER c1_insert_trig ON part_c_1_100
+--
+2bd1c014eb2abd59
+== 168
+DROP TRIGGER d1_delete_trig ON part_d_1_15
+--
+e8494bb12a64af80
+== 169
+DROP TRIGGER d1_update_trig ON part_d_1_15
+--
+4174c42730b614e4
+== 170
+DROP TRIGGER d1_insert_trig ON part_d_1_15
+--
+ea881555882542d7
+== 171
+DROP TRIGGER d15_delete_trig ON part_d_15_20
+--
+9a733cb713dc8ca7
+== 172
+DROP TRIGGER d15_update_trig ON part_d_15_20
+--
+6402680ce09c8046
+== 173
+DROP TRIGGER d15_insert_trig ON part_d_15_20
+--
+ed6805acae18af8b
+== 174
+create table part_def partition of range_parted default
+--
+ae0d8df5240ac98b
+== 175
+insert into range_parted values ('c', 9)
+--
+bd87860c049384b6
+== 176
+-- ok
+update part_def set a = 'd' where a = 'c'
+--
+0874a8ef0be0130c
+== 177
+-- fail
+update part_def set a = 'a' where a = 'd'
+--
+0874a8ef0be0130c
+== 178
+-- Update row movement from non-default to default partition.
+-- fail, default partition is not under part_a_10_a_20;
+UPDATE part_a_10_a_20 set a = 'ad' WHERE a = 'a'
+--
+5fd74c1da85d9e3c
+== 179
+-- ok
+UPDATE range_parted set a = 'ad' WHERE a = 'a'
+--
+fec95a5a98475724
+== 180
+UPDATE range_parted set a = 'bd' WHERE a = 'b'
+--
+fec95a5a98475724
+== 181
+-- Update row movement from default to non-default partitions.
+-- ok
+UPDATE range_parted set a = 'a' WHERE a = 'ad'
+--
+fec95a5a98475724
+== 182
+UPDATE range_parted set a = 'b' WHERE a = 'bd'
+--
+fec95a5a98475724
+== 183
+-- Cleanup: range_parted no longer needed.
+DROP TABLE range_parted
+--
+7c8249bdace3ac37
+== 184
+CREATE TABLE list_parted (
+	a text,
+	b int
+) PARTITION BY list (a)
+--
+7b242e07700dba0a
+== 185
+CREATE TABLE list_part1  PARTITION OF list_parted for VALUES in ('a', 'b')
+--
+1ac42e8bda3d241d
+== 186
+CREATE TABLE list_default PARTITION OF list_parted default
+--
+325be5e0f5196729
+== 187
+INSERT into list_part1 VALUES ('a', 1)
+--
+c4f65f9f44ac58e3
+== 188
+INSERT into list_default VALUES ('d', 10)
+--
+c1ea09454b9d1ca7
+== 189
+-- fail
+UPDATE list_default set a = 'a' WHERE a = 'd'
+--
+f1093ba2ee664903
+== 190
+-- ok
+UPDATE list_default set a = 'x' WHERE a = 'd'
+--
+f1093ba2ee664903
+== 191
+DROP TABLE list_parted
+--
+a453b4df2d8cab70
+== 192
+-- Test retrieval of system columns with non-consistent partition row types.
+-- This is only partially supported, as seen in the results.
+
+create table utrtest (a int, b text) partition by list (a)
+--
+75b3098871f76af8
+== 193
+create table utr1 (a int check (a in (1)), q text, b text)
+--
+737f08dac173f4a8
+== 194
+create table utr2 (a int check (a in (2)), b text)
+--
+dd2dc761a92b5705
+== 195
+alter table utr1 drop column q
+--
+8a68a9993811add4
+== 196
+alter table utrtest attach partition utr1 for values in (1)
+--
+82bb9f671947c860
+== 197
+alter table utrtest attach partition utr2 for values in (2)
+--
+e56449fa717126d2
+== 198
+insert into utrtest values (1, 'foo')
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+98759474ad162665
+== 199
+insert into utrtest values (2, 'bar')
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+98759474ad162665
+== 200
+-- fails
+insert into utrtest values (2, 'bar')
+  returning *, tableoid::regclass
+--
+024bdf3de81886e0
+== 201
+update utrtest set b = b || b from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+3daab449658f9eb9
+== 202
+update utrtest set a = 3 - a from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+359c4df9c72e9df7
+== 203
+-- fails
+
+update utrtest set a = 3 - a from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass
+--
+4d0795eaedecf2a6
+== 204
+delete from utrtest
+  returning *, tableoid::regclass, xmax = pg_current_xact_id()::xid as xmax_ok
+--
+b1bf79f471f1bf6d
+== 205
+drop table utrtest
+--
+ec4fcaf666f70d42
+== 206
+--------------
+-- Some more update-partition-key test scenarios below. This time use list
+-- partitions.
+--------------
+
+-- Setup for list partitions
+CREATE TABLE list_parted (a numeric, b int, c int8) PARTITION BY list (a)
+--
+54d12cf4ee85a18e
+== 207
+CREATE TABLE sub_parted PARTITION OF list_parted for VALUES in (1) PARTITION BY list (b)
+--
+15035e44e9ecb5aa
+== 208
+CREATE TABLE sub_part1(b int, c int8, a numeric)
+--
+3b44116c511dafdd
+== 209
+ALTER TABLE sub_parted ATTACH PARTITION sub_part1 for VALUES in (1)
+--
+9734b83088839cd1
+== 210
+CREATE TABLE sub_part2(b int, c int8, a numeric)
+--
+dce5c8180d80f17b
+== 211
+ALTER TABLE sub_parted ATTACH PARTITION sub_part2 for VALUES in (2)
+--
+a7152af7b268a4a2
+== 212
+CREATE TABLE list_part1(a numeric, b int, c int8)
+--
+f2f0ae7f626f2954
+== 213
+ALTER TABLE list_parted ATTACH PARTITION list_part1 for VALUES in (2,3)
+--
+adeaf32094e80ef5
+== 214
+INSERT into list_parted VALUES (2,5,50)
+--
+19bfe2e442d9b5fd
+== 215
+INSERT into list_parted VALUES (3,6,60)
+--
+19bfe2e442d9b5fd
+== 216
+INSERT into sub_parted VALUES (1,1,60)
+--
+c5bfc485c137163e
+== 217
+INSERT into sub_parted VALUES (1,2,10)
+--
+c5bfc485c137163e
+== 218
+-- Test partition constraint violation when intermediate ancestor is used and
+-- constraint is inherited from upper root.
+UPDATE sub_parted set a = 2 WHERE c = 10
+--
+4303cdc4e3cb1035
+== 219
+-- Test update-partition-key, where the unpruned partitions do not have their
+-- partition keys updated.
+SELECT tableoid::regclass::text, * FROM list_parted WHERE a = 2 ORDER BY 1
+--
+251b1f94e7e02395
+== 220
+UPDATE list_parted set b = c + a WHERE a = 2
+--
+94900a9ff3c332be
+== 221
+SELECT tableoid::regclass::text, * FROM list_parted WHERE a = 2 ORDER BY 1
+--
+251b1f94e7e02395
+== 222
+-- Test the case where BR UPDATE triggers change the partition key.
+CREATE FUNCTION func_parted_mod_b() returns trigger as $$
+BEGIN
+   NEW.b = 2; -- This is changing partition key column.
+   return NEW;
+END $$ LANGUAGE plpgsql
+--
+4f3ebb0f0ba14cda
+== 223
+CREATE TRIGGER parted_mod_b before update on sub_part1
+   for each row execute procedure func_parted_mod_b()
+--
+5c07895d23fc9422
+== 224
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+94cc91b92ac15f33
+== 225
+-- This should do the tuple routing even though there is no explicit
+-- partition-key update, because there is a trigger on sub_part1.
+UPDATE list_parted set c = 70 WHERE b  = 1
+--
+f8ce43cf16d0266b
+== 226
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+94cc91b92ac15f33
+== 227
+DROP TRIGGER parted_mod_b ON sub_part1
+--
+c0ff9cdfc3d6b05c
+== 228
+-- If BR DELETE trigger prevented DELETE from happening, we should also skip
+-- the INSERT if that delete is part of UPDATE=>DELETE+INSERT.
+CREATE OR REPLACE FUNCTION func_parted_mod_b() returns trigger as $$
+BEGIN
+   raise notice 'Trigger: Got OLD row %, but returning NULL', OLD;
+   return NULL;
+END $$ LANGUAGE plpgsql
+--
+bfe4d9fe4fe2c072
+== 229
+CREATE TRIGGER trig_skip_delete before delete on sub_part2
+   for each row execute procedure func_parted_mod_b()
+--
+9b487b689f845354
+== 230
+UPDATE list_parted set b = 1 WHERE c = 70
+--
+27143124a8b60aa5
+== 231
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+94cc91b92ac15f33
+== 232
+-- Drop the trigger. Now the row should be moved.
+DROP TRIGGER trig_skip_delete ON sub_part2
+--
+5670a10c6b5e7ba9
+== 233
+UPDATE list_parted set b = 1 WHERE c = 70
+--
+27143124a8b60aa5
+== 234
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+94cc91b92ac15f33
+== 235
+DROP FUNCTION func_parted_mod_b()
+--
+6672f93bbf816b0a
+== 236
+-- UPDATE partition-key with FROM clause. If join produces multiple output
+-- rows for the same row to be modified, we should tuple-route the row only
+-- once. There should not be any rows inserted.
+CREATE TABLE non_parted (id int)
+--
+dbb9cda92f12fc80
+== 237
+INSERT into non_parted VALUES (1), (1), (1), (2), (2), (2), (3), (3), (3)
+--
+6c81f476377ae287
+== 238
+UPDATE list_parted t1 set a = 2 FROM non_parted t2 WHERE t1.a = t2.id and a = 1
+--
+d0c712a788635ce1
+== 239
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+94cc91b92ac15f33
+== 240
+DROP TABLE non_parted
+--
+a0de7effd175a957
+== 241
+-- Cleanup: list_parted no longer needed.
+DROP TABLE list_parted
+--
+a453b4df2d8cab70
+== 242
+-- create custom operator class and hash function, for the same reason
+-- explained in alter_table.sql
+create or replace function dummy_hashint4(a int4, seed int8) returns int8 as
+$$ begin return (a + seed); end; $$ language 'plpgsql' immutable
+--
+9e8db8a27fe8f83a
+== 243
+create operator class custom_opclass for type int4 using hash as
+operator 1 = , function 2 dummy_hashint4(int4, int8)
+--
+564581efae463017
+== 244
+create table hash_parted (
+	a int,
+	b int
+) partition by hash (a custom_opclass, b custom_opclass)
+--
+866728b516a5826f
+== 245
+create table hpart1 partition of hash_parted for values with (modulus 2, remainder 1)
+--
+9ed75aa55af71c40
+== 246
+create table hpart2 partition of hash_parted for values with (modulus 4, remainder 2)
+--
+0869d9e3b6db6c74
+== 247
+create table hpart3 partition of hash_parted for values with (modulus 8, remainder 0)
+--
+4ef016d4bb21e2b6
+== 248
+create table hpart4 partition of hash_parted for values with (modulus 8, remainder 4)
+--
+d4b848e56de9fcd9
+== 249
+insert into hpart1 values (1, 1)
+--
+3896b3f4a026ea34
+== 250
+insert into hpart2 values (2, 5)
+--
+1734d6e5918aa130
+== 251
+insert into hpart4 values (3, 4)
+--
+67d068adddd67875
+== 252
+-- fail
+update hpart1 set a = 3, b=4 where a = 1
+--
+7a3727704c17a7c5
+== 253
+-- ok, row movement
+update hash_parted set b = b - 1 where b = 1
+--
+212768acea304edf
+== 254
+-- ok
+update hash_parted set b = b + 8 where b = 1
+--
+b9dc291f3b1de0ec
+== 255
+-- cleanup
+drop table hash_parted
+--
+80758c57bd896694
+== 256
+drop operator class custom_opclass using hash
+--
+1ce50abf465aaaa8
+== 257
+drop function dummy_hashint4(a int4, seed int8)
+--
+da62942d7b9ed340

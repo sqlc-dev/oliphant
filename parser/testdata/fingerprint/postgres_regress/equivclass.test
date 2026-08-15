@@ -1,0 +1,473 @@
+== 001
+|--
+-- Tests for the planner's "equivalence class" mechanism
+|--
+
+-- One thing that's not tested well during normal querying is the logic
+-- for handling "broken" ECs.  This is because an EC can only become broken
+-- if its underlying btree operator family doesn't include a complete set
+-- of cross-type equality operators.  There are not (and should not be)
+-- any such families built into Postgres; so we have to hack things up
+-- to create one.  We do this by making two alias types that are really
+-- int8 (so we need no new C code) and adding only some operators for them
+-- into the standard integer_ops opfamily.
+
+create type int8alias1
+--
+3df3d8dde01938e4
+== 002
+create function int8alias1in(cstring) returns int8alias1
+  strict immutable language internal as 'int8in'
+--
+e52a9d802e894486
+== 003
+create function int8alias1out(int8alias1) returns cstring
+  strict immutable language internal as 'int8out'
+--
+f47c992e9b792cc3
+== 004
+create type int8alias1 (
+    input = int8alias1in,
+    output = int8alias1out,
+    like = int8
+)
+--
+f0ebce0abd52fee7
+== 005
+create type int8alias2
+--
+dd7b503bb6349f23
+== 006
+create function int8alias2in(cstring) returns int8alias2
+  strict immutable language internal as 'int8in'
+--
+32684617d93b780d
+== 007
+create function int8alias2out(int8alias2) returns cstring
+  strict immutable language internal as 'int8out'
+--
+5f5cd208760988e3
+== 008
+create type int8alias2 (
+    input = int8alias2in,
+    output = int8alias2out,
+    like = int8
+)
+--
+2e39969ff49e71b3
+== 009
+create cast (int8 as int8alias1) without function
+--
+0217be0a601182ad
+== 010
+create cast (int8 as int8alias2) without function
+--
+9d984ad5bacfe8ff
+== 011
+create cast (int8alias1 as int8) without function
+--
+db1e21ed4220fb15
+== 012
+create cast (int8alias2 as int8) without function
+--
+fb54654cab8e3e12
+== 013
+create function int8alias1eq(int8alias1, int8alias1) returns bool
+  strict immutable language internal as 'int8eq'
+--
+79d79600495803c7
+== 014
+create operator = (
+    procedure = int8alias1eq,
+    leftarg = int8alias1, rightarg = int8alias1,
+    commutator = =,
+    restrict = eqsel, join = eqjoinsel,
+    merges
+)
+--
+79c61d5515a25932
+== 015
+alter operator family integer_ops using btree add
+  operator 3 = (int8alias1, int8alias1)
+--
+8483943abd0c19b8
+== 016
+create function int8alias2eq(int8alias2, int8alias2) returns bool
+  strict immutable language internal as 'int8eq'
+--
+ed3c7dfc3b323f37
+== 017
+create operator = (
+    procedure = int8alias2eq,
+    leftarg = int8alias2, rightarg = int8alias2,
+    commutator = =,
+    restrict = eqsel, join = eqjoinsel,
+    merges
+)
+--
+1809fa987e22d8eb
+== 018
+alter operator family integer_ops using btree add
+  operator 3 = (int8alias2, int8alias2)
+--
+f91e2c391564956b
+== 019
+create function int8alias1eq(int8, int8alias1) returns bool
+  strict immutable language internal as 'int8eq'
+--
+3b30b17a5ce641c7
+== 020
+create operator = (
+    procedure = int8alias1eq,
+    leftarg = int8, rightarg = int8alias1,
+    restrict = eqsel, join = eqjoinsel,
+    merges
+)
+--
+b77f3fa0b699cd36
+== 021
+alter operator family integer_ops using btree add
+  operator 3 = (int8, int8alias1)
+--
+d4b4a35e0b7e9b84
+== 022
+create function int8alias1eq(int8alias1, int8alias2) returns bool
+  strict immutable language internal as 'int8eq'
+--
+2eec16c07d6e5fc4
+== 023
+create operator = (
+    procedure = int8alias1eq,
+    leftarg = int8alias1, rightarg = int8alias2,
+    restrict = eqsel, join = eqjoinsel,
+    merges
+)
+--
+e42effe4f3608ec2
+== 024
+alter operator family integer_ops using btree add
+  operator 3 = (int8alias1, int8alias2)
+--
+0ec89f9639155626
+== 025
+create function int8alias1lt(int8alias1, int8alias1) returns bool
+  strict immutable language internal as 'int8lt'
+--
+e78dc1014b841403
+== 026
+create operator < (
+    procedure = int8alias1lt,
+    leftarg = int8alias1, rightarg = int8alias1
+)
+--
+d5f5d1e52eeccf2c
+== 027
+alter operator family integer_ops using btree add
+  operator 1 < (int8alias1, int8alias1)
+--
+aab3fb770cf467d4
+== 028
+create function int8alias1cmp(int8, int8alias1) returns int
+  strict immutable language internal as 'btint8cmp'
+--
+b62b971ba1da9ad9
+== 029
+alter operator family integer_ops using btree add
+  function 1 int8alias1cmp (int8, int8alias1)
+--
+f625a0d8e3a73cd0
+== 030
+create table ec0 (ff int8 primary key, f1 int8, f2 int8)
+--
+6da2767b0f7360e8
+== 031
+create table ec1 (ff int8 primary key, f1 int8alias1, f2 int8alias2)
+--
+77647550af785546
+== 032
+create table ec2 (xf int8 primary key, x1 int8alias1, x2 int8alias2)
+--
+1655702887c7ec9e
+== 033
+-- for the moment we only want to look at nestloop plans
+set enable_hashjoin = off
+--
+1c83d8645c9b8506
+== 034
+set enable_mergejoin = off
+--
+3914b6ed82c705b8
+== 035
+|--
+-- Note that for cases where there's a missing operator, we don't care so
+-- much whether the plan is ideal as that we don't fail or generate an
+-- outright incorrect plan.
+|--
+
+explain (costs off)
+  select * from ec0 where ff = f1 and f1 = '42'::int8
+--
+021399ae74899afa
+== 036
+explain (costs off)
+  select * from ec0 where ff = f1 and f1 = '42'::int8alias1
+--
+021399ae74899afa
+== 037
+explain (costs off)
+  select * from ec1 where ff = f1 and f1 = '42'::int8alias1
+--
+ac40cc24d089f42a
+== 038
+explain (costs off)
+  select * from ec1 where ff = f1 and f1 = '42'::int8alias2
+--
+ac40cc24d089f42a
+== 039
+explain (costs off)
+  select * from ec1, ec2 where ff = x1 and ff = '42'::int8
+--
+06327c2c29dc9fe6
+== 040
+explain (costs off)
+  select * from ec1, ec2 where ff = x1 and ff = '42'::int8alias1
+--
+06327c2c29dc9fe6
+== 041
+explain (costs off)
+  select * from ec1, ec2 where ff = x1 and '42'::int8 = x1
+--
+06b024ee873e1bff
+== 042
+explain (costs off)
+  select * from ec1, ec2 where ff = x1 and x1 = '42'::int8alias1
+--
+c905a97078054bdd
+== 043
+explain (costs off)
+  select * from ec1, ec2 where ff = x1 and x1 = '42'::int8alias2
+--
+c905a97078054bdd
+== 044
+create unique index ec1_expr1 on ec1((ff + 1))
+--
+3a9fb85828fcc539
+== 045
+create unique index ec1_expr2 on ec1((ff + 2 + 1))
+--
+e83320298c8d139d
+== 046
+create unique index ec1_expr3 on ec1((ff + 3 + 1))
+--
+f33939f329bbd8a1
+== 047
+create unique index ec1_expr4 on ec1((ff + 4))
+--
+dbba7e6f2a92b4cf
+== 048
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1
+  where ss1.x = ec1.f1 and ec1.ff = 42::int8
+--
+fa54f00ae6804e0b
+== 049
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1
+  where ss1.x = ec1.f1 and ec1.ff = 42::int8 and ec1.ff = ec1.f1
+--
+332f002ab4a19adc
+== 050
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss2
+  where ss1.x = ec1.f1 and ss1.x = ss2.x and ec1.ff = 42::int8
+--
+a79336029b186d47
+== 051
+-- let's try that as a mergejoin
+set enable_mergejoin = on
+--
+3914b6ed82c705b8
+== 052
+set enable_nestloop = off
+--
+1fa6f2b4831faf62
+== 053
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss2
+  where ss1.x = ec1.f1 and ss1.x = ss2.x and ec1.ff = 42::int8
+--
+a79336029b186d47
+== 054
+-- check partially indexed scan
+set enable_nestloop = on
+--
+1fa6f2b4831faf62
+== 055
+set enable_mergejoin = off
+--
+3914b6ed82c705b8
+== 056
+drop index ec1_expr3
+--
+57743bec5e89330f
+== 057
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1
+  where ss1.x = ec1.f1 and ec1.ff = 42::int8
+--
+fa54f00ae6804e0b
+== 058
+-- let's try that as a mergejoin
+set enable_mergejoin = on
+--
+3914b6ed82c705b8
+== 059
+set enable_nestloop = off
+--
+1fa6f2b4831faf62
+== 060
+explain (costs off)
+  select * from ec1,
+    (select ff + 1 as x from
+       (select ff + 2 as ff from ec1
+        union all
+        select ff + 3 as ff from ec1) ss0
+     union all
+     select ff + 4 as x from ec1) as ss1
+  where ss1.x = ec1.f1 and ec1.ff = 42::int8
+--
+fa54f00ae6804e0b
+== 061
+-- check effects of row-level security
+set enable_nestloop = on
+--
+1fa6f2b4831faf62
+== 062
+set enable_mergejoin = off
+--
+3914b6ed82c705b8
+== 063
+alter table ec1 enable row level security
+--
+ae8d9e35be3dbc23
+== 064
+create policy p1 on ec1 using (f1 < '5'::int8alias1)
+--
+32d161c45f206bf9
+== 065
+create user regress_user_ectest
+--
+7a3851ff0543fe71
+== 066
+grant select on ec0 to regress_user_ectest
+--
+8275a8980f13642e
+== 067
+grant select on ec1 to regress_user_ectest
+--
+106a28b1fac2fcd8
+== 068
+-- without any RLS, we'll treat {a.ff, b.ff, 43} as an EquivalenceClass
+explain (costs off)
+  select * from ec0 a, ec1 b
+  where a.ff = b.ff and a.ff = 43::bigint::int8alias1
+--
+002f7982e86ea028
+== 069
+set session authorization regress_user_ectest
+--
+532a0ea53df105d9
+== 070
+-- with RLS active, the non-leakproof a.ff = 43 clause is not treated
+-- as a suitable source for an EquivalenceClass; currently, this is true
+-- even though the RLS clause has nothing to do directly with the EC
+explain (costs off)
+  select * from ec0 a, ec1 b
+  where a.ff = b.ff and a.ff = 43::bigint::int8alias1
+--
+002f7982e86ea028
+== 071
+reset session authorization
+--
+8a5cf7139a632958
+== 072
+revoke select on ec0 from regress_user_ectest
+--
+838b64d3ff7727aa
+== 073
+revoke select on ec1 from regress_user_ectest
+--
+16d9ecfbbaf3b071
+== 074
+drop user regress_user_ectest
+--
+1e974bc504531267
+== 075
+-- check that X=X is converted to X IS NOT NULL when appropriate
+explain (costs off)
+  select * from tenk1 where unique1 = unique1 and unique2 = unique2
+--
+113132c0bf333cd4
+== 076
+-- this could be converted, but isn't at present
+explain (costs off)
+  select * from tenk1 where unique1 = unique1 or unique2 = unique2
+--
+b8636cb4884d73df
+== 077
+-- check that we recognize equivalence with dummy domains in the way
+create temp table undername (f1 name, f2 int)
+--
+4ba9c5b7c3e0e582
+== 078
+create temp view overview as
+  select f1::information_schema.sql_identifier as sqli, f2 from undername
+--
+f2c18aced497854f
+== 079
+explain (costs off)  -- this should not require a sort
+  select * from overview where sqli = 'foo' order by sqli
+--
+cb9f2942ba1d052d

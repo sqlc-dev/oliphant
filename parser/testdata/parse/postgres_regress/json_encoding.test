@@ -1,0 +1,226 @@
+== 001
+|--
+-- encoding-sensitive tests for json and jsonb
+|--
+
+-- We provide expected-results files for UTF8 (json_encoding.out)
+-- and for SQL_ASCII (json_encoding_1.out).  Skip otherwise.
+SELECT getdatabaseencoding() NOT IN ('UTF8', 'SQL_ASCII')
+       AS skip_test
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"skip_test","val":{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"getdatabaseencoding"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":188}},"rexpr":{"List":{"items":[{"A_Const":{"sval":{"sval":"UTF8"},"location":218}},{"A_Const":{"sval":{"sval":"SQL_ASCII"},"location":226}}]}},"location":210}},"location":188}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 002
+SELECT getdatabaseencoding()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"getdatabaseencoding"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 003
+-- just to label the results files
+
+-- first json
+
+-- basic unicode input
+SELECT '"\u"'::json
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u\""},"location":81}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":89},"location":87}},"location":81}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 004
+-- ERROR, incomplete escape
+SELECT '"\u00"'::json
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u00\""},"location":35}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":45},"location":43}},"location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 005
+-- ERROR, incomplete escape
+SELECT '"\u000g"'::json
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u000g\""},"location":35}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":47},"location":45}},"location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 006
+-- ERROR, g is not a hex digit
+SELECT '"\u0000"'::json
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u0000\""},"location":38}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":50},"location":48}},"location":38}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 007
+-- OK, legal escape
+SELECT '"\uaBcD"'::json
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\uaBcD\""},"location":27}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":39},"location":37}},"location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 008
+-- OK, uppercase and lower case both OK
+
+-- handling of unicode surrogate pairs
+
+select json '{ "a":  "\ud83d\ude04\ud83d\udc36" }' -> 'a' as correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83d\\ude04\\ud83d\\udc36\" }"},"location":93}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":88},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":135}},"location":132}},"location":88}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 009
+select json '{ "a":  "\ud83d\ud83d" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83d\\ud83d\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":42}},"location":39}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 010
+-- 2 high surrogates in a row
+select json '{ "a":  "\ude04\ud83d" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ude04\\ud83d\" }"},"location":42}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":37},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":72}},"location":69}},"location":37}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 011
+-- surrogates in wrong order
+select json '{ "a":  "\ud83dX" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83dX\" }"},"location":41}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":36},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":66}},"location":63}},"location":36}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 012
+-- orphan high surrogate
+select json '{ "a":  "\ude04X" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ude04X\" }"},"location":37}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":32},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":62}},"location":59}},"location":32}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 013
+-- orphan low surrogate
+
+--handling of simple unicode escapes
+
+select json '{ "a":  "the Copyright \u00a9 sign" }' as correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"the Copyright \\u00a9 sign\" }"},"location":75}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":70},"location":-1}},"location":70}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 014
+select json '{ "a":  "dollar \u0024 character" }' as correct_everywhere
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_everywhere","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\u0024 character\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 015
+select json '{ "a":  "dollar \\u0024 character" }' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\\\u0024 character\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 016
+select json '{ "a":  "null \u0000 escape" }' as not_unescaped
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_unescaped","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\u0000 escape\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 017
+select json '{ "a":  "null \\u0000 escape" }' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\\\u0000 escape\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 018
+select json '{ "a":  "the Copyright \u00a9 sign" }' ->> 'a' as correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"the Copyright \\u00a9 sign\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":56}},"location":52}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 019
+select json '{ "a":  "dollar \u0024 character" }' ->> 'a' as correct_everywhere
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_everywhere","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\u0024 character\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":54}},"location":50}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 020
+select json '{ "a":  "dollar \\u0024 character" }' ->> 'a' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\\\u0024 character\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":55}},"location":51}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 021
+select json '{ "a":  "null \u0000 escape" }' ->> 'a' as fails
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"fails","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\u0000 escape\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":49}},"location":45}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
+select json '{ "a":  "null \\u0000 escape" }' ->> 'a' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\\\u0000 escape\" }"},"location":12}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":50}},"location":46}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 023
+-- then jsonb
+
+-- basic unicode input
+SELECT '"\u"'::jsonb
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u\""},"location":45}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":53},"location":51}},"location":45}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 024
+-- ERROR, incomplete escape
+SELECT '"\u00"'::jsonb
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u00\""},"location":35}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":45},"location":43}},"location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 025
+-- ERROR, incomplete escape
+SELECT '"\u000g"'::jsonb
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u000g\""},"location":35}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":47},"location":45}},"location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 026
+-- ERROR, g is not a hex digit
+SELECT '"\u0045"'::jsonb
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u0045\""},"location":38}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":50},"location":48}},"location":38}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 027
+-- OK, legal escape
+SELECT '"\u0000"'::jsonb
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\u0000\""},"location":27}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":39},"location":37}},"location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+-- ERROR, we don't support U+0000
+-- use octet_length here so we don't get an odd unicode char in the
+-- output
+SELECT octet_length('"\uaBcD"'::jsonb::text)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"octet_length"}}],"args":[{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\"\\uaBcD\""},"location":132}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":144},"location":142}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":151},"location":149}}],"funcformat":"COERCE_EXPLICIT_CALL","location":119}},"location":119}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 029
+-- OK, uppercase and lower case both OK
+
+-- handling of unicode surrogate pairs
+
+SELECT octet_length((jsonb '{ "a":  "\ud83d\ude04\ud83d\udc36" }' -> 'a')::text) AS correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"FuncCall":{"funcname":[{"String":{"sval":"octet_length"}}],"args":[{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83d\\ude04\\ud83d\\udc36\" }"},"location":108}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":102},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":150}},"location":147}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":156},"location":154}}],"funcformat":"COERCE_EXPLICIT_CALL","location":88}},"location":88}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+SELECT jsonb '{ "a":  "\ud83d\ud83d" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83d\\ud83d\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":43}},"location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 031
+-- 2 high surrogates in a row
+SELECT jsonb '{ "a":  "\ude04\ud83d" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ude04\\ud83d\" }"},"location":43}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":37},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":73}},"location":70}},"location":37}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 032
+-- surrogates in wrong order
+SELECT jsonb '{ "a":  "\ud83dX" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83dX\" }"},"location":42}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":36},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":67}},"location":64}},"location":36}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 033
+-- orphan high surrogate
+SELECT jsonb '{ "a":  "\ude04X" }' -> 'a'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ude04X\" }"},"location":38}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":32},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":63}},"location":60}},"location":32}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 034
+-- orphan low surrogate
+
+-- handling of simple unicode escapes
+
+SELECT jsonb '{ "a":  "the Copyright \u00a9 sign" }' as correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"the Copyright \\u00a9 sign\" }"},"location":77}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":71},"location":-1}},"location":71}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 035
+SELECT jsonb '{ "a":  "dollar \u0024 character" }' as correct_everywhere
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_everywhere","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\u0024 character\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 036
+SELECT jsonb '{ "a":  "dollar \\u0024 character" }' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\\\u0024 character\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 037
+SELECT jsonb '{ "a":  "null \u0000 escape" }' as fails
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"fails","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\u0000 escape\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 038
+SELECT jsonb '{ "a":  "null \\u0000 escape" }' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\\\u0000 escape\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 039
+SELECT jsonb '{ "a":  "the Copyright \u00a9 sign" }' ->> 'a' as correct_in_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_in_utf8","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"the Copyright \\u00a9 sign\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":57}},"location":53}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 040
+SELECT jsonb '{ "a":  "dollar \u0024 character" }' ->> 'a' as correct_everywhere
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"correct_everywhere","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\u0024 character\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":55}},"location":51}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 041
+SELECT jsonb '{ "a":  "dollar \\u0024 character" }' ->> 'a' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"dollar \\\\u0024 character\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":56}},"location":52}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 042
+SELECT jsonb '{ "a":  "null \u0000 escape" }' ->> 'a' as fails
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"fails","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\u0000 escape\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":50}},"location":46}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 043
+SELECT jsonb '{ "a":  "null \\u0000 escape" }' ->> 'a' as not_an_escape
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"not_an_escape","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-\u003e\u003e"}}],"lexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"{ \"a\":  \"null \\\\u0000 escape\" }"},"location":13}},"typeName":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":7},"location":-1}},"rexpr":{"A_Const":{"sval":{"sval":"a"},"location":51}},"location":47}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 044
+-- soft error for input-time failure
+
+select * from pg_input_error_info('{ "a":  "\ud83d\ude04\ud83d\udc36" }', 'jsonb')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":45}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"pg_input_error_info"}}],"args":[{"A_Const":{"sval":{"sval":"{ \"a\":  \"\\ud83d\\ude04\\ud83d\\udc36\" }"},"location":72}},{"A_Const":{"sval":{"sval":"jsonb"},"location":112}}],"funcformat":"COERCE_EXPLICIT_CALL","location":52}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}

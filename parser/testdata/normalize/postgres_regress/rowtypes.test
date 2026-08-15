@@ -1,0 +1,1410 @@
+== 001
+|--
+-- ROWTYPES
+|--
+
+-- Make both a standalone composite type and a table rowtype
+
+create type complex as (r float8, i float8)
+--
+|--
+-- ROWTYPES
+|--
+
+-- Make both a standalone composite type and a table rowtype
+
+create type complex as (r float8, i float8)
+== 002
+create temp table fullname (first text, last text)
+--
+create temp table fullname (first text, last text)
+== 003
+-- Nested composite
+
+create type quad as (c1 complex, c2 complex)
+--
+-- Nested composite
+
+create type quad as (c1 complex, c2 complex)
+== 004
+-- Some simple tests of I/O conversions and row construction
+
+select (1.1,2.2)::complex, row((3.3,4.4),(5.5,null))::quad
+--
+-- Some simple tests of I/O conversions and row construction
+
+select ($1,$2)::complex, row(($3,$4),($5,$6))::quad
+== 005
+select row('Joe', 'Blow')::fullname, '(Joe,Blow)'::fullname
+--
+select row($1, $2)::fullname, $3::fullname
+== 006
+select '(Joe,von Blow)'::fullname, '(Joe,d''Blow)'::fullname
+--
+select $1::fullname, $2::fullname
+== 007
+select '(Joe,"von""Blow")'::fullname, E'(Joe,d\\\\Blow)'::fullname
+--
+select $1::fullname, $2::fullname
+== 008
+select '(Joe,"Blow,Jr")'::fullname
+--
+select $1::fullname
+== 009
+select '(Joe,)'::fullname
+--
+select $1::fullname
+== 010
+-- ok, null 2nd column
+select '(Joe)'::fullname
+--
+-- ok, null 2nd column
+select $1::fullname
+== 011
+-- bad
+select '(Joe,,)'::fullname
+--
+-- bad
+select $1::fullname
+== 012
+-- bad
+select '[]'::fullname
+--
+-- bad
+select $1::fullname
+== 013
+-- bad
+select ' (Joe,Blow)  '::fullname
+--
+-- bad
+select $1::fullname
+== 014
+-- ok, extra whitespace
+select '(Joe,Blow) /'::fullname
+--
+-- ok, extra whitespace
+select $1::fullname
+== 015
+-- bad
+
+-- test non-error-throwing API
+SELECT pg_input_is_valid('(1,2)', 'complex')
+--
+-- bad
+
+-- test non-error-throwing API
+SELECT pg_input_is_valid($1, $2)
+== 016
+SELECT pg_input_is_valid('(1,2', 'complex')
+--
+SELECT pg_input_is_valid($1, $2)
+== 017
+SELECT pg_input_is_valid('(1,zed)', 'complex')
+--
+SELECT pg_input_is_valid($1, $2)
+== 018
+SELECT * FROM pg_input_error_info('(1,zed)', 'complex')
+--
+SELECT * FROM pg_input_error_info($1, $2)
+== 019
+SELECT * FROM pg_input_error_info('(1,1e400)', 'complex')
+--
+SELECT * FROM pg_input_error_info($1, $2)
+== 020
+create temp table quadtable(f1 int, q quad)
+--
+create temp table quadtable(f1 int, q quad)
+== 021
+insert into quadtable values (1, ((3.3,4.4),(5.5,6.6)))
+--
+insert into quadtable values ($1, (($2,$3),($4,$5)))
+== 022
+insert into quadtable values (2, ((null,4.4),(5.5,6.6)))
+--
+insert into quadtable values ($1, (($2,$3),($4,$5)))
+== 023
+select * from quadtable
+--
+select * from quadtable
+== 024
+select f1, q.c1 from quadtable
+--
+select f1, q.c1 from quadtable
+== 025
+-- fails, q is a table reference
+
+select f1, (q).c1, (qq.q).c1.i from quadtable qq
+--
+-- fails, q is a table reference
+
+select f1, (q).c1, (qq.q).c1.i from quadtable qq
+== 026
+create temp table people (fn fullname, bd date)
+--
+create temp table people (fn fullname, bd date)
+== 027
+insert into people values ('(Joe,Blow)', '1984-01-10')
+--
+insert into people values ($1, $2)
+== 028
+select * from people
+--
+select * from people
+== 029
+-- at the moment this will not work due to ALTER TABLE inadequacy:
+alter table fullname add column suffix text default ''
+--
+-- at the moment this will not work due to ALTER TABLE inadequacy:
+alter table fullname add column suffix text default ''
+== 030
+-- but this should work:
+alter table fullname add column suffix text default null
+--
+-- but this should work:
+alter table fullname add column suffix text default null
+== 031
+select * from people
+--
+select * from people
+== 032
+-- test insertion/updating of subfields
+update people set fn.suffix = 'Jr'
+--
+-- test insertion/updating of subfields
+update people set fn.suffix = $1
+== 033
+select * from people
+--
+select * from people
+== 034
+insert into quadtable (f1, q.c1.r, q.c2.i) values(44,55,66)
+--
+insert into quadtable (f1, q.c1.r, q.c2.i) values($1,$2,$3)
+== 035
+update quadtable set q.c1.r = 12 where f1 = 2
+--
+update quadtable set q.c1.r = $1 where f1 = $2
+== 036
+update quadtable set q.c1 = 12
+--
+update quadtable set q.c1 = $1
+== 037
+-- error, type mismatch
+
+select * from quadtable
+--
+-- error, type mismatch
+
+select * from quadtable
+== 038
+-- The object here is to ensure that toasted references inside
+-- composite values don't cause problems.  The large f1 value will
+-- be toasted inside pp, it must still work after being copied to people.
+
+create temp table pp (f1 text)
+--
+-- The object here is to ensure that toasted references inside
+-- composite values don't cause problems.  The large f1 value will
+-- be toasted inside pp, it must still work after being copied to people.
+
+create temp table pp (f1 text)
+== 039
+insert into pp values (repeat('abcdefghijkl', 100000))
+--
+insert into pp values (repeat($1, $2))
+== 040
+insert into people select ('Jim', f1, null)::fullname, current_date from pp
+--
+insert into people select ($1, f1, $2)::fullname, current_date from pp
+== 041
+select (fn).first, substr((fn).last, 1, 20), length((fn).last) from people
+--
+select (fn).first, substr((fn).last, $1, $2), length((fn).last) from people
+== 042
+-- try an update on a toasted composite value, too
+update people set fn.first = 'Jack'
+--
+-- try an update on a toasted composite value, too
+update people set fn.first = $1
+== 043
+select (fn).first, substr((fn).last, 1, 20), length((fn).last) from people
+--
+select (fn).first, substr((fn).last, $1, $2), length((fn).last) from people
+== 044
+-- Test row comparison semantics.  Prior to PG 8.2 we did this in a totally
+-- non-spec-compliant way.
+
+select ROW(1,2) < ROW(1,3) as true
+--
+-- Test row comparison semantics.  Prior to PG 8.2 we did this in a totally
+-- non-spec-compliant way.
+
+select ROW($1,$2) < ROW($3,$4) as true
+== 045
+select ROW(1,2) < ROW(1,1) as false
+--
+select ROW($1,$2) < ROW($3,$4) as false
+== 046
+select ROW(1,2) < ROW(1,NULL) as null
+--
+select ROW($1,$2) < ROW($3,$4) as null
+== 047
+select ROW(1,2,3) < ROW(1,3,NULL) as true
+--
+select ROW($1,$2,$3) < ROW($4,$5,$6) as true
+== 048
+-- the NULL is not examined
+select ROW(11,'ABC') < ROW(11,'DEF') as true
+--
+-- the NULL is not examined
+select ROW($1,$2) < ROW($3,$4) as true
+== 049
+select ROW(11,'ABC') > ROW(11,'DEF') as false
+--
+select ROW($1,$2) > ROW($3,$4) as false
+== 050
+select ROW(12,'ABC') > ROW(11,'DEF') as true
+--
+select ROW($1,$2) > ROW($3,$4) as true
+== 051
+-- = and <> have different NULL-behavior than < etc
+select ROW(1,2,3) < ROW(1,NULL,4) as null
+--
+-- = and <> have different NULL-behavior than < etc
+select ROW($1,$2,$3) < ROW($4,$5,$6) as null
+== 052
+select ROW(1,2,3) = ROW(1,NULL,4) as false
+--
+select ROW($1,$2,$3) = ROW($4,$5,$6) as false
+== 053
+select ROW(1,2,3) <> ROW(1,NULL,4) as true
+--
+select ROW($1,$2,$3) <> ROW($4,$5,$6) as true
+== 054
+-- We allow operators beyond the six standard ones, if they have btree
+-- operator classes.
+select ROW('ABC','DEF') ~<=~ ROW('DEF','ABC') as true
+--
+-- We allow operators beyond the six standard ones, if they have btree
+-- operator classes.
+select ROW($1,$2) ~<=~ ROW($3,$4) as true
+== 055
+select ROW('ABC','DEF') ~>=~ ROW('DEF','ABC') as false
+--
+select ROW($1,$2) ~>=~ ROW($3,$4) as false
+== 056
+select ROW('ABC','DEF') ~~ ROW('DEF','ABC') as fail
+--
+select ROW($1,$2) ~~ ROW($3,$4) as fail
+== 057
+-- Comparisons of ROW() expressions can cope with some type mismatches
+select ROW(1,2) = ROW(1,2::int8)
+--
+-- Comparisons of ROW() expressions can cope with some type mismatches
+select ROW($1,$2) = ROW($3,$4::int8)
+== 058
+select ROW(1,2) in (ROW(3,4), ROW(1,2))
+--
+select ROW($1,$2) in (ROW($3,$4), ROW($5,$6))
+== 059
+select ROW(1,2) in (ROW(3,4), ROW(1,2::int8))
+--
+select ROW($1,$2) in (ROW($3,$4), ROW($5,$6::int8))
+== 060
+-- Check row comparison with a subselect
+select unique1, unique2 from tenk1
+where (unique1, unique2) < any (select ten, ten from tenk1 where hundred < 3)
+      and unique1 <= 20
+order by 1
+--
+-- Check row comparison with a subselect
+select unique1, unique2 from tenk1
+where (unique1, unique2) < any (select ten, ten from tenk1 where hundred < $1)
+      and unique1 <= $2
+order by 1
+== 061
+-- Also check row comparison with an indexable condition
+explain (costs off)
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= (997, 5000)
+order by thousand, tenthous
+--
+-- Also check row comparison with an indexable condition
+explain (costs off)
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= ($1, $2)
+order by thousand, tenthous
+== 062
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= (997, 5000)
+order by thousand, tenthous
+--
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= ($1, $2)
+order by thousand, tenthous
+== 063
+explain (costs off)
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > (998, 5000, 3)
+order by thousand, tenthous
+--
+explain (costs off)
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > ($1, $2, $3)
+order by thousand, tenthous
+== 064
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > (998, 5000, 3)
+order by thousand, tenthous
+--
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > ($1, $2, $3)
+order by thousand, tenthous
+== 065
+explain (costs off)
+select thousand, tenthous from tenk1
+where (998, 5000) < (thousand, tenthous)
+order by thousand, tenthous
+--
+explain (costs off)
+select thousand, tenthous from tenk1
+where ($1, $2) < (thousand, tenthous)
+order by thousand, tenthous
+== 066
+select thousand, tenthous from tenk1
+where (998, 5000) < (thousand, tenthous)
+order by thousand, tenthous
+--
+select thousand, tenthous from tenk1
+where ($1, $2) < (thousand, tenthous)
+order by thousand, tenthous
+== 067
+explain (costs off)
+select thousand, hundred from tenk1
+where (998, 5000) < (thousand, hundred)
+order by thousand, hundred
+--
+explain (costs off)
+select thousand, hundred from tenk1
+where ($1, $2) < (thousand, hundred)
+order by thousand, hundred
+== 068
+select thousand, hundred from tenk1
+where (998, 5000) < (thousand, hundred)
+order by thousand, hundred
+--
+select thousand, hundred from tenk1
+where ($1, $2) < (thousand, hundred)
+order by thousand, hundred
+== 069
+-- Test case for bug #14010: indexed row comparisons fail with nulls
+create temp table test_table (a text, b text)
+--
+-- Test case for bug #14010: indexed row comparisons fail with nulls
+create temp table test_table (a text, b text)
+== 070
+insert into test_table values ('a', 'b')
+--
+insert into test_table values ($1, $2)
+== 071
+insert into test_table select 'a', null from generate_series(1,1000)
+--
+insert into test_table select $1, $2 from generate_series($3,$4)
+== 072
+insert into test_table values ('b', 'a')
+--
+insert into test_table values ($1, $2)
+== 073
+create index on test_table (a,b)
+--
+create index on test_table (a,b)
+== 074
+set enable_sort = off
+--
+set enable_sort = $1
+== 075
+explain (costs off)
+select a,b from test_table where (a,b) > ('a','a') order by a,b
+--
+explain (costs off)
+select a,b from test_table where (a,b) > ($1,$2) order by a,b
+== 076
+select a,b from test_table where (a,b) > ('a','a') order by a,b
+--
+select a,b from test_table where (a,b) > ($1,$2) order by a,b
+== 077
+reset enable_sort
+--
+reset enable_sort
+== 078
+-- Check row comparisons with IN
+select * from int8_tbl i8 where i8 in (row(123,456))
+--
+-- Check row comparisons with IN
+select * from int8_tbl i8 where i8 in (row($1,$2))
+== 079
+-- fail, type mismatch
+
+explain (costs off)
+select * from int8_tbl i8
+where i8 in (row(123,456)::int8_tbl, '(4567890123456789,123)')
+--
+-- fail, type mismatch
+
+explain (costs off)
+select * from int8_tbl i8
+where i8 in (row($1,$2)::int8_tbl, $3)
+== 080
+select * from int8_tbl i8
+where i8 in (row(123,456)::int8_tbl, '(4567890123456789,123)')
+--
+select * from int8_tbl i8
+where i8 in (row($1,$2)::int8_tbl, $3)
+== 081
+-- Check ability to select columns from an anonymous rowtype
+select (row(1, 2.0)).f1
+--
+-- Check ability to select columns from an anonymous rowtype
+select (row($1, $2)).f1
+== 082
+select (row(1, 2.0)).f2
+--
+select (row($1, $2)).f2
+== 083
+select (row(1, 2.0)).nosuch
+--
+select (row($1, $2)).nosuch
+== 084
+-- fail
+select (row(1, 2.0)).*
+--
+-- fail
+select (row($1, $2)).*
+== 085
+select (r).f1 from (select row(1, 2.0) as r) ss
+--
+select (r).f1 from (select row($1, $2) as r) ss
+== 086
+select (r).f3 from (select row(1, 2.0) as r) ss
+--
+select (r).f3 from (select row($1, $2) as r) ss
+== 087
+-- fail
+select (r).* from (select row(1, 2.0) as r) ss
+--
+-- fail
+select (r).* from (select row($1, $2) as r) ss
+== 088
+-- Check some corner cases involving empty rowtypes
+select ROW()
+--
+-- Check some corner cases involving empty rowtypes
+select ROW()
+== 089
+select ROW() IS NULL
+--
+select ROW() IS NULL
+== 090
+select ROW() = ROW()
+--
+select ROW() = ROW()
+== 091
+-- Check ability to create arrays of anonymous rowtypes
+select array[ row(1,2), row(3,4), row(5,6) ]
+--
+-- Check ability to create arrays of anonymous rowtypes
+select array[ row($1,$2), row($3,$4), row($5,$6) ]
+== 092
+-- Check ability to compare an anonymous row to elements of an array
+select row(1,1.1) = any (array[ row(7,7.7), row(1,1.1), row(0,0.0) ])
+--
+-- Check ability to compare an anonymous row to elements of an array
+select row($1,$2) = any (array[ row($3,$4), row($5,$6), row($7,$8) ])
+== 093
+select row(1,1.1) = any (array[ row(7,7.7), row(1,1.0), row(0,0.0) ])
+--
+select row($1,$2) = any (array[ row($3,$4), row($5,$6), row($7,$8) ])
+== 094
+-- Check behavior with a non-comparable rowtype
+create type cantcompare as (p point, r float8)
+--
+-- Check behavior with a non-comparable rowtype
+create type cantcompare as (p point, r float8)
+== 095
+create temp table cc (f1 cantcompare)
+--
+create temp table cc (f1 cantcompare)
+== 096
+insert into cc values('("(1,2)",3)')
+--
+insert into cc values($1)
+== 097
+insert into cc values('("(4,5)",6)')
+--
+insert into cc values($1)
+== 098
+select * from cc order by f1
+--
+select * from cc order by f1
+== 099
+-- fail, but should complain about cantcompare
+
+|--
+-- Tests for record_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+--
+-- fail, but should complain about cantcompare
+
+|--
+-- Tests for record_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+== 100
+-- all true
+select row(1, 2)::testtype1 < row(1, 3)::testtype1
+--
+-- all true
+select row($1, $2)::testtype1 < row($3, $4)::testtype1
+== 101
+select row(1, 2)::testtype1 <= row(1, 3)::testtype1
+--
+select row($1, $2)::testtype1 <= row($3, $4)::testtype1
+== 102
+select row(1, 2)::testtype1 = row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 = row($3, $4)::testtype1
+== 103
+select row(1, 2)::testtype1 <> row(1, 3)::testtype1
+--
+select row($1, $2)::testtype1 <> row($3, $4)::testtype1
+== 104
+select row(1, 3)::testtype1 >= row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 >= row($3, $4)::testtype1
+== 105
+select row(1, 3)::testtype1 > row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 > row($3, $4)::testtype1
+== 106
+-- all false
+select row(1, -2)::testtype1 < row(1, -3)::testtype1
+--
+-- all false
+select row($1, $2)::testtype1 < row($3, $4)::testtype1
+== 107
+select row(1, -2)::testtype1 <= row(1, -3)::testtype1
+--
+select row($1, $2)::testtype1 <= row($3, $4)::testtype1
+== 108
+select row(1, -2)::testtype1 = row(1, -3)::testtype1
+--
+select row($1, $2)::testtype1 = row($3, $4)::testtype1
+== 109
+select row(1, -2)::testtype1 <> row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 <> row($3, $4)::testtype1
+== 110
+select row(1, -3)::testtype1 >= row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 >= row($3, $4)::testtype1
+== 111
+select row(1, -3)::testtype1 > row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 > row($3, $4)::testtype1
+== 112
+-- true, but see *< below
+select row(1, -2)::testtype1 < row(1, 3)::testtype1
+--
+-- true, but see *< below
+select row($1, $2)::testtype1 < row($3, $4)::testtype1
+== 113
+-- mismatches
+create type testtype3 as (a int, b text)
+--
+-- mismatches
+create type testtype3 as (a int, b text)
+== 114
+select row(1, 2)::testtype1 < row(1, 'abc')::testtype3
+--
+select row($1, $2)::testtype1 < row($3, $4)::testtype3
+== 115
+select row(1, 2)::testtype1 <> row(1, 'abc')::testtype3
+--
+select row($1, $2)::testtype1 <> row($3, $4)::testtype3
+== 116
+create type testtype5 as (a int)
+--
+create type testtype5 as (a int)
+== 117
+select row(1, 2)::testtype1 < row(1)::testtype5
+--
+select row($1, $2)::testtype1 < row($3)::testtype5
+== 118
+select row(1, 2)::testtype1 <> row(1)::testtype5
+--
+select row($1, $2)::testtype1 <> row($3)::testtype5
+== 119
+-- non-comparable types
+create type testtype6 as (a int, b point)
+--
+-- non-comparable types
+create type testtype6 as (a int, b point)
+== 120
+select row(1, '(1,2)')::testtype6 < row(1, '(1,3)')::testtype6
+--
+select row($1, $2)::testtype6 < row($3, $4)::testtype6
+== 121
+select row(1, '(1,2)')::testtype6 <> row(1, '(1,3)')::testtype6
+--
+select row($1, $2)::testtype6 <> row($3, $4)::testtype6
+== 122
+drop type testtype1, testtype3, testtype5, testtype6
+--
+drop type testtype1, testtype3, testtype5, testtype6
+== 123
+|--
+-- Tests for record_image_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+--
+|--
+-- Tests for record_image_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+== 124
+-- all true
+select row(1, 2)::testtype1 *< row(1, 3)::testtype1
+--
+-- all true
+select row($1, $2)::testtype1 *< row($3, $4)::testtype1
+== 125
+select row(1, 2)::testtype1 *<= row(1, 3)::testtype1
+--
+select row($1, $2)::testtype1 *<= row($3, $4)::testtype1
+== 126
+select row(1, 2)::testtype1 *= row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 *= row($3, $4)::testtype1
+== 127
+select row(1, 2)::testtype1 *<> row(1, 3)::testtype1
+--
+select row($1, $2)::testtype1 *<> row($3, $4)::testtype1
+== 128
+select row(1, 3)::testtype1 *>= row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 *>= row($3, $4)::testtype1
+== 129
+select row(1, 3)::testtype1 *> row(1, 2)::testtype1
+--
+select row($1, $2)::testtype1 *> row($3, $4)::testtype1
+== 130
+-- all false
+select row(1, -2)::testtype1 *< row(1, -3)::testtype1
+--
+-- all false
+select row($1, $2)::testtype1 *< row($3, $4)::testtype1
+== 131
+select row(1, -2)::testtype1 *<= row(1, -3)::testtype1
+--
+select row($1, $2)::testtype1 *<= row($3, $4)::testtype1
+== 132
+select row(1, -2)::testtype1 *= row(1, -3)::testtype1
+--
+select row($1, $2)::testtype1 *= row($3, $4)::testtype1
+== 133
+select row(1, -2)::testtype1 *<> row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 *<> row($3, $4)::testtype1
+== 134
+select row(1, -3)::testtype1 *>= row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 *>= row($3, $4)::testtype1
+== 135
+select row(1, -3)::testtype1 *> row(1, -2)::testtype1
+--
+select row($1, $2)::testtype1 *> row($3, $4)::testtype1
+== 136
+-- This returns the "wrong" order because record_image_cmp works on
+-- unsigned datums without knowing about the actual data type.
+select row(1, -2)::testtype1 *< row(1, 3)::testtype1
+--
+-- This returns the "wrong" order because record_image_cmp works on
+-- unsigned datums without knowing about the actual data type.
+select row($1, $2)::testtype1 *< row($3, $4)::testtype1
+== 137
+-- other types
+create type testtype2 as (a smallint, b bool)
+--
+-- other types
+create type testtype2 as (a smallint, b bool)
+== 138
+-- byval different sizes
+select row(1, true)::testtype2 *< row(2, true)::testtype2
+--
+-- byval different sizes
+select row($1, $2)::testtype2 *< row($3, $4)::testtype2
+== 139
+select row(-2, true)::testtype2 *< row(-1, true)::testtype2
+--
+select row($1, $2)::testtype2 *< row($3, $4)::testtype2
+== 140
+select row(0, false)::testtype2 *< row(0, true)::testtype2
+--
+select row($1, $2)::testtype2 *< row($3, $4)::testtype2
+== 141
+select row(0, false)::testtype2 *<> row(0, true)::testtype2
+--
+select row($1, $2)::testtype2 *<> row($3, $4)::testtype2
+== 142
+create type testtype3 as (a int, b text)
+--
+create type testtype3 as (a int, b text)
+== 143
+-- variable length
+select row(1, 'abc')::testtype3 *< row(1, 'abd')::testtype3
+--
+-- variable length
+select row($1, $2)::testtype3 *< row($3, $4)::testtype3
+== 144
+select row(1, 'abc')::testtype3 *< row(1, 'abcd')::testtype3
+--
+select row($1, $2)::testtype3 *< row($3, $4)::testtype3
+== 145
+select row(1, 'abc')::testtype3 *> row(1, 'abd')::testtype3
+--
+select row($1, $2)::testtype3 *> row($3, $4)::testtype3
+== 146
+select row(1, 'abc')::testtype3 *<> row(1, 'abd')::testtype3
+--
+select row($1, $2)::testtype3 *<> row($3, $4)::testtype3
+== 147
+create type testtype4 as (a int, b point)
+--
+create type testtype4 as (a int, b point)
+== 148
+-- by ref, fixed length
+select row(1, '(1,2)')::testtype4 *< row(1, '(1,3)')::testtype4
+--
+-- by ref, fixed length
+select row($1, $2)::testtype4 *< row($3, $4)::testtype4
+== 149
+select row(1, '(1,2)')::testtype4 *<> row(1, '(1,3)')::testtype4
+--
+select row($1, $2)::testtype4 *<> row($3, $4)::testtype4
+== 150
+-- mismatches
+select row(1, 2)::testtype1 *< row(1, 'abc')::testtype3
+--
+-- mismatches
+select row($1, $2)::testtype1 *< row($3, $4)::testtype3
+== 151
+select row(1, 2)::testtype1 *<> row(1, 'abc')::testtype3
+--
+select row($1, $2)::testtype1 *<> row($3, $4)::testtype3
+== 152
+create type testtype5 as (a int)
+--
+create type testtype5 as (a int)
+== 153
+select row(1, 2)::testtype1 *< row(1)::testtype5
+--
+select row($1, $2)::testtype1 *< row($3)::testtype5
+== 154
+select row(1, 2)::testtype1 *<> row(1)::testtype5
+--
+select row($1, $2)::testtype1 *<> row($3)::testtype5
+== 155
+-- non-comparable types
+create type testtype6 as (a int, b point)
+--
+-- non-comparable types
+create type testtype6 as (a int, b point)
+== 156
+select row(1, '(1,2)')::testtype6 *< row(1, '(1,3)')::testtype6
+--
+select row($1, $2)::testtype6 *< row($3, $4)::testtype6
+== 157
+select row(1, '(1,2)')::testtype6 *>= row(1, '(1,3)')::testtype6
+--
+select row($1, $2)::testtype6 *>= row($3, $4)::testtype6
+== 158
+select row(1, '(1,2)')::testtype6 *<> row(1, '(1,3)')::testtype6
+--
+select row($1, $2)::testtype6 *<> row($3, $4)::testtype6
+== 159
+-- anonymous rowtypes in coldeflists
+select q.a, q.b = row(2), q.c = array[row(3)], q.d = row(row(4)) from
+    unnest(array[row(1, row(2), array[row(3)], row(row(4))),
+                 row(2, row(3), array[row(4)], row(row(5)))])
+      as q(a int, b record, c record[], d record)
+--
+-- anonymous rowtypes in coldeflists
+select q.a, q.b = row($1), q.c = array[row($2)], q.d = row(row($3)) from
+    unnest(array[row($4, row($5), array[row($6)], row(row($7))),
+                 row($8, row($9), array[row($10)], row(row($11)))])
+      as q(a int, b record, c record[], d record)
+== 160
+drop type testtype1, testtype2, testtype3, testtype4, testtype5, testtype6
+--
+drop type testtype1, testtype2, testtype3, testtype4, testtype5, testtype6
+== 161
+|--
+-- Test case derived from bug #5716: check multiple uses of a rowtype result
+|--
+
+BEGIN
+--
+|--
+-- Test case derived from bug #5716: check multiple uses of a rowtype result
+|--
+
+BEGIN
+== 162
+CREATE TABLE price (
+    id SERIAL PRIMARY KEY,
+    active BOOLEAN NOT NULL,
+    price NUMERIC
+)
+--
+CREATE TABLE price (
+    id SERIAL PRIMARY KEY,
+    active BOOLEAN NOT NULL,
+    price NUMERIC
+)
+== 163
+CREATE TYPE price_input AS (
+    id INTEGER,
+    price NUMERIC
+)
+--
+CREATE TYPE price_input AS (
+    id INTEGER,
+    price NUMERIC
+)
+== 164
+CREATE TYPE price_key AS (
+    id INTEGER
+)
+--
+CREATE TYPE price_key AS (
+    id INTEGER
+)
+== 165
+CREATE FUNCTION price_key_from_table(price) RETURNS price_key AS $$
+    SELECT $1.id
+$$ LANGUAGE SQL
+--
+CREATE FUNCTION price_key_from_table(price) RETURNS price_key AS $1 LANGUAGE SQL
+== 166
+CREATE FUNCTION price_key_from_input(price_input) RETURNS price_key AS $$
+    SELECT $1.id
+$$ LANGUAGE SQL
+--
+CREATE FUNCTION price_key_from_input(price_input) RETURNS price_key AS $1 LANGUAGE SQL
+== 167
+insert into price values (1,false,42), (10,false,100), (11,true,17.99)
+--
+insert into price values ($1,$2,$3), ($4,$5,$6), ($7,$8,$9)
+== 168
+UPDATE price
+    SET active = true, price = input_prices.price
+    FROM unnest(ARRAY[(10, 123.00), (11, 99.99)]::price_input[]) input_prices
+    WHERE price_key_from_table(price.*) = price_key_from_input(input_prices.*)
+--
+UPDATE price
+    SET active = $1, price = input_prices.price
+    FROM unnest(ARRAY[($2, $3), ($4, $5)]::price_input[]) input_prices
+    WHERE price_key_from_table(price.*) = price_key_from_input(input_prices.*)
+== 169
+select * from price
+--
+select * from price
+== 170
+rollback
+--
+rollback
+== 171
+|--
+-- Test case derived from bug #9085: check * qualification of composite
+-- parameters for SQL functions
+|--
+
+create temp table compos (f1 int, f2 text)
+--
+|--
+-- Test case derived from bug #9085: check * qualification of composite
+-- parameters for SQL functions
+|--
+
+create temp table compos (f1 int, f2 text)
+== 172
+create function fcompos1(v compos) returns void as $$
+insert into compos values (v);  -- fail
+$$ language sql
+--
+create function fcompos1(v compos) returns void as $1 language sql
+== 173
+create function fcompos1(v compos) returns void as $$
+insert into compos values (v.*);
+$$ language sql
+--
+create function fcompos1(v compos) returns void as $1 language sql
+== 174
+create function fcompos2(v compos) returns void as $$
+select fcompos1(v);
+$$ language sql
+--
+create function fcompos2(v compos) returns void as $1 language sql
+== 175
+create function fcompos3(v compos) returns void as $$
+select fcompos1(fcompos3.v.*);
+$$ language sql
+--
+create function fcompos3(v compos) returns void as $1 language sql
+== 176
+select fcompos1(row(1,'one'))
+--
+select fcompos1(row($1,$2))
+== 177
+select fcompos2(row(2,'two'))
+--
+select fcompos2(row($1,$2))
+== 178
+select fcompos3(row(3,'three'))
+--
+select fcompos3(row($1,$2))
+== 179
+select * from compos
+--
+select * from compos
+== 180
+|--
+-- We allow I/O conversion casts from composite types to strings to be
+-- invoked via cast syntax, but not functional syntax.  This is because
+-- the latter is too prone to be invoked unintentionally.
+|--
+select cast (fullname as text) from fullname
+--
+|--
+-- We allow I/O conversion casts from composite types to strings to be
+-- invoked via cast syntax, but not functional syntax.  This is because
+-- the latter is too prone to be invoked unintentionally.
+|--
+select cast (fullname as text) from fullname
+== 181
+select fullname::text from fullname
+--
+select fullname::text from fullname
+== 182
+select text(fullname) from fullname
+--
+select text(fullname) from fullname
+== 183
+-- error
+select fullname.text from fullname
+--
+-- error
+select fullname.text from fullname
+== 184
+-- error
+-- same, but RECORD instead of named composite type:
+select cast (row('Jim', 'Beam') as text)
+--
+-- error
+-- same, but RECORD instead of named composite type:
+select cast (row($1, $2) as text)
+== 185
+select (row('Jim', 'Beam'))::text
+--
+select (row($1, $2))::text
+== 186
+select text(row('Jim', 'Beam'))
+--
+select text(row($1, $2))
+== 187
+-- error
+select (row('Jim', 'Beam')).text
+--
+-- error
+select (row($1, $2)).text
+== 188
+-- error
+
+|--
+-- Check the equivalence of functional and column notation
+|--
+insert into fullname values ('Joe', 'Blow')
+--
+-- error
+
+|--
+-- Check the equivalence of functional and column notation
+|--
+insert into fullname values ($1, $2)
+== 189
+select f.last from fullname f
+--
+select f.last from fullname f
+== 190
+select last(f) from fullname f
+--
+select last(f) from fullname f
+== 191
+create function longname(fullname) returns text language sql
+as $$select $1.first || ' ' || $1.last$$
+--
+create function longname(fullname) returns text language sql
+as $1
+== 192
+select f.longname from fullname f
+--
+select f.longname from fullname f
+== 193
+select longname(f) from fullname f
+--
+select longname(f) from fullname f
+== 194
+-- Starting in v11, the notational form does matter if there's ambiguity
+alter table fullname add column longname text
+--
+-- Starting in v11, the notational form does matter if there's ambiguity
+alter table fullname add column longname text
+== 195
+select f.longname from fullname f
+--
+select f.longname from fullname f
+== 196
+select longname(f) from fullname f
+--
+select longname(f) from fullname f
+== 197
+|--
+-- Test that composite values are seen to have the correct column names
+-- (bug #11210 and other reports)
+|--
+
+select row_to_json(i) from int8_tbl i
+--
+|--
+-- Test that composite values are seen to have the correct column names
+-- (bug #11210 and other reports)
+|--
+
+select row_to_json(i) from int8_tbl i
+== 198
+-- since "i" is of type "int8_tbl", attaching aliases doesn't change anything:
+select row_to_json(i) from int8_tbl i(x,y)
+--
+-- since "i" is of type "int8_tbl", attaching aliases doesn't change anything:
+select row_to_json(i) from int8_tbl i(x,y)
+== 199
+-- in these examples, we'll report the exposed column names of the subselect:
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl) as ss
+--
+-- in these examples, we'll report the exposed column names of the subselect:
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl) as ss
+== 200
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl offset 0) as ss
+--
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl offset $1) as ss
+== 201
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss
+--
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss
+== 202
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset 0) as ss
+--
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset $1) as ss
+== 203
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss(x,y)
+--
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss(x,y)
+== 204
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset 0) as ss(x,y)
+--
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset $1) as ss(x,y)
+== 205
+explain (costs off)
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+explain (costs off)
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = $1 and tenthous < $2 offset $3) q
+== 206
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = $1 and tenthous < $2 offset $3) q
+== 207
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = $1 and tenthous < $2 offset $3) q
+== 208
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q(a,b)
+--
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = $1 and tenthous < $2 offset $3) q(a,b)
+== 209
+create temp table tt1 as select * from int8_tbl limit 2
+--
+create temp table tt1 as select * from int8_tbl limit 2
+== 210
+create temp table tt2 () inherits(tt1)
+--
+create temp table tt2 () inherits(tt1)
+== 211
+insert into tt2 values(0,0)
+--
+insert into tt2 values($1,$2)
+== 212
+select row_to_json(r) from (select q2,q1 from tt1 offset 0) r
+--
+select row_to_json(r) from (select q2,q1 from tt1 offset $1) r
+== 213
+-- check no-op rowtype conversions
+create temp table tt3 () inherits(tt2)
+--
+-- check no-op rowtype conversions
+create temp table tt3 () inherits(tt2)
+== 214
+insert into tt3 values(33,44)
+--
+insert into tt3 values($1,$2)
+== 215
+select row_to_json(tt3::tt2::tt1) from tt3
+--
+select row_to_json(tt3::tt2::tt1) from tt3
+== 216
+|--
+-- IS [NOT] NULL should not recurse into nested composites (bug #14235)
+|--
+
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b)
+--
+|--
+-- IS [NOT] NULL should not recurse into nested composites (bug #14235)
+|--
+
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values ($1,row($2,$3)), ($4,row($5,$6)), ($7,$8),
+             ($9,row($10,$11)), ($12,row($13,$14)), ($15,$16) ) r(a,b)
+== 217
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b)
+--
+select r, r is null as isnull, r is not null as isnotnull
+from (values ($1,row($2,$3)), ($4,row($5,$6)), ($7,$8),
+             ($9,row($10,$11)), ($12,row($13,$14)), ($15,$16) ) r(a,b)
+== 218
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r
+--
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values ($1,row($2,$3)), ($4,row($5,$6)), ($7,$8),
+          ($9,row($10,$11)), ($12,row($13,$14)), ($15,$16) )
+select r, r is null as isnull, r is not null as isnotnull from r
+== 219
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r
+--
+with r(a,b) as materialized
+  (values ($1,row($2,$3)), ($4,row($5,$6)), ($7,$8),
+          ($9,row($10,$11)), ($12,row($13,$14)), ($15,$16) )
+select r, r is null as isnull, r is not null as isnotnull from r
+== 220
+|--
+-- Check parsing of indirect references to composite values (bug #18077)
+|--
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+|--
+-- Check parsing of indirect references to composite values (bug #18077)
+|--
+explain (verbose, costs off)
+with cte(c) as materialized (select row($2, $3)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > $1)) is not null
+== 221
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+with cte(c) as materialized (select row($2, $3)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > $1)) is not null
+== 222
+-- Also check deparsing of such cases
+create view composite_v as
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select 1 as one from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+-- Also check deparsing of such cases
+create view composite_v as
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select 1 as one from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+== 223
+select pg_get_viewdef('composite_v', true)
+--
+select pg_get_viewdef($1, $2)
+== 224
+drop view composite_v
+--
+drop view composite_v
+== 225
+|--
+-- Check cases where the composite comes from a proven-dummy rel (bug #18576)
+|--
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[1,2]) AS a) ss
+--
+|--
+-- Check cases where the composite comes from a proven-dummy rel (bug #18576)
+|--
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[$1,$2]) AS a) ss
+== 226
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[1,2]) AS a) ss
+where false
+--
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[$1,$2]) AS a) ss
+where $3
+== 227
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+--
+explain (verbose, costs off)
+with cte(c) as materialized (select row($1, $2)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+== 228
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+where false
+--
+explain (verbose, costs off)
+with cte(c) as materialized (select row($2, $3)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+where $1
+== 229
+|--
+-- Tests for component access / FieldSelect
+|--
+CREATE TABLE compositetable(a text, b text)
+--
+|--
+-- Tests for component access / FieldSelect
+|--
+CREATE TABLE compositetable(a text, b text)
+== 230
+INSERT INTO compositetable(a, b) VALUES('fa', 'fb')
+--
+INSERT INTO compositetable(a, b) VALUES($1, $2)
+== 231
+-- composite type columns can't directly be accessed (error)
+SELECT d.a FROM (SELECT compositetable AS d FROM compositetable) s
+--
+-- composite type columns can't directly be accessed (error)
+SELECT d.a FROM (SELECT compositetable AS d FROM compositetable) s
+== 232
+-- but can be accessed with proper parens
+SELECT (d).a, (d).b FROM (SELECT compositetable AS d FROM compositetable) s
+--
+-- but can be accessed with proper parens
+SELECT (d).a, (d).b FROM (SELECT compositetable AS d FROM compositetable) s
+== 233
+-- system columns can't be accessed in composite types (error)
+SELECT (d).ctid FROM (SELECT compositetable AS d FROM compositetable) s
+--
+-- system columns can't be accessed in composite types (error)
+SELECT (d).ctid FROM (SELECT compositetable AS d FROM compositetable) s
+== 234
+-- accessing non-existing column in NULL datum errors out
+SELECT (NULL::compositetable).nonexistent
+--
+-- accessing non-existing column in NULL datum errors out
+SELECT ($1::compositetable).nonexistent
+== 235
+-- existing column in a NULL composite yield NULL
+SELECT (NULL::compositetable).a
+--
+-- existing column in a NULL composite yield NULL
+SELECT ($1::compositetable).a
+== 236
+-- oids can't be accessed in composite types (error)
+SELECT (NULL::compositetable).oid
+--
+-- oids can't be accessed in composite types (error)
+SELECT ($1::compositetable).oid
+== 237
+DROP TABLE compositetable
+--
+DROP TABLE compositetable

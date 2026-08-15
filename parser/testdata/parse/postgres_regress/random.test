@@ -1,0 +1,392 @@
+== 001
+|--
+-- RANDOM
+-- Test random() and allies
+|--
+-- Tests in this file may have a small probability of failure,
+-- since we are dealing with randomness.  Try to keep the failure
+-- risk for any one test case under 1e-9.
+|--
+
+-- There should be no duplicates in 1000 random() values.
+-- (Assuming 52 random bits in the float8 results, we could
+-- take as many as 3000 values and still have less than 1e-9 chance
+-- of failure, per https://en.wikipedia.org/wiki/Birthday_problem)
+SELECT r, count(*)
+FROM (SELECT random() r FROM generate_series(1, 1000)) ss
+GROUP BY r HAVING count(*) > 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":479}},"location":479}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":482}},"location":482}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":504}},"location":504}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":536}},{"A_Const":{"ival":{"ival":1000},"location":539}}],"funcformat":"COERCE_EXPLICIT_CALL","location":520}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":558}}],"havingClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":567}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":578}},"location":576}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 002
+-- The range should be [0, 1).  We can expect that at least one out of 2000
+-- random values is in the lowest or highest 1% of the range with failure
+-- probability less than about 1e-9.
+
+SELECT count(*) FILTER (WHERE r < 0 OR r >= 1) AS out_of_range,
+       (count(*) FILTER (WHERE r < 0.01)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 0.99)) > 0 AS has_large
+FROM (SELECT random() r FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"out_of_range","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":218}},"rexpr":{"A_Const":{"ival":{},"location":222}},"location":220}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":227}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":232}},"location":229}}],"location":224}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":195}},"location":195}},{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":283}},"rexpr":{"A_Const":{"fval":{"fval":"0.01"},"location":287}},"location":285}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":260}},"rexpr":{"A_Const":{"ival":{},"location":296}},"location":294}},"location":259}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":343}},"rexpr":{"A_Const":{"fval":{"fval":"0.99"},"location":347}},"location":345}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":320}},"rexpr":{"A_Const":{"ival":{},"location":356}},"location":354}},"location":319}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":384}},"location":384}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":416}},{"A_Const":{"ival":{"ival":2000},"location":419}}],"funcformat":"COERCE_EXPLICIT_CALL","location":400}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 003
+-- Check for uniform distribution using the Kolmogorov-Smirnov test.
+
+CREATE FUNCTION ks_test_uniform_random()
+RETURNS boolean AS
+$$
+DECLARE
+  n int := 1000;        -- Number of samples
+  c float8 := 1.94947;  -- Critical value for 99.9% confidence
+  ok boolean;
+BEGIN
+  ok := (
+    WITH samples AS (
+      SELECT random() r FROM generate_series(1, n) ORDER BY 1
+    ), indexed_samples AS (
+      SELECT (row_number() OVER())-1.0 i, r FROM samples
+    )
+    SELECT max(abs(i/n-r)) < c / sqrt(n) FROM indexed_samples
+  );
+  RETURN ok;
+END
+$$
+LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"ks_test_uniform_random"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bool"}}],"typemod":-1,"location":119},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  n int := 1000;        -- Number of samples\n  c float8 := 1.94947;  -- Critical value for 99.9% confidence\n  ok boolean;\nBEGIN\n  ok := (\n    WITH samples AS (\n      SELECT random() r FROM generate_series(1, n) ORDER BY 1\n    ), indexed_samples AS (\n      SELECT (row_number() OVER())-1.0 i, r FROM samples\n    )\n    SELECT max(abs(i/n-r)) \u003c c / sqrt(n) FROM indexed_samples\n  );\n  RETURN ok;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":127}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":541}}]}}}]}
+== 004
+-- As written, ks_test_uniform_random() returns true about 99.9%
+-- of the time.  To get down to a roughly 1e-9 test failure rate,
+-- just run it 3 times and accept if any one of them passes.
+SELECT ks_test_uniform_random() OR
+       ks_test_uniform_random() OR
+       ks_test_uniform_random() AS uniform
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"uniform","val":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":199}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":234}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":269}}],"location":224}},"location":199}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 005
+-- now test random_normal()
+
+-- As above, there should be no duplicates in 1000 random_normal() values.
+SELECT r, count(*)
+FROM (SELECT random_normal() r FROM generate_series(1, 1000)) ss
+GROUP BY r HAVING count(*) > 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":111}},"location":111}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":114}},"location":114}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":136}},"location":136}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":175}},{"A_Const":{"ival":{"ival":1000},"location":178}}],"funcformat":"COERCE_EXPLICIT_CALL","location":159}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":197}}],"havingClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":206}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":217}},"location":215}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 006
+-- ... unless we force the range (standard deviation) to zero.
+-- This is a good place to check that the mean input does something, too.
+SELECT r, count(*)
+FROM (SELECT random_normal(10, 0) r FROM generate_series(1, 100)) ss
+GROUP BY r
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":144}},"location":144}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":147}},"location":147}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"args":[{"A_Const":{"ival":{"ival":10},"location":183}},{"A_Const":{"ival":{},"location":187}}],"funcformat":"COERCE_EXPLICIT_CALL","location":169}},"location":169}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":213}},{"A_Const":{"ival":{"ival":100},"location":216}}],"funcformat":"COERCE_EXPLICIT_CALL","location":197}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":234}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 007
+SELECT r, count(*)
+FROM (SELECT random_normal(-10, 0) r FROM generate_series(1, 100)) ss
+GROUP BY r
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":10}},"location":10}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"args":[{"A_Const":{"ival":{"ival":-10},"location":46}},{"A_Const":{"ival":{},"location":51}}],"funcformat":"COERCE_EXPLICIT_CALL","location":32}},"location":32}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":77}},{"A_Const":{"ival":{"ival":100},"location":80}}],"funcformat":"COERCE_EXPLICIT_CALL","location":61}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":98}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 008
+-- Check standard normal distribution using the Kolmogorov-Smirnov test.
+
+CREATE FUNCTION ks_test_normal_random()
+RETURNS boolean AS
+$$
+DECLARE
+  n int := 1000;        -- Number of samples
+  c float8 := 1.94947;  -- Critical value for 99.9% confidence
+  ok boolean;
+BEGIN
+  ok := (
+    WITH samples AS (
+      SELECT random_normal() r FROM generate_series(1, n) ORDER BY 1
+    ), indexed_samples AS (
+      SELECT (row_number() OVER())-1.0 i, r FROM samples
+    )
+    SELECT max(abs((1+erf(r/sqrt(2)))/2 - i/n)) < c / sqrt(n)
+    FROM indexed_samples
+  );
+  RETURN ok;
+END
+$$
+LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"ks_test_normal_random"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bool"}}],"typemod":-1,"location":122},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  n int := 1000;        -- Number of samples\n  c float8 := 1.94947;  -- Critical value for 99.9% confidence\n  ok boolean;\nBEGIN\n  ok := (\n    WITH samples AS (\n      SELECT random_normal() r FROM generate_series(1, n) ORDER BY 1\n    ), indexed_samples AS (\n      SELECT (row_number() OVER())-1.0 i, r FROM samples\n    )\n    SELECT max(abs((1+erf(r/sqrt(2)))/2 - i/n)) \u003c c / sqrt(n)\n    FROM indexed_samples\n  );\n  RETURN ok;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":130}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":576}}]}}}]}
+== 009
+-- As above, ks_test_normal_random() returns true about 99.9%
+-- of the time, so try it 3 times and accept if any test passes.
+SELECT ks_test_normal_random() OR
+       ks_test_normal_random() OR
+       ks_test_normal_random() AS standard_normal
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"standard_normal","val":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_normal_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":134}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_normal_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":168}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_normal_random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":202}}],"location":158}},"location":134}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 010
+-- Test random(min, max)
+
+-- invalid range bounds
+SELECT random(1, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":64}},{"A_Const":{"ival":{},"location":67}}],"funcformat":"COERCE_EXPLICIT_CALL","location":57}},"location":57}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 011
+SELECT random(1000000000001, 1000000000000)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"1000000000001"},"location":14}},{"A_Const":{"fval":{"fval":"1000000000000"},"location":29}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 012
+SELECT random(-2.0, -3.0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-2.0"},"location":14}},{"A_Const":{"fval":{"fval":"-3.0"},"location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 013
+SELECT random('NaN'::numeric, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"NaN"},"location":14}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":21},"location":19}},{"A_Const":{"ival":{"ival":10},"location":30}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 014
+SELECT random('-Inf'::numeric, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"-Inf"},"location":14}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":22},"location":20}},{"A_Const":{"ival":{},"location":31}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 015
+SELECT random(0, 'NaN'::numeric)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{},"location":14}},{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"NaN"},"location":17}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":24},"location":22}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 016
+SELECT random(0, 'Inf'::numeric)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{},"location":14}},{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"Inf"},"location":17}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":24},"location":22}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 017
+-- empty range is OK
+SELECT random(101, 101)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{"ival":101},"location":35}},{"A_Const":{"ival":{"ival":101},"location":40}}],"funcformat":"COERCE_EXPLICIT_CALL","location":28}},"location":28}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 018
+SELECT random(1000000000001, 1000000000001)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"1000000000001"},"location":14}},{"A_Const":{"fval":{"fval":"1000000000001"},"location":29}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 019
+SELECT random(3.14, 3.14)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"3.14"},"location":14}},{"A_Const":{"fval":{"fval":"3.14"},"location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 020
+-- There should be no triple duplicates in 1000 full-range 32-bit random()
+-- values.  (Each of the C(1000, 3) choices of triplets from the 1000 values
+-- has a probability of 1/(2^32)^2 of being a triple duplicate, so the
+-- average number of triple duplicates is 1000 * 999 * 998 / 6 / 2^64, which
+-- is roughly 9e-12.)
+SELECT r, count(*)
+FROM (SELECT random(-2147483648, 2147483647) r
+      FROM generate_series(1, 1000)) ss
+GROUP BY r HAVING count(*) > 2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":329}},"location":329}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":332}},"location":332}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-2147483648"},"location":361}},{"A_Const":{"ival":{"ival":2147483647},"location":374}}],"funcformat":"COERCE_EXPLICIT_CALL","location":354}},"location":354}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":415}},{"A_Const":{"ival":{"ival":1000},"location":418}}],"funcformat":"COERCE_EXPLICIT_CALL","location":399}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":437}}],"havingClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":446}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":457}},"location":455}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 021
+-- There should be no duplicates in 1000 full-range 64-bit random() values.
+SELECT r, count(*)
+FROM (SELECT random_normal(-9223372036854775808, 9223372036854775807) r
+      FROM generate_series(1, 1000)) ss
+GROUP BY r HAVING count(*) > 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":83}},"location":83}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":86}},"location":86}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"args":[{"A_Const":{"fval":{"fval":"-9223372036854775808"},"location":122}},{"A_Const":{"fval":{"fval":"9223372036854775807"},"location":144}}],"funcformat":"COERCE_EXPLICIT_CALL","location":108}},"location":108}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":194}},{"A_Const":{"ival":{"ival":1000},"location":197}}],"funcformat":"COERCE_EXPLICIT_CALL","location":178}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":216}}],"havingClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":225}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":236}},"location":234}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
+-- There should be no duplicates in 1000 15-digit random() numeric values.
+SELECT r, count(*)
+FROM (SELECT random_normal(0, 1 - 1e-15) r
+      FROM generate_series(1, 1000)) ss
+GROUP BY r HAVING count(*) > 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":82}},"location":82}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":85}},"location":85}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"args":[{"A_Const":{"ival":{},"location":121}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":1},"location":124}},"rexpr":{"A_Const":{"fval":{"fval":"1e-15"},"location":128}},"location":126}}],"funcformat":"COERCE_EXPLICIT_CALL","location":107}},"location":107}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":164}},{"A_Const":{"ival":{"ival":1000},"location":167}}],"funcformat":"COERCE_EXPLICIT_CALL","location":148}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"groupClause":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":186}}],"havingClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":195}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":206}},"location":204}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 023
+-- Expect at least one out of 2000 random values to be in the lowest and
+-- highest 1% of the range.
+SELECT (count(*) FILTER (WHERE r < -2104533975)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 2104533974)) > 0 AS has_large
+FROM (SELECT random(-2147483648, 2147483647) r FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":132}},"rexpr":{"A_Const":{"ival":{"ival":-2104533975},"location":136}},"location":134}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":109}},"rexpr":{"A_Const":{"ival":{},"location":152}},"location":150}},"location":108}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":199}},"rexpr":{"A_Const":{"ival":{"ival":2104533974},"location":203}},"location":201}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":176}},"rexpr":{"A_Const":{"ival":{},"location":218}},"location":216}},"location":175}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-2147483648"},"location":253}},{"A_Const":{"ival":{"ival":2147483647},"location":266}}],"funcformat":"COERCE_EXPLICIT_CALL","location":246}},"location":246}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":301}},{"A_Const":{"ival":{"ival":2000},"location":304}}],"funcformat":"COERCE_EXPLICIT_CALL","location":285}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 024
+SELECT count(*) FILTER (WHERE r < -1500000000 OR r > 1500000000) AS out_of_range,
+       (count(*) FILTER (WHERE r < -1470000000)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 1470000000)) > 0 AS has_large
+FROM (SELECT random(-1500000000, 1500000000) r FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"out_of_range","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":30}},"rexpr":{"A_Const":{"ival":{"ival":-1500000000},"location":34}},"location":32}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":49}},"rexpr":{"A_Const":{"ival":{"ival":1500000000},"location":53}},"location":51}}],"location":46}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":113}},"rexpr":{"A_Const":{"ival":{"ival":-1470000000},"location":117}},"location":115}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":90}},"rexpr":{"A_Const":{"ival":{},"location":133}},"location":131}},"location":89}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":180}},"rexpr":{"A_Const":{"ival":{"ival":1470000000},"location":184}},"location":182}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":157}},"rexpr":{"A_Const":{"ival":{},"location":199}},"location":197}},"location":156}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{"ival":-1500000000},"location":234}},{"A_Const":{"ival":{"ival":1500000000},"location":247}}],"funcformat":"COERCE_EXPLICIT_CALL","location":227}},"location":227}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":282}},{"A_Const":{"ival":{"ival":2000},"location":285}}],"funcformat":"COERCE_EXPLICIT_CALL","location":266}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 025
+SELECT (count(*) FILTER (WHERE r < -9038904596117680292)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 9038904596117680291)) > 0 AS has_large
+FROM (SELECT random(-9223372036854775808, 9223372036854775807) r
+      FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":31}},"rexpr":{"A_Const":{"fval":{"fval":"-9038904596117680292"},"location":35}},"location":33}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"rexpr":{"A_Const":{"ival":{},"location":60}},"location":58}},"location":7}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":107}},"rexpr":{"A_Const":{"fval":{"fval":"9038904596117680291"},"location":111}},"location":109}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":84}},"rexpr":{"A_Const":{"ival":{},"location":135}},"location":133}},"location":83}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-9223372036854775808"},"location":170}},{"A_Const":{"fval":{"fval":"9223372036854775807"},"location":192}}],"funcformat":"COERCE_EXPLICIT_CALL","location":163}},"location":163}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":242}},{"A_Const":{"ival":{"ival":2000},"location":245}}],"funcformat":"COERCE_EXPLICIT_CALL","location":226}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 026
+SELECT count(*) FILTER (WHERE r < -1500000000000000 OR r > 1500000000000000) AS out_of_range,
+       (count(*) FILTER (WHERE r < -1470000000000000)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 1470000000000000)) > 0 AS has_large
+FROM (SELECT random(-1500000000000000, 1500000000000000) r
+      FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"out_of_range","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":30}},"rexpr":{"A_Const":{"fval":{"fval":"-1500000000000000"},"location":34}},"location":32}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":55}},"rexpr":{"A_Const":{"fval":{"fval":"1500000000000000"},"location":59}},"location":57}}],"location":52}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":125}},"rexpr":{"A_Const":{"fval":{"fval":"-1470000000000000"},"location":129}},"location":127}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":102}},"rexpr":{"A_Const":{"ival":{},"location":151}},"location":149}},"location":101}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":198}},"rexpr":{"A_Const":{"fval":{"fval":"1470000000000000"},"location":202}},"location":200}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":175}},"rexpr":{"A_Const":{"ival":{},"location":223}},"location":221}},"location":174}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-1500000000000000"},"location":258}},{"A_Const":{"fval":{"fval":"1500000000000000"},"location":277}}],"funcformat":"COERCE_EXPLICIT_CALL","location":251}},"location":251}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":324}},{"A_Const":{"ival":{"ival":2000},"location":327}}],"funcformat":"COERCE_EXPLICIT_CALL","location":308}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 027
+SELECT count(*) FILTER (WHERE r < -1.5 OR r > 1.5) AS out_of_range,
+       (count(*) FILTER (WHERE r < -1.47)) > 0 AS has_small,
+       (count(*) FILTER (WHERE r > 1.47)) > 0 AS has_large
+FROM (SELECT random(-1.500000000000000, 1.500000000000000) r
+      FROM generate_series(1, 2000)) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"out_of_range","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":30}},"rexpr":{"A_Const":{"fval":{"fval":"-1.5"},"location":34}},"location":32}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":42}},"rexpr":{"A_Const":{"fval":{"fval":"1.5"},"location":46}},"location":44}}],"location":39}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"has_small","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":99}},"rexpr":{"A_Const":{"fval":{"fval":"-1.47"},"location":103}},"location":101}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":76}},"rexpr":{"A_Const":{"ival":{},"location":113}},"location":111}},"location":75}},{"ResTarget":{"name":"has_large","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_filter":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":160}},"rexpr":{"A_Const":{"fval":{"fval":"1.47"},"location":164}},"location":162}},"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":137}},"rexpr":{"A_Const":{"ival":{},"location":173}},"location":171}},"location":136}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-1.500000000000000"},"location":208}},{"A_Const":{"fval":{"fval":"1.500000000000000"},"location":228}}],"funcformat":"COERCE_EXPLICIT_CALL","location":201}},"location":201}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":276}},{"A_Const":{"ival":{"ival":2000},"location":279}}],"funcformat":"COERCE_EXPLICIT_CALL","location":260}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+-- Every possible value should occur at least once in 2500 random() values
+-- chosen from a range with 100 distinct values.
+SELECT min(r), max(r), count(r) FROM (
+  SELECT DISTINCT random(-50, 49) r FROM generate_series(1, 2500))
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"min"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":135}}],"funcformat":"COERCE_EXPLICIT_CALL","location":131}},"location":131}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":143}}],"funcformat":"COERCE_EXPLICIT_CALL","location":139}},"location":139}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":153}}],"funcformat":"COERCE_EXPLICIT_CALL","location":147}},"location":147}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{"ival":-50},"location":188}},{"A_Const":{"ival":{"ival":49},"location":193}}],"funcformat":"COERCE_EXPLICIT_CALL","location":181}},"location":181}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":220}},{"A_Const":{"ival":{"ival":2500},"location":223}}],"funcformat":"COERCE_EXPLICIT_CALL","location":204}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 029
+SELECT min(r), max(r), count(r) FROM (
+  SELECT DISTINCT random(123000000000, 123000000099) r
+  FROM generate_series(1, 2500))
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"min"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":15}},"location":15}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":29}}],"funcformat":"COERCE_EXPLICIT_CALL","location":23}},"location":23}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"123000000000"},"location":64}},{"A_Const":{"fval":{"fval":"123000000099"},"location":78}}],"funcformat":"COERCE_EXPLICIT_CALL","location":57}},"location":57}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":117}},{"A_Const":{"ival":{"ival":2500},"location":120}}],"funcformat":"COERCE_EXPLICIT_CALL","location":101}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+SELECT min(r), max(r), count(r) FROM (
+  SELECT DISTINCT random(-0.5, 0.49) r FROM generate_series(1, 2500))
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"min"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":15}},"location":15}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":29}}],"funcformat":"COERCE_EXPLICIT_CALL","location":23}},"location":23}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-0.5"},"location":64}},{"A_Const":{"fval":{"fval":"0.49"},"location":70}}],"funcformat":"COERCE_EXPLICIT_CALL","location":57}},"location":57}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":99}},{"A_Const":{"ival":{"ival":2500},"location":102}}],"funcformat":"COERCE_EXPLICIT_CALL","location":83}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 031
+-- Check for uniform distribution using the Kolmogorov-Smirnov test.
+
+CREATE FUNCTION ks_test_uniform_random_int_in_range()
+RETURNS boolean AS
+$$
+DECLARE
+  n int := 1000;        -- Number of samples
+  c float8 := 1.94947;  -- Critical value for 99.9% confidence
+  ok boolean;
+BEGIN
+  ok := (
+    WITH samples AS (
+      SELECT random(0, 999999) / 1000000.0 r FROM generate_series(1, n) ORDER BY 1
+    ), indexed_samples AS (
+      SELECT (row_number() OVER())-1.0 i, r FROM samples
+    )
+    SELECT max(abs(i/n-r)) < c / sqrt(n) FROM indexed_samples
+  );
+  RETURN ok;
+END
+$$
+LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"ks_test_uniform_random_int_in_range"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bool"}}],"typemod":-1,"location":132},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  n int := 1000;        -- Number of samples\n  c float8 := 1.94947;  -- Critical value for 99.9% confidence\n  ok boolean;\nBEGIN\n  ok := (\n    WITH samples AS (\n      SELECT random(0, 999999) / 1000000.0 r FROM generate_series(1, n) ORDER BY 1\n    ), indexed_samples AS (\n      SELECT (row_number() OVER())-1.0 i, r FROM samples\n    )\n    SELECT max(abs(i/n-r)) \u003c c / sqrt(n) FROM indexed_samples\n  );\n  RETURN ok;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":140}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":575}}]}}}]}
+== 032
+SELECT ks_test_uniform_random_int_in_range() OR
+       ks_test_uniform_random_int_in_range() OR
+       ks_test_uniform_random_int_in_range() AS uniform_int
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"uniform_int","val":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_int_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_int_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":55}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_int_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":103}}],"location":45}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 033
+CREATE FUNCTION ks_test_uniform_random_bigint_in_range()
+RETURNS boolean AS
+$$
+DECLARE
+  n int := 1000;        -- Number of samples
+  c float8 := 1.94947;  -- Critical value for 99.9% confidence
+  ok boolean;
+BEGIN
+  ok := (
+    WITH samples AS (
+      SELECT random(0, 999999999999) / 1000000000000.0 r FROM generate_series(1, n) ORDER BY 1
+    ), indexed_samples AS (
+      SELECT (row_number() OVER())-1.0 i, r FROM samples
+    )
+    SELECT max(abs(i/n-r)) < c / sqrt(n) FROM indexed_samples
+  );
+  RETURN ok;
+END
+$$
+LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"ks_test_uniform_random_bigint_in_range"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bool"}}],"typemod":-1,"location":65},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  n int := 1000;        -- Number of samples\n  c float8 := 1.94947;  -- Critical value for 99.9% confidence\n  ok boolean;\nBEGIN\n  ok := (\n    WITH samples AS (\n      SELECT random(0, 999999999999) / 1000000000000.0 r FROM generate_series(1, n) ORDER BY 1\n    ), indexed_samples AS (\n      SELECT (row_number() OVER())-1.0 i, r FROM samples\n    )\n    SELECT max(abs(i/n-r)) \u003c c / sqrt(n) FROM indexed_samples\n  );\n  RETURN ok;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":73}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":520}}]}}}]}
+== 034
+SELECT ks_test_uniform_random_bigint_in_range() OR
+       ks_test_uniform_random_bigint_in_range() OR
+       ks_test_uniform_random_bigint_in_range() AS uniform_bigint
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"uniform_bigint","val":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_bigint_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_bigint_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":58}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_bigint_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":109}}],"location":48}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 035
+CREATE FUNCTION ks_test_uniform_random_numeric_in_range()
+RETURNS boolean AS
+$$
+DECLARE
+  n int := 1000;        -- Number of samples
+  c float8 := 1.94947;  -- Critical value for 99.9% confidence
+  ok boolean;
+BEGIN
+  ok := (
+    WITH samples AS (
+      SELECT random(0, 0.999999) r FROM generate_series(1, n) ORDER BY 1
+    ), indexed_samples AS (
+      SELECT (row_number() OVER())-1.0 i, r FROM samples
+    )
+    SELECT max(abs(i/n-r)) < c / sqrt(n) FROM indexed_samples
+  );
+  RETURN ok;
+END
+$$
+LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"ks_test_uniform_random_numeric_in_range"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bool"}}],"typemod":-1,"location":66},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  n int := 1000;        -- Number of samples\n  c float8 := 1.94947;  -- Critical value for 99.9% confidence\n  ok boolean;\nBEGIN\n  ok := (\n    WITH samples AS (\n      SELECT random(0, 0.999999) r FROM generate_series(1, n) ORDER BY 1\n    ), indexed_samples AS (\n      SELECT (row_number() OVER())-1.0 i, r FROM samples\n    )\n    SELECT max(abs(i/n-r)) \u003c c / sqrt(n) FROM indexed_samples\n  );\n  RETURN ok;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":74}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":499}}]}}}]}
+== 036
+SELECT ks_test_uniform_random_numeric_in_range() OR
+       ks_test_uniform_random_numeric_in_range() OR
+       ks_test_uniform_random_numeric_in_range() AS uniform_numeric
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"uniform_numeric","val":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_numeric_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_numeric_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":59}},{"FuncCall":{"funcname":[{"String":{"sval":"ks_test_uniform_random_numeric_in_range"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":111}}],"location":49}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 037
+-- setseed() should produce a reproducible series of random() values.
+
+SELECT setseed(0.5)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"setseed"}}],"args":[{"A_Const":{"fval":{"fval":"0.5"},"location":86}}],"funcformat":"COERCE_EXPLICIT_CALL","location":78}},"location":78}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 038
+SELECT random() FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":37}},{"A_Const":{"ival":{"ival":10},"location":40}}],"funcformat":"COERCE_EXPLICIT_CALL","location":21}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 039
+-- Likewise for random_normal(); however, since its implementation relies
+-- on libm functions that have different roundoff behaviors on different
+-- machines, we have to round off the results a bit to get consistent output.
+SET extra_float_digits = -1
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"extra_float_digits","args":[{"A_Const":{"ival":{"ival":-1},"location":250}}]}}}]}
+== 040
+SELECT random_normal() FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":44}},{"A_Const":{"ival":{"ival":10},"location":47}}],"funcformat":"COERCE_EXPLICIT_CALL","location":28}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 041
+SELECT random_normal(mean => 1, stddev => 0.1) r FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"r","val":{"FuncCall":{"funcname":[{"String":{"sval":"random_normal"}}],"args":[{"NamedArgExpr":{"arg":{"A_Const":{"ival":{"ival":1},"location":29}},"name":"mean","argnumber":-1,"location":21}},{"NamedArgExpr":{"arg":{"A_Const":{"fval":{"fval":"0.1"},"location":42}},"name":"stddev","argnumber":-1,"location":32}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":70}},{"A_Const":{"ival":{"ival":10},"location":73}}],"funcformat":"COERCE_EXPLICIT_CALL","location":54}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 042
+-- Reproducible random(min, max) values.
+SELECT random(1, 6) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{"ival":6},"location":58}}],"funcformat":"COERCE_EXPLICIT_CALL","location":48}},"location":48}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":82}},{"A_Const":{"ival":{"ival":10},"location":85}}],"funcformat":"COERCE_EXPLICIT_CALL","location":66}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 043
+SELECT random(-2147483648, 2147483647) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-2147483648"},"location":14}},{"A_Const":{"ival":{"ival":2147483647},"location":27}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":60}},{"A_Const":{"ival":{"ival":10},"location":63}}],"funcformat":"COERCE_EXPLICIT_CALL","location":44}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 044
+SELECT random(-9223372036854775808, 9223372036854775807) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-9223372036854775808"},"location":14}},{"A_Const":{"fval":{"fval":"9223372036854775807"},"location":36}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":78}},{"A_Const":{"ival":{"ival":10},"location":81}}],"funcformat":"COERCE_EXPLICIT_CALL","location":62}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 045
+SELECT random(-1e30, 1e30) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-1e30"},"location":14}},{"A_Const":{"fval":{"fval":"1e30"},"location":21}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":48}},{"A_Const":{"ival":{"ival":10},"location":51}}],"funcformat":"COERCE_EXPLICIT_CALL","location":32}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 046
+SELECT random(-0.4, 0.4) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"fval":{"fval":"-0.4"},"location":14}},{"A_Const":{"fval":{"fval":"0.4"},"location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":46}},{"A_Const":{"ival":{"ival":10},"location":49}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 047
+SELECT random(0, 1 - 1e-30) FROM generate_series(1, 10)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{},"location":14}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":1},"location":17}},"rexpr":{"A_Const":{"fval":{"fval":"1e-30"},"location":21}},"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":49}},{"A_Const":{"ival":{"ival":10},"location":52}}],"funcformat":"COERCE_EXPLICIT_CALL","location":33}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 048
+SELECT n, random(0, trim_scale(abs(1 - 10.0^(-n)))) FROM generate_series(-20, 20) n
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"args":[{"A_Const":{"ival":{},"location":17}},{"FuncCall":{"funcname":[{"String":{"sval":"trim_scale"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"abs"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":1},"location":35}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"^"}}],"lexpr":{"A_Const":{"fval":{"fval":"10.0"},"location":39}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":46}},"location":45}},"location":43}},"location":37}}],"funcformat":"COERCE_EXPLICIT_CALL","location":31}}],"funcformat":"COERCE_EXPLICIT_CALL","location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":10}},"location":10}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":-20},"location":73}},{"A_Const":{"ival":{"ival":20},"location":78}}],"funcformat":"COERCE_EXPLICIT_CALL","location":57}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}

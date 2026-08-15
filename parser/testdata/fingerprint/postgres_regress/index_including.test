@@ -1,0 +1,615 @@
+== 001
+/*
+ * 1.test CREATE INDEX
+ *
+ * Deliberately avoid dropping objects in this section, to get some pg_dump
+ * coverage.
+ */
+
+-- Regular index with included columns
+CREATE TABLE tbl_include_reg (c1 int, c2 int, c3 int, c4 box)
+--
+5a71809f40398929
+== 002
+INSERT INTO tbl_include_reg SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+6d486251a05c2f13
+== 003
+CREATE INDEX tbl_include_reg_idx ON tbl_include_reg (c1, c2) INCLUDE (c3, c4)
+--
+57d6f434e84c4fe3
+== 004
+-- duplicate column is pretty pointless, but we allow it anyway
+CREATE INDEX ON tbl_include_reg (c1, c2) INCLUDE (c1, c3)
+--
+b753797aa3f1988f
+== 005
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_reg'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 006
+-- Unique index and unique constraint
+CREATE TABLE tbl_include_unique1 (c1 int, c2 int, c3 int, c4 box)
+--
+0e2332d4c963b6f2
+== 007
+INSERT INTO tbl_include_unique1 SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+3eb3b9617e9709ce
+== 008
+CREATE UNIQUE INDEX tbl_include_unique1_idx_unique ON tbl_include_unique1 using btree (c1, c2) INCLUDE (c3, c4)
+--
+209a146472624103
+== 009
+ALTER TABLE tbl_include_unique1 add UNIQUE USING INDEX tbl_include_unique1_idx_unique
+--
+0b866ade4667d6de
+== 010
+ALTER TABLE tbl_include_unique1 add UNIQUE (c1, c2) INCLUDE (c3, c4)
+--
+b8a8f448418d0b2e
+== 011
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_unique1'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 012
+-- Unique index and unique constraint. Both must fail.
+CREATE TABLE tbl_include_unique2 (c1 int, c2 int, c3 int, c4 box)
+--
+2248c1c92b504779
+== 013
+INSERT INTO tbl_include_unique2 SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+033649bb3c2747ad
+== 014
+CREATE UNIQUE INDEX tbl_include_unique2_idx_unique ON tbl_include_unique2 using btree (c1, c2) INCLUDE (c3, c4)
+--
+8290fe9921029bee
+== 015
+ALTER TABLE tbl_include_unique2 add UNIQUE (c1, c2) INCLUDE (c3, c4)
+--
+20c07fb7b622837d
+== 016
+-- PK constraint
+CREATE TABLE tbl_include_pk (c1 int, c2 int, c3 int, c4 box)
+--
+5114b22c98d6688a
+== 017
+INSERT INTO tbl_include_pk SELECT 1, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+2707c8b044f67586
+== 018
+ALTER TABLE tbl_include_pk add PRIMARY KEY (c1, c2) INCLUDE (c3, c4)
+--
+b865b127bbfa078e
+== 019
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_pk'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 020
+CREATE TABLE tbl_include_box (c1 int, c2 int, c3 int, c4 box)
+--
+05a90aa7323a3a81
+== 021
+INSERT INTO tbl_include_box SELECT 1, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+6bd8343ae273906e
+== 022
+CREATE UNIQUE INDEX tbl_include_box_idx_unique ON tbl_include_box using btree (c1, c2) INCLUDE (c3, c4)
+--
+763f2215b546cfc9
+== 023
+ALTER TABLE tbl_include_box add PRIMARY KEY USING INDEX tbl_include_box_idx_unique
+--
+ec26ebd3b5eb2992
+== 024
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_box'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 025
+-- PK constraint. Must fail.
+CREATE TABLE tbl_include_box_pk (c1 int, c2 int, c3 int, c4 box)
+--
+626baf4cf8ece96a
+== 026
+INSERT INTO tbl_include_box_pk SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ccfabcd6e3bf66a7
+== 027
+ALTER TABLE tbl_include_box_pk add PRIMARY KEY (c1, c2) INCLUDE (c3, c4)
+--
+9bdbae20f9710aaa
+== 028
+/*
+ * 2. Test CREATE TABLE with constraint
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				CONSTRAINT covering UNIQUE(c1,c2) INCLUDE(c3,c4))
+--
+73e15d0c007a1f54
+== 029
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+8e16e4ecf6c65c15
+== 030
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+3a6fa8fd7ef704b5
+== 031
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 032
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 033
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				CONSTRAINT covering PRIMARY KEY(c1,c2) INCLUDE(c3,c4))
+--
+cb7937c1871642d8
+== 034
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+8e16e4ecf6c65c15
+== 035
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+3a6fa8fd7ef704b5
+== 036
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 037
+INSERT INTO tbl SELECT 1, NULL, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 038
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,300) AS x
+--
+46474d39a5291fd6
+== 039
+explain (costs off)
+select * from tbl where (c1,c2,c3) < (2,5,1)
+--
+a8601362f4386aa5
+== 040
+select * from tbl where (c1,c2,c3) < (2,5,1)
+--
+2de75b296865c3bd
+== 041
+-- row comparison that compares high key at page boundary
+SET enable_seqscan = off
+--
+b6355b32597ef7db
+== 042
+explain (costs off)
+select * from tbl where (c1,c2,c3) < (262,1,1) limit 1
+--
+56a5aae7d6c806ff
+== 043
+select * from tbl where (c1,c2,c3) < (262,1,1) limit 1
+--
+6e831cede154e2db
+== 044
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 045
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 046
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				UNIQUE(c1,c2) INCLUDE(c3,c4))
+--
+31542f905a04e430
+== 047
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+8e16e4ecf6c65c15
+== 048
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+3a6fa8fd7ef704b5
+== 049
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 050
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 051
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				PRIMARY KEY(c1,c2) INCLUDE(c3,c4))
+--
+553758885b05ff06
+== 052
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+8e16e4ecf6c65c15
+== 053
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+3a6fa8fd7ef704b5
+== 054
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 055
+INSERT INTO tbl SELECT 1, NULL, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 056
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,10) AS x
+--
+46474d39a5291fd6
+== 057
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 058
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				EXCLUDE USING btree (c1 WITH =) INCLUDE(c3,c4))
+--
+5304b996cd453bc1
+== 059
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+8e16e4ecf6c65c15
+== 060
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+3a6fa8fd7ef704b5
+== 061
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+ed42c8b9b7d2a007
+== 062
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,10) AS x
+--
+46474d39a5291fd6
+== 063
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 064
+/*
+ * 3.0 Test ALTER TABLE DROP COLUMN.
+ * Any column deletion leads to index deletion.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 int)
+--
+37fa658ea3b9ced9
+== 065
+CREATE UNIQUE INDEX tbl_idx ON tbl using btree(c1, c2, c3, c4)
+--
+f692465fb1e8796c
+== 066
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 067
+ALTER TABLE tbl DROP COLUMN c3
+--
+f6e3fe9839d54cac
+== 068
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 069
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 070
+/*
+ * 3.1 Test ALTER TABLE DROP COLUMN.
+ * Included column deletion leads to the index deletion,
+ * AS well AS key columns deletion. It's explained in documentation.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box)
+--
+efd7b708847297de
+== 071
+CREATE UNIQUE INDEX tbl_idx ON tbl using btree(c1, c2) INCLUDE(c3,c4)
+--
+4575304a70c9dc11
+== 072
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 073
+ALTER TABLE tbl DROP COLUMN c3
+--
+f6e3fe9839d54cac
+== 074
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 075
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 076
+/*
+ * 3.2 Test ALTER TABLE DROP COLUMN.
+ * Included column deletion leads to the index deletion.
+ * AS well AS key columns deletion. It's explained in documentation.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+31542f905a04e430
+== 077
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 078
+ALTER TABLE tbl DROP COLUMN c3
+--
+f6e3fe9839d54cac
+== 079
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 080
+ALTER TABLE tbl DROP COLUMN c1
+--
+b84101f9c3351bd3
+== 081
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 082
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 083
+/*
+ * 3.3 Test ALTER TABLE SET STATISTICS
+ */
+CREATE TABLE tbl (c1 int, c2 int)
+--
+fb7c4b794b0c0594
+== 084
+CREATE INDEX tbl_idx ON tbl (c1, (c1+0)) INCLUDE (c2)
+--
+106fe447e5f7f213
+== 085
+ALTER INDEX tbl_idx ALTER COLUMN 1 SET STATISTICS 1000
+--
+3a9ddfe2aed0c404
+== 086
+ALTER INDEX tbl_idx ALTER COLUMN 2 SET STATISTICS 1000
+--
+6cd1b9b5d68307ff
+== 087
+ALTER INDEX tbl_idx ALTER COLUMN 3 SET STATISTICS 1000
+--
+113ff52fe9f367aa
+== 088
+ALTER INDEX tbl_idx ALTER COLUMN 4 SET STATISTICS 1000
+--
+085196cecddcdca3
+== 089
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 090
+/*
+ * 4. CREATE INDEX CONCURRENTLY
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+31542f905a04e430
+== 091
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,1000) AS x
+--
+abca05f02caf8e5b
+== 092
+CREATE UNIQUE INDEX CONCURRENTLY on tbl (c1, c2) INCLUDE (c3, c4)
+--
+340a0799ff575be8
+== 093
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 094
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 095
+/*
+ * 5. REINDEX
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+31542f905a04e430
+== 096
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 097
+ALTER TABLE tbl DROP COLUMN c3
+--
+f6e3fe9839d54cac
+== 098
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 099
+REINDEX INDEX tbl_c1_c2_c3_c4_key
+--
+41aecc8a4db14f6f
+== 100
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 101
+ALTER TABLE tbl DROP COLUMN c1
+--
+b84101f9c3351bd3
+== 102
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+fa26214577001e3e
+== 103
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 104
+/*
+ * 7. Check various AMs. All but btree, gist and spgist must fail.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 box, c4 box)
+--
+a2d4cf15549a87be
+== 105
+CREATE INDEX on tbl USING brin(c1, c2) INCLUDE (c3, c4)
+--
+8864cbc6f6e559df
+== 106
+CREATE INDEX on tbl USING gist(c3) INCLUDE (c1, c4)
+--
+33349eca7da0a7f3
+== 107
+CREATE INDEX on tbl USING spgist(c3) INCLUDE (c4)
+--
+01a72304b34605fa
+== 108
+CREATE INDEX on tbl USING gin(c1, c2) INCLUDE (c3, c4)
+--
+0a84e26625276f23
+== 109
+CREATE INDEX on tbl USING hash(c1, c2) INCLUDE (c3, c4)
+--
+7ea85718e671260d
+== 110
+CREATE INDEX on tbl USING rtree(c3) INCLUDE (c1, c4)
+--
+94e1ceb5f2ffa033
+== 111
+CREATE INDEX on tbl USING btree(c1, c2) INCLUDE (c3, c4)
+--
+1a4da5b501c3b08a
+== 112
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 113
+/*
+ * 8. Update, delete values in indexed table.
+ */
+CREATE TABLE tbl (c1 int, c2 int, c3 int, c4 box)
+--
+efd7b708847297de
+== 114
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+abca05f02caf8e5b
+== 115
+CREATE UNIQUE INDEX tbl_idx_unique ON tbl using btree(c1, c2) INCLUDE (c3,c4)
+--
+fba1894f2951fac1
+== 116
+UPDATE tbl SET c1 = 100 WHERE c1 = 2
+--
+6737454546a046ab
+== 117
+UPDATE tbl SET c1 = 1 WHERE c1 = 3
+--
+6737454546a046ab
+== 118
+-- should fail
+UPDATE tbl SET c2 = 2 WHERE c1 = 1
+--
+71e960302cd3343c
+== 119
+UPDATE tbl SET c3 = 1
+--
+ecc70fc1c8ef1776
+== 120
+DELETE FROM tbl WHERE c1 = 5 OR c3 = 12
+--
+52b14debaef75d6a
+== 121
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 122
+/*
+ * 9. Alter column type.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+31542f905a04e430
+== 123
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+abca05f02caf8e5b
+== 124
+ALTER TABLE tbl ALTER c1 TYPE bigint
+--
+80b3f7d14689e26f
+== 125
+ALTER TABLE tbl ALTER c3 TYPE bigint
+--
+a74d6aba72626338
+== 126
+DROP TABLE tbl
+--
+5f0f91366029a851
+== 127
+/*
+ * 10. Test coverage for names stored as cstrings in indexes
+ */
+CREATE TABLE nametbl (c1 int, c2 name, c3 float)
+--
+adad18997d905ccf
+== 128
+CREATE INDEX nametbl_c1_c2_idx ON nametbl (c2, c1) INCLUDE (c3)
+--
+726e9f6a1dba4591
+== 129
+INSERT INTO nametbl VALUES(1, 'two', 3.0)
+--
+04ee8c6f59f6d565
+== 130
+VACUUM nametbl
+--
+ccb0f98cf613a06d
+== 131
+SET enable_seqscan = 0
+--
+b6355b32597ef7db
+== 132
+-- Ensure we get an index only scan plan
+EXPLAIN (COSTS OFF) SELECT c2, c1, c3 FROM nametbl WHERE c2 = 'two' AND c1 = 1
+--
+918fa5d1402d2142
+== 133
+-- Validate the results look sane
+SELECT c2, c1, c3 FROM nametbl WHERE c2 = 'two' AND c1 = 1
+--
+0e99175e792cbd1b
+== 134
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 135
+DROP TABLE nametbl
+--
+b07c21e4e3a9b1db

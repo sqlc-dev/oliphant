@@ -1,0 +1,626 @@
+== 001
+-- When there is a LIMIT clause, incremental sort is beneficial because
+-- it only has to sort some of the groups, and not the entire table.
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+limit 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":168}},"location":168}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":183}},"location":183}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":190}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"four"}}],"location":205}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"t"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"four"}}],"location":222}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"ten"}}],"location":228}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":1},"location":238}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":150}}]}}}]}
+== 002
+-- When work_mem is not enough to sort the entire table, incremental sort
+-- may be faster if individual groups still fit into work_mem.
+set work_mem to '2MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"2MB"},"location":153}}]}}}]}
+== 003
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"four"}}],"location":64}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"t"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"four"}}],"location":81}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"ten"}}],"location":87}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 004
+reset work_mem
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"work_mem"}}}]}
+== 005
+create table t(a integer, b integer)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":17},"is_local":true,"location":15}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":28},"is_local":true,"location":26}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 006
+create or replace function explain_analyze_without_memory(query text)
+returns table (out_line text) language plpgsql
+as
+$$
+declare
+  line text;
+begin
+  for line in
+    execute 'explain (analyze, costs off, summary off, timing off) ' || query
+  loop
+    out_line := regexp_replace(line, '\d+kB', 'NNkB', 'g');
+    return next;
+  end loop;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"explain_analyze_without_memory"}}],"parameters":[{"FunctionParameter":{"name":"query","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":64},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"out_line","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":94},"mode":"FUNC_PARAM_TABLE"}}],"returnType":{"names":[{"String":{"sval":"text"}}],"setof":true,"typemod":-1,"location":78},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":100}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  line text;\nbegin\n  for line in\n    execute 'explain (analyze, costs off, summary off, timing off) ' || query\n  loop\n    out_line := regexp_replace(line, '\\d+kB', 'NNkB', 'g');\n    return next;\n  end loop;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":117}}]}}}]}
+== 007
+create or replace function explain_analyze_inc_sort_nodes(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  elements jsonb;
+  element jsonb;
+  matching_nodes jsonb := '[]'::jsonb;
+begin
+  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;
+  while jsonb_array_length(elements) > 0 loop
+    element := elements->0;
+    elements := elements - 0;
+    case jsonb_typeof(element)
+    when 'array' then
+      if jsonb_array_length(element) > 0 then
+        elements := elements || element;
+      end if;
+    when 'object' then
+      if element ? 'Plan' then
+        elements := elements || jsonb_build_array(element->'Plan');
+        element := element - 'Plan';
+      else
+        if element ? 'Plans' then
+          elements := elements || jsonb_build_array(element->'Plans');
+          element := element - 'Plans';
+        end if;
+        if (element->>'Node Type')::text = 'Incremental Sort' then
+          matching_nodes := matching_nodes || element;
+        end if;
+      end if;
+    end case;
+  end loop;
+  return matching_nodes;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes"}}],"parameters":[{"FunctionParameter":{"name":"query","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":64},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":78},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":84}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  elements jsonb;\n  element jsonb;\n  matching_nodes jsonb := '[]'::jsonb;\nbegin\n  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;\n  while jsonb_array_length(elements) \u003e 0 loop\n    element := elements-\u003e0;\n    elements := elements - 0;\n    case jsonb_typeof(element)\n    when 'array' then\n      if jsonb_array_length(element) \u003e 0 then\n        elements := elements || element;\n      end if;\n    when 'object' then\n      if element ? 'Plan' then\n        elements := elements || jsonb_build_array(element-\u003e'Plan');\n        element := element - 'Plan';\n      else\n        if element ? 'Plans' then\n          elements := elements || jsonb_build_array(element-\u003e'Plans');\n          element := element - 'Plans';\n        end if;\n        if (element-\u003e\u003e'Node Type')::text = 'Incremental Sort' then\n          matching_nodes := matching_nodes || element;\n        end if;\n      end if;\n    end case;\n  end loop;\n  return matching_nodes;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":101}}]}}}]}
+== 008
+create or replace function explain_analyze_inc_sort_nodes_without_memory(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  nodes jsonb := '[]'::jsonb;
+  node jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        node := jsonb_set(node, array[group_key, space_key, 'Average Sort Space Used'], '"NN"', false);
+        node := jsonb_set(node, array[group_key, space_key, 'Peak Sort Space Used'], '"NN"', false);
+      end loop;
+    end loop;
+    nodes := nodes || node;
+  end loop;
+  return nodes;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_without_memory"}}],"parameters":[{"FunctionParameter":{"name":"query","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":79},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"jsonb"}}],"typemod":-1,"location":93},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":99}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  nodes jsonb := '[]'::jsonb;\n  node jsonb;\n  group_key text;\n  space_key text;\nbegin\n  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop\n    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop\n      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop\n        node := jsonb_set(node, array[group_key, space_key, 'Average Sort Space Used'], '\"NN\"', false);\n        node := jsonb_set(node, array[group_key, space_key, 'Peak Sort Space Used'], '\"NN\"', false);\n      end loop;\n    end loop;\n    nodes := nodes || node;\n  end loop;\n  return nodes;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":116}}]}}}]}
+== 009
+create or replace function explain_analyze_inc_sort_nodes_verify_invariants(query text)
+returns bool language plpgsql
+as
+$$
+declare
+  node jsonb;
+  group_stats jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      group_stats := node->group_key;
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        if (group_stats->space_key->'Peak Sort Space Used')::bigint < (group_stats->space_key->'Peak Sort Space Used')::bigint then
+          raise exception '% has invalid max space < average space', group_key;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return true;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_verify_invariants"}}],"parameters":[{"FunctionParameter":{"name":"query","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":82},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"bool"}}],"typemod":-1,"location":96},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":101}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  node jsonb;\n  group_stats jsonb;\n  group_key text;\n  space_key text;\nbegin\n  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop\n    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop\n      group_stats := node-\u003egroup_key;\n      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop\n        if (group_stats-\u003espace_key-\u003e'Peak Sort Space Used')::bigint \u003c (group_stats-\u003espace_key-\u003e'Peak Sort Space Used')::bigint then\n          raise exception '% has invalid max space \u003c average space', group_key;\n        end if;\n      end loop;\n    end loop;\n  end loop;\n  return true;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":118}}]}}}]}
+== 010
+-- A single large group tested around each mode transition point.
+insert into t(a, b) select i/100 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":78},"cols":[{"ResTarget":{"name":"a","location":80}},{"ResTarget":{"name":"b","location":83}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"/"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":93}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":95}},"location":94}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":101}},"location":99}},"location":93}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":104}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":108}},"location":106}},"location":104}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{},"location":131}},{"A_Const":{"ival":{"ival":999},"location":134}}],"funcformat":"COERCE_EXPLICIT_CALL","location":115}},{}]}}],"alias":{"aliasname":"n","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 011
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 012
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 013
+select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 014
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 015
+select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 016
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 017
+select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 018
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 019
+select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 020
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 021
+select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 022
+delete from t
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12}}}}]}
+== 023
+-- An initial large group followed by a small group.
+insert into t(a, b) select i/50 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":65},"cols":[{"ResTarget":{"name":"a","location":67}},{"ResTarget":{"name":"b","location":70}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"/"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":80}},"rexpr":{"A_Const":{"ival":{"ival":50},"location":82}},"location":81}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":87}},"location":85}},"location":80}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":90}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":94}},"location":92}},"location":90}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{},"location":117}},{"A_Const":{"ival":{"ival":999},"location":120}}],"funcformat":"COERCE_EXPLICIT_CALL","location":101}},{}]}}],"alias":{"aliasname":"n","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 024
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 025
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 55
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":55},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 026
+select * from (select * from t order by a) s order by a, b limit 55
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":55},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 027
+-- Test EXPLAIN ANALYZE with only a fullsort group.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 55')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_without_memory"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 55"},"location":90}}],"funcformat":"COERCE_EXPLICIT_CALL","location":59}},"location":59}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 55'))
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"jsonb_pretty"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_without_memory"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 55"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 029
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 55')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_verify_invariants"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 55"},"location":56}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+delete from t
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12}}}}]}
+== 031
+-- An initial small group followed by a large group.
+insert into t(a, b) select (case when i < 5 then i else 9 end), i from generate_series(1, 1000) n(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":65},"cols":[{"ResTarget":{"name":"a","location":67}},{"ResTarget":{"name":"b","location":70}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"CaseExpr":{"args":[{"CaseWhen":{"expr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":91}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":95}},"location":93}},"result":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":102}},"location":86}}],"defresult":{"A_Const":{"ival":{"ival":9},"location":109}},"location":81}},"location":80}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":117}},"location":117}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":140}},{"A_Const":{"ival":{"ival":1000},"location":143}}],"funcformat":"COERCE_EXPLICIT_CALL","location":124}},{}]}}],"alias":{"aliasname":"n","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 032
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 033
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 70
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":70},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 034
+select * from (select * from t order by a) s order by a, b limit 70
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":70},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 035
+-- Checks case where we hit a group boundary at the last tuple of a batch.
+-- Because the full sort state is bounded, we scan 64 tuples (the mode
+-- transition point) but only retain 5. Thus when we transition modes, all
+-- tuples in the full sort state have different prefix keys.
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 5
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":309}},"location":309}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":324}},"location":324}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":331}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":342}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":356}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":359}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":5},"location":367}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":291}}]}}}]}
+== 036
+select * from (select * from t order by a) s order by a, b limit 5
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":5},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 037
+-- Test rescan.
+begin
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 038
+-- We force the planner to choose a plan with incremental sort on the right side
+-- of a nested loop join node. That way we trigger the rescan code path.
+set local enable_hashjoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashjoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":182}}],"is_local":true}}}]}
+== 039
+set local enable_mergejoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":29}}],"is_local":true}}}]}
+== 040
+set local enable_material = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":28}}],"is_local":true}}}]}
+== 041
+set local enable_sort = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_sort","args":[{"A_Const":{"sval":{"sval":"off"},"location":24}}],"is_local":true}}}]}
+== 042
+explain (costs off) select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":34}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":54}},"location":54}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":69}},"location":69}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":76}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":87}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"v"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":101}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":104}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"a"}}],"location":112}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"a"}}],"location":118}},"location":116}}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"a"}}],"location":128}},"rexpr":{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":136}},{"A_Const":{"ival":{"ival":2},"location":139}}]}},"location":132}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 043
+select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":14}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":34}},"location":34}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":49}},"location":49}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":56}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"v"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":81}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":84}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"a"}}],"location":92}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"a"}}],"location":98}},"location":96}}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"a"}}],"location":108}},"rexpr":{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":116}},{"A_Const":{"ival":{"ival":2},"location":119}}]}},"location":112}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 044
+rollback
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 045
+-- Test EXPLAIN ANALYZE with both fullsort and presorted groups.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 70')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_without_memory"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 70"},"location":103}}],"funcformat":"COERCE_EXPLICIT_CALL","location":72}},"location":72}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 046
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 70'))
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"jsonb_pretty"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_without_memory"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 70"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":20}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 047
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 70')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"explain_analyze_inc_sort_nodes_verify_invariants"}}],"args":[{"A_Const":{"sval":{"sval":"select * from (select * from t order by a) s order by a, b limit 70"},"location":56}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 048
+delete from t
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12}}}}]}
+== 049
+-- Small groups of 10 tuples each tested around each mode transition point.
+insert into t(a, b) select i / 10, i from generate_series(1, 1000) n(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":88},"cols":[{"ResTarget":{"name":"a","location":90}},{"ResTarget":{"name":"b","location":93}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"/"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":103}},"rexpr":{"A_Const":{"ival":{"ival":10},"location":107}},"location":105}},"location":103}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":111}},"location":111}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":134}},{"A_Const":{"ival":{"ival":1000},"location":137}}],"funcformat":"COERCE_EXPLICIT_CALL","location":118}},{}]}}],"alias":{"aliasname":"n","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 050
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 051
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 052
+select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 053
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 054
+select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 055
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 056
+select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 057
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 058
+select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 059
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 060
+select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 061
+delete from t
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12}}}}]}
+== 062
+-- Small groups of only 1 tuple each tested around each mode transition point.
+insert into t(a, b) select i, i from generate_series(1, 1000) n(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":91},"cols":[{"ResTarget":{"name":"a","location":93}},{"ResTarget":{"name":"b","location":96}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":106}},"location":106}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":109}},"location":109}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":132}},{"A_Const":{"ival":{"ival":1000},"location":135}}],"funcformat":"COERCE_EXPLICIT_CALL","location":116}},{}]}}],"alias":{"aliasname":"n","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 063
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 064
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 065
+select * from (select * from t order by a) s order by a, b limit 31
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":31},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 066
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 067
+select * from (select * from t order by a) s order by a, b limit 32
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":32},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 068
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 069
+select * from (select * from t order by a) s order by a, b limit 33
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":33},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 070
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 071
+select * from (select * from t order by a) s order by a, b limit 65
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":65},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 072
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":49}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":60}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":74}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":77}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":85}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 073
+select * from (select * from t order by a) s order by a, b limit 66
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":29}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":40}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":54}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":57}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":66},"location":65}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 074
+delete from t
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12}}}}]}
+== 075
+drop table t
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"t"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 076
+-- Incremental sort vs. parallel queries
+set min_parallel_table_scan_size = '1kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"sval":{"sval":"1kB"},"location":76}}]}}}]}
+== 077
+set min_parallel_index_scan_size = '1kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_index_scan_size","args":[{"A_Const":{"sval":{"sval":"1kB"},"location":35}}]}}}]}
+== 078
+set parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 079
+set parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 080
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 081
+create table t (a int, b int, c int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":18},"is_local":true,"location":16}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":25},"is_local":true,"location":23}},{"ColumnDef":{"colname":"c","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":32},"is_local":true,"location":30}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 082
+insert into t select mod(i,10),mod(i,10),i from generate_series(1,10000) s(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"mod"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":25}},{"A_Const":{"ival":{"ival":10},"location":27}}],"funcformat":"COERCE_EXPLICIT_CALL","location":21}},"location":21}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"mod"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":35}},{"A_Const":{"ival":{"ival":10},"location":37}}],"funcformat":"COERCE_EXPLICIT_CALL","location":31}},"location":31}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":41}},"location":41}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":64}},{"A_Const":{"ival":{"ival":10000},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":48}},{}]}}],"alias":{"aliasname":"s","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 083
+create index on t (a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":16},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 084
+analyze t
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"t","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 085
+set enable_incremental_sort = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_incremental_sort","args":[{"A_Const":{"sval":{"sval":"off"},"location":30}}]}}}]}
+== 086
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":29}},"location":29}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"c"}}],"location":35}}],"funcformat":"COERCE_EXPLICIT_CALL","location":31}},"location":31}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":43}}],"groupClause":[{"A_Const":{"ival":{"ival":1},"location":54}},{"A_Const":{"ival":{"ival":2},"location":56}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":69}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":3},"location":71}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":1},"location":79}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 087
+set enable_incremental_sort = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_incremental_sort","args":[{"A_Const":{"sval":{"sval":"on"},"location":30}}]}}}]}
+== 088
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":29}},"location":29}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"c"}}],"location":35}}],"funcformat":"COERCE_EXPLICIT_CALL","location":31}},"location":31}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":43}}],"groupClause":[{"A_Const":{"ival":{"ival":1},"location":54}},{"A_Const":{"ival":{"ival":2},"location":56}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":69}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":3},"location":71}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":1},"location":79}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 089
+-- Incremental sort vs. set operations with varno 0
+set enable_hashagg to off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashagg","args":[{"A_Const":{"sval":{"sval":"off"},"location":74}}]}}}]}
+== 090
+explain (costs off) select * from t union select * from t order by 1,3
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":3},"location":69}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_UNION","larg":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":34}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"},"rarg":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":49}},"location":49}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":56}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 091
+-- Full sort, not just incremental sort can be pushed below a gather merge path
+-- by generate_useful_gather_paths.
+explain (costs off) select distinct a,b from t
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":152}},"location":152}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":154}},"location":154}}],"fromClause":[{"RangeVar":{"relname":"t","inh":true,"relpersistence":"p","location":161}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":125}}]}}}]}
+== 092
+drop table t
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"t"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 093
+-- Sort pushdown can't go below where expressions are part of the rel target.
+-- In particular this is interesting for volatile expressions which have to
+-- go above joins since otherwise we'll incorrectly use expression evaluations
+-- across multiple rows.
+set enable_hashagg=off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashagg","args":[{"A_Const":{"sval":{"sval":"off"},"location":277}}]}}}]}
+== 094
+set enable_seqscan=off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":19}}]}}}]}
+== 095
+set enable_incremental_sort = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_incremental_sort","args":[{"A_Const":{"sval":{"sval":"off"},"location":30}}]}}}]}
+== 096
+set parallel_tuple_cost=0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":24}}]}}}]}
+== 097
+set parallel_setup_cost=0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":24}}]}}}]}
+== 098
+set min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 099
+set min_parallel_index_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_index_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 100
+-- Parallel sort below join.
+explain (costs off) select distinct sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":65}},"location":65}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":78}},"location":78}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":92}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":115}},"location":115}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":150}},{"A_Const":{"ival":{"ival":1000},"location":153}}],"funcformat":"COERCE_EXPLICIT_CALL","location":134}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":38}}]}}}]}
+== 101
+explain (costs off) select sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":40}},"location":40}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":54}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":77}},"location":77}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":112}},{"A_Const":{"ival":{"ival":1000},"location":115}}],"funcformat":"COERCE_EXPLICIT_CALL","location":96}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":138}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":141}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 102
+-- Parallel sort but with expression that can be safely generated at the base rel.
+explain (costs off) select distinct sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":119}},"location":119}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"md5"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":136}}],"funcformat":"COERCE_EXPLICIT_CALL","location":132}},"location":132}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":151}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":174}},"location":174}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":209}},{"A_Const":{"ival":{"ival":1000},"location":212}}],"funcformat":"COERCE_EXPLICIT_CALL","location":193}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":92}}]}}}]}
+== 103
+explain (costs off) select sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"md5"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":44}}],"funcformat":"COERCE_EXPLICIT_CALL","location":40}},"location":40}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":59}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":82}},"location":82}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":117}},{"A_Const":{"ival":{"ival":1000},"location":120}}],"funcformat":"COERCE_EXPLICIT_CALL","location":101}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":143}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":146}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 104
+-- Parallel sort with an aggregate that can be safely generated in parallel,
+-- but we can't sort by partial aggregate values.
+explain (costs off) select count(*)
+from tenk1 t1
+join tenk1 t2 on t1.unique1 = t2.unique2
+join tenk1 t3 on t2.unique1 = t3.unique1
+order by count(*)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":154}},"location":154}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":168}},"rarg":{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":182}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"unique1"}}],"location":194}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"unique2"}}],"location":207}},"location":205}}}},"rarg":{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t3"},"location":223}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"unique1"}}],"location":235}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t3"}},{"String":{"sval":"unique1"}}],"location":248}},"location":246}}}}],"sortClause":[{"SortBy":{"node":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":268}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":136}}]}}}]}
+== 105
+-- Parallel sort but with expression (correlated subquery) that
+-- is prohibited in parallel plans.
+explain (costs off) select distinct
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"unique1"}}],"location":138}},"location":138}},{"ResTarget":{"val":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"unique1"}}],"location":157}},"location":157}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":172}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":184}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"unique1"}}],"location":200}},"location":198}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":149}},"location":149}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t"},"location":216}},{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":241}},{"A_Const":{"ival":{"ival":1000},"location":244}}],"funcformat":"COERCE_EXPLICIT_CALL","location":225}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":109}}]}}}]}
+== 106
+explain (costs off) select
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+order by 1, 2
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"unique1"}}],"location":29}},"location":29}},{"ResTarget":{"val":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"unique1"}}],"location":48}},"location":48}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":63}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":75}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"unique1"}}],"location":91}},"location":89}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":40}},"location":40}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t"},"location":107}},{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":132}},{"A_Const":{"ival":{"ival":1000},"location":135}}],"funcformat":"COERCE_EXPLICIT_CALL","location":116}},{}]}}]}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":150}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":153}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 107
+-- Parallel sort but with expression not available until the upper rel.
+explain (costs off) select distinct sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"distinctClause":[{}],"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":108}},"location":108}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":121}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":133}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":143},"location":141}},"location":130}},"location":121}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":153}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":176}},"location":176}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":211}},{"A_Const":{"ival":{"ival":1000},"location":214}}],"funcformat":"COERCE_EXPLICIT_CALL","location":195}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":81}}]}}}]}
+== 108
+explain (costs off) select sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"sub"}},{"String":{"sval":"unique1"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"stringu1"}}],"location":40}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"random"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":52}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":62},"location":60}},"location":49}},"location":40}}],"fromClause":[{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","location":72}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"tenk1"}},{"String":{"sval":"unique1"}}],"location":95}},"location":95}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":130}},{"A_Const":{"ival":{"ival":1000},"location":133}}],"funcformat":"COERCE_EXPLICIT_CALL","location":114}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"sub"}}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":156}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":159}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 109
+reset enable_hashagg
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"enable_hashagg"}}}]}
+== 110
+reset enable_seqscan
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"enable_seqscan"}}}]}
+== 111
+reset enable_incremental_sort
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"enable_incremental_sort"}}}]}
+== 112
+reset parallel_tuple_cost
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"parallel_tuple_cost"}}}]}
+== 113
+reset parallel_setup_cost
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"parallel_setup_cost"}}}]}
+== 114
+reset min_parallel_table_scan_size
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"min_parallel_table_scan_size"}}}]}
+== 115
+reset min_parallel_index_scan_size
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"min_parallel_index_scan_size"}}}]}
+== 116
+-- Ensure incremental sorts work for amcanorderbyop type indexes
+create table point_table (a point, b int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"point_table","inh":true,"relpersistence":"p","location":78},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"point"}}],"typemod":-1,"location":93},"is_local":true,"location":91}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":102},"is_local":true,"location":100}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 117
+create index point_table_a_idx on point_table using gist(a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"point_table_a_idx","relation":{"relname":"point_table","inh":true,"relpersistence":"p","location":34},"accessMethod":"gist","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 118
+-- Ensure we get an incremental sort plan for both of the following queries
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b limit 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":103}},"location":103}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":106}},"location":106}},{"ResTarget":{"name":"dist","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c-\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":109}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"point"}}],"args":[{"A_Const":{"ival":{"ival":5},"location":121}},{"A_Const":{"ival":{"ival":5},"location":124}}],"funcformat":"COERCE_EXPLICIT_CALL","location":115}},"location":111}},"location":109}}],"fromClause":[{"RangeVar":{"relname":"point_table","inh":true,"relpersistence":"p","location":137}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"dist"}}],"location":158}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":164}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":1},"location":172}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":85}}]}}}]}
+== 119
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b desc limit 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":30}},"location":30}},{"ResTarget":{"name":"dist","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c-\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":33}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"point"}}],"args":[{"A_Const":{"ival":{"ival":5},"location":45}},{"A_Const":{"ival":{"ival":5},"location":48}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},"location":35}},"location":33}}],"fromClause":[{"RangeVar":{"relname":"point_table","inh":true,"relpersistence":"p","location":61}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"dist"}}],"location":82}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":88}},"sortby_dir":"SORTBY_DESC","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitCount":{"A_Const":{"ival":{"ival":1},"location":101}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}

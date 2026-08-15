@@ -1,0 +1,62 @@
+== 001
+-- Test bitmap AND and OR
+
+
+-- Generate enough data that we can test the lossy bitmaps.
+
+-- There's 55 tuples per page in the table. 53 is just
+-- below 55, so that an index scan with qual a = constant
+-- will return at least one hit per page. 59 is just above
+-- 55, so that an index scan with qual b = constant will return
+-- hits on most but not all pages. 53 and 59 are prime, so that
+-- there's a maximum number of a,b combinations in the table.
+-- That allows us to test all the different combinations of
+-- lossy and non-lossy pages with the minimum amount of data
+
+CREATE TABLE bmscantest (a int, b int, t text)
+--
+64900c18a41bfe62
+== 002
+INSERT INTO bmscantest
+  SELECT (r%53), (r%59), 'foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
+  FROM generate_series(1,70000) r
+--
+84823b4f975d1aa6
+== 003
+CREATE INDEX i_bmtest_a ON bmscantest(a)
+--
+b52d51f5a821203b
+== 004
+CREATE INDEX i_bmtest_b ON bmscantest(b)
+--
+b5d772ed1c0b8922
+== 005
+-- We want to use bitmapscans. With default settings, the planner currently
+-- chooses a bitmap scan for the queries below anyway, but let's make sure.
+set enable_indexscan=false
+--
+c95f6a280f5be733
+== 006
+set enable_seqscan=false
+--
+b6355b32597ef7db
+== 007
+-- Lower work_mem to trigger use of lossy bitmaps
+set work_mem = 64
+--
+8a6e71e5b3e06483
+== 008
+-- Test bitmap-and.
+SELECT count(*) FROM bmscantest WHERE a = 1 AND b = 1
+--
+2acda1d10ecebe54
+== 009
+-- Test bitmap-or.
+SELECT count(*) FROM bmscantest WHERE a = 1 OR b = 1
+--
+08f1b3370231f6b1
+== 010
+-- clean up
+DROP TABLE bmscantest
+--
+0aca6111e913c79d

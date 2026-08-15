@@ -1,0 +1,373 @@
+== 001
+|--
+-- Test INSERT/UPDATE/DELETE RETURNING
+|--
+
+-- Simple cases
+
+CREATE TEMP TABLE foo (f1 serial, f2 text, f3 int default 42)
+--
+CREATE TEMPORARY TABLE foo (f1 serial, f2 text, f3 int DEFAULT 42)
+== 002
+INSERT INTO foo (f2,f3)
+  VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9)
+  RETURNING *, f1+f3 AS sum
+--
+INSERT INTO foo (f2, f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7 + 9) RETURNING *, f1 + f3 AS sum
+== 003
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 004
+UPDATE foo SET f2 = lower(f2), f3 = DEFAULT RETURNING foo.*, f1+f3 AS sum13
+--
+UPDATE foo SET f2 = lower(f2), f3 = DEFAULT RETURNING foo.*, f1 + f3 AS sum13
+== 005
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 006
+DELETE FROM foo WHERE f1 > 2 RETURNING f3, f2, f1, least(f1,f3)
+--
+DELETE FROM foo WHERE f1 > 2 RETURNING f3, f2, f1, LEAST(f1, f3)
+== 007
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 008
+-- Subplans and initplans in the RETURNING list
+
+INSERT INTO foo SELECT f1+10, f2, f3+99 FROM foo
+  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM int4_tbl) AS initplan
+--
+INSERT INTO foo SELECT f1 + 10, f2, f3 + 99 FROM foo RETURNING *, f1 + 112 IN (SELECT q1 FROM int8_tbl) AS subplan, EXISTS (SELECT * FROM int4_tbl) AS initplan
+== 009
+UPDATE foo SET f3 = f3 * 2
+  WHERE f1 > 10
+  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM int4_tbl) AS initplan
+--
+UPDATE foo SET f3 = f3 * 2 WHERE f1 > 10 RETURNING *, f1 + 112 IN (SELECT q1 FROM int8_tbl) AS subplan, EXISTS (SELECT * FROM int4_tbl) AS initplan
+== 010
+DELETE FROM foo
+  WHERE f1 > 10
+  RETURNING *, f1+112 IN (SELECT q1 FROM int8_tbl) AS subplan,
+    EXISTS(SELECT * FROM int4_tbl) AS initplan
+--
+DELETE FROM foo WHERE f1 > 10 RETURNING *, f1 + 112 IN (SELECT q1 FROM int8_tbl) AS subplan, EXISTS (SELECT * FROM int4_tbl) AS initplan
+== 011
+-- Joins
+
+UPDATE foo SET f3 = f3*2
+  FROM int4_tbl i
+  WHERE foo.f1 + 123455 = i.f1
+  RETURNING foo.*, i.f1 as "i.f1"
+--
+UPDATE foo SET f3 = f3 * 2 FROM int4_tbl i WHERE (foo.f1 + 123455) = i.f1 RETURNING foo.*, i.f1 AS "i.f1"
+== 012
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 013
+DELETE FROM foo
+  USING int4_tbl i
+  WHERE foo.f1 + 123455 = i.f1
+  RETURNING foo.*, i.f1 as "i.f1"
+--
+DELETE FROM foo USING int4_tbl i WHERE (foo.f1 + 123455) = i.f1 RETURNING foo.*, i.f1 AS "i.f1"
+== 014
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 015
+-- Check inheritance cases
+
+CREATE TEMP TABLE foochild (fc int) INHERITS (foo)
+--
+CREATE TEMPORARY TABLE foochild (fc int) INHERITS (foo)
+== 016
+INSERT INTO foochild VALUES(123,'child',999,-123)
+--
+INSERT INTO foochild VALUES (123, 'child', 999, -123)
+== 017
+ALTER TABLE foo ADD COLUMN f4 int8 DEFAULT 99
+--
+ALTER TABLE foo ADD COLUMN f4 int8 DEFAULT 99
+== 018
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 019
+SELECT * FROM foochild
+--
+SELECT * FROM foochild
+== 020
+UPDATE foo SET f4 = f4 + f3 WHERE f4 = 99 RETURNING *
+--
+UPDATE foo SET f4 = f4 + f3 WHERE f4 = 99 RETURNING *
+== 021
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 022
+SELECT * FROM foochild
+--
+SELECT * FROM foochild
+== 023
+UPDATE foo SET f3 = f3*2
+  FROM int8_tbl i
+  WHERE foo.f1 = i.q2
+  RETURNING *
+--
+UPDATE foo SET f3 = f3 * 2 FROM int8_tbl i WHERE foo.f1 = i.q2 RETURNING *
+== 024
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 025
+SELECT * FROM foochild
+--
+SELECT * FROM foochild
+== 026
+DELETE FROM foo
+  USING int8_tbl i
+  WHERE foo.f1 = i.q2
+  RETURNING *
+--
+DELETE FROM foo USING int8_tbl i WHERE foo.f1 = i.q2 RETURNING *
+== 027
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 028
+SELECT * FROM foochild
+--
+SELECT * FROM foochild
+== 029
+DROP TABLE foochild
+--
+DROP TABLE foochild
+== 030
+-- Rules and views
+
+CREATE TEMP VIEW voo AS SELECT f1, f2 FROM foo
+--
+CREATE TEMPORARY VIEW voo AS SELECT f1, f2 FROM foo
+== 031
+CREATE RULE voo_i AS ON INSERT TO voo DO INSTEAD
+  INSERT INTO foo VALUES(new.*, 57)
+--
+CREATE RULE voo_i AS ON INSERT TO voo DO INSTEAD INSERT INTO foo VALUES (new.*, 57)
+== 032
+INSERT INTO voo VALUES(11,'zit')
+--
+INSERT INTO voo VALUES (11, 'zit')
+== 033
+-- fails:
+INSERT INTO voo VALUES(12,'zoo') RETURNING *, f1*2
+--
+INSERT INTO voo VALUES (12, 'zoo') RETURNING *, f1 * 2
+== 034
+-- fails, incompatible list:
+CREATE OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD
+  INSERT INTO foo VALUES(new.*, 57) RETURNING *
+--
+CREATE OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD INSERT INTO foo VALUES (new.*, 57) RETURNING *
+== 035
+CREATE OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD
+  INSERT INTO foo VALUES(new.*, 57) RETURNING f1, f2
+--
+CREATE OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD INSERT INTO foo VALUES (new.*, 57) RETURNING f1, f2
+== 036
+-- should still work
+INSERT INTO voo VALUES(13,'zit2')
+--
+INSERT INTO voo VALUES (13, 'zit2')
+== 037
+-- works now
+INSERT INTO voo VALUES(14,'zoo2') RETURNING *
+--
+INSERT INTO voo VALUES (14, 'zoo2') RETURNING *
+== 038
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 039
+SELECT * FROM voo
+--
+SELECT * FROM voo
+== 040
+CREATE OR REPLACE RULE voo_u AS ON UPDATE TO voo DO INSTEAD
+  UPDATE foo SET f1 = new.f1, f2 = new.f2 WHERE f1 = old.f1
+  RETURNING f1, f2
+--
+CREATE OR REPLACE RULE voo_u AS ON UPDATE TO voo DO INSTEAD UPDATE foo SET f1 = new.f1, f2 = new.f2 WHERE f1 = old.f1 RETURNING f1, f2
+== 041
+update voo set f1 = f1 + 1 where f2 = 'zoo2'
+--
+UPDATE voo SET f1 = f1 + 1 WHERE f2 = 'zoo2'
+== 042
+update voo set f1 = f1 + 1 where f2 = 'zoo2' RETURNING *, f1*2
+--
+UPDATE voo SET f1 = f1 + 1 WHERE f2 = 'zoo2' RETURNING *, f1 * 2
+== 043
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 044
+SELECT * FROM voo
+--
+SELECT * FROM voo
+== 045
+CREATE OR REPLACE RULE voo_d AS ON DELETE TO voo DO INSTEAD
+  DELETE FROM foo WHERE f1 = old.f1
+  RETURNING f1, f2
+--
+CREATE OR REPLACE RULE voo_d AS ON DELETE TO voo DO INSTEAD DELETE FROM foo WHERE f1 = old.f1 RETURNING f1, f2
+== 046
+DELETE FROM foo WHERE f1 = 13
+--
+DELETE FROM foo WHERE f1 = 13
+== 047
+DELETE FROM foo WHERE f2 = 'zit' RETURNING *
+--
+DELETE FROM foo WHERE f2 = 'zit' RETURNING *
+== 048
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 049
+SELECT * FROM voo
+--
+SELECT * FROM voo
+== 050
+-- Check use of a whole-row variable for an un-flattenable view
+CREATE TEMP VIEW foo_v AS SELECT * FROM foo OFFSET 0
+--
+CREATE TEMPORARY VIEW foo_v AS SELECT * FROM foo OFFSET 0
+== 051
+UPDATE foo SET f2 = foo_v.f2 FROM foo_v WHERE foo_v.f1 = foo.f1
+  RETURNING foo_v
+--
+UPDATE foo SET f2 = foo_v.f2 FROM foo_v WHERE foo_v.f1 = foo.f1 RETURNING foo_v
+== 052
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 053
+-- Check use of a whole-row variable for an inlined set-returning function
+CREATE FUNCTION foo_f() RETURNS SETOF foo AS
+  $$ SELECT * FROM foo OFFSET 0 $$ LANGUAGE sql STABLE
+--
+CREATE FUNCTION foo_f() RETURNS SETOF foo AS $$ SELECT * FROM foo OFFSET 0 $$ LANGUAGE sql STABLE
+== 054
+UPDATE foo SET f2 = foo_f.f2 FROM foo_f() WHERE foo_f.f1 = foo.f1
+  RETURNING foo_f
+--
+UPDATE foo SET f2 = foo_f.f2 FROM foo_f() WHERE foo_f.f1 = foo.f1 RETURNING foo_f
+== 055
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 056
+DROP FUNCTION foo_f()
+--
+DROP FUNCTION foo_f()
+== 057
+-- As above, but SRF is defined to return a composite type
+CREATE TYPE foo_t AS (f1 int, f2 text, f3 int, f4 int8)
+--
+CREATE TYPE foo_t AS (f1 int, f2 text, f3 int, f4 int8)
+== 058
+CREATE FUNCTION foo_f() RETURNS SETOF foo_t AS
+  $$ SELECT * FROM foo OFFSET 0 $$ LANGUAGE sql STABLE
+--
+CREATE FUNCTION foo_f() RETURNS SETOF foo_t AS $$ SELECT * FROM foo OFFSET 0 $$ LANGUAGE sql STABLE
+== 059
+UPDATE foo SET f2 = foo_f.f2 FROM foo_f() WHERE foo_f.f1 = foo.f1
+  RETURNING foo_f
+--
+UPDATE foo SET f2 = foo_f.f2 FROM foo_f() WHERE foo_f.f1 = foo.f1 RETURNING foo_f
+== 060
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 061
+DROP FUNCTION foo_f()
+--
+DROP FUNCTION foo_f()
+== 062
+DROP TYPE foo_t
+--
+DROP TYPE foo_t
+== 063
+-- Try a join case
+
+CREATE TEMP TABLE joinme (f2j text, other int)
+--
+CREATE TEMPORARY TABLE joinme (f2j text, other int)
+== 064
+INSERT INTO joinme VALUES('more', 12345)
+--
+INSERT INTO joinme VALUES ('more', 12345)
+== 065
+INSERT INTO joinme VALUES('zoo2', 54321)
+--
+INSERT INTO joinme VALUES ('zoo2', 54321)
+== 066
+INSERT INTO joinme VALUES('other', 0)
+--
+INSERT INTO joinme VALUES ('other', 0)
+== 067
+CREATE TEMP VIEW joinview AS
+  SELECT foo.*, other FROM foo JOIN joinme ON (f2 = f2j)
+--
+CREATE TEMPORARY VIEW joinview AS SELECT foo.*, other FROM foo JOIN joinme ON f2 = f2j
+== 068
+SELECT * FROM joinview
+--
+SELECT * FROM joinview
+== 069
+CREATE RULE joinview_u AS ON UPDATE TO joinview DO INSTEAD
+  UPDATE foo SET f1 = new.f1, f3 = new.f3
+    FROM joinme WHERE f2 = f2j AND f2 = old.f2
+    RETURNING foo.*, other
+--
+CREATE RULE joinview_u AS ON UPDATE TO joinview DO INSTEAD UPDATE foo SET f1 = new.f1, f3 = new.f3 FROM joinme WHERE f2 = f2j AND f2 = old.f2 RETURNING foo.*, other
+== 070
+UPDATE joinview SET f1 = f1 + 1 WHERE f3 = 57 RETURNING *, other + 1
+--
+UPDATE joinview SET f1 = f1 + 1 WHERE f3 = 57 RETURNING *, other + 1
+== 071
+SELECT * FROM joinview
+--
+SELECT * FROM joinview
+== 072
+SELECT * FROM foo
+--
+SELECT * FROM foo
+== 073
+SELECT * FROM voo
+--
+SELECT * FROM voo
+== 074
+-- Check aliased target relation
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING *
+--
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING *
+== 075
+-- ok
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING foo.*
+--
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING foo.*
+== 076
+-- fails, wrong name
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.*
+--
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.*
+== 077
+-- ok
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.f3
+--
+INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.f3

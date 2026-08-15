@@ -1,0 +1,367 @@
+== 001
+|--
+-- tsrf - targetlist set returning function tests
+|--
+
+-- simple srf
+SELECT generate_series(1, 3)
+--
+566947e694d5283c
+== 002
+-- parallel iteration
+SELECT generate_series(1, 3), generate_series(3,5)
+--
+566947e694d5283c
+== 003
+-- parallel iteration, different number of rows
+SELECT generate_series(1, 2), generate_series(1,4)
+--
+566947e694d5283c
+== 004
+-- srf, with SRF argument
+SELECT generate_series(1, generate_series(1, 3))
+--
+28d080e0a57368dd
+== 005
+-- but we've traditionally rejected the same in FROM
+SELECT * FROM generate_series(1, generate_series(1, 3))
+--
+48cb496844d22406
+== 006
+-- srf, with two SRF arguments
+SELECT generate_series(generate_series(1,3), generate_series(2, 4))
+--
+28d080e0a57368dd
+== 007
+-- check proper nesting of SRFs in different expressions
+explain (verbose, costs off)
+SELECT generate_series(1, generate_series(1, 3)), generate_series(2, 4)
+--
+b63a081bbb97ee1e
+== 008
+SELECT generate_series(1, generate_series(1, 3)), generate_series(2, 4)
+--
+c4e1ee5ebafaec43
+== 009
+CREATE TABLE few(id int, dataa text, datab text)
+--
+6eb19de746ca4c4d
+== 010
+INSERT INTO few VALUES(1, 'a', 'foo'),(2, 'a', 'bar'),(3, 'b', 'bar')
+--
+794fd5613524c0f7
+== 011
+-- SRF with a provably-dummy relation
+explain (verbose, costs off)
+SELECT unnest(ARRAY[1, 2]) FROM few WHERE false
+--
+702753f17e284140
+== 012
+SELECT unnest(ARRAY[1, 2]) FROM few WHERE false
+--
+d767ebd99b88dbea
+== 013
+-- SRF shouldn't prevent upper query from recognizing lower as dummy
+explain (verbose, costs off)
+SELECT * FROM few f1,
+  (SELECT unnest(ARRAY[1,2]) FROM few f2 WHERE false OFFSET 0) ss
+--
+47bdcc91e17541b4
+== 014
+SELECT * FROM few f1,
+  (SELECT unnest(ARRAY[1,2]) FROM few f2 WHERE false OFFSET 0) ss
+--
+976b9f138cfc54bc
+== 015
+-- SRF output order of sorting is maintained, if SRF is not referenced
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id DESC
+--
+1684eb4e48ac7a17
+== 016
+-- but SRFs can be referenced in sort
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id, g DESC
+--
+7a246c8390838a9c
+== 017
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id, generate_series(1,3) DESC
+--
+dc03b4db79c36a09
+== 018
+-- it's weird to have ORDER BYs that increase the number of results
+SELECT few.id FROM few ORDER BY id, generate_series(1,3) DESC
+--
+a7d4b2966bf223a1
+== 019
+-- SRFs are computed after aggregation
+SET enable_hashagg TO 0
+--
+a83598b3841af185
+== 020
+-- stable output order
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa
+--
+1cd5b2f141c487fa
+== 021
+-- unless referenced in GROUP BY clause
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa, unnest('{1,1,3}'::int[])
+--
+6cb5c3a0ad6a8f1c
+== 022
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa, 5
+--
+1cd5b2f141c487fa
+== 023
+RESET enable_hashagg
+--
+b056ae859e494ea7
+== 024
+-- check HAVING works when GROUP BY does [not] reference SRF output
+SELECT dataa, generate_series(1,1), count(*) FROM few GROUP BY 1 HAVING count(*) > 1
+--
+9d6d9d1395cf243f
+== 025
+SELECT dataa, generate_series(1,1), count(*) FROM few GROUP BY 1, 2 HAVING count(*) > 1
+--
+9d6d9d1395cf243f
+== 026
+-- it's weird to have GROUP BYs that increase the number of results
+SELECT few.dataa, count(*) FROM few WHERE dataa = 'a' GROUP BY few.dataa ORDER BY 2
+--
+3470c8fe9820781c
+== 027
+SELECT few.dataa, count(*) FROM few WHERE dataa = 'a' GROUP BY few.dataa, unnest('{1,1,3}'::int[]) ORDER BY 2
+--
+6922f5fbfb7982d4
+== 028
+-- SRFs are not allowed if they'd need to be conditionally executed
+SELECT q1, case when q1 > 0 then generate_series(1,3) else 0 end FROM int8_tbl
+--
+aff177a48b37bfe0
+== 029
+SELECT q1, coalesce(generate_series(1,3), 0) FROM int8_tbl
+--
+1293c4012ab3f5dd
+== 030
+-- SRFs are not allowed in aggregate arguments
+SELECT min(generate_series(1, 3)) FROM few
+--
+ae073a4e0c28013d
+== 031
+-- ... unless they're within a sub-select
+SELECT sum((3 = ANY(SELECT generate_series(1,4)))::int)
+--
+90745dd352fdc184
+== 032
+SELECT sum((3 = ANY(SELECT lag(x) over(order by x)
+                    FROM generate_series(1,4) x))::int)
+--
+cdd548ecac9cc191
+== 033
+-- SRFs are not allowed in window function arguments, either
+SELECT min(generate_series(1, 3)) OVER() FROM few
+--
+3d2ddf06863433af
+== 034
+-- SRFs are normally computed after window functions
+SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few
+--
+80e3ae86809fb26d
+== 035
+-- unless referencing SRFs
+SELECT SUM(count(*)) OVER(PARTITION BY generate_series(1,3) ORDER BY generate_series(1,3)), generate_series(1,3) g FROM few GROUP BY g
+--
+69f56074d523ffdc
+== 036
+-- sorting + grouping
+SELECT few.dataa, count(*), min(id), max(id), generate_series(1,3) FROM few GROUP BY few.dataa ORDER BY 5, 1
+--
+bf6d0f598b981b69
+== 037
+-- grouping sets are a bit special, they produce NULLs in columns not actually NULL
+set enable_hashagg = false
+--
+a83598b3841af185
+== 038
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab)
+--
+ffb99e0be43dda9e
+== 039
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY dataa
+--
+258bc45f80f559e0
+== 040
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY g
+--
+66b4684212d8504f
+== 041
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g)
+--
+914a1c2821c142a9
+== 042
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g) ORDER BY dataa
+--
+ebc6e7c0afee7432
+== 043
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g) ORDER BY g
+--
+8e84d4333bb8a94d
+== 044
+reset enable_hashagg
+--
+b056ae859e494ea7
+== 045
+-- case with degenerate ORDER BY
+explain (verbose, costs off)
+select 'foo' as f, generate_series(1,2) as g from few order by 1
+--
+36c3f9c3f85187c1
+== 046
+select 'foo' as f, generate_series(1,2) as g from few order by 1
+--
+7cef75632fd2dfa5
+== 047
+-- data modification
+CREATE TABLE fewmore AS SELECT generate_series(1,3) AS data
+--
+496a2425bf800667
+== 048
+INSERT INTO fewmore VALUES(generate_series(4,5))
+--
+840aa513c52d70a0
+== 049
+SELECT * FROM fewmore
+--
+334df1d719649c02
+== 050
+-- SRFs are not allowed in UPDATE (they once were, but it was nonsense)
+UPDATE fewmore SET data = generate_series(4,9)
+--
+48ffca043148c0f8
+== 051
+-- SRFs are not allowed in RETURNING
+INSERT INTO fewmore VALUES(1) RETURNING generate_series(1,3)
+--
+69866ee38a0c0cab
+== 052
+-- nor standalone VALUES (but surely this is a bug?)
+VALUES(1, generate_series(1,2))
+--
+97290ce7cb855851
+== 053
+-- We allow tSRFs that are not at top level
+SELECT int4mul(generate_series(1,2), 10)
+--
+ed8ee2a190277234
+== 054
+SELECT generate_series(1,3) IS DISTINCT FROM 2
+--
+1b91502be6c018f8
+== 055
+-- but SRFs in function RTEs must be at top level (annoying restriction)
+SELECT * FROM int4mul(generate_series(1,2), 10)
+--
+f050cc3a302ba57d
+== 056
+-- DISTINCT ON is evaluated before tSRF evaluation if SRF is not
+-- referenced either in ORDER BY or in the DISTINCT ON list. The ORDER
+-- BY reference can be implicitly generated, if there's no other ORDER BY.
+
+-- implicit reference (via implicit ORDER) to all columns
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+--
+6bbd0a0333dbe89c
+== 057
+-- unreferenced in DISTINCT ON or ORDER BY
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC
+--
+b0c30ff9da83d04b
+== 058
+-- referenced in ORDER BY
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC, g DESC
+--
+a0c865c8bc806140
+== 059
+-- referenced in ORDER BY and DISTINCT ON
+SELECT DISTINCT ON (a, b, g) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC, g DESC
+--
+dbc175bbd2b3b9b2
+== 060
+-- only SRF mentioned in DISTINCT ON
+SELECT DISTINCT ON (g) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+--
+bfce5ef044c03f9d
+== 061
+-- LIMIT / OFFSET is evaluated after SRF evaluation
+SELECT a, generate_series(1,2) FROM (VALUES(1),(2),(3)) r(a) LIMIT 2 OFFSET 2
+--
+6ee7bae9010f0552
+== 062
+-- SRFs are not allowed in LIMIT.
+SELECT 1 LIMIT generate_series(1,3)
+--
+b9ec622bfc795629
+== 063
+-- tSRF in correlated subquery, referencing table outside
+SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET few.id) FROM few
+--
+7f5693d06f1bc72b
+== 064
+-- tSRF in correlated subquery, referencing SRF outside
+SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET g.i) FROM generate_series(0,3) g(i)
+--
+d2b08d0296c0c0de
+== 065
+-- Operators can return sets too
+CREATE OPERATOR |@| (PROCEDURE = unnest, RIGHTARG = ANYARRAY)
+--
+d5cd0f86444588dc
+== 066
+SELECT |@|ARRAY[1,2,3]
+--
+c0f73dc8fd89e770
+== 067
+-- Some fun cases involving duplicate SRF calls
+explain (verbose, costs off)
+select generate_series(1,3) as x, generate_series(1,3) + 1 as xp1
+--
+d588ec142945ec60
+== 068
+select generate_series(1,3) as x, generate_series(1,3) + 1 as xp1
+--
+cbed02802a1ad8ef
+== 069
+explain (verbose, costs off)
+select generate_series(1,3)+1 order by generate_series(1,3)
+--
+5fe4f15150ed514e
+== 070
+select generate_series(1,3)+1 order by generate_series(1,3)
+--
+4f97b89f03881aae
+== 071
+-- Check that SRFs of same nesting level run in lockstep
+explain (verbose, costs off)
+select generate_series(1,3) as x, generate_series(3,6) + 1 as y
+--
+d588ec142945ec60
+== 072
+select generate_series(1,3) as x, generate_series(3,6) + 1 as y
+--
+cbed02802a1ad8ef
+== 073
+-- Clean up
+DROP TABLE few
+--
+faa9dff908b08d8d
+== 074
+DROP TABLE fewmore
+--
+ee8d2da91bfe7a46

@@ -1,0 +1,840 @@
+== 001
+|--
+-- CREATE_FUNCTION_SQL
+|--
+-- Assorted tests using SQL-language functions
+|--
+
+-- All objects made in this test are in temp_func_test schema
+
+CREATE USER regress_unpriv_user
+--
+3f0beeded9c38c2a
+== 002
+CREATE SCHEMA temp_func_test
+--
+2aac8b344286ee2e
+== 003
+GRANT ALL ON SCHEMA temp_func_test TO public
+--
+3bad348a81564abb
+== 004
+SET search_path TO temp_func_test, public
+--
+972eb2e22f47f95c
+== 005
+|--
+-- Make sanity checks on the pg_proc entries created by CREATE FUNCTION
+|--
+
+|--
+-- ARGUMENT and RETURN TYPES
+|--
+CREATE FUNCTION functest_A_1(text, date) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 = ''abcd'' AND $2 > ''2001-01-01'''
+--
+0425958a3b0eb9a0
+== 006
+CREATE FUNCTION functest_A_2(text[]) RETURNS int LANGUAGE 'sql'
+       AS 'SELECT $1[1]::int'
+--
+f35b30202564294e
+== 007
+CREATE FUNCTION functest_A_3() RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT false'
+--
+24f4cb5275fda6ae
+== 008
+SELECT proname, prorettype::regtype, proargtypes::regtype[] FROM pg_proc
+       WHERE oid in ('functest_A_1'::regproc,
+                     'functest_A_2'::regproc,
+                     'functest_A_3'::regproc) ORDER BY proname
+--
+68437f874ddbf1c1
+== 009
+SELECT functest_A_1('abcd', '2020-01-01')
+--
+c5778727524082b1
+== 010
+SELECT functest_A_2(ARRAY['1', '2', '3'])
+--
+e56325409d762cde
+== 011
+SELECT functest_A_3()
+--
+f1aecec612d82545
+== 012
+|--
+-- IMMUTABLE | STABLE | VOLATILE
+|--
+CREATE FUNCTION functest_B_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 0'
+--
+ecbde85ab6cff437
+== 013
+CREATE FUNCTION functest_B_2(int) RETURNS bool LANGUAGE 'sql'
+       IMMUTABLE AS 'SELECT $1 > 0'
+--
+74d22e9764668913
+== 014
+CREATE FUNCTION functest_B_3(int) RETURNS bool LANGUAGE 'sql'
+       STABLE AS 'SELECT $1 = 0'
+--
+252527db6bd6da57
+== 015
+CREATE FUNCTION functest_B_4(int) RETURNS bool LANGUAGE 'sql'
+       VOLATILE AS 'SELECT $1 < 0'
+--
+d9ef7c9593949a76
+== 016
+SELECT proname, provolatile FROM pg_proc
+       WHERE oid in ('functest_B_1'::regproc,
+                     'functest_B_2'::regproc,
+                     'functest_B_3'::regproc,
+		     'functest_B_4'::regproc) ORDER BY proname
+--
+df97d2fda3e105b4
+== 017
+ALTER FUNCTION functest_B_2(int) VOLATILE
+--
+a36a9f975804081e
+== 018
+ALTER FUNCTION functest_B_3(int) COST 100
+--
+b6843a27c5860dd4
+== 019
+-- unrelated change, no effect
+SELECT proname, provolatile FROM pg_proc
+       WHERE oid in ('functest_B_1'::regproc,
+                     'functest_B_2'::regproc,
+                     'functest_B_3'::regproc,
+		     'functest_B_4'::regproc) ORDER BY proname
+--
+df97d2fda3e105b4
+== 020
+|--
+-- SECURITY DEFINER | INVOKER
+|--
+CREATE FUNCTION functest_C_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 0'
+--
+39c8c8e27b4d58a0
+== 021
+CREATE FUNCTION functest_C_2(int) RETURNS bool LANGUAGE 'sql'
+       SECURITY DEFINER AS 'SELECT $1 = 0'
+--
+954c65b4a1f31779
+== 022
+CREATE FUNCTION functest_C_3(int) RETURNS bool LANGUAGE 'sql'
+       SECURITY INVOKER AS 'SELECT $1 < 0'
+--
+b343028da6220433
+== 023
+SELECT proname, prosecdef FROM pg_proc
+       WHERE oid in ('functest_C_1'::regproc,
+                     'functest_C_2'::regproc,
+                     'functest_C_3'::regproc) ORDER BY proname
+--
+a5dc126ab044914e
+== 024
+ALTER FUNCTION functest_C_1(int) IMMUTABLE
+--
+3a5499bb13746726
+== 025
+-- unrelated change, no effect
+ALTER FUNCTION functest_C_2(int) SECURITY INVOKER
+--
+29e9740b3aca45cf
+== 026
+ALTER FUNCTION functest_C_3(int) SECURITY DEFINER
+--
+b64b13f1aa06c178
+== 027
+SELECT proname, prosecdef FROM pg_proc
+       WHERE oid in ('functest_C_1'::regproc,
+                     'functest_C_2'::regproc,
+                     'functest_C_3'::regproc) ORDER BY proname
+--
+a5dc126ab044914e
+== 028
+|--
+-- LEAKPROOF
+|--
+CREATE FUNCTION functest_E_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 100'
+--
+af776a25ce5a804a
+== 029
+CREATE FUNCTION functest_E_2(int) RETURNS bool LANGUAGE 'sql'
+       LEAKPROOF AS 'SELECT $1 > 100'
+--
+22e4411ff72f3cbf
+== 030
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+bf343c39493a8f9d
+== 031
+ALTER FUNCTION functest_E_1(int) LEAKPROOF
+--
+1521b4a2e6bf9961
+== 032
+ALTER FUNCTION functest_E_2(int) STABLE
+--
+f135539a1825ad97
+== 033
+-- unrelated change, no effect
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+bf343c39493a8f9d
+== 034
+ALTER FUNCTION functest_E_2(int) NOT LEAKPROOF
+--
+ec9bf602b1cf3603
+== 035
+-- remove leakproof attribute
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+bf343c39493a8f9d
+== 036
+-- it takes superuser privilege to turn on leakproof, but not to turn off
+ALTER FUNCTION functest_E_1(int) OWNER TO regress_unpriv_user
+--
+fe8b787d18b3c420
+== 037
+ALTER FUNCTION functest_E_2(int) OWNER TO regress_unpriv_user
+--
+dc1019df83c8f9c9
+== 038
+SET SESSION AUTHORIZATION regress_unpriv_user
+--
+532a0ea53df105d9
+== 039
+SET search_path TO temp_func_test, public
+--
+972eb2e22f47f95c
+== 040
+ALTER FUNCTION functest_E_1(int) NOT LEAKPROOF
+--
+fef62c2b6b9f7468
+== 041
+ALTER FUNCTION functest_E_2(int) LEAKPROOF
+--
+054b44af3527ad56
+== 042
+CREATE FUNCTION functest_E_3(int) RETURNS bool LANGUAGE 'sql'
+       LEAKPROOF AS 'SELECT $1 < 200'
+--
+c5f123ca915316cd
+== 043
+-- fail
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 044
+|--
+-- CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT
+|--
+CREATE FUNCTION functest_F_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 50'
+--
+c62cf0e2945b83ad
+== 045
+CREATE FUNCTION functest_F_2(int) RETURNS bool LANGUAGE 'sql'
+       CALLED ON NULL INPUT AS 'SELECT $1 = 50'
+--
+1f4bccd923dd2b29
+== 046
+CREATE FUNCTION functest_F_3(int) RETURNS bool LANGUAGE 'sql'
+       RETURNS NULL ON NULL INPUT AS 'SELECT $1 < 50'
+--
+b620b13def393ddf
+== 047
+CREATE FUNCTION functest_F_4(int) RETURNS bool LANGUAGE 'sql'
+       STRICT AS 'SELECT $1 = 50'
+--
+c4f49be16abe06e5
+== 048
+SELECT proname, proisstrict FROM pg_proc
+       WHERE oid in ('functest_F_1'::regproc,
+                     'functest_F_2'::regproc,
+                     'functest_F_3'::regproc,
+                     'functest_F_4'::regproc) ORDER BY proname
+--
+abfe691c91fd43b3
+== 049
+ALTER FUNCTION functest_F_1(int) IMMUTABLE
+--
+f030cd5999699d65
+== 050
+-- unrelated change, no effect
+ALTER FUNCTION functest_F_2(int) STRICT
+--
+8ccbcd0ade0333bc
+== 051
+ALTER FUNCTION functest_F_3(int) CALLED ON NULL INPUT
+--
+954aec6636bb84a8
+== 052
+SELECT proname, proisstrict FROM pg_proc
+       WHERE oid in ('functest_F_1'::regproc,
+                     'functest_F_2'::regproc,
+                     'functest_F_3'::regproc,
+                     'functest_F_4'::regproc) ORDER BY proname
+--
+abfe691c91fd43b3
+== 053
+-- pg_get_functiondef tests
+
+SELECT pg_get_functiondef('functest_A_1'::regproc)
+--
+04816244deea829c
+== 054
+SELECT pg_get_functiondef('functest_B_3'::regproc)
+--
+04816244deea829c
+== 055
+SELECT pg_get_functiondef('functest_C_3'::regproc)
+--
+04816244deea829c
+== 056
+SELECT pg_get_functiondef('functest_F_2'::regproc)
+--
+04816244deea829c
+== 057
+|--
+-- SQL-standard body
+|--
+CREATE FUNCTION functest_S_1(a text, b date) RETURNS boolean
+    LANGUAGE SQL
+    RETURN a = 'abcd' AND b > '2001-01-01'
+--
+a5fa27292c2965f0
+== 058
+CREATE FUNCTION functest_S_2(a text[]) RETURNS int
+    RETURN a[1]::int
+--
+cd5cb210be32796a
+== 059
+CREATE FUNCTION functest_S_3() RETURNS boolean
+    RETURN false
+--
+cde058bbfcdc831d
+== 060
+CREATE FUNCTION functest_S_3a() RETURNS boolean
+    BEGIN ATOMIC
+--
+ERROR: syntax error at end of input
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 061
+RETURN false
+--
+ERROR: syntax error at or near "RETURN"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 062
+END
+--
+7bbcde9cfab6c79c
+== 063
+CREATE FUNCTION functest_S_10(a text, b date) RETURNS boolean
+    LANGUAGE SQL
+    BEGIN ATOMIC
+        SELECT a = 'abcd' AND b > '2001-01-01'
+--
+ERROR: syntax error at end of input
+CURSORPOS: 143
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 064
+END
+--
+7bbcde9cfab6c79c
+== 065
+CREATE FUNCTION functest_S_13() RETURNS boolean
+    BEGIN ATOMIC
+        SELECT 1
+--
+ERROR: syntax error at end of input
+CURSORPOS: 82
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 066
+SELECT false
+--
+50fde20626009aba
+== 067
+END
+--
+7bbcde9cfab6c79c
+== 068
+-- check display of function arguments in sub-SELECT
+CREATE TABLE functest1 (i int)
+--
+4a7d756cb12fe60f
+== 069
+CREATE FUNCTION functest_S_16(a int, b int) RETURNS void
+    LANGUAGE SQL
+    BEGIN ATOMIC
+        INSERT INTO functest1 SELECT a + $2
+--
+ERROR: syntax error at end of input
+CURSORPOS: 135
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 070
+END
+--
+7bbcde9cfab6c79c
+== 071
+-- error: duplicate function body
+CREATE FUNCTION functest_S_xxx(x int) RETURNS int
+    LANGUAGE SQL
+    AS $$ SELECT x * 2 $$
+    RETURN x * 3
+--
+a42706372fabdb01
+== 072
+-- polymorphic arguments not allowed in this form
+CREATE FUNCTION functest_S_xx(x anyarray) RETURNS anyelement
+    LANGUAGE SQL
+    RETURN x[1]
+--
+8949e77334c90956
+== 073
+-- check reporting of parse-analysis errors
+CREATE FUNCTION functest_S_xx(x date) RETURNS boolean
+    LANGUAGE SQL
+    RETURN x > 1
+--
+98cf72bc1fc2de6b
+== 074
+-- tricky parsing
+CREATE FUNCTION functest_S_15(x int) RETURNS boolean
+LANGUAGE SQL
+BEGIN ATOMIC
+    select case when x % 2 = 0 then true else false end
+--
+ERROR: syntax error at end of input
+CURSORPOS: 153
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 075
+END
+--
+7bbcde9cfab6c79c
+== 076
+SELECT functest_S_1('abcd', '2020-01-01')
+--
+f5d39ab1156c1e3c
+== 077
+SELECT functest_S_2(ARRAY['1', '2', '3'])
+--
+9b2e3c9aa6e75004
+== 078
+SELECT functest_S_3()
+--
+abdf3d4ecd7a7207
+== 079
+SELECT functest_S_10('abcd', '2020-01-01')
+--
+a61cc1cde59726cd
+== 080
+SELECT functest_S_13()
+--
+d80c2d1969ce3aee
+== 081
+SELECT pg_get_functiondef('functest_S_1'::regproc)
+--
+04816244deea829c
+== 082
+SELECT pg_get_functiondef('functest_S_2'::regproc)
+--
+04816244deea829c
+== 083
+SELECT pg_get_functiondef('functest_S_3'::regproc)
+--
+04816244deea829c
+== 084
+SELECT pg_get_functiondef('functest_S_3a'::regproc)
+--
+04816244deea829c
+== 085
+SELECT pg_get_functiondef('functest_S_10'::regproc)
+--
+04816244deea829c
+== 086
+SELECT pg_get_functiondef('functest_S_13'::regproc)
+--
+04816244deea829c
+== 087
+SELECT pg_get_functiondef('functest_S_15'::regproc)
+--
+04816244deea829c
+== 088
+SELECT pg_get_functiondef('functest_S_16'::regproc)
+--
+04816244deea829c
+== 089
+DROP TABLE functest1 CASCADE
+--
+45a16f40a51b3b0d
+== 090
+-- test with views
+CREATE TABLE functest3 (a int)
+--
+face7ed03c5fd908
+== 091
+INSERT INTO functest3 VALUES (1), (2)
+--
+cc4dd367e62bb9f1
+== 092
+CREATE VIEW functestv3 AS SELECT * FROM functest3
+--
+5a55f5172e864296
+== 093
+CREATE FUNCTION functest_S_14() RETURNS bigint
+    RETURN (SELECT count(*) FROM functestv3)
+--
+7f72192fc923d19d
+== 094
+SELECT functest_S_14()
+--
+7085a207543a9896
+== 095
+DROP TABLE functest3 CASCADE
+--
+8d88d0f2ad904993
+== 096
+-- information_schema tests
+
+CREATE FUNCTION functest_IS_1(a int, b int default 1, c text default 'foo')
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1 + $2'
+--
+670e362c43225090
+== 097
+CREATE FUNCTION functest_IS_2(out a int, b int default 1)
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1'
+--
+dd21af5112b9410a
+== 098
+CREATE FUNCTION functest_IS_3(a int default 1, out b int)
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1'
+--
+324bdf53ec6591ee
+== 099
+SELECT routine_name, ordinal_position, parameter_name, parameter_default
+    FROM information_schema.parameters JOIN information_schema.routines USING (specific_schema, specific_name)
+    WHERE routine_schema = 'temp_func_test' AND routine_name ~ '^functest_is_'
+    ORDER BY 1, 2
+--
+3eda978853d1389d
+== 100
+DROP FUNCTION functest_IS_1(int, int, text), functest_IS_2(int), functest_IS_3(int)
+--
+11fa22a8308e09fb
+== 101
+-- routine usage views
+
+CREATE FUNCTION functest_IS_4a() RETURNS int LANGUAGE SQL AS 'SELECT 1'
+--
+6149cd0a02cffd82
+== 102
+CREATE FUNCTION functest_IS_4b(x int DEFAULT functest_IS_4a()) RETURNS int LANGUAGE SQL AS 'SELECT x'
+--
+7993f4802d343193
+== 103
+CREATE SEQUENCE functest1
+--
+073aa7e6a2b0d48e
+== 104
+CREATE FUNCTION functest_IS_5(x int DEFAULT nextval('functest1'))
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT x'
+--
+d080bad6ba27e4cd
+== 105
+CREATE FUNCTION functest_IS_6()
+    RETURNS int
+    LANGUAGE SQL
+    RETURN nextval('functest1')
+--
+28ba8968810e0218
+== 106
+CREATE TABLE functest2 (a int, b int)
+--
+7f6bc93ed509f214
+== 107
+CREATE FUNCTION functest_IS_7()
+    RETURNS int
+    LANGUAGE SQL
+    RETURN (SELECT count(a) FROM functest2)
+--
+1ad74bf9def9b28f
+== 108
+SELECT r0.routine_name, r1.routine_name
+  FROM information_schema.routine_routine_usage rru
+       JOIN information_schema.routines r0 ON r0.specific_name = rru.specific_name
+       JOIN information_schema.routines r1 ON r1.specific_name = rru.routine_name
+  WHERE r0.routine_schema = 'temp_func_test' AND
+        r1.routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+22687657da6d394a
+== 109
+SELECT routine_name, sequence_name FROM information_schema.routine_sequence_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+6b5e95eb227d244c
+== 110
+SELECT routine_name, table_name, column_name FROM information_schema.routine_column_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+490b2c7fae1f8b80
+== 111
+SELECT routine_name, table_name FROM information_schema.routine_table_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+e4408e57808dbe86
+== 112
+DROP FUNCTION functest_IS_4a CASCADE
+--
+d196435b82da21f8
+== 113
+DROP SEQUENCE functest1 CASCADE
+--
+6793b64344ef81c5
+== 114
+DROP TABLE functest2 CASCADE
+--
+1618528d2536c55b
+== 115
+-- overload
+CREATE FUNCTION functest_B_2(bigint) RETURNS bool LANGUAGE 'sql'
+       IMMUTABLE AS 'SELECT $1 > 0'
+--
+9942c65d1295eb95
+== 116
+DROP FUNCTION functest_b_1
+--
+8c665930036099e9
+== 117
+DROP FUNCTION functest_b_1
+--
+8c665930036099e9
+== 118
+-- error, not found
+DROP FUNCTION functest_b_2
+--
+682562ce223df545
+== 119
+-- error, ambiguous
+
+
+-- CREATE OR REPLACE tests
+
+CREATE FUNCTION functest1(a int) RETURNS int LANGUAGE SQL AS 'SELECT $1'
+--
+cca02d4a780af957
+== 120
+CREATE OR REPLACE FUNCTION functest1(a int) RETURNS int LANGUAGE SQL WINDOW AS 'SELECT $1'
+--
+c5f38a1b584a6314
+== 121
+CREATE OR REPLACE PROCEDURE functest1(a int) LANGUAGE SQL AS 'SELECT $1'
+--
+8eada6b3f0112871
+== 122
+DROP FUNCTION functest1(a int)
+--
+75e3726c2db05d85
+== 123
+-- inlining of set-returning functions
+
+CREATE TABLE functest3 (a int)
+--
+face7ed03c5fd908
+== 124
+INSERT INTO functest3 VALUES (1), (2), (3)
+--
+cc4dd367e62bb9f1
+== 125
+CREATE FUNCTION functest_sri1() RETURNS SETOF int
+LANGUAGE SQL
+STABLE
+AS '
+    SELECT * FROM functest3;
+'
+--
+ac9ef12f050e681a
+== 126
+SELECT * FROM functest_sri1()
+--
+231c6f45bd672582
+== 127
+EXPLAIN (verbose, costs off) SELECT * FROM functest_sri1()
+--
+8af05a87da4d1397
+== 128
+CREATE FUNCTION functest_sri2() RETURNS SETOF int
+LANGUAGE SQL
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM functest3
+--
+ERROR: syntax error at end of input
+CURSORPOS: 111
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 129
+END
+--
+7bbcde9cfab6c79c
+== 130
+SELECT * FROM functest_sri2()
+--
+f87cd4d3ff54fc83
+== 131
+EXPLAIN (verbose, costs off) SELECT * FROM functest_sri2()
+--
+1d30c441fd4b9058
+== 132
+DROP TABLE functest3 CASCADE
+--
+8d88d0f2ad904993
+== 133
+-- Check behavior of VOID-returning SQL functions
+
+CREATE FUNCTION voidtest1(a int) RETURNS VOID LANGUAGE SQL AS
+$$ SELECT a + 1 $$
+--
+ad6c8b5d260ed052
+== 134
+SELECT voidtest1(42)
+--
+d5349fa9f45859c3
+== 135
+CREATE FUNCTION voidtest2(a int, b int) RETURNS VOID LANGUAGE SQL AS
+$$ SELECT voidtest1(a + b) $$
+--
+48729573be6afd2d
+== 136
+SELECT voidtest2(11,22)
+--
+89ac34ebcd4b031b
+== 137
+-- currently, we can inline voidtest2 but not voidtest1
+EXPLAIN (verbose, costs off) SELECT voidtest2(11,22)
+--
+1673fdeb8bfa5f0f
+== 138
+CREATE TEMP TABLE sometable(f1 int)
+--
+cecd718310a73ba0
+== 139
+CREATE FUNCTION voidtest3(a int) RETURNS VOID LANGUAGE SQL AS
+$$ INSERT INTO sometable VALUES(a + 1) $$
+--
+4789e264dc2cad7d
+== 140
+SELECT voidtest3(17)
+--
+8eb65d524514d26a
+== 141
+CREATE FUNCTION voidtest4(a int) RETURNS VOID LANGUAGE SQL AS
+$$ INSERT INTO sometable VALUES(a - 1) RETURNING f1 $$
+--
+aeec746ecf748f42
+== 142
+SELECT voidtest4(39)
+--
+0066250339b95382
+== 143
+TABLE sometable
+--
+5ae7004e8cc3bad1
+== 144
+CREATE FUNCTION voidtest5(a int) RETURNS SETOF VOID LANGUAGE SQL AS
+$$ SELECT generate_series(1, a) $$ STABLE
+--
+0356c5bf3e9c3c57
+== 145
+SELECT * FROM voidtest5(3)
+--
+0e83f505f87a3b12
+== 146
+-- Regression tests for bugs:
+
+-- Check that arguments that are R/W expanded datums aren't corrupted by
+-- multiple uses.  This test knows that array_append() returns a R/W datum
+-- and will modify a R/W array input in-place.  We use SETOF to prevent
+-- inlining of the SQL function.
+CREATE FUNCTION double_append(anyarray, anyelement) RETURNS SETOF anyarray
+LANGUAGE SQL IMMUTABLE AS
+$$ SELECT array_append($1, $2) || array_append($1, $2) $$
+--
+34576e9d6784fe28
+== 147
+SELECT double_append(array_append(ARRAY[q1], q2), q3)
+  FROM (VALUES(1,2,3), (4,5,6)) v(q1,q2,q3)
+--
+636bc1e70dd4527b
+== 148
+-- Things that shouldn't work:
+
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT ''not an integer'';'
+--
+d45923d0640d1626
+== 149
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'not even SQL'
+--
+d45923d0640d1626
+== 150
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT 1, 2, 3;'
+--
+d45923d0640d1626
+== 151
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT $2;'
+--
+d45923d0640d1626
+== 152
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'a', 'b'
+--
+d45923d0640d1626
+== 153
+-- Cleanup
+DROP SCHEMA temp_func_test CASCADE
+--
+2fbb2d91091540ac
+== 154
+DROP USER regress_unpriv_user
+--
+23b2977c3f3320c1
+== 155
+RESET search_path
+--
+e97698aade82a29f

@@ -1,0 +1,5424 @@
+== 001
+|--
+-- UPDATABLE VIEWS
+|--
+
+-- avoid bit-exact output here because operations may not be bit-exact.
+SET extra_float_digits = 0
+--
+e4d6a0d1aa7aee70
+== 002
+-- check that non-updatable views and columns are rejected with useful error
+-- messages
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 003
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 004
+CREATE VIEW ro_view1 AS SELECT DISTINCT a, b FROM base_tbl
+--
+df5299061be8c472
+== 005
+-- DISTINCT not supported
+CREATE VIEW ro_view2 AS SELECT a, b FROM base_tbl GROUP BY a, b
+--
+6bc2c68863100448
+== 006
+-- GROUP BY not supported
+CREATE VIEW ro_view3 AS SELECT 1 FROM base_tbl HAVING max(a) > 0
+--
+2bf1bcddf5cc08cb
+== 007
+-- HAVING not supported
+CREATE VIEW ro_view4 AS SELECT count(*) FROM base_tbl
+--
+c8697ccb4ed65d96
+== 008
+-- Aggregate functions not supported
+CREATE VIEW ro_view5 AS SELECT a, rank() OVER() FROM base_tbl
+--
+b34a7e974114d5d4
+== 009
+-- Window functions not supported
+CREATE VIEW ro_view6 AS SELECT a, b FROM base_tbl UNION SELECT -a, b FROM base_tbl
+--
+49ac1567bcdbf6dd
+== 010
+-- Set ops not supported
+CREATE VIEW ro_view7 AS WITH t AS (SELECT a, b FROM base_tbl) SELECT * FROM t
+--
+e8d08073b851179a
+== 011
+-- WITH not supported
+CREATE VIEW ro_view8 AS SELECT a, b FROM base_tbl ORDER BY a OFFSET 1
+--
+50707f29cdb3cc92
+== 012
+-- OFFSET not supported
+CREATE VIEW ro_view9 AS SELECT a, b FROM base_tbl ORDER BY a LIMIT 1
+--
+6eefe308d2368387
+== 013
+-- LIMIT not supported
+CREATE VIEW ro_view10 AS SELECT 1 AS a
+--
+f3faf656ef34db2f
+== 014
+-- No base relations
+CREATE VIEW ro_view11 AS SELECT b1.a, b2.b FROM base_tbl b1, base_tbl b2
+--
+795a5222c89e2811
+== 015
+-- Multiple base relations
+CREATE VIEW ro_view12 AS SELECT * FROM generate_series(1, 10) AS g(a)
+--
+8d310acfc462775a
+== 016
+-- SRF in rangetable
+CREATE VIEW ro_view13 AS SELECT a, b FROM (SELECT * FROM base_tbl) AS t
+--
+8cc500083b12f2b4
+== 017
+-- Subselect in rangetable
+CREATE VIEW rw_view14 AS SELECT ctid, a, b FROM base_tbl
+--
+76514f963521cde8
+== 018
+-- System columns may be part of an updatable view
+CREATE VIEW rw_view15 AS SELECT a, upper(b) FROM base_tbl
+--
+c77011851330dd16
+== 019
+-- Expression/function may be part of an updatable view
+CREATE VIEW rw_view16 AS SELECT a, b, a AS aa FROM base_tbl
+--
+7b5105fd95f3fe54
+== 020
+-- Repeated column may be part of an updatable view
+CREATE VIEW ro_view17 AS SELECT * FROM ro_view1
+--
+fae3264b68e1b6c7
+== 021
+-- Base relation not updatable
+CREATE VIEW ro_view18 AS SELECT * FROM (VALUES(1)) AS tmp(a)
+--
+8346b3ce25db1dae
+== 022
+-- VALUES in rangetable
+CREATE SEQUENCE uv_seq
+--
+083e4ec42ff07026
+== 023
+CREATE VIEW ro_view19 AS SELECT * FROM uv_seq
+--
+489bf13ac9342c99
+== 024
+-- View based on a sequence
+CREATE VIEW ro_view20 AS SELECT a, b, generate_series(1, a) g FROM base_tbl
+--
+5bd249c673fd554d
+== 025
+-- SRF in targetlist not supported
+
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 026
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 027
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 028
+-- Read-only views
+DELETE FROM ro_view1
+--
+819c23adba867d14
+== 029
+DELETE FROM ro_view2
+--
+9fe2725a30de9b35
+== 030
+DELETE FROM ro_view3
+--
+2995a2952c21fa13
+== 031
+DELETE FROM ro_view4
+--
+160c9e1558af17ea
+== 032
+DELETE FROM ro_view5
+--
+9072c013b607c433
+== 033
+DELETE FROM ro_view6
+--
+87b813d824304944
+== 034
+UPDATE ro_view7 SET a=a+1
+--
+aee1fa48f5d83d6b
+== 035
+UPDATE ro_view8 SET a=a+1
+--
+76d0fd1693cbb6d0
+== 036
+UPDATE ro_view9 SET a=a+1
+--
+47b7d09eba213e87
+== 037
+UPDATE ro_view10 SET a=a+1
+--
+beee251c527ecfa4
+== 038
+UPDATE ro_view11 SET a=a+1
+--
+beee251c527ecfa4
+== 039
+UPDATE ro_view12 SET a=a+1
+--
+beee251c527ecfa4
+== 040
+INSERT INTO ro_view13 VALUES (3, 'Row 3')
+--
+200fb0ede2712bd8
+== 041
+MERGE INTO ro_view13 AS t USING (VALUES (1, 'Row 1')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN DELETE
+--
+dfd52224c46c6d5c
+== 042
+MERGE INTO ro_view13 AS t USING (VALUES (2, 'Row 2')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = v.b
+--
+dd66dbfa8ca46b76
+== 043
+MERGE INTO ro_view13 AS t USING (VALUES (3, 'Row 3')) AS v(a,b) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b)
+--
+a0304b5ca44c1826
+== 044
+MERGE INTO ro_view13 AS t USING (VALUES (2, 'Row 2')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN DO NOTHING
+  WHEN NOT MATCHED THEN DO NOTHING
+--
+a4467e65251c2785
+== 045
+-- should be OK to do nothing
+MERGE INTO ro_view13 AS t USING (VALUES (3, 'Row 3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN DO NOTHING
+  WHEN NOT MATCHED THEN DO NOTHING
+--
+a4467e65251c2785
+== 046
+-- should be OK to do nothing
+-- Partially updatable view
+INSERT INTO rw_view14 VALUES (null, 3, 'Row 3')
+--
+ad6826f70c84fa44
+== 047
+-- should fail
+INSERT INTO rw_view14 (a, b) VALUES (3, 'Row 3')
+--
+2d5e4a1bc77b8f39
+== 048
+-- should be OK
+UPDATE rw_view14 SET ctid=null WHERE a=3
+--
+d12b353a167fd5e0
+== 049
+-- should fail
+UPDATE rw_view14 SET b='ROW 3' WHERE a=3
+--
+d4eabb8c65d1f789
+== 050
+-- should be OK
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 051
+DELETE FROM rw_view14 WHERE a=3
+--
+279735cd6ec8f367
+== 052
+-- should be OK
+MERGE INTO rw_view14  AS t
+  USING (VALUES (2, 'Merged row 2'), (3, 'Merged row 3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = v.b  -- should be OK, except...
+  WHEN NOT MATCHED THEN INSERT VALUES (null, v.a, v.b)
+--
+fe3da4f72268efd8
+== 053
+-- should fail
+MERGE INTO rw_view14  AS t
+  USING (VALUES (2, 'Merged row 2'), (3, 'Merged row 3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = v.b  -- should be OK
+  WHEN NOT MATCHED THEN INSERT (a,b) VALUES (v.a, v.b)
+--
+ecd685f9d6d82100
+== 054
+-- should be OK
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 055
+MERGE INTO rw_view14  AS t
+  USING (VALUES (2, 'Row 2'), (3, 'Row 3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED AND t.a = 2 THEN UPDATE SET b = v.b  -- should be OK
+  WHEN MATCHED AND t.a = 3 THEN DELETE
+--
+e5693fa855240064
+== 056
+-- should be OK
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 057
+-- Partially updatable view
+INSERT INTO rw_view15 VALUES (3, 'ROW 3')
+--
+ad6826f70c84fa44
+== 058
+-- should fail
+INSERT INTO rw_view15 (a) VALUES (3)
+--
+719641ddfd296821
+== 059
+-- should be OK
+INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT DO NOTHING
+--
+32be7c514ddb84d9
+== 060
+-- succeeds
+SELECT * FROM rw_view15
+--
+6dc0a0a2b02a1f81
+== 061
+INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT (a) DO NOTHING
+--
+3c005bfbb25ccc19
+== 062
+-- succeeds
+SELECT * FROM rw_view15
+--
+6dc0a0a2b02a1f81
+== 063
+INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT (a) DO UPDATE set a = excluded.a
+--
+a8c97c728b684789
+== 064
+-- succeeds
+SELECT * FROM rw_view15
+--
+6dc0a0a2b02a1f81
+== 065
+INSERT INTO rw_view15 (a) VALUES (3) ON CONFLICT (a) DO UPDATE set upper = 'blarg'
+--
+3697bd5e32111a88
+== 066
+-- fails
+SELECT * FROM rw_view15
+--
+6dc0a0a2b02a1f81
+== 067
+SELECT * FROM rw_view15
+--
+6dc0a0a2b02a1f81
+== 068
+ALTER VIEW rw_view15 ALTER COLUMN upper SET DEFAULT 'NOT SET'
+--
+d6ce917d9c278989
+== 069
+INSERT INTO rw_view15 (a) VALUES (4)
+--
+719641ddfd296821
+== 070
+-- should fail
+UPDATE rw_view15 SET upper='ROW 3' WHERE a=3
+--
+c31f7938bc7ac8d1
+== 071
+-- should fail
+UPDATE rw_view15 SET upper=DEFAULT WHERE a=3
+--
+c31f7938bc7ac8d1
+== 072
+-- should fail
+UPDATE rw_view15 SET a=4 WHERE a=3
+--
+8599a7e88d9bf576
+== 073
+-- should be OK
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 074
+DELETE FROM rw_view15 WHERE a=4
+--
+279735cd6ec8f367
+== 075
+-- should be OK
+-- Partially updatable view
+INSERT INTO rw_view16 VALUES (3, 'Row 3', 3)
+--
+ad6826f70c84fa44
+== 076
+-- should fail
+INSERT INTO rw_view16 (a, b) VALUES (3, 'Row 3')
+--
+2d5e4a1bc77b8f39
+== 077
+-- should be OK
+UPDATE rw_view16 SET a=3, aa=-3 WHERE a=3
+--
+30f2d3e33d8c3eb9
+== 078
+-- should fail
+UPDATE rw_view16 SET aa=-3 WHERE a=3
+--
+418e4340d5889aaf
+== 079
+-- should be OK
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 080
+DELETE FROM rw_view16 WHERE a=-3
+--
+279735cd6ec8f367
+== 081
+-- should be OK
+-- Read-only views
+INSERT INTO ro_view17 VALUES (3, 'ROW 3')
+--
+200fb0ede2712bd8
+== 082
+DELETE FROM ro_view18
+--
+f26894d60f82a093
+== 083
+MERGE INTO ro_view18 AS t USING (VALUES (1, 'Row 1')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN DO NOTHING
+--
+5ae7c34af0651d39
+== 084
+-- should be OK to do nothing
+UPDATE ro_view19 SET last_value=1000
+--
+a0f3765b52e01435
+== 085
+UPDATE ro_view20 SET b=upper(b)
+--
+c2aede0f32c597c3
+== 086
+-- A view with a conditional INSTEAD rule but no unconditional INSTEAD rules
+-- or INSTEAD OF triggers should be non-updatable and generate useful error
+-- messages with appropriate detail
+CREATE RULE rw_view16_ins_rule AS ON INSERT TO rw_view16
+  WHERE NEW.a > 0 DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a, NEW.b)
+--
+0b1a8f26057befb0
+== 087
+CREATE RULE rw_view16_upd_rule AS ON UPDATE TO rw_view16
+  WHERE OLD.a > 0 DO INSTEAD UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a
+--
+2f7bbfe9d0522c58
+== 088
+CREATE RULE rw_view16_del_rule AS ON DELETE TO rw_view16
+  WHERE OLD.a > 0 DO INSTEAD DELETE FROM base_tbl WHERE a=OLD.a
+--
+d95ffc1e0b17d6d9
+== 089
+INSERT INTO rw_view16 (a, b) VALUES (3, 'Row 3')
+--
+2d5e4a1bc77b8f39
+== 090
+-- should fail
+UPDATE rw_view16 SET b='ROW 2' WHERE a=2
+--
+d4eabb8c65d1f789
+== 091
+-- should fail
+DELETE FROM rw_view16 WHERE a=2
+--
+279735cd6ec8f367
+== 092
+-- should fail
+MERGE INTO rw_view16 AS t USING (VALUES (3, 'Row 3')) AS v(a,b) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b)
+--
+5d75e468eae461de
+== 093
+-- should fail
+
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 094
+DROP VIEW ro_view10, ro_view12, ro_view18
+--
+be14dec8bccf6620
+== 095
+DROP SEQUENCE uv_seq CASCADE
+--
+1bfa4b57b9fbc451
+== 096
+-- simple updatable view
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 097
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 098
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0
+--
+5c0a53706ab91141
+== 099
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name = 'rw_view1'
+--
+e32eb995f909ceee
+== 100
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name = 'rw_view1'
+--
+950d92027441b610
+== 101
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name = 'rw_view1'
+ ORDER BY ordinal_position
+--
+dfaa1b01933f7b37
+== 102
+INSERT INTO rw_view1 VALUES (3, 'Row 3')
+--
+23c7e1eb4c7cfd57
+== 103
+INSERT INTO rw_view1 (a) VALUES (4)
+--
+5b7221bd8a958db1
+== 104
+UPDATE rw_view1 SET a=5 WHERE a=4
+--
+f852f157affad333
+== 105
+DELETE FROM rw_view1 WHERE b='Row 2'
+--
+242d5d365814d5a2
+== 106
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 107
+MERGE INTO rw_view1 t
+  USING (VALUES (0, 'ROW 0'), (1, 'ROW 1'),
+                (2, 'ROW 2'), (3, 'ROW 3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b
+  WHEN MATCHED THEN DELETE
+  WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a)
+  RETURNING merge_action(), v.*, t.*
+--
+862f0abd43b50151
+== 108
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 109
+MERGE INTO rw_view1 t
+  USING (VALUES (0, 'R0'), (1, 'R1'),
+                (2, 'R2'), (3, 'R3')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b
+  WHEN MATCHED THEN DELETE
+  WHEN NOT MATCHED BY SOURCE THEN DELETE
+  WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a)
+  RETURNING merge_action(), v.*, t.*
+--
+0255bf12afc325c8
+== 110
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 111
+EXPLAIN (costs off) UPDATE rw_view1 SET a=6 WHERE a=5
+--
+234d1e9c0d0a0942
+== 112
+EXPLAIN (costs off) DELETE FROM rw_view1 WHERE a=5
+--
+135d73fea6e06b35
+== 113
+EXPLAIN (costs off)
+MERGE INTO rw_view1 t USING (VALUES (5, 'X')) AS v(a,b) ON t.a = v.a
+  WHEN MATCHED THEN DELETE
+--
+91a83b088c758860
+== 114
+EXPLAIN (costs off)
+MERGE INTO rw_view1 t
+  USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = 'Updated'
+--
+3744dbc4c927bd68
+== 115
+EXPLAIN (costs off)
+MERGE INTO rw_view1 t
+  USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
+  WHEN NOT MATCHED BY SOURCE THEN DELETE
+--
+b5989ce2b766456f
+== 116
+EXPLAIN (costs off)
+MERGE INTO rw_view1 t
+  USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
+  WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)
+--
+c2a61234525baf08
+== 117
+-- it's still updatable if we add a DO ALSO rule
+
+CREATE TABLE base_tbl_hist(ts timestamptz default now(), a int, b text)
+--
+e015b29a7254bd48
+== 118
+CREATE RULE base_tbl_log AS ON INSERT TO rw_view1 DO ALSO
+  INSERT INTO base_tbl_hist(a,b) VALUES(new.a, new.b)
+--
+fdc34e6857123c73
+== 119
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name = 'rw_view1'
+--
+950d92027441b610
+== 120
+-- Check behavior with DEFAULTs (bug #17633)
+
+INSERT INTO rw_view1 VALUES (9, DEFAULT), (10, DEFAULT)
+--
+23c7e1eb4c7cfd57
+== 121
+SELECT a, b FROM base_tbl_hist
+--
+0523ac93c24b4351
+== 122
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 123
+DROP TABLE base_tbl_hist
+--
+49027760de81c58c
+== 124
+-- view on top of view
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 125
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 126
+CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl WHERE a>0
+--
+0030f102e05aa4bf
+== 127
+CREATE VIEW rw_view2 AS SELECT aa AS aaa, bb AS bbb FROM rw_view1 WHERE aa<10
+--
+26c9532458c858c9
+== 128
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name = 'rw_view2'
+--
+e32eb995f909ceee
+== 129
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name = 'rw_view2'
+--
+950d92027441b610
+== 130
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name = 'rw_view2'
+ ORDER BY ordinal_position
+--
+dfaa1b01933f7b37
+== 131
+INSERT INTO rw_view2 VALUES (3, 'Row 3')
+--
+c908a2471c7e773e
+== 132
+INSERT INTO rw_view2 (aaa) VALUES (4)
+--
+14ba136072bd1018
+== 133
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 134
+UPDATE rw_view2 SET bbb='Row 4' WHERE aaa=4
+--
+66ec6df8cc463ae5
+== 135
+DELETE FROM rw_view2 WHERE aaa=2
+--
+a73d47e7ea9b49ef
+== 136
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 137
+MERGE INTO rw_view2 t
+  USING (VALUES (3, 'R3'), (4, 'R4'), (5, 'R5')) AS v(a,b) ON aaa = v.a
+  WHEN MATCHED AND aaa = 3 THEN DELETE
+  WHEN MATCHED THEN UPDATE SET bbb = v.b
+  WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a)
+  RETURNING merge_action(), v.*, t.*
+--
+5adf0d98ec2a0cbb
+== 138
+SELECT * FROM rw_view2 ORDER BY aaa
+--
+ae878122deea32b5
+== 139
+MERGE INTO rw_view2 t
+  USING (VALUES (4, 'r4'), (5, 'r5'), (6, 'r6')) AS v(a,b) ON aaa = v.a
+  WHEN MATCHED AND aaa = 4 THEN DELETE
+  WHEN MATCHED THEN UPDATE SET bbb = v.b
+  WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a)
+  WHEN NOT MATCHED BY SOURCE THEN UPDATE SET bbb = 'Not matched by source'
+  RETURNING merge_action(), v.*, t.*
+--
+646b2da976113957
+== 140
+SELECT * FROM rw_view2 ORDER BY aaa
+--
+ae878122deea32b5
+== 141
+EXPLAIN (costs off) UPDATE rw_view2 SET aaa=5 WHERE aaa=4
+--
+a2aa56f3b9b9d153
+== 142
+EXPLAIN (costs off) DELETE FROM rw_view2 WHERE aaa=4
+--
+a3d66543bca5d2aa
+== 143
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 144
+-- view on top of view with rules
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 145
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 146
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0 OFFSET 0
+--
+28b42f8947720005
+== 147
+-- not updatable without rules/triggers
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a<10
+--
+00327ea26e96998a
+== 148
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 149
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 150
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 151
+CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
+  DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a, NEW.b) RETURNING *
+--
+7325fe9b71c61617
+== 152
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 153
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 154
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 155
+CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1
+  DO INSTEAD UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a RETURNING NEW.*
+--
+3df30cfe42ae51d6
+== 156
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 157
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 158
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 159
+CREATE RULE rw_view1_del_rule AS ON DELETE TO rw_view1
+  DO INSTEAD DELETE FROM base_tbl WHERE a=OLD.a RETURNING OLD.*
+--
+48e9c0b3544ae974
+== 160
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 161
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 162
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 163
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
+--
+ff9f1cd9007d1156
+== 164
+UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING *
+--
+75ded6c63bfcf163
+== 165
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 166
+DELETE FROM rw_view2 WHERE a=3 RETURNING *
+--
+3c2c16ea3b4c60bb
+== 167
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 168
+MERGE INTO rw_view2 t USING (VALUES (3, 'Row 3')) AS v(a,b) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b)
+--
+8fc9f759bef8fcf7
+== 169
+-- should fail
+
+EXPLAIN (costs off) UPDATE rw_view2 SET a=3 WHERE a=2
+--
+db94ad0086078ee4
+== 170
+EXPLAIN (costs off) DELETE FROM rw_view2 WHERE a=2
+--
+dc451f449ee0e9b3
+== 171
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 172
+-- view on top of view with triggers
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 173
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 174
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0 OFFSET 0
+--
+28b42f8947720005
+== 175
+-- not updatable without rules/triggers
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a<10
+--
+00327ea26e96998a
+== 176
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 177
+SELECT table_name, is_updatable, is_insertable_into,
+       is_trigger_updatable, is_trigger_deletable,
+       is_trigger_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+a14ebbfe191e6f66
+== 178
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 179
+CREATE FUNCTION rw_view1_trig_fn()
+RETURNS trigger AS
+$$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO base_tbl VALUES (NEW.a, NEW.b);
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    DELETE FROM base_tbl WHERE a=OLD.a;
+    RETURN OLD;
+  END IF;
+END;
+$$
+LANGUAGE plpgsql
+--
+c56142448e5cad8d
+== 180
+CREATE TRIGGER rw_view1_ins_trig INSTEAD OF INSERT ON rw_view1
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+f626f0588c201cb1
+== 181
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 182
+SELECT table_name, is_updatable, is_insertable_into,
+       is_trigger_updatable, is_trigger_deletable,
+       is_trigger_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+a14ebbfe191e6f66
+== 183
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 184
+CREATE TRIGGER rw_view1_upd_trig INSTEAD OF UPDATE ON rw_view1
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+8cb73013e7f47e28
+== 185
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 186
+SELECT table_name, is_updatable, is_insertable_into,
+       is_trigger_updatable, is_trigger_deletable,
+       is_trigger_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+a14ebbfe191e6f66
+== 187
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 188
+CREATE TRIGGER rw_view1_del_trig INSTEAD OF DELETE ON rw_view1
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+78bd74c402c95c5c
+== 189
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 190
+SELECT table_name, is_updatable, is_insertable_into,
+       is_trigger_updatable, is_trigger_deletable,
+       is_trigger_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+a14ebbfe191e6f66
+== 191
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 192
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
+--
+ff9f1cd9007d1156
+== 193
+UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING *
+--
+75ded6c63bfcf163
+== 194
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 195
+DELETE FROM rw_view2 WHERE a=3 RETURNING *
+--
+3c2c16ea3b4c60bb
+== 196
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 197
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED AND t.a <= 1 THEN DELETE
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+  RETURNING merge_action(), s.*, t.*
+--
+e33191f873c42738
+== 198
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 199
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'r'||x FROM generate_series(0,2) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+  WHEN NOT MATCHED BY SOURCE THEN UPDATE SET b = 'Not matched by source'
+  RETURNING merge_action(), s.*, t.*
+--
+1b9c1056c1a34fa9
+== 200
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 201
+EXPLAIN (costs off) UPDATE rw_view2 SET a=3 WHERE a=2
+--
+db94ad0086078ee4
+== 202
+EXPLAIN (costs off) DELETE FROM rw_view2 WHERE a=2
+--
+dc451f449ee0e9b3
+== 203
+EXPLAIN (costs off)
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED AND t.a <= 1 THEN DELETE
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+b8c42a85531afa8a
+== 204
+-- MERGE with incomplete set of INSTEAD OF triggers
+DROP TRIGGER rw_view1_del_trig ON rw_view1
+--
+26d2e310bbb6bba9
+== 205
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED AND t.a <= 1 THEN DELETE
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+9900b37631cd5858
+== 206
+-- should fail
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+1f0106b54b49cfdb
+== 207
+-- ok
+
+DROP TRIGGER rw_view1_ins_trig ON rw_view1
+--
+8b6b9a2c0f4eaac8
+== 208
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+1f0106b54b49cfdb
+== 209
+-- should fail
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+--
+7a6ae0544f5f420a
+== 210
+-- ok
+
+-- MERGE with INSTEAD OF triggers on auto-updatable view
+CREATE TRIGGER rw_view2_upd_trig INSTEAD OF UPDATE ON rw_view2
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+49296210506bcad5
+== 211
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+1f0106b54b49cfdb
+== 212
+-- should fail
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+--
+7a6ae0544f5f420a
+== 213
+-- ok
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 214
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 215
+DROP FUNCTION rw_view1_trig_fn()
+--
+1b1a885517396387
+== 216
+-- update using whole row from view
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 217
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
+--
+4ec6090c7b92d8e1
+== 218
+CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl
+--
+f795ec52a9df783a
+== 219
+CREATE FUNCTION rw_view1_aa(x rw_view1)
+  RETURNS int AS $$ SELECT x.aa $$ LANGUAGE sql
+--
+d025b6491c423d89
+== 220
+UPDATE rw_view1 v SET bb='Updated row 2' WHERE rw_view1_aa(v)=2
+  RETURNING rw_view1_aa(v), v.bb
+--
+8f1e0b9ead492c6b
+== 221
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 222
+EXPLAIN (costs off)
+UPDATE rw_view1 v SET bb='Updated row 2' WHERE rw_view1_aa(v)=2
+  RETURNING rw_view1_aa(v), v.bb
+--
+6c4adafedbb35d07
+== 223
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 224
+-- permissions checks
+
+CREATE USER regress_view_user1
+--
+30e20dab3b2a799d
+== 225
+CREATE USER regress_view_user2
+--
+89544bdee4cf4048
+== 226
+CREATE USER regress_view_user3
+--
+8eff369adeceae86
+== 227
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 228
+CREATE TABLE base_tbl(a int, b text, c float)
+--
+89e20536d875ea8c
+== 229
+INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
+--
+c2e77c4edb5b3119
+== 230
+CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
+--
+6ff0fe3b820f931c
+== 231
+INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
+--
+23c7e1eb4c7cfd57
+== 232
+GRANT SELECT ON base_tbl TO regress_view_user2
+--
+30b7acd53ba00529
+== 233
+GRANT SELECT ON rw_view1 TO regress_view_user2
+--
+7e78e6028f7794b2
+== 234
+GRANT UPDATE (a,c) ON base_tbl TO regress_view_user2
+--
+db0ff10b06d1d37a
+== 235
+GRANT UPDATE (bb,cc) ON rw_view1 TO regress_view_user2
+--
+93f1291cdc4e7f30
+== 236
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 237
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 238
+CREATE VIEW rw_view2 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
+--
+b617227ee1c44353
+== 239
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 240
+-- ok
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 241
+-- ok
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 242
+-- ok
+
+INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
+--
+c2e77c4edb5b3119
+== 243
+-- not allowed
+INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
+--
+23c7e1eb4c7cfd57
+== 244
+-- not allowed
+INSERT INTO rw_view2 VALUES ('Row 3', 3.0, 3)
+--
+c908a2471c7e773e
+== 245
+-- not allowed
+
+MERGE INTO rw_view1 t
+  USING (VALUES ('Row 3', 3.0, 3)) AS v(b,c,a) ON t.aa = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
+--
+bbd860f94aeba393
+== 246
+-- not allowed
+MERGE INTO rw_view2 t
+  USING (VALUES ('Row 3', 3.0, 3)) AS v(b,c,a) ON t.aa = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
+--
+bb85b697c29cf325
+== 247
+-- not allowed
+
+UPDATE base_tbl SET a=a, c=c
+--
+0e491e18400e2ef9
+== 248
+-- ok
+UPDATE base_tbl SET b=b
+--
+a49f96bb258d8126
+== 249
+-- not allowed
+UPDATE rw_view1 SET bb=bb, cc=cc
+--
+2d9d099cfe3917fc
+== 250
+-- ok
+UPDATE rw_view1 SET aa=aa
+--
+6635be1b816f9852
+== 251
+-- not allowed
+UPDATE rw_view2 SET aa=aa, cc=cc
+--
+7c2a455122cf6be1
+== 252
+-- ok
+UPDATE rw_view2 SET bb=bb
+--
+297a162758657c7c
+== 253
+-- not allowed
+
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET bb = bb, cc = cc
+--
+adc2300192249527
+== 254
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET aa = aa
+--
+4ef5a5efe4ddc489
+== 255
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET aa = aa, cc = cc
+--
+6ca55d32281ffd6f
+== 256
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET bb = bb
+--
+dc9008a399c6974b
+== 257
+-- not allowed
+
+DELETE FROM base_tbl
+--
+3b90389aaa188dc7
+== 258
+-- not allowed
+DELETE FROM rw_view1
+--
+be2ff74e0277fc1e
+== 259
+-- not allowed
+DELETE FROM rw_view2
+--
+909526776e157b72
+== 260
+-- not allowed
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 261
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 262
+GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
+--
+8aab273c57450332
+== 263
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 264
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 265
+INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
+--
+c2e77c4edb5b3119
+== 266
+-- ok
+INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
+--
+23c7e1eb4c7cfd57
+== 267
+-- not allowed
+INSERT INTO rw_view2 VALUES ('Row 4', 4.0, 4)
+--
+c908a2471c7e773e
+== 268
+-- ok
+DELETE FROM base_tbl WHERE a=1
+--
+e5e1a89b2f4fdda4
+== 269
+-- ok
+DELETE FROM rw_view1 WHERE aa=2
+--
+8f69913214086309
+== 270
+-- not allowed
+DELETE FROM rw_view2 WHERE aa=2
+--
+cd4ded0e6b786b5a
+== 271
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED AND bb = 'xxx' THEN DELETE
+--
+0d44ca4390675ee6
+== 272
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED AND bb = 'xxx' THEN DELETE
+--
+0cc3ccb9c90d597f
+== 273
+-- ok
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 274
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 275
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 276
+REVOKE INSERT, DELETE ON base_tbl FROM regress_view_user2
+--
+02dd51adaf6eb222
+== 277
+GRANT INSERT, DELETE ON rw_view1 TO regress_view_user2
+--
+84e573b51ee07afc
+== 278
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 279
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 280
+INSERT INTO base_tbl VALUES (5, 'Row 5', 5.0)
+--
+c2e77c4edb5b3119
+== 281
+-- not allowed
+INSERT INTO rw_view1 VALUES ('Row 5', 5.0, 5)
+--
+23c7e1eb4c7cfd57
+== 282
+-- ok
+INSERT INTO rw_view2 VALUES ('Row 6', 6.0, 6)
+--
+c908a2471c7e773e
+== 283
+-- not allowed
+DELETE FROM base_tbl WHERE a=3
+--
+e5e1a89b2f4fdda4
+== 284
+-- not allowed
+DELETE FROM rw_view1 WHERE aa=3
+--
+8f69913214086309
+== 285
+-- ok
+DELETE FROM rw_view2 WHERE aa=4
+--
+cd4ded0e6b786b5a
+== 286
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED AND bb = 'xxx' THEN DELETE
+--
+0d44ca4390675ee6
+== 287
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED AND bb = 'xxx' THEN DELETE
+--
+0cc3ccb9c90d597f
+== 288
+-- not allowed
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 289
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 290
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 291
+-- nested-view permissions
+
+CREATE TABLE base_tbl(a int, b text, c float)
+--
+89e20536d875ea8c
+== 292
+INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
+--
+c2e77c4edb5b3119
+== 293
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 294
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
+--
+0f5baa359638b4d3
+== 295
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 296
+-- not allowed
+SELECT * FROM rw_view1 FOR UPDATE
+--
+51b966e42b303cd3
+== 297
+-- not allowed
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1
+--
+4ff25741a62c62b5
+== 298
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+a1db037f530587d5
+== 299
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 300
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1
+--
+0f1703331d9aae57
+== 301
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 302
+-- not allowed
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 303
+-- not allowed
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 304
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+80a725f0c8ef2e31
+== 305
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 306
+GRANT SELECT ON base_tbl TO regress_view_user1
+--
+c73c077e9dcd0b88
+== 307
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 308
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 309
+SELECT * FROM rw_view1 FOR UPDATE
+--
+51b966e42b303cd3
+== 310
+-- not allowed
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1
+--
+4ff25741a62c62b5
+== 311
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+a1db037f530587d5
+== 312
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 313
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 314
+-- not allowed
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 315
+-- not allowed
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 316
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+80a725f0c8ef2e31
+== 317
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 318
+GRANT SELECT ON rw_view1 TO regress_view_user2
+--
+7e78e6028f7794b2
+== 319
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 320
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 321
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 322
+-- not allowed
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 323
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+80a725f0c8ef2e31
+== 324
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 325
+GRANT UPDATE ON base_tbl TO regress_view_user1
+--
+3ad09f54d690ebc0
+== 326
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 327
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 328
+SELECT * FROM rw_view1 FOR UPDATE
+--
+51b966e42b303cd3
+== 329
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1
+--
+4ff25741a62c62b5
+== 330
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+a1db037f530587d5
+== 331
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 332
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 333
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 334
+-- not allowed
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 335
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'bar'
+--
+80a725f0c8ef2e31
+== 336
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 337
+GRANT UPDATE ON rw_view1 TO regress_view_user2
+--
+a421b18cb0edba5a
+== 338
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 339
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 340
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 341
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 342
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'fud'
+--
+80a725f0c8ef2e31
+== 343
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 344
+REVOKE UPDATE ON base_tbl FROM regress_view_user1
+--
+d319bbeaadb596a1
+== 345
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 346
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 347
+SELECT * FROM rw_view1 FOR UPDATE
+--
+51b966e42b303cd3
+== 348
+-- not allowed
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1
+--
+4ff25741a62c62b5
+== 349
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+a1db037f530587d5
+== 350
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 351
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 352
+SELECT * FROM rw_view2 FOR UPDATE
+--
+e62d718c9b984ac4
+== 353
+-- not allowed
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1
+--
+92efc731b5eec761
+== 354
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET b = 'foo'
+--
+80a725f0c8ef2e31
+== 355
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 356
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 357
+-- security invoker view permissions
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 358
+CREATE TABLE base_tbl(a int, b text, c float)
+--
+89e20536d875ea8c
+== 359
+INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
+--
+c2e77c4edb5b3119
+== 360
+CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
+--
+6ff0fe3b820f931c
+== 361
+ALTER VIEW rw_view1 SET (security_invoker = true)
+--
+d9cfeb0b4b1fd6b1
+== 362
+INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
+--
+23c7e1eb4c7cfd57
+== 363
+GRANT SELECT ON rw_view1 TO regress_view_user2
+--
+7e78e6028f7794b2
+== 364
+GRANT UPDATE (bb,cc) ON rw_view1 TO regress_view_user2
+--
+93f1291cdc4e7f30
+== 365
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 366
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 367
+-- not allowed
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 368
+-- not allowed
+INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
+--
+c2e77c4edb5b3119
+== 369
+-- not allowed
+INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
+--
+23c7e1eb4c7cfd57
+== 370
+-- not allowed
+UPDATE base_tbl SET a=a
+--
+d42e302b8a90a79b
+== 371
+-- not allowed
+UPDATE rw_view1 SET bb=bb, cc=cc
+--
+2d9d099cfe3917fc
+== 372
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET bb = bb
+--
+261f3ee8f0c79bca
+== 373
+-- not allowed
+DELETE FROM base_tbl
+--
+3b90389aaa188dc7
+== 374
+-- not allowed
+DELETE FROM rw_view1
+--
+be2ff74e0277fc1e
+== 375
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN DELETE
+--
+c9ab626f89d5f9a4
+== 376
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 377
+GRANT SELECT ON base_tbl TO regress_view_user2
+--
+30b7acd53ba00529
+== 378
+GRANT UPDATE (a,c) ON base_tbl TO regress_view_user2
+--
+db0ff10b06d1d37a
+== 379
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 380
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 381
+-- ok
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 382
+-- ok
+UPDATE base_tbl SET a=a, c=c
+--
+0e491e18400e2ef9
+== 383
+-- ok
+UPDATE base_tbl SET b=b
+--
+a49f96bb258d8126
+== 384
+-- not allowed
+UPDATE rw_view1 SET cc=cc
+--
+5d2c4a3543813888
+== 385
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET cc = cc
+--
+9de510dc52c34e93
+== 386
+-- ok
+UPDATE rw_view1 SET aa=aa
+--
+6635be1b816f9852
+== 387
+-- not allowed
+UPDATE rw_view1 SET bb=bb
+--
+0efc3ccbba652390
+== 388
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET aa = aa
+--
+4ef5a5efe4ddc489
+== 389
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET bb = bb
+--
+261f3ee8f0c79bca
+== 390
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 391
+GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
+--
+8aab273c57450332
+== 392
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 393
+INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
+--
+c2e77c4edb5b3119
+== 394
+-- ok
+INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
+--
+23c7e1eb4c7cfd57
+== 395
+-- not allowed
+DELETE FROM base_tbl WHERE a=1
+--
+e5e1a89b2f4fdda4
+== 396
+-- ok
+DELETE FROM rw_view1 WHERE aa=2
+--
+8f69913214086309
+== 397
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN DELETE
+--
+c9ab626f89d5f9a4
+== 398
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 399
+REVOKE INSERT, DELETE ON base_tbl FROM regress_view_user2
+--
+02dd51adaf6eb222
+== 400
+GRANT INSERT, DELETE ON rw_view1 TO regress_view_user2
+--
+84e573b51ee07afc
+== 401
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 402
+INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
+--
+23c7e1eb4c7cfd57
+== 403
+-- not allowed
+DELETE FROM rw_view1 WHERE aa=2
+--
+8f69913214086309
+== 404
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN DELETE
+--
+c9ab626f89d5f9a4
+== 405
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 406
+GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
+--
+8aab273c57450332
+== 407
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 408
+INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
+--
+23c7e1eb4c7cfd57
+== 409
+-- ok
+DELETE FROM rw_view1 WHERE aa=2
+--
+8f69913214086309
+== 410
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (3)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN DELETE
+--
+c9ab626f89d5f9a4
+== 411
+-- ok
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 412
+-- ok
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 413
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 414
+-- ordinary view on top of security invoker view permissions
+
+CREATE TABLE base_tbl(a int, b text, c float)
+--
+89e20536d875ea8c
+== 415
+INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
+--
+c2e77c4edb5b3119
+== 416
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 417
+CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
+--
+6ff0fe3b820f931c
+== 418
+ALTER VIEW rw_view1 SET (security_invoker = true)
+--
+d9cfeb0b4b1fd6b1
+== 419
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 420
+-- not allowed
+UPDATE rw_view1 SET aa=aa
+--
+6635be1b816f9852
+== 421
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (2, 'Row 2', 2.0)) AS v(a,b,c) ON t.aa = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
+--
+bbd860f94aeba393
+== 422
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 423
+CREATE VIEW rw_view2 AS SELECT cc AS ccc, aa AS aaa, bb AS bbb FROM rw_view1
+--
+48825f0e579171bf
+== 424
+GRANT SELECT, UPDATE ON rw_view2 TO regress_view_user3
+--
+d11910108949087d
+== 425
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 426
+-- not allowed
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 427
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (2, 'Row 2', 2.0)) AS v(a,b,c) ON t.aaa = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.c, v.a, v.b)
+--
+c6c5dc7e60525cf6
+== 428
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 429
+GRANT SELECT ON base_tbl TO regress_view_user1
+--
+c73c077e9dcd0b88
+== 430
+GRANT UPDATE (a, b) ON base_tbl TO regress_view_user1
+--
+95575773a6be5b51
+== 431
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 432
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 433
+-- ok
+UPDATE rw_view1 SET aa=aa, bb=bb
+--
+217f9586757d7f83
+== 434
+-- ok
+UPDATE rw_view1 SET cc=cc
+--
+5d2c4a3543813888
+== 435
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET aa = aa, bb = bb
+--
+d33b1592ab841e23
+== 436
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET cc = cc
+--
+9de510dc52c34e93
+== 437
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 438
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 439
+-- not allowed
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 440
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 441
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 442
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 443
+-- not allowed
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 444
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 445
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 446
+GRANT SELECT ON rw_view1 TO regress_view_user2
+--
+7e78e6028f7794b2
+== 447
+GRANT UPDATE (bb, cc) ON rw_view1 TO regress_view_user2
+--
+93f1291cdc4e7f30
+== 448
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 449
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 450
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 451
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 452
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 453
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 454
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 455
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 456
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 457
+GRANT SELECT ON base_tbl TO regress_view_user2
+--
+30b7acd53ba00529
+== 458
+GRANT UPDATE (a, c) ON base_tbl TO regress_view_user2
+--
+db0ff10b06d1d37a
+== 459
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 460
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 461
+-- ok
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 462
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 463
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 464
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 465
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 466
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 467
+-- ok
+
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 468
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 469
+-- not allowed
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 470
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 471
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 472
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 473
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 474
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 475
+-- not allowed
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 476
+GRANT SELECT ON base_tbl TO regress_view_user3
+--
+1cce289be8aaeee3
+== 477
+GRANT UPDATE (a, c) ON base_tbl TO regress_view_user3
+--
+0a215665426207e5
+== 478
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 479
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 480
+-- ok
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 481
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 482
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 483
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 484
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 485
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 486
+-- ok
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 487
+REVOKE SELECT, UPDATE ON base_tbl FROM regress_view_user1
+--
+6bf2166ab69fa15a
+== 488
+SET SESSION AUTHORIZATION regress_view_user1
+--
+532a0ea53df105d9
+== 489
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 490
+-- not allowed
+UPDATE rw_view1 SET aa=aa
+--
+6635be1b816f9852
+== 491
+-- not allowed
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
+  WHEN MATCHED THEN UPDATE SET aa = aa
+--
+4ef5a5efe4ddc489
+== 492
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 493
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 494
+-- ok
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 495
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 496
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 497
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 498
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 499
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 500
+-- ok
+
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 501
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 502
+-- ok
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 503
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 504
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 505
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 506
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 507
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 508
+-- ok
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 509
+REVOKE SELECT, UPDATE ON base_tbl FROM regress_view_user2
+--
+d274f51e9146ca44
+== 510
+SET SESSION AUTHORIZATION regress_view_user2
+--
+532a0ea53df105d9
+== 511
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 512
+-- not allowed
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 513
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 514
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 515
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 516
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 517
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 518
+-- not allowed
+
+SET SESSION AUTHORIZATION regress_view_user3
+--
+532a0ea53df105d9
+== 519
+SELECT * FROM rw_view2
+--
+1be5c51532717a97
+== 520
+-- ok
+UPDATE rw_view2 SET aaa=aaa
+--
+196e2d15a6aab3eb
+== 521
+-- not allowed
+UPDATE rw_view2 SET bbb=bbb
+--
+cc89d9dd881012f7
+== 522
+-- not allowed
+UPDATE rw_view2 SET ccc=ccc
+--
+3e469defc21967b6
+== 523
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET aaa = aaa
+--
+ce6e22b9da11c6c1
+== 524
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET bbb = bbb
+--
+419c2c304c3843ee
+== 525
+-- not allowed
+MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
+  WHEN MATCHED THEN UPDATE SET ccc = ccc
+--
+4292aa1d31bf6fec
+== 526
+-- ok
+
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 527
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 528
+DROP USER regress_view_user1
+--
+0e0bb4a555d3244e
+== 529
+DROP USER regress_view_user2
+--
+e355792328931a28
+== 530
+DROP USER regress_view_user3
+--
+42086bb490ae0eec
+== 531
+-- column defaults
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified', c serial)
+--
+d66823fd0a275030
+== 532
+INSERT INTO base_tbl VALUES (1, 'Row 1')
+--
+c2e77c4edb5b3119
+== 533
+INSERT INTO base_tbl VALUES (2, 'Row 2')
+--
+c2e77c4edb5b3119
+== 534
+INSERT INTO base_tbl VALUES (3)
+--
+c2e77c4edb5b3119
+== 535
+CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
+--
+f795ec52a9df783a
+== 536
+ALTER VIEW rw_view1 ALTER COLUMN bb SET DEFAULT 'View default'
+--
+131526c7c5a83552
+== 537
+INSERT INTO rw_view1 VALUES (4, 'Row 4')
+--
+23c7e1eb4c7cfd57
+== 538
+INSERT INTO rw_view1 (aa) VALUES (5)
+--
+fa21489026797cd1
+== 539
+MERGE INTO rw_view1 t USING (VALUES (6)) AS v(a) ON t.aa = v.a
+  WHEN NOT MATCHED THEN INSERT (aa) VALUES (v.a)
+--
+49a8b2b6bffea7db
+== 540
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 541
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 542
+-- Table having triggers
+
+CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
+--
+211966292c228613
+== 543
+INSERT INTO base_tbl VALUES (1, 'Row 1')
+--
+c2e77c4edb5b3119
+== 544
+INSERT INTO base_tbl VALUES (2, 'Row 2')
+--
+c2e77c4edb5b3119
+== 545
+CREATE FUNCTION rw_view1_trig_fn()
+RETURNS trigger AS
+$$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE base_tbl SET b=NEW.b WHERE a=1;
+    RETURN NULL;
+  END IF;
+  RETURN NULL;
+END;
+$$
+LANGUAGE plpgsql
+--
+c56142448e5cad8d
+== 546
+CREATE TRIGGER rw_view1_ins_trig AFTER INSERT ON base_tbl
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+03e01d817d1708f2
+== 547
+CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
+--
+f795ec52a9df783a
+== 548
+INSERT INTO rw_view1 VALUES (3, 'Row 3')
+--
+23c7e1eb4c7cfd57
+== 549
+select * from base_tbl
+--
+1772d6623ed7a55e
+== 550
+DROP VIEW rw_view1
+--
+79a4e42d3aff0a33
+== 551
+DROP TRIGGER rw_view1_ins_trig on base_tbl
+--
+9351ea231abdb147
+== 552
+DROP FUNCTION rw_view1_trig_fn()
+--
+1b1a885517396387
+== 553
+DROP TABLE base_tbl
+--
+d3660d3268d5a4dd
+== 554
+-- view with ORDER BY
+
+CREATE TABLE base_tbl (a int, b int)
+--
+0c5d68a1e92e467b
+== 555
+INSERT INTO base_tbl VALUES (1,2), (4,5), (3,-3)
+--
+c2e77c4edb5b3119
+== 556
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl ORDER BY a+b
+--
+d5396cbb64b69929
+== 557
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 558
+INSERT INTO rw_view1 VALUES (7,-8)
+--
+23c7e1eb4c7cfd57
+== 559
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 560
+EXPLAIN (verbose, costs off) UPDATE rw_view1 SET b = b + 1 RETURNING *
+--
+8e2c28948ddb709a
+== 561
+UPDATE rw_view1 SET b = b + 1 RETURNING *
+--
+571fba9872a21cdc
+== 562
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 563
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 564
+-- multiple array-column updates
+
+CREATE TABLE base_tbl (a int, arr int[])
+--
+e57e232cff3652df
+== 565
+INSERT INTO base_tbl VALUES (1,ARRAY[2]), (3,ARRAY[4])
+--
+43fa1620326a77fd
+== 566
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
+--
+0f5baa359638b4d3
+== 567
+UPDATE rw_view1 SET arr[1] = 42, arr[2] = 77 WHERE a = 3
+--
+51a2c26c76cc88df
+== 568
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 569
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 570
+-- views with updatable and non-updatable columns
+
+CREATE TABLE base_tbl(a float)
+--
+f9ba209c1723815d
+== 571
+INSERT INTO base_tbl SELECT i/10.0 FROM generate_series(1,10) g(i)
+--
+5c0d2f0d321d4331
+== 572
+CREATE VIEW rw_view1 AS
+  SELECT ctid, sin(a) s, a, cos(a) c
+  FROM base_tbl
+  WHERE a != 0
+  ORDER BY abs(a)
+--
+8391e7165802a8e5
+== 573
+INSERT INTO rw_view1 VALUES (null, null, 1.1, null)
+--
+23c7e1eb4c7cfd57
+== 574
+-- should fail
+INSERT INTO rw_view1 (s, c, a) VALUES (null, null, 1.1)
+--
+9b8376e52fd70750
+== 575
+-- should fail
+INSERT INTO rw_view1 (s, c, a) VALUES (default, default, 1.1)
+--
+9b8376e52fd70750
+== 576
+-- should fail
+INSERT INTO rw_view1 (a) VALUES (1.1) RETURNING a, s, c
+--
+3567b8fb85868772
+== 577
+-- OK
+UPDATE rw_view1 SET s = s WHERE a = 1.1
+--
+aa69cd5dab827c9e
+== 578
+-- should fail
+UPDATE rw_view1 SET a = 1.05 WHERE a = 1.1 RETURNING s
+--
+18dea6a4f16f0740
+== 579
+-- OK
+DELETE FROM rw_view1 WHERE a = 1.05
+--
+9aefd4b99879deae
+== 580
+-- OK
+
+CREATE VIEW rw_view2 AS
+  SELECT s, c, s/c t, a base_a, ctid
+  FROM rw_view1
+--
+35ca68ec96ce47c9
+== 581
+INSERT INTO rw_view2 VALUES (null, null, null, 1.1, null)
+--
+c908a2471c7e773e
+== 582
+-- should fail
+INSERT INTO rw_view2(s, c, base_a) VALUES (null, null, 1.1)
+--
+eb047d2035f8d875
+== 583
+-- should fail
+INSERT INTO rw_view2(base_a) VALUES (1.1) RETURNING t
+--
+68ddb25a704bfd98
+== 584
+-- OK
+UPDATE rw_view2 SET s = s WHERE base_a = 1.1
+--
+914dfda63fcecaeb
+== 585
+-- should fail
+UPDATE rw_view2 SET t = t WHERE base_a = 1.1
+--
+a5be4d767fb1798b
+== 586
+-- should fail
+UPDATE rw_view2 SET base_a = 1.05 WHERE base_a = 1.1
+--
+423444035293a70c
+== 587
+-- OK
+DELETE FROM rw_view2 WHERE base_a = 1.05 RETURNING base_a, s, c, t
+--
+56e1434bca4c6232
+== 588
+-- OK
+
+CREATE VIEW rw_view3 AS
+  SELECT s, c, s/c t, ctid
+  FROM rw_view1
+--
+bff2cddd08cfabf0
+== 589
+INSERT INTO rw_view3 VALUES (null, null, null, null)
+--
+be1564f4e1326288
+== 590
+-- should fail
+INSERT INTO rw_view3(s) VALUES (null)
+--
+d877e63a2ef964bb
+== 591
+-- should fail
+UPDATE rw_view3 SET s = s
+--
+edd766f8c02a5a4a
+== 592
+-- should fail
+DELETE FROM rw_view3 WHERE s = sin(0.1)
+--
+9bfff1f8e3945d03
+== 593
+-- should be OK
+SELECT * FROM base_tbl ORDER BY a
+--
+11c4bbd3d18a54f8
+== 594
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name
+--
+fb8dc82f6ca3a247
+== 595
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name
+--
+46273b6cde8af37b
+== 596
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE E'r_\\_view%'
+ ORDER BY table_name, ordinal_position
+--
+7f2261a75abcc018
+== 597
+SELECT events & 4 != 0 AS upd,
+       events & 8 != 0 AS ins,
+       events & 16 != 0 AS del
+  FROM pg_catalog.pg_relation_is_updatable('rw_view3'::regclass, false) t(events)
+--
+edd9cbf9962eb8b0
+== 598
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 599
+-- view on table with GENERATED columns
+
+CREATE TABLE base_tbl (id int, idplus1 int GENERATED ALWAYS AS (id + 1) STORED)
+--
+e011dc92ff03f7c6
+== 600
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
+--
+0f5baa359638b4d3
+== 601
+INSERT INTO base_tbl (id) VALUES (1)
+--
+d844633d08f55db0
+== 602
+INSERT INTO rw_view1 (id) VALUES (2)
+--
+0d46b2ef52b5cc33
+== 603
+INSERT INTO base_tbl (id, idplus1) VALUES (3, DEFAULT)
+--
+16cea0d19ff5337b
+== 604
+INSERT INTO rw_view1 (id, idplus1) VALUES (4, DEFAULT)
+--
+58bef1596d6e618a
+== 605
+INSERT INTO base_tbl (id, idplus1) VALUES (5, 6)
+--
+16cea0d19ff5337b
+== 606
+-- error
+INSERT INTO rw_view1 (id, idplus1) VALUES (6, 7)
+--
+58bef1596d6e618a
+== 607
+-- error
+
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 608
+UPDATE base_tbl SET id = 2000 WHERE id = 2
+--
+efc63d66bb3b2fed
+== 609
+UPDATE rw_view1 SET id = 3000 WHERE id = 3
+--
+ceca7a144238aecc
+== 610
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 611
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 612
+-- inheritance tests
+
+CREATE TABLE base_tbl_parent (a int)
+--
+f805c034c721d33e
+== 613
+CREATE TABLE base_tbl_child (CHECK (a > 0)) INHERITS (base_tbl_parent)
+--
+70df9a71ac706bff
+== 614
+INSERT INTO base_tbl_parent SELECT * FROM generate_series(-8, -1)
+--
+c2a0530c1c9640d2
+== 615
+INSERT INTO base_tbl_child SELECT * FROM generate_series(1, 8)
+--
+cb99a6202e885f53
+== 616
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl_parent
+--
+39af48e11432304e
+== 617
+CREATE VIEW rw_view2 AS SELECT * FROM ONLY base_tbl_parent
+--
+04f2e49e1d4080cc
+== 618
+SELECT * FROM rw_view1 ORDER BY a
+--
+6750fcefa9f0c041
+== 619
+SELECT * FROM ONLY rw_view1 ORDER BY a
+--
+386fc5970036991b
+== 620
+SELECT * FROM rw_view2 ORDER BY a
+--
+c8978e896b7c2dee
+== 621
+INSERT INTO rw_view1 VALUES (-100), (100)
+--
+23c7e1eb4c7cfd57
+== 622
+INSERT INTO rw_view2 VALUES (-200), (200)
+--
+c908a2471c7e773e
+== 623
+UPDATE rw_view1 SET a = a*10 WHERE a IN (-1, 1)
+--
+3bb0d676ab8b5033
+== 624
+-- Should produce -10 and 10
+UPDATE ONLY rw_view1 SET a = a*10 WHERE a IN (-2, 2)
+--
+ea887b2a7c18aeec
+== 625
+-- Should produce -20 and 20
+UPDATE rw_view2 SET a = a*10 WHERE a IN (-3, 3)
+--
+350007d1188a8fc3
+== 626
+-- Should produce -30 only
+UPDATE ONLY rw_view2 SET a = a*10 WHERE a IN (-4, 4)
+--
+18c30a7b5e80b43a
+== 627
+-- Should produce -40 only
+
+DELETE FROM rw_view1 WHERE a IN (-5, 5)
+--
+9aefd4b99879deae
+== 628
+-- Should delete -5 and 5
+DELETE FROM ONLY rw_view1 WHERE a IN (-6, 6)
+--
+6394900bd1f4ecc7
+== 629
+-- Should delete -6 and 6
+DELETE FROM rw_view2 WHERE a IN (-7, 7)
+--
+5ece46754bb4f2c8
+== 630
+-- Should delete -7 only
+DELETE FROM ONLY rw_view2 WHERE a IN (-8, 8)
+--
+ae0479a9b69cae02
+== 631
+-- Should delete -8 only
+
+SELECT * FROM ONLY base_tbl_parent ORDER BY a
+--
+49a9e025ff1f8bbe
+== 632
+SELECT * FROM base_tbl_child ORDER BY a
+--
+992b77c790ca87c6
+== 633
+MERGE INTO rw_view1 t USING (VALUES (-200), (10)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a+1
+--
+e9e2e92c5423f116
+== 634
+-- Should produce -199 and 11
+MERGE INTO ONLY rw_view1 t USING (VALUES (-100), (20)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a+1
+--
+b4fd691eeac58b84
+== 635
+-- Should produce -99 and 21
+MERGE INTO rw_view2 t USING (VALUES (-40), (3)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a+1
+--
+c49063cf56de9f29
+== 636
+-- Should produce -39 only
+MERGE INTO ONLY rw_view2 t USING (VALUES (-30), (4)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a+1
+--
+ee3e7dd1a7f026fb
+== 637
+-- Should produce -29 only
+
+SELECT * FROM ONLY base_tbl_parent ORDER BY a
+--
+49a9e025ff1f8bbe
+== 638
+SELECT * FROM base_tbl_child ORDER BY a
+--
+992b77c790ca87c6
+== 639
+CREATE TABLE other_tbl_parent (id int)
+--
+7470583fc2653ad7
+== 640
+CREATE TABLE other_tbl_child () INHERITS (other_tbl_parent)
+--
+81a674df1d9c4115
+== 641
+INSERT INTO other_tbl_parent VALUES (7),(200)
+--
+6564edd74deaf36a
+== 642
+INSERT INTO other_tbl_child VALUES (8),(100)
+--
+ab07f7c1414cd83f
+== 643
+EXPLAIN (costs off)
+UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
+--
+97fc72c02c302bab
+== 644
+UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
+--
+07f12ec53619efc1
+== 645
+SELECT * FROM ONLY base_tbl_parent ORDER BY a
+--
+49a9e025ff1f8bbe
+== 646
+SELECT * FROM base_tbl_child ORDER BY a
+--
+992b77c790ca87c6
+== 647
+DROP TABLE base_tbl_parent, base_tbl_child CASCADE
+--
+8fd1ce9bb9481cd6
+== 648
+DROP TABLE other_tbl_parent CASCADE
+--
+dcb59e87b764137e
+== 649
+-- simple WITH CHECK OPTION
+
+CREATE TABLE base_tbl (a int, b int DEFAULT 10)
+--
+c8fded32354ed933
+== 650
+INSERT INTO base_tbl VALUES (1,2), (2,3), (1,-1)
+--
+c2e77c4edb5b3119
+== 651
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b
+  WITH LOCAL CHECK OPTION
+--
+d443b25fa74657d9
+== 652
+SELECT * FROM information_schema.views WHERE table_name = 'rw_view1'
+--
+4369c04570e93963
+== 653
+INSERT INTO rw_view1 VALUES(3,4)
+--
+23c7e1eb4c7cfd57
+== 654
+-- ok
+INSERT INTO rw_view1 VALUES(4,3)
+--
+23c7e1eb4c7cfd57
+== 655
+-- should fail
+INSERT INTO rw_view1 VALUES(5,null)
+--
+23c7e1eb4c7cfd57
+== 656
+-- should fail
+UPDATE rw_view1 SET b = 5 WHERE a = 3
+--
+4ff25741a62c62b5
+== 657
+-- ok
+UPDATE rw_view1 SET b = -5 WHERE a = 3
+--
+4ff25741a62c62b5
+== 658
+-- should fail
+INSERT INTO rw_view1(a) VALUES (9)
+--
+5b7221bd8a958db1
+== 659
+-- ok
+INSERT INTO rw_view1(a) VALUES (10)
+--
+5b7221bd8a958db1
+== 660
+-- should fail
+SELECT * FROM base_tbl ORDER BY a, b
+--
+41ae0c03f658ff20
+== 661
+MERGE INTO rw_view1 t USING (VALUES (10)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a + 1)
+--
+6d9cf050b10c06fd
+== 662
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (11)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a - 1)
+--
+5fc12043d7c850e8
+== 663
+-- should fail
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a - 1
+--
+e1835c03c6355529
+== 664
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (2)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a + 1
+--
+e9e2e92c5423f116
+== 665
+-- should fail
+SELECT * FROM base_tbl ORDER BY a, b
+--
+41ae0c03f658ff20
+== 666
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 667
+-- WITH LOCAL/CASCADED CHECK OPTION
+
+CREATE TABLE base_tbl (a int)
+--
+f58be31440d18756
+== 668
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0
+--
+5c0a53706ab91141
+== 669
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
+  WITH CHECK OPTION
+--
+ee85a1b2f7bcb093
+== 670
+-- implicitly cascaded
+SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
+--
+4369c04570e93963
+== 671
+INSERT INTO rw_view2 VALUES (-5)
+--
+c908a2471c7e773e
+== 672
+-- should fail
+INSERT INTO rw_view2 VALUES (5)
+--
+c908a2471c7e773e
+== 673
+-- ok
+INSERT INTO rw_view2 VALUES (15)
+--
+c908a2471c7e773e
+== 674
+-- should fail
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 675
+UPDATE rw_view2 SET a = a - 10
+--
+e8e8564885e5ce3c
+== 676
+-- should fail
+UPDATE rw_view2 SET a = a + 10
+--
+8e4f5ce3d1513a8f
+== 677
+-- should fail
+
+CREATE OR REPLACE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
+  WITH LOCAL CHECK OPTION
+--
+fdbcc78ef9c71bd6
+== 678
+SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
+--
+4369c04570e93963
+== 679
+INSERT INTO rw_view2 VALUES (-10)
+--
+c908a2471c7e773e
+== 680
+-- ok, but not in view
+INSERT INTO rw_view2 VALUES (20)
+--
+c908a2471c7e773e
+== 681
+-- should fail
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 682
+ALTER VIEW rw_view1 SET (check_option=here)
+--
+b48c3d3263d40394
+== 683
+-- invalid
+ALTER VIEW rw_view1 SET (check_option=local)
+--
+8dcfb111009740f1
+== 684
+INSERT INTO rw_view2 VALUES (-20)
+--
+c908a2471c7e773e
+== 685
+-- should fail
+INSERT INTO rw_view2 VALUES (30)
+--
+c908a2471c7e773e
+== 686
+-- should fail
+
+ALTER VIEW rw_view2 RESET (check_option)
+--
+466be7b1c5c488d7
+== 687
+SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
+--
+4369c04570e93963
+== 688
+INSERT INTO rw_view2 VALUES (30)
+--
+c908a2471c7e773e
+== 689
+-- ok, but not in view
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 690
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 691
+-- WITH CHECK OPTION with no local view qual
+
+CREATE TABLE base_tbl (a int)
+--
+f58be31440d18756
+== 692
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WITH CHECK OPTION
+--
+a7d24aa7613bc7ca
+== 693
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0
+--
+3089fb7e59e69ded
+== 694
+CREATE VIEW rw_view3 AS SELECT * FROM rw_view2 WITH CHECK OPTION
+--
+8fffd7eb638ffc45
+== 695
+SELECT * FROM information_schema.views WHERE table_name LIKE E'rw\\_view_' ORDER BY table_name
+--
+31e54e41ead6524f
+== 696
+INSERT INTO rw_view1 VALUES (-1)
+--
+23c7e1eb4c7cfd57
+== 697
+-- ok
+INSERT INTO rw_view1 VALUES (1)
+--
+23c7e1eb4c7cfd57
+== 698
+-- ok
+INSERT INTO rw_view2 VALUES (-2)
+--
+c908a2471c7e773e
+== 699
+-- ok, but not in view
+INSERT INTO rw_view2 VALUES (2)
+--
+c908a2471c7e773e
+== 700
+-- ok
+INSERT INTO rw_view3 VALUES (-3)
+--
+be1564f4e1326288
+== 701
+-- should fail
+INSERT INTO rw_view3 VALUES (3)
+--
+be1564f4e1326288
+== 702
+-- ok
+
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 703
+-- WITH CHECK OPTION with scalar array ops
+
+CREATE TABLE base_tbl (a int, b int[])
+--
+a4f8d604a7f8def7
+== 704
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a = ANY (b)
+  WITH CHECK OPTION
+--
+abe4ae2e4faf929d
+== 705
+INSERT INTO rw_view1 VALUES (1, ARRAY[1,2,3])
+--
+4a86cf4bb0f057c6
+== 706
+-- ok
+INSERT INTO rw_view1 VALUES (10, ARRAY[4,5])
+--
+4a86cf4bb0f057c6
+== 707
+-- should fail
+
+UPDATE rw_view1 SET b[2] = -b[2] WHERE a = 1
+--
+d3e6dd8a8269a895
+== 708
+-- ok
+UPDATE rw_view1 SET b[1] = -b[1] WHERE a = 1
+--
+d3e6dd8a8269a895
+== 709
+-- should fail
+
+PREPARE ins(int, int[]) AS INSERT INTO rw_view1 VALUES($1, $2)
+--
+39ee6a3e3f1c4fd0
+== 710
+EXECUTE ins(2, ARRAY[1,2,3])
+--
+aaf0497c91679c79
+== 711
+-- ok
+EXECUTE ins(10, ARRAY[4,5])
+--
+aaf0497c91679c79
+== 712
+-- should fail
+DEALLOCATE PREPARE ins
+--
+d8a65a814fbc5f95
+== 713
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 714
+-- WITH CHECK OPTION with subquery
+
+CREATE TABLE base_tbl (a int)
+--
+f58be31440d18756
+== 715
+CREATE TABLE ref_tbl (a int PRIMARY KEY)
+--
+5f775aa2cbb6fa66
+== 716
+INSERT INTO ref_tbl SELECT * FROM generate_series(1,10)
+--
+75c60de9160441ff
+== 717
+CREATE VIEW rw_view1 AS
+  SELECT * FROM base_tbl b
+  WHERE EXISTS(SELECT 1 FROM ref_tbl r WHERE r.a = b.a)
+  WITH CHECK OPTION
+--
+65b65f59e0f77269
+== 718
+INSERT INTO rw_view1 VALUES (5)
+--
+23c7e1eb4c7cfd57
+== 719
+-- ok
+INSERT INTO rw_view1 VALUES (15)
+--
+23c7e1eb4c7cfd57
+== 720
+-- should fail
+
+UPDATE rw_view1 SET a = a + 5
+--
+888a340b9ba6014e
+== 721
+-- ok
+UPDATE rw_view1 SET a = a + 5
+--
+888a340b9ba6014e
+== 722
+-- should fail
+
+EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (5)
+--
+2805262052d9418b
+== 723
+EXPLAIN (costs off) UPDATE rw_view1 SET a = a + 5
+--
+8243d2ed5562879a
+== 724
+DROP TABLE base_tbl, ref_tbl CASCADE
+--
+f58cba6b6620e33a
+== 725
+-- WITH CHECK OPTION with BEFORE trigger on base table
+
+CREATE TABLE base_tbl (a int, b int)
+--
+0c5d68a1e92e467b
+== 726
+CREATE FUNCTION base_tbl_trig_fn()
+RETURNS trigger AS
+$$
+BEGIN
+  NEW.b := 10;
+  RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql
+--
+03d64c2fadfb8598
+== 727
+CREATE TRIGGER base_tbl_trig BEFORE INSERT OR UPDATE ON base_tbl
+  FOR EACH ROW EXECUTE PROCEDURE base_tbl_trig_fn()
+--
+97668f080ee5ee0a
+== 728
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b WITH CHECK OPTION
+--
+b7b5252966b6d0c2
+== 729
+INSERT INTO rw_view1 VALUES (5,0)
+--
+23c7e1eb4c7cfd57
+== 730
+-- ok
+INSERT INTO rw_view1 VALUES (15, 20)
+--
+23c7e1eb4c7cfd57
+== 731
+-- should fail
+UPDATE rw_view1 SET a = 20, b = 30
+--
+9c4cb77be69049ce
+== 732
+-- should fail
+
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 733
+DROP FUNCTION base_tbl_trig_fn()
+--
+f5122fd5fec4946c
+== 734
+-- WITH LOCAL CHECK OPTION with INSTEAD OF trigger on base view
+
+CREATE TABLE base_tbl (a int, b int)
+--
+0c5d68a1e92e467b
+== 735
+CREATE VIEW rw_view1 AS SELECT a FROM base_tbl WHERE a < b
+--
+71f8f408097c17c3
+== 736
+CREATE FUNCTION rw_view1_trig_fn()
+RETURNS trigger AS
+$$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO base_tbl VALUES (NEW.a, 10);
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    UPDATE base_tbl SET a=NEW.a WHERE a=OLD.a;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    DELETE FROM base_tbl WHERE a=OLD.a;
+    RETURN OLD;
+  END IF;
+END;
+$$
+LANGUAGE plpgsql
+--
+c56142448e5cad8d
+== 737
+CREATE TRIGGER rw_view1_trig
+  INSTEAD OF INSERT OR UPDATE OR DELETE ON rw_view1
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+1c6f79a04cd8c5cb
+== 738
+CREATE VIEW rw_view2 AS
+  SELECT * FROM rw_view1 WHERE a > 0 WITH LOCAL CHECK OPTION
+--
+74d32241fba18590
+== 739
+INSERT INTO rw_view2 VALUES (-5)
+--
+c908a2471c7e773e
+== 740
+-- should fail
+MERGE INTO rw_view2 t USING (VALUES (-5)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a)
+--
+f68b80797412952d
+== 741
+-- should fail
+INSERT INTO rw_view2 VALUES (5)
+--
+c908a2471c7e773e
+== 742
+-- ok
+MERGE INTO rw_view2 t USING (VALUES (6)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a)
+--
+f68b80797412952d
+== 743
+-- ok
+INSERT INTO rw_view2 VALUES (50)
+--
+c908a2471c7e773e
+== 744
+-- ok, but not in view
+MERGE INTO rw_view2 t USING (VALUES (60)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a)
+--
+f68b80797412952d
+== 745
+-- ok, but not in view
+UPDATE rw_view2 SET a = a - 10
+--
+e8e8564885e5ce3c
+== 746
+-- should fail
+MERGE INTO rw_view2 t USING (VALUES (6)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a - 10
+--
+62010d1c50c9244e
+== 747
+-- should fail
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 748
+-- Check option won't cascade down to base view with INSTEAD OF triggers
+
+ALTER VIEW rw_view2 SET (check_option=cascaded)
+--
+d24fd3705f34c602
+== 749
+INSERT INTO rw_view2 VALUES (100)
+--
+c908a2471c7e773e
+== 750
+-- ok, but not in view (doesn't fail rw_view1's check)
+UPDATE rw_view2 SET a = 200 WHERE a = 5
+--
+76ebb8960bab0981
+== 751
+-- ok, but not in view (doesn't fail rw_view1's check)
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 752
+-- Neither local nor cascaded check options work with INSTEAD rules
+
+DROP TRIGGER rw_view1_trig ON rw_view1
+--
+79ec1cec776b13ef
+== 753
+CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
+  DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a, 10)
+--
+4330d5cb6e292cce
+== 754
+CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1
+  DO INSTEAD UPDATE base_tbl SET a=NEW.a WHERE a=OLD.a
+--
+8b7cd91e0eaffa3c
+== 755
+INSERT INTO rw_view2 VALUES (-10)
+--
+c908a2471c7e773e
+== 756
+-- ok, but not in view (doesn't fail rw_view2's check)
+INSERT INTO rw_view2 VALUES (5)
+--
+c908a2471c7e773e
+== 757
+-- ok
+INSERT INTO rw_view2 VALUES (20)
+--
+c908a2471c7e773e
+== 758
+-- ok, but not in view (doesn't fail rw_view1's check)
+UPDATE rw_view2 SET a = 30 WHERE a = 5
+--
+76ebb8960bab0981
+== 759
+-- ok, but not in view (doesn't fail rw_view1's check)
+INSERT INTO rw_view2 VALUES (5)
+--
+c908a2471c7e773e
+== 760
+-- ok
+UPDATE rw_view2 SET a = -5 WHERE a = 5
+--
+76ebb8960bab0981
+== 761
+-- ok, but not in view (doesn't fail rw_view2's check)
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 762
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 763
+DROP FUNCTION rw_view1_trig_fn()
+--
+1b1a885517396387
+== 764
+CREATE TABLE base_tbl (a int)
+--
+f58be31440d18756
+== 765
+CREATE VIEW rw_view1 AS SELECT a,10 AS b FROM base_tbl
+--
+b0da5c211a638e01
+== 766
+CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
+  DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a)
+--
+4330d5cb6e292cce
+== 767
+CREATE VIEW rw_view2 AS
+  SELECT * FROM rw_view1 WHERE a > b WITH LOCAL CHECK OPTION
+--
+c0282d5a3e062eb9
+== 768
+INSERT INTO rw_view2 VALUES (2,3)
+--
+c908a2471c7e773e
+== 769
+-- ok, but not in view (doesn't fail rw_view2's check)
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 770
+-- security barrier view
+
+CREATE TABLE base_tbl (person text, visibility text)
+--
+a0273daec4ce761f
+== 771
+INSERT INTO base_tbl VALUES ('Tom', 'public'),
+                            ('Dick', 'private'),
+                            ('Harry', 'public')
+--
+c2e77c4edb5b3119
+== 772
+CREATE VIEW rw_view1 AS
+  SELECT person FROM base_tbl WHERE visibility = 'public'
+--
+3ccf911c4013b258
+== 773
+CREATE FUNCTION snoop(anyelement)
+RETURNS boolean AS
+$$
+BEGIN
+  RAISE NOTICE 'snooped value: %', $1;
+  RETURN true;
+END;
+$$
+LANGUAGE plpgsql COST 0.000001
+--
+a4a46090db13714e
+== 774
+CREATE OR REPLACE FUNCTION leakproof(anyelement)
+RETURNS boolean AS
+$$
+BEGIN
+  RETURN true;
+END;
+$$
+LANGUAGE plpgsql STRICT IMMUTABLE LEAKPROOF
+--
+c091d3f509ec30eb
+== 775
+SELECT * FROM rw_view1 WHERE snoop(person)
+--
+ba9108989ba743e2
+== 776
+UPDATE rw_view1 SET person=person WHERE snoop(person)
+--
+b372c37e5afff2e9
+== 777
+DELETE FROM rw_view1 WHERE NOT snoop(person)
+--
+79d819d2a31c68f6
+== 778
+ALTER VIEW rw_view1 SET (security_barrier = true)
+--
+f846099505079256
+== 779
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name = 'rw_view1'
+--
+e32eb995f909ceee
+== 780
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name = 'rw_view1'
+--
+950d92027441b610
+== 781
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name = 'rw_view1'
+ ORDER BY ordinal_position
+--
+dfaa1b01933f7b37
+== 782
+SELECT * FROM rw_view1 WHERE snoop(person)
+--
+ba9108989ba743e2
+== 783
+UPDATE rw_view1 SET person=person WHERE snoop(person)
+--
+b372c37e5afff2e9
+== 784
+DELETE FROM rw_view1 WHERE NOT snoop(person)
+--
+79d819d2a31c68f6
+== 785
+MERGE INTO rw_view1 t
+  USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
+  WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
+--
+5010d3e0c7578404
+== 786
+EXPLAIN (costs off) SELECT * FROM rw_view1 WHERE snoop(person)
+--
+d2bee127b5c505ed
+== 787
+EXPLAIN (costs off) UPDATE rw_view1 SET person=person WHERE snoop(person)
+--
+c1769ed75016e5cc
+== 788
+EXPLAIN (costs off) DELETE FROM rw_view1 WHERE NOT snoop(person)
+--
+b5e1710797dc0440
+== 789
+EXPLAIN (costs off)
+MERGE INTO rw_view1 t
+  USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
+  WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
+--
+670edd4a0b6cad78
+== 790
+-- security barrier view on top of security barrier view
+
+CREATE VIEW rw_view2 WITH (security_barrier = true) AS
+  SELECT * FROM rw_view1 WHERE snoop(person)
+--
+b8a19e4c1fe9c711
+== 791
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name = 'rw_view2'
+--
+e32eb995f909ceee
+== 792
+SELECT table_name, is_updatable, is_insertable_into
+  FROM information_schema.views
+ WHERE table_name = 'rw_view2'
+--
+950d92027441b610
+== 793
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name = 'rw_view2'
+ ORDER BY ordinal_position
+--
+dfaa1b01933f7b37
+== 794
+SELECT * FROM rw_view2 WHERE snoop(person)
+--
+03ee4381adb2c72a
+== 795
+UPDATE rw_view2 SET person=person WHERE snoop(person)
+--
+cc8203a3a5e64534
+== 796
+DELETE FROM rw_view2 WHERE NOT snoop(person)
+--
+7145614714dc3b8f
+== 797
+MERGE INTO rw_view2 t
+  USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
+  WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
+--
+6f3b6ebd2e9c72be
+== 798
+EXPLAIN (costs off) SELECT * FROM rw_view2 WHERE snoop(person)
+--
+f305dfe0b2e97acb
+== 799
+EXPLAIN (costs off) UPDATE rw_view2 SET person=person WHERE snoop(person)
+--
+139e20975725db60
+== 800
+EXPLAIN (costs off) DELETE FROM rw_view2 WHERE NOT snoop(person)
+--
+c686fc7372d47fda
+== 801
+EXPLAIN (costs off)
+MERGE INTO rw_view2 t
+  USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
+  WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
+--
+8c6432a57b65a486
+== 802
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 803
+-- security barrier view on top of table with rules
+
+CREATE TABLE base_tbl(id int PRIMARY KEY, data text, deleted boolean)
+--
+8000ccfe52d3ceec
+== 804
+INSERT INTO base_tbl VALUES (1, 'Row 1', false), (2, 'Row 2', true)
+--
+c2e77c4edb5b3119
+== 805
+CREATE RULE base_tbl_ins_rule AS ON INSERT TO base_tbl
+  WHERE EXISTS (SELECT 1 FROM base_tbl t WHERE t.id = new.id)
+  DO INSTEAD
+    UPDATE base_tbl SET data = new.data, deleted = false WHERE id = new.id
+--
+1e34c82eb04f01f1
+== 806
+CREATE RULE base_tbl_del_rule AS ON DELETE TO base_tbl
+  DO INSTEAD
+    UPDATE base_tbl SET deleted = true WHERE id = old.id
+--
+a0eabfcf61e850b5
+== 807
+CREATE VIEW rw_view1 WITH (security_barrier=true) AS
+  SELECT id, data FROM base_tbl WHERE NOT deleted
+--
+af0ad886e7101d2f
+== 808
+SELECT * FROM rw_view1
+--
+3fb73c228d58c6d6
+== 809
+EXPLAIN (costs off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
+--
+d6339353fcd5ff9f
+== 810
+DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
+--
+7a5d5340d9ea8a23
+== 811
+EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (2, 'New row 2')
+--
+2805262052d9418b
+== 812
+INSERT INTO rw_view1 VALUES (2, 'New row 2')
+--
+23c7e1eb4c7cfd57
+== 813
+SELECT * FROM base_tbl
+--
+1772d6623ed7a55e
+== 814
+DROP TABLE base_tbl CASCADE
+--
+b2a3eaeb4cc4e754
+== 815
+-- security barrier view based on inheritance set
+CREATE TABLE t1 (a int, b float, c text)
+--
+842b7a6cb7a01aa6
+== 816
+CREATE INDEX t1_a_idx ON t1(a)
+--
+5eb19b1bf4a07635
+== 817
+INSERT INTO t1
+SELECT i,i,'t1' FROM generate_series(1,10) g(i)
+--
+c972eda43f9d19a2
+== 818
+ANALYZE t1
+--
+730ac09b08ea6dd9
+== 819
+CREATE TABLE t11 (d text) INHERITS (t1)
+--
+aa2d2bcf770f7e11
+== 820
+CREATE INDEX t11_a_idx ON t11(a)
+--
+a5ab8268f4ceff0e
+== 821
+INSERT INTO t11
+SELECT i,i,'t11','t11d' FROM generate_series(1,10) g(i)
+--
+ef7f833ea3b9187e
+== 822
+ANALYZE t11
+--
+6194c7b88fa87ce9
+== 823
+CREATE TABLE t12 (e int[]) INHERITS (t1)
+--
+b9164da7b056c41b
+== 824
+CREATE INDEX t12_a_idx ON t12(a)
+--
+9cac136f1dcff9f6
+== 825
+INSERT INTO t12
+SELECT i,i,'t12','{1,2}'::int[] FROM generate_series(1,10) g(i)
+--
+ef7f833ea3b9187e
+== 826
+ANALYZE t12
+--
+6194c7b88fa87ce9
+== 827
+CREATE TABLE t111 () INHERITS (t11, t12)
+--
+a453e1796d1d5182
+== 828
+CREATE INDEX t111_a_idx ON t111(a)
+--
+180816501dd7bd0e
+== 829
+INSERT INTO t111
+SELECT i,i,'t111','t111d','{1,1,1}'::int[] FROM generate_series(1,10) g(i)
+--
+ef7f833ea3b9187e
+== 830
+ANALYZE t111
+--
+6194c7b88fa87ce9
+== 831
+CREATE VIEW v1 WITH (security_barrier=true) AS
+SELECT *, (SELECT d FROM t11 WHERE t11.a = t1.a LIMIT 1) AS d
+FROM t1
+WHERE a > 5 AND EXISTS(SELECT 1 FROM t12 WHERE t12.a = t1.a)
+--
+3f032028f13783d9
+== 832
+SELECT * FROM v1 WHERE a=3
+--
+d0531f17a18f2515
+== 833
+-- should not see anything
+SELECT * FROM v1 WHERE a=8
+--
+d0531f17a18f2515
+== 834
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6
+--
+6f21b25ff2c07ca6
+== 835
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6
+--
+1705633f7889dce7
+== 836
+SELECT * FROM v1 WHERE a=100
+--
+d0531f17a18f2515
+== 837
+-- Nothing should have been changed to 100
+SELECT * FROM t1 WHERE a=100
+--
+04c49b7790489cfc
+== 838
+-- Nothing should have been changed to 100
+
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8
+--
+2038c984f8b1bb51
+== 839
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8
+--
+88f7dabd0ad394d9
+== 840
+SELECT * FROM v1 WHERE b=8
+--
+93d0b1d68f516fc8
+== 841
+DELETE FROM v1 WHERE snoop(a) AND leakproof(a)
+--
+f1c7a69c0657a074
+== 842
+-- should not delete everything, just where a>5
+
+TABLE t1
+--
+6ddf03c0ca938fc0
+== 843
+-- verify all a<=5 are intact
+
+DROP TABLE t1, t11, t12, t111 CASCADE
+--
+8c9e053164141594
+== 844
+DROP FUNCTION snoop(anyelement)
+--
+ba70731875cea956
+== 845
+DROP FUNCTION leakproof(anyelement)
+--
+df5cce066050cdc9
+== 846
+CREATE TABLE tx1 (a integer)
+--
+83c97fde183d20db
+== 847
+CREATE TABLE tx2 (b integer)
+--
+b01fafc870be68ad
+== 848
+CREATE TABLE tx3 (c integer)
+--
+9b2573a75e622076
+== 849
+CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
+--
+d62e2d4bda6a0741
+== 850
+INSERT INTO vx1 values (1)
+--
+f038e61c0e36677f
+== 851
+SELECT * FROM tx1
+--
+adbdfcb753c668a5
+== 852
+SELECT * FROM vx1
+--
+fd148c4909e2bad5
+== 853
+DROP VIEW vx1
+--
+73050ff4f596e2e2
+== 854
+DROP TABLE tx1
+--
+3f00e5bca8e41a6b
+== 855
+DROP TABLE tx2
+--
+892d625513520045
+== 856
+DROP TABLE tx3
+--
+5194b33a814a864a
+== 857
+CREATE TABLE tx1 (a integer)
+--
+83c97fde183d20db
+== 858
+CREATE TABLE tx2 (b integer)
+--
+b01fafc870be68ad
+== 859
+CREATE TABLE tx3 (c integer)
+--
+9b2573a75e622076
+== 860
+CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
+--
+d62e2d4bda6a0741
+== 861
+INSERT INTO vx1 VALUES (1)
+--
+f038e61c0e36677f
+== 862
+INSERT INTO vx1 VALUES (1)
+--
+f038e61c0e36677f
+== 863
+SELECT * FROM tx1
+--
+adbdfcb753c668a5
+== 864
+SELECT * FROM vx1
+--
+fd148c4909e2bad5
+== 865
+DROP VIEW vx1
+--
+73050ff4f596e2e2
+== 866
+DROP TABLE tx1
+--
+3f00e5bca8e41a6b
+== 867
+DROP TABLE tx2
+--
+892d625513520045
+== 868
+DROP TABLE tx3
+--
+5194b33a814a864a
+== 869
+CREATE TABLE tx1 (a integer, b integer)
+--
+e4324ae1ebbd4539
+== 870
+CREATE TABLE tx2 (b integer, c integer)
+--
+b0ccf9fc32f3ba04
+== 871
+CREATE TABLE tx3 (c integer, d integer)
+--
+842527c0f4ed766f
+== 872
+ALTER TABLE tx1 DROP COLUMN b
+--
+48a55ede0934c69e
+== 873
+ALTER TABLE tx2 DROP COLUMN c
+--
+fedb5be60fa7a6c0
+== 874
+ALTER TABLE tx3 DROP COLUMN d
+--
+905251e829145439
+== 875
+CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
+--
+d62e2d4bda6a0741
+== 876
+INSERT INTO vx1 VALUES (1)
+--
+f038e61c0e36677f
+== 877
+INSERT INTO vx1 VALUES (1)
+--
+f038e61c0e36677f
+== 878
+SELECT * FROM tx1
+--
+adbdfcb753c668a5
+== 879
+SELECT * FROM vx1
+--
+fd148c4909e2bad5
+== 880
+DROP VIEW vx1
+--
+73050ff4f596e2e2
+== 881
+DROP TABLE tx1
+--
+3f00e5bca8e41a6b
+== 882
+DROP TABLE tx2
+--
+892d625513520045
+== 883
+DROP TABLE tx3
+--
+5194b33a814a864a
+== 884
+|--
+-- Test handling of vars from correlated subqueries in quals from outer
+-- security barrier views, per bug #13988
+|--
+CREATE TABLE t1 (a int, b text, c int)
+--
+a47b8856edf163ff
+== 885
+INSERT INTO t1 VALUES (1, 'one', 10)
+--
+a2e44d31b55f17c7
+== 886
+CREATE TABLE t2 (cc int)
+--
+78bee2b46f2423e7
+== 887
+INSERT INTO t2 VALUES (10), (20)
+--
+37b3160bea0c45ef
+== 888
+CREATE VIEW v1 WITH (security_barrier = true) AS
+  SELECT * FROM t1 WHERE (a > 0)
+  WITH CHECK OPTION
+--
+818184c32e6eee7c
+== 889
+CREATE VIEW v2 WITH (security_barrier = true) AS
+  SELECT * FROM v1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.cc = v1.c)
+  WITH CHECK OPTION
+--
+053441338e618d58
+== 890
+INSERT INTO v2 VALUES (2, 'two', 20)
+--
+2474e5095f41b157
+== 891
+-- ok
+INSERT INTO v2 VALUES (-2, 'minus two', 20)
+--
+2474e5095f41b157
+== 892
+-- not allowed
+INSERT INTO v2 VALUES (3, 'three', 30)
+--
+2474e5095f41b157
+== 893
+-- not allowed
+
+UPDATE v2 SET b = 'ONE' WHERE a = 1
+--
+4aa804780c780bae
+== 894
+-- ok
+UPDATE v2 SET a = -1 WHERE a = 1
+--
+e30650b291f13acf
+== 895
+-- not allowed
+UPDATE v2 SET c = 30 WHERE a = 1
+--
+975e24ce25ca31ee
+== 896
+-- not allowed
+
+DELETE FROM v2 WHERE a = 2
+--
+e0897344e4a09ede
+== 897
+-- ok
+SELECT * FROM v2
+--
+9fe7b45d45320eba
+== 898
+DROP VIEW v2
+--
+6ddf9ead9b4edb08
+== 899
+DROP VIEW v1
+--
+ea6f98226bef7d47
+== 900
+DROP TABLE t2
+--
+8a1aae9eb50d046c
+== 901
+DROP TABLE t1
+--
+7cef1560e91b5a1f
+== 902
+|--
+-- Test sub-select in nested security barrier views, per bug #17972
+|--
+CREATE TABLE t1 (a int)
+--
+f4679c6ce362c52b
+== 903
+CREATE VIEW v1 WITH (security_barrier = true) AS
+  SELECT * FROM t1
+--
+fa73e7ac35fc8f0d
+== 904
+CREATE RULE v1_upd_rule AS ON UPDATE TO v1 DO INSTEAD
+  UPDATE t1 SET a = NEW.a WHERE a = OLD.a
+--
+a58f165bd9a8a95b
+== 905
+CREATE VIEW v2 WITH (security_barrier = true) AS
+  SELECT * FROM v1 WHERE EXISTS (SELECT 1)
+--
+2aa524acdfd9618c
+== 906
+EXPLAIN (COSTS OFF) UPDATE v2 SET a = 1
+--
+8d9276a10b866c70
+== 907
+DROP VIEW v2
+--
+6ddf9ead9b4edb08
+== 908
+DROP VIEW v1
+--
+ea6f98226bef7d47
+== 909
+DROP TABLE t1
+--
+7cef1560e91b5a1f
+== 910
+|--
+-- Test CREATE OR REPLACE VIEW turning a non-updatable view into an
+-- auto-updatable view and adding check options in a single step
+|--
+CREATE TABLE t1 (a int, b text)
+--
+27ace81377fce56d
+== 911
+CREATE VIEW v1 AS SELECT null::int AS a
+--
+575e4e3266966ccf
+== 912
+CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1 WHERE a > 0 WITH CHECK OPTION
+--
+ba48a7ff5dbddeba
+== 913
+INSERT INTO v1 VALUES (1, 'ok')
+--
+273874e6c2ad83d8
+== 914
+-- ok
+INSERT INTO v1 VALUES (-1, 'invalid')
+--
+273874e6c2ad83d8
+== 915
+-- should fail
+
+DROP VIEW v1
+--
+ea6f98226bef7d47
+== 916
+DROP TABLE t1
+--
+7cef1560e91b5a1f
+== 917
+-- check that an auto-updatable view on a partitioned table works correctly
+create table uv_pt (a int, b int, v varchar) partition by range (a, b)
+--
+ec151c90f6a8b6b8
+== 918
+create table uv_pt1 (b int not null, v varchar, a int not null) partition by range (b)
+--
+eb32173827bbe4a2
+== 919
+create table uv_pt11 (like uv_pt1)
+--
+892154581e76e8d6
+== 920
+alter table uv_pt11 drop a
+--
+3eba5976ceab597b
+== 921
+alter table uv_pt11 add a int
+--
+172b6c539dc41433
+== 922
+alter table uv_pt11 drop a
+--
+3eba5976ceab597b
+== 923
+alter table uv_pt11 add a int not null
+--
+4eef026ea0fa95ef
+== 924
+alter table uv_pt1 attach partition uv_pt11 for values from (2) to (5)
+--
+411d6874214635ef
+== 925
+alter table uv_pt attach partition uv_pt1 for values from (1, 2) to (1, 10)
+--
+502ac564150b1ee5
+== 926
+create view uv_ptv as select * from uv_pt
+--
+03e914b48e8fbe7c
+== 927
+select events & 4 != 0 AS upd,
+       events & 8 != 0 AS ins,
+       events & 16 != 0 AS del
+  from pg_catalog.pg_relation_is_updatable('uv_pt'::regclass, false) t(events)
+--
+edd9cbf9962eb8b0
+== 928
+select pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 1::smallint, false)
+--
+a6f424dc701ac934
+== 929
+select pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 2::smallint, false)
+--
+a6f424dc701ac934
+== 930
+select table_name, is_updatable, is_insertable_into
+  from information_schema.views where table_name = 'uv_ptv'
+--
+950d92027441b610
+== 931
+select table_name, column_name, is_updatable
+  from information_schema.columns where table_name = 'uv_ptv' order by column_name
+--
+2b8e1c4d4463ebcc
+== 932
+insert into uv_ptv values (1, 2)
+--
+172801a35e8b246f
+== 933
+select tableoid::regclass, * from uv_pt
+--
+357ce88e42f5b30d
+== 934
+create view uv_ptv_wco as select * from uv_pt where a = 0 with check option
+--
+4dfa5421fac8f386
+== 935
+insert into uv_ptv_wco values (1, 2)
+--
+0293a63f34a85995
+== 936
+merge into uv_ptv t
+  using (values (1,2), (1,4)) as v(a,b) on t.a = v.a -- fail: matches 2 src rows
+  when matched then update set b = t.b + 1
+  when not matched then insert values (v.a, v.b + 1)
+--
+b19feb12c4d7da25
+== 937
+merge into uv_ptv t
+  using (values (1,2), (1,4)) as v(a,b) on t.a = v.a and t.b = v.b
+  when matched then update set b = t.b + 1
+  when not matched then insert values (v.a, v.b + 1)
+--
+b372dc46d6ef258c
+== 938
+-- fail: no partition for b=5
+merge into uv_ptv t
+  using (values (1,2), (1,3)) as v(a,b) on t.a = v.a and t.b = v.b
+  when matched then update set b = t.b + 1
+  when not matched then insert values (v.a, v.b + 1)
+--
+b372dc46d6ef258c
+== 939
+-- ok
+select tableoid::regclass, * from uv_pt order by a, b
+--
+ff680e182c91ad0e
+== 940
+drop view uv_ptv, uv_ptv_wco
+--
+e9c9e7516ca33ec5
+== 941
+drop table uv_pt, uv_pt1, uv_pt11
+--
+5d79f548330322e5
+== 942
+-- check that wholerow vars appearing in WITH CHECK OPTION constraint expressions
+-- work fine with partitioned tables
+create table wcowrtest (a int) partition by list (a)
+--
+b38cbcea5b32ba35
+== 943
+create table wcowrtest1 partition of wcowrtest for values in (1)
+--
+5b24fcb3c41d85e6
+== 944
+create view wcowrtest_v as select * from wcowrtest where wcowrtest = '(2)'::wcowrtest with check option
+--
+84cf44b628ec7819
+== 945
+insert into wcowrtest_v values (1)
+--
+07e32171ea3d2aae
+== 946
+alter table wcowrtest add b text
+--
+c2de142c3024c53d
+== 947
+create table wcowrtest2 (b text, c int, a int)
+--
+145d104bab814750
+== 948
+alter table wcowrtest2 drop c
+--
+1e5126e780d2b477
+== 949
+alter table wcowrtest attach partition wcowrtest2 for values in (2)
+--
+9e901014d028dc21
+== 950
+create table sometable (a int, b text)
+--
+2554bc7901406730
+== 951
+insert into sometable values (1, 'a'), (2, 'b')
+--
+af9db6180a122455
+== 952
+create view wcowrtest_v2 as
+    select *
+      from wcowrtest r
+      where r in (select s from sometable s where r.a = s.a)
+with check option
+--
+326a4051e09ef219
+== 953
+-- WITH CHECK qual will be processed with wcowrtest2's
+-- rowtype after tuple-routing
+insert into wcowrtest_v2 values (2, 'no such row in sometable')
+--
+6c5712b5c35832e3
+== 954
+drop view wcowrtest_v, wcowrtest_v2
+--
+2f41574195e2f877
+== 955
+drop table wcowrtest, sometable
+--
+0d343faca851e153
+== 956
+-- Check INSERT .. ON CONFLICT DO UPDATE works correctly when the view's
+-- columns are named and ordered differently than the underlying table's.
+create table uv_iocu_tab (a text unique, b float)
+--
+0bbe3be117e3f18d
+== 957
+insert into uv_iocu_tab values ('xyxyxy', 0)
+--
+1e93b091f20dc93a
+== 958
+create view uv_iocu_view as
+   select b, b+1 as c, a, '2.0'::text as two from uv_iocu_tab
+--
+6f4a3879f9a13928
+== 959
+insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
+   on conflict (a) do update set b = uv_iocu_view.b
+--
+5625e11a570f1e09
+== 960
+select * from uv_iocu_tab
+--
+770a118f49acdb50
+== 961
+insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
+   on conflict (a) do update set b = excluded.b
+--
+bdfe10b160288cb3
+== 962
+select * from uv_iocu_tab
+--
+770a118f49acdb50
+== 963
+-- OK to access view columns that are not present in underlying base
+-- relation in the ON CONFLICT portion of the query
+insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
+   on conflict (a) do update set b = cast(excluded.two as float)
+--
+43eac554a6360792
+== 964
+select * from uv_iocu_tab
+--
+770a118f49acdb50
+== 965
+explain (costs off)
+insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
+   on conflict (a) do update set b = excluded.b where excluded.c > 0
+--
+95b93bb05cef7cd9
+== 966
+insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
+   on conflict (a) do update set b = excluded.b where excluded.c > 0
+--
+800a5e8e99293e5f
+== 967
+select * from uv_iocu_tab
+--
+770a118f49acdb50
+== 968
+drop view uv_iocu_view
+--
+8f35ffc9dc330008
+== 969
+drop table uv_iocu_tab
+--
+dcbb61ac209cb357
+== 970
+-- Test whole-row references to the view
+create table uv_iocu_tab (a int unique, b text)
+--
+41430992750b1aba
+== 971
+create view uv_iocu_view as
+    select b as bb, a as aa, uv_iocu_tab::text as cc from uv_iocu_tab
+--
+118858c2b75efb4a
+== 972
+insert into uv_iocu_view (aa,bb) values (1,'x')
+--
+de7187bcfc032b21
+== 973
+explain (costs off)
+insert into uv_iocu_view (aa,bb) values (1,'y')
+   on conflict (aa) do update set bb = 'Rejected: '||excluded.*
+   where excluded.aa > 0
+   and excluded.bb != ''
+   and excluded.cc is not null
+--
+ddb3b9b17f6f8e78
+== 974
+insert into uv_iocu_view (aa,bb) values (1,'y')
+   on conflict (aa) do update set bb = 'Rejected: '||excluded.*
+   where excluded.aa > 0
+   and excluded.bb != ''
+   and excluded.cc is not null
+--
+79c0227d4854270b
+== 975
+select * from uv_iocu_view
+--
+f2a49f7dd736b3f7
+== 976
+-- Test omitting a column of the base relation
+delete from uv_iocu_view
+--
+1e882dd8e41d83c9
+== 977
+insert into uv_iocu_view (aa,bb) values (1,'x')
+--
+de7187bcfc032b21
+== 978
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do update set bb = 'Rejected: '||excluded.*
+--
+01f5699efb58e80a
+== 979
+select * from uv_iocu_view
+--
+f2a49f7dd736b3f7
+== 980
+alter table uv_iocu_tab alter column b set default 'table default'
+--
+0ce54d3c4402489b
+== 981
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do update set bb = 'Rejected: '||excluded.*
+--
+01f5699efb58e80a
+== 982
+select * from uv_iocu_view
+--
+f2a49f7dd736b3f7
+== 983
+alter view uv_iocu_view alter column bb set default 'view default'
+--
+c1d5a08f3e7908a1
+== 984
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do update set bb = 'Rejected: '||excluded.*
+--
+01f5699efb58e80a
+== 985
+select * from uv_iocu_view
+--
+f2a49f7dd736b3f7
+== 986
+-- Should fail to update non-updatable columns
+insert into uv_iocu_view (aa) values (1)
+   on conflict (aa) do update set cc = 'XXX'
+--
+76b8f7b73fec30cf
+== 987
+drop view uv_iocu_view
+--
+8f35ffc9dc330008
+== 988
+drop table uv_iocu_tab
+--
+dcbb61ac209cb357
+== 989
+-- ON CONFLICT DO UPDATE permissions checks
+create user regress_view_user1
+--
+30e20dab3b2a799d
+== 990
+create user regress_view_user2
+--
+89544bdee4cf4048
+== 991
+set session authorization regress_view_user1
+--
+532a0ea53df105d9
+== 992
+create table base_tbl(a int unique, b text, c float)
+--
+6f2ca0383c668217
+== 993
+insert into base_tbl values (1,'xxx',1.0)
+--
+c2e77c4edb5b3119
+== 994
+create view rw_view1 as select b as bb, c as cc, a as aa from base_tbl
+--
+6ff0fe3b820f931c
+== 995
+grant select (aa,bb) on rw_view1 to regress_view_user2
+--
+32312232759a755b
+== 996
+grant insert on rw_view1 to regress_view_user2
+--
+f329886c3da33d1b
+== 997
+grant update (bb) on rw_view1 to regress_view_user2
+--
+763ef4de889ccbe9
+== 998
+set session authorization regress_view_user2
+--
+532a0ea53df105d9
+== 999
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do update set bb = excluded.cc
+--
+623fbdb09ffffd1f
+== 1000
+-- Not allowed
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do update set bb = rw_view1.cc
+--
+bf1e29f13d2da748
+== 1001
+-- Not allowed
+insert into rw_view1 values ('yyy',2.0,1)
+  on conflict (aa) do update set bb = excluded.bb
+--
+5218b872207aecf7
+== 1002
+-- OK
+insert into rw_view1 values ('zzz',2.0,1)
+  on conflict (aa) do update set bb = rw_view1.bb||'xxx'
+--
+39b1598ca6e92174
+== 1003
+-- OK
+insert into rw_view1 values ('zzz',2.0,1)
+  on conflict (aa) do update set cc = 3.0
+--
+11488078892a99e9
+== 1004
+-- Not allowed
+reset session authorization
+--
+8a5cf7139a632958
+== 1005
+select * from base_tbl
+--
+1772d6623ed7a55e
+== 1006
+set session authorization regress_view_user1
+--
+532a0ea53df105d9
+== 1007
+grant select (a,b) on base_tbl to regress_view_user2
+--
+21158ad4f5c0d07a
+== 1008
+grant insert (a,b) on base_tbl to regress_view_user2
+--
+a51f9eb3649b4b0c
+== 1009
+grant update (a,b) on base_tbl to regress_view_user2
+--
+120d0560b30e04f6
+== 1010
+set session authorization regress_view_user2
+--
+532a0ea53df105d9
+== 1011
+create view rw_view2 as select b as bb, c as cc, a as aa from base_tbl
+--
+b617227ee1c44353
+== 1012
+insert into rw_view2 (aa,bb) values (1,'xxx')
+  on conflict (aa) do update set bb = excluded.bb
+--
+7fc06ea810e97ed9
+== 1013
+-- Not allowed
+create view rw_view3 as select b as bb, a as aa from base_tbl
+--
+1720aa51b32dd72a
+== 1014
+insert into rw_view3 (aa,bb) values (1,'xxx')
+  on conflict (aa) do update set bb = excluded.bb
+--
+30bcdf6b7c95ec43
+== 1015
+-- OK
+reset session authorization
+--
+8a5cf7139a632958
+== 1016
+select * from base_tbl
+--
+1772d6623ed7a55e
+== 1017
+set session authorization regress_view_user2
+--
+532a0ea53df105d9
+== 1018
+create view rw_view4 as select aa, bb, cc FROM rw_view1
+--
+036b855f8030b46a
+== 1019
+insert into rw_view4 (aa,bb) values (1,'yyy')
+  on conflict (aa) do update set bb = excluded.bb
+--
+5b332122cb7276e0
+== 1020
+-- Not allowed
+create view rw_view5 as select aa, bb FROM rw_view1
+--
+bc4904b20f77f013
+== 1021
+insert into rw_view5 (aa,bb) values (1,'yyy')
+  on conflict (aa) do update set bb = excluded.bb
+--
+24e70d675e5e9ee8
+== 1022
+-- OK
+reset session authorization
+--
+8a5cf7139a632958
+== 1023
+select * from base_tbl
+--
+1772d6623ed7a55e
+== 1024
+drop view rw_view5
+--
+76418f5559d9b1d5
+== 1025
+drop view rw_view4
+--
+8f770149907bb1ae
+== 1026
+drop view rw_view3
+--
+1f42f78742008708
+== 1027
+drop view rw_view2
+--
+24284a58f5179cee
+== 1028
+drop view rw_view1
+--
+79a4e42d3aff0a33
+== 1029
+drop table base_tbl
+--
+d3660d3268d5a4dd
+== 1030
+drop user regress_view_user1
+--
+0e0bb4a555d3244e
+== 1031
+drop user regress_view_user2
+--
+e355792328931a28
+== 1032
+-- Test single- and multi-row inserts with table and view defaults.
+-- Table defaults should be used, unless overridden by view defaults.
+create table base_tab_def (a int, b text default 'Table default',
+                           c text default 'Table default', d text, e text)
+--
+5eb47ea51251c251
+== 1033
+create view base_tab_def_view as select * from base_tab_def
+--
+e56c1fb8970eacbc
+== 1034
+alter view base_tab_def_view alter b set default 'View default'
+--
+2ec49df8dd3911e4
+== 1035
+alter view base_tab_def_view alter d set default 'View default'
+--
+33cce89ba561e8f6
+== 1036
+insert into base_tab_def values (1)
+--
+fd991f27e1b12859
+== 1037
+insert into base_tab_def values (2), (3)
+--
+fd991f27e1b12859
+== 1038
+insert into base_tab_def values (4, default, default, default, default)
+--
+fd991f27e1b12859
+== 1039
+insert into base_tab_def values (5, default, default, default, default),
+                                (6, default, default, default, default)
+--
+fd991f27e1b12859
+== 1040
+insert into base_tab_def_view values (11)
+--
+7713ac18d5af8497
+== 1041
+insert into base_tab_def_view values (12), (13)
+--
+7713ac18d5af8497
+== 1042
+insert into base_tab_def_view values (14, default, default, default, default)
+--
+7713ac18d5af8497
+== 1043
+insert into base_tab_def_view values (15, default, default, default, default),
+                                     (16, default, default, default, default)
+--
+7713ac18d5af8497
+== 1044
+insert into base_tab_def_view values (17), (default)
+--
+7713ac18d5af8497
+== 1045
+select * from base_tab_def order by a
+--
+f2e1e15f0c0b89ed
+== 1046
+-- Adding an INSTEAD OF trigger should cause NULLs to be inserted instead of
+-- table defaults, where there are no view defaults.
+create function base_tab_def_view_instrig_func() returns trigger
+as
+$$
+begin
+  insert into base_tab_def values (new.a, new.b, new.c, new.d, new.e);
+  return new;
+end;
+$$
+language plpgsql
+--
+dfea92862ff85353
+== 1047
+create trigger base_tab_def_view_instrig instead of insert on base_tab_def_view
+  for each row execute function base_tab_def_view_instrig_func()
+--
+437add5712df8e16
+== 1048
+truncate base_tab_def
+--
+07c16ba2e0a7163f
+== 1049
+insert into base_tab_def values (1)
+--
+fd991f27e1b12859
+== 1050
+insert into base_tab_def values (2), (3)
+--
+fd991f27e1b12859
+== 1051
+insert into base_tab_def values (4, default, default, default, default)
+--
+fd991f27e1b12859
+== 1052
+insert into base_tab_def values (5, default, default, default, default),
+                                (6, default, default, default, default)
+--
+fd991f27e1b12859
+== 1053
+insert into base_tab_def_view values (11)
+--
+7713ac18d5af8497
+== 1054
+insert into base_tab_def_view values (12), (13)
+--
+7713ac18d5af8497
+== 1055
+insert into base_tab_def_view values (14, default, default, default, default)
+--
+7713ac18d5af8497
+== 1056
+insert into base_tab_def_view values (15, default, default, default, default),
+                                     (16, default, default, default, default)
+--
+7713ac18d5af8497
+== 1057
+insert into base_tab_def_view values (17), (default)
+--
+7713ac18d5af8497
+== 1058
+select * from base_tab_def order by a
+--
+f2e1e15f0c0b89ed
+== 1059
+-- Using an unconditional DO INSTEAD rule should also cause NULLs to be
+-- inserted where there are no view defaults.
+drop trigger base_tab_def_view_instrig on base_tab_def_view
+--
+294be0bb524129a1
+== 1060
+drop function base_tab_def_view_instrig_func
+--
+4e74b25e68aa3400
+== 1061
+create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
+  do instead insert into base_tab_def values (new.a, new.b, new.c, new.d, new.e)
+--
+f6cfacba81be593b
+== 1062
+truncate base_tab_def
+--
+07c16ba2e0a7163f
+== 1063
+insert into base_tab_def values (1)
+--
+fd991f27e1b12859
+== 1064
+insert into base_tab_def values (2), (3)
+--
+fd991f27e1b12859
+== 1065
+insert into base_tab_def values (4, default, default, default, default)
+--
+fd991f27e1b12859
+== 1066
+insert into base_tab_def values (5, default, default, default, default),
+                                (6, default, default, default, default)
+--
+fd991f27e1b12859
+== 1067
+insert into base_tab_def_view values (11)
+--
+7713ac18d5af8497
+== 1068
+insert into base_tab_def_view values (12), (13)
+--
+7713ac18d5af8497
+== 1069
+insert into base_tab_def_view values (14, default, default, default, default)
+--
+7713ac18d5af8497
+== 1070
+insert into base_tab_def_view values (15, default, default, default, default),
+                                     (16, default, default, default, default)
+--
+7713ac18d5af8497
+== 1071
+insert into base_tab_def_view values (17), (default)
+--
+7713ac18d5af8497
+== 1072
+select * from base_tab_def order by a
+--
+f2e1e15f0c0b89ed
+== 1073
+-- A DO ALSO rule should cause each row to be inserted twice. The first
+-- insert should behave the same as an auto-updatable view (using table
+-- defaults, unless overridden by view defaults). The second insert should
+-- behave the same as a rule-updatable view (inserting NULLs where there are
+-- no view defaults).
+drop rule base_tab_def_view_ins_rule on base_tab_def_view
+--
+e9baf1cb77aa0a84
+== 1074
+create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
+  do also insert into base_tab_def values (new.a, new.b, new.c, new.d, new.e)
+--
+01dab9ede9ac8d29
+== 1075
+truncate base_tab_def
+--
+07c16ba2e0a7163f
+== 1076
+insert into base_tab_def values (1)
+--
+fd991f27e1b12859
+== 1077
+insert into base_tab_def values (2), (3)
+--
+fd991f27e1b12859
+== 1078
+insert into base_tab_def values (4, default, default, default, default)
+--
+fd991f27e1b12859
+== 1079
+insert into base_tab_def values (5, default, default, default, default),
+                                (6, default, default, default, default)
+--
+fd991f27e1b12859
+== 1080
+insert into base_tab_def_view values (11)
+--
+7713ac18d5af8497
+== 1081
+insert into base_tab_def_view values (12), (13)
+--
+7713ac18d5af8497
+== 1082
+insert into base_tab_def_view values (14, default, default, default, default)
+--
+7713ac18d5af8497
+== 1083
+insert into base_tab_def_view values (15, default, default, default, default),
+                                     (16, default, default, default, default)
+--
+7713ac18d5af8497
+== 1084
+insert into base_tab_def_view values (17), (default)
+--
+7713ac18d5af8497
+== 1085
+select * from base_tab_def order by a, c NULLS LAST
+--
+e3911dde5043e327
+== 1086
+-- Test a DO ALSO INSERT ... SELECT rule
+drop rule base_tab_def_view_ins_rule on base_tab_def_view
+--
+e9baf1cb77aa0a84
+== 1087
+create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
+  do also insert into base_tab_def (a, b, e) select new.a, new.b, 'xxx'
+--
+1bdc243834412c5f
+== 1088
+truncate base_tab_def
+--
+07c16ba2e0a7163f
+== 1089
+insert into base_tab_def_view values (1, default, default, default, default)
+--
+7713ac18d5af8497
+== 1090
+insert into base_tab_def_view values (2, default, default, default, default),
+                                     (3, default, default, default, default)
+--
+7713ac18d5af8497
+== 1091
+select * from base_tab_def order by a, e nulls first
+--
+8ddb706bbfb5180a
+== 1092
+drop view base_tab_def_view
+--
+a1ecbb75e898bbd5
+== 1093
+drop table base_tab_def
+--
+689898b07acae80c
+== 1094
+-- Test defaults with array assignments
+create table base_tab (a serial, b int[], c text, d text default 'Table default')
+--
+e0813b927a1e662c
+== 1095
+create view base_tab_view as select c, a, b from base_tab
+--
+123bac4053617ea3
+== 1096
+alter view base_tab_view alter column c set default 'View default'
+--
+24647c88bb725aa9
+== 1097
+insert into base_tab_view (b[1], b[2], c, b[5], b[4], a, b[3])
+values (1, 2, default, 5, 4, default, 3), (10, 11, 'C value', 14, 13, 100, 12)
+--
+9aa9ba6ba2342477
+== 1098
+select * from base_tab order by a
+--
+55375ee61f1636c4
+== 1099
+drop view base_tab_view
+--
+6efa785270e010ef
+== 1100
+drop table base_tab
+--
+868139bd2c1bfb69

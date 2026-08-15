@@ -1,0 +1,1257 @@
+== 001
+|--
+-- insert...on conflict do unique index inference
+|--
+create table insertconflicttest(key int4, fruit text)
+--
+79da73982f19fc00
+== 002
+-- These things should work through a view, as well
+create view insertconflictview as select * from insertconflicttest
+--
+9adf525e0e568444
+== 003
+|--
+-- Test unique index inference with operator class specifications and
+-- named collations
+|--
+create unique index op_index_key on insertconflicttest(key, fruit text_pattern_ops)
+--
+135b04964ae86b5d
+== 004
+create unique index collation_index_key on insertconflicttest(key, fruit collate "C")
+--
+a82768d6115d90ca
+== 005
+create unique index both_index_key on insertconflicttest(key, fruit collate "C" text_pattern_ops)
+--
+a1490c3e4152033c
+== 006
+create unique index both_index_expr_key on insertconflicttest(key, lower(fruit) collate "C" text_pattern_ops)
+--
+016627279170d57e
+== 007
+-- fails
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key) do nothing
+--
+9b653329d06e7f68
+== 008
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit) do nothing
+--
+a4f4d755058a1ff1
+== 009
+-- succeeds
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do nothing
+--
+6d77e394171726dc
+== 010
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit, key, fruit, key) do nothing
+--
+48e3568c43df297f
+== 011
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit), key, lower(fruit), key) do nothing
+--
+72322177577c0409
+== 012
+explain (costs off) insert into insertconflictview values(0, 'Crowberry') on conflict (lower(fruit), key, lower(fruit), key) do nothing
+--
+6d4f992ab1bb0416
+== 013
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do update set fruit = excluded.fruit
+  where exists (select 1 from insertconflicttest ii where ii.key = excluded.key)
+--
+6b57f78cbe7bc297
+== 014
+-- Neither collation nor operator class specifications are required --
+-- supplying them merely *limits* matches to indexes with matching opclasses
+-- used for relevant indexes
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit text_pattern_ops) do nothing
+--
+a157baeee769225a
+== 015
+-- Okay, arbitrates using both index where text_pattern_ops opclass does and
+-- does not appear.
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit collate "C") do nothing
+--
+31cbd00fab95df36
+== 016
+-- Okay, but only accepts the single index where both opclass and collation are
+-- specified
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit collate "C" text_pattern_ops, key) do nothing
+--
+a58ae892492aa399
+== 017
+-- Okay, but only accepts the single index where both opclass and collation are
+-- specified (plus expression variant)
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C", key, key) do nothing
+--
+29fe79cf810a93b4
+== 018
+-- Attribute appears twice, while not all attributes/expressions on attributes
+-- appearing within index definition match in terms of both opclass and
+-- collation.
+|--
+-- Works because every attribute in inference specification needs to be
+-- satisfied once or more by cataloged index attribute, and as always when an
+-- attribute in the cataloged definition has a non-default opclass/collation,
+-- it still satisfied some inference attribute lacking any particular
+-- opclass/collation specification.
+|--
+-- The implementation is liberal in accepting inference specifications on the
+-- assumption that multiple inferred unique indexes will prevent problematic
+-- cases.  It rolls with unique indexes where attributes redundantly appear
+-- multiple times, too (which is not tested here).
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit, key, fruit text_pattern_ops, key) do nothing
+--
+d56ca61cb8038ef0
+== 019
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C" text_pattern_ops, key, key) do nothing
+--
+f4b8afa2f56bf440
+== 020
+drop index op_index_key
+--
+e57666c8e2cbce8f
+== 021
+drop index collation_index_key
+--
+2875626547ce1a00
+== 022
+drop index both_index_key
+--
+afea56ea8dd355e8
+== 023
+drop index both_index_expr_key
+--
+11543c9f5dc522ae
+== 024
+|--
+-- Make sure that cross matching of attribute opclass/collation does not occur
+|--
+create unique index cross_match on insertconflicttest(lower(fruit) collate "C", upper(fruit) text_pattern_ops)
+--
+8a4cb47981806e24
+== 025
+-- fails:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) text_pattern_ops, upper(fruit) collate "C") do nothing
+--
+ff38f886d97c6cf7
+== 026
+-- works:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C", upper(fruit) text_pattern_ops) do nothing
+--
+803235569d8c3a06
+== 027
+drop index cross_match
+--
+edc6d60deede9c84
+== 028
+|--
+-- Single key tests
+|--
+create unique index key_index on insertconflicttest(key)
+--
+93c2b690c5626812
+== 029
+|--
+-- Explain tests
+|--
+explain (costs off) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit
+--
+515da5a39f83e3f8
+== 030
+-- Should display qual actually attributable to internal sequential scan:
+explain (costs off) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit where insertconflicttest.fruit != 'Cawesh'
+--
+65390d4bc9eca40d
+== 031
+-- With EXCLUDED.* expression in scan node:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key) do update set fruit = excluded.fruit where excluded.fruit != 'Elderberry'
+--
+1e1114ca6107acd8
+== 032
+-- Does the same, but JSON format shows "Conflict Arbiter Index" as JSON array:
+explain (costs off, format json) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit where insertconflicttest.fruit != 'Lime' returning *
+--
+926d7fba7178fcbc
+== 033
+-- Fails (no unique index inference specification, required for do update variant):
+insert into insertconflicttest values (1, 'Apple') on conflict do update set fruit = excluded.fruit
+--
+1283636c88203973
+== 034
+-- inference succeeds:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 035
+insert into insertconflicttest values (2, 'Orange') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+6bb19e5b66eab439
+== 036
+-- Succeed, since multi-assignment does not involve subquery:
+insert into insertconflicttest
+values (1, 'Apple'), (2, 'Orange')
+on conflict (key) do update set (fruit, key) = (excluded.fruit, excluded.key)
+--
+35a7b7da3f66014f
+== 037
+-- Give good diagnostic message when EXCLUDED.* spuriously referenced from
+-- RETURNING:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruit RETURNING excluded.fruit
+--
+9319fb9ea8ef0f36
+== 038
+-- Only suggest <table>.* column when inference element misspelled:
+insert into insertconflicttest values (1, 'Apple') on conflict (keyy) do update set fruit = excluded.fruit
+--
+fdceceffd769e69f
+== 039
+-- Have useful HINT for EXCLUDED.* RTE within UPDATE:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruitt
+--
+ad6f253ef0e2aaff
+== 040
+-- inference fails:
+insert into insertconflicttest values (3, 'Kiwi') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+83e1f256991bc16f
+== 041
+insert into insertconflicttest values (4, 'Mango') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+395474eff078e968
+== 042
+insert into insertconflicttest values (5, 'Lemon') on conflict (fruit) do update set fruit = excluded.fruit
+--
+fb6262bb4358c290
+== 043
+insert into insertconflicttest values (6, 'Passionfruit') on conflict (lower(fruit)) do update set fruit = excluded.fruit
+--
+68a9adbbfa45b625
+== 044
+-- Check the target relation can be aliased
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 045
+-- ok, no reference to target table
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = ict.fruit
+--
+e7fed97cae0cf5ca
+== 046
+-- ok, alias
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = insertconflicttest.fruit
+--
+1a2cab7956081efb
+== 047
+-- error, references aliased away name
+
+-- Check helpful hint when qualifying set column with target table
+insert into insertconflicttest values (3, 'Kiwi') on conflict (key, fruit) do update set insertconflicttest.fruit = 'Mango'
+--
+a576a867f7ad98e0
+== 048
+drop index key_index
+--
+0da9277fa802f684
+== 049
+|--
+-- Composite key tests
+|--
+create unique index comp_key_index on insertconflicttest(key, fruit)
+--
+8f830dc0b2d373f7
+== 050
+-- inference succeeds:
+insert into insertconflicttest values (7, 'Raspberry') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+83e1f256991bc16f
+== 051
+insert into insertconflicttest values (8, 'Lime') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+395474eff078e968
+== 052
+-- inference fails:
+insert into insertconflicttest values (9, 'Banana') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 053
+insert into insertconflicttest values (10, 'Blueberry') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+6bb19e5b66eab439
+== 054
+insert into insertconflicttest values (11, 'Cherry') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+cc7ad06970cc9779
+== 055
+insert into insertconflicttest values (12, 'Date') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+d34dd2e07d77cb1a
+== 056
+drop index comp_key_index
+--
+67341949de71c6d3
+== 057
+|--
+-- Partial index tests, no inference predicate specified
+|--
+create unique index part_comp_key_index on insertconflicttest(key, fruit) where key < 5
+--
+08cf6f22c9a77681
+== 058
+create unique index expr_part_comp_key_index on insertconflicttest(key, lower(fruit)) where key < 5
+--
+c0db5539f4404cab
+== 059
+-- inference fails:
+insert into insertconflicttest values (13, 'Grape') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+83e1f256991bc16f
+== 060
+insert into insertconflicttest values (14, 'Raisin') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+395474eff078e968
+== 061
+insert into insertconflicttest values (15, 'Cranberry') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 062
+insert into insertconflicttest values (16, 'Melon') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+6bb19e5b66eab439
+== 063
+insert into insertconflicttest values (17, 'Mulberry') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+cc7ad06970cc9779
+== 064
+insert into insertconflicttest values (18, 'Pineapple') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+d34dd2e07d77cb1a
+== 065
+drop index part_comp_key_index
+--
+5da5b1743f461ea2
+== 066
+drop index expr_part_comp_key_index
+--
+f75ab16441fa8aca
+== 067
+|--
+-- Expression index tests
+|--
+create unique index expr_key_index on insertconflicttest(lower(fruit))
+--
+ef1a75409b55bd21
+== 068
+-- inference succeeds:
+insert into insertconflicttest values (20, 'Quince') on conflict (lower(fruit)) do update set fruit = excluded.fruit
+--
+68a9adbbfa45b625
+== 069
+insert into insertconflicttest values (21, 'Pomegranate') on conflict (lower(fruit), lower(fruit)) do update set fruit = excluded.fruit
+--
+7dfaf8b3b31834fa
+== 070
+-- inference fails:
+insert into insertconflicttest values (22, 'Apricot') on conflict (upper(fruit)) do update set fruit = excluded.fruit
+--
+5c8292fe3a9b8390
+== 071
+insert into insertconflicttest values (23, 'Blackberry') on conflict (fruit) do update set fruit = excluded.fruit
+--
+fb6262bb4358c290
+== 072
+drop index expr_key_index
+--
+d503c3ac2014397c
+== 073
+|--
+-- Expression index tests (with regular column)
+|--
+create unique index expr_comp_key_index on insertconflicttest(key, lower(fruit))
+--
+fe0cdb31e87f993a
+== 074
+create unique index tricky_expr_comp_key_index on insertconflicttest(key, lower(fruit), upper(fruit))
+--
+48c1e99aee98493f
+== 075
+-- inference succeeds:
+insert into insertconflicttest values (24, 'Plum') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+cc7ad06970cc9779
+== 076
+insert into insertconflicttest values (25, 'Peach') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+d34dd2e07d77cb1a
+== 077
+-- Should not infer "tricky_expr_comp_key_index" index:
+explain (costs off) insert into insertconflicttest values (26, 'Fig') on conflict (lower(fruit), key, lower(fruit), key) do update set fruit = excluded.fruit
+--
+c91c090be694b22a
+== 078
+-- inference fails:
+insert into insertconflicttest values (27, 'Prune') on conflict (key, upper(fruit)) do update set fruit = excluded.fruit
+--
+d406eb1cfcf4e03c
+== 079
+insert into insertconflicttest values (28, 'Redcurrant') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+395474eff078e968
+== 080
+insert into insertconflicttest values (29, 'Nectarine') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 081
+drop index expr_comp_key_index
+--
+da61b7e3dc259c02
+== 082
+drop index tricky_expr_comp_key_index
+--
+a8653d95e7add329
+== 083
+|--
+-- Non-spurious duplicate violation tests
+|--
+create unique index key_index on insertconflicttest(key)
+--
+93c2b690c5626812
+== 084
+create unique index fruit_index on insertconflicttest(fruit)
+--
+416f66b5aaf83221
+== 085
+-- succeeds, since UPDATE happens to update "fruit" to existing value:
+insert into insertconflicttest values (26, 'Fig') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 086
+-- fails, since UPDATE is to row with key value 26, and we're updating "fruit"
+-- to a value that happens to exist in another row ('peach'):
+insert into insertconflicttest values (26, 'Peach') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 087
+-- succeeds, since "key" isn't repeated/referenced in UPDATE, and "fruit"
+-- arbitrates that statement updates existing "Fig" row:
+insert into insertconflicttest values (25, 'Fig') on conflict (fruit) do update set fruit = excluded.fruit
+--
+fb6262bb4358c290
+== 088
+drop index key_index
+--
+0da9277fa802f684
+== 089
+drop index fruit_index
+--
+bb342b8a86c8beec
+== 090
+|--
+-- Test partial unique index inference
+|--
+create unique index partial_key_index on insertconflicttest(key) where fruit like '%berry'
+--
+9bd0c3419314034a
+== 091
+-- Succeeds
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where fruit like '%berry' do update set fruit = excluded.fruit
+--
+202ae1557aae26a9
+== 092
+insert into insertconflicttest as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing
+--
+f679a79f49f53995
+== 093
+insert into insertconflictview as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing
+--
+47be3b047fb82542
+== 094
+-- fails
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) do update set fruit = excluded.fruit
+--
+6ab212abc46e3c62
+== 095
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where fruit like '%berry' or fruit = 'consequential' do nothing
+--
+e635b4448091a565
+== 096
+insert into insertconflicttest values (23, 'Blackberry') on conflict (fruit) where fruit like '%berry' do update set fruit = excluded.fruit
+--
+d7d894e31ccf6f23
+== 097
+drop index partial_key_index
+--
+aad448045caf86fc
+== 098
+|--
+-- Test that wholerow references to ON CONFLICT's EXCLUDED work
+|--
+create unique index plain on insertconflicttest(key)
+--
+0bc99d5e26d89e02
+== 099
+-- Succeeds, updates existing row:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* != excluded.* returning *
+--
+d74999124b4d14b3
+== 100
+-- No update this time, though:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* != excluded.* returning *
+--
+d74999124b4d14b3
+== 101
+-- Predicate changed to require match rather than non-match, so updates once more:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* = excluded.* returning *
+--
+34bca36a6b89d1b7
+== 102
+-- Assign:
+insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.*::text
+  returning *
+--
+e8c71a8ce0b922a7
+== 103
+-- deparse whole row var in WHERE and SET clauses:
+explain (costs off) insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.fruit where excluded.* is null
+--
+50ae4d0ecd1ab986
+== 104
+explain (costs off) insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.*::text
+--
+7f8bd9f06de0c9d7
+== 105
+drop index plain
+--
+f6a9bb41281540f6
+== 106
+-- Cleanup
+drop view insertconflictview
+--
+9a9fe21ccc53454f
+== 107
+drop table insertconflicttest
+--
+a17f04a5fa425ba3
+== 108
+|--
+-- Verify that EXCLUDED does not allow system column references. These
+-- do not make sense because EXCLUDED isn't an already stored tuple
+-- (and thus doesn't have a ctid etc).
+|--
+create table syscolconflicttest(key int4, data text)
+--
+c0d43621b8cce5a7
+== 109
+insert into syscolconflicttest values (1)
+--
+4b2d90da0f6e6fde
+== 110
+insert into syscolconflicttest values (1) on conflict (key) do update set data = excluded.ctid::text
+--
+06de79080afd6b70
+== 111
+drop table syscolconflicttest
+--
+d6654f4c03a9f547
+== 112
+|--
+-- Previous tests all managed to not test any expressions requiring
+-- planner preprocessing ...
+|--
+create table insertconflict (a bigint, b bigint)
+--
+df26edfe97332e64
+== 113
+create unique index insertconflicti1 on insertconflict(coalesce(a, 0))
+--
+691ef00207c0575f
+== 114
+create unique index insertconflicti2 on insertconflict(b)
+  where coalesce(a, 1) > 0
+--
+9162954dc5b24e69
+== 115
+insert into insertconflict values (1, 2)
+on conflict (coalesce(a, 0)) do nothing
+--
+e853326a16d2ed72
+== 116
+insert into insertconflict values (1, 2)
+on conflict (b) where coalesce(a, 1) > 0 do nothing
+--
+6ab4a646c550cdeb
+== 117
+insert into insertconflict values (1, 2)
+on conflict (b) where coalesce(a, 1) > 1 do nothing
+--
+6ab4a646c550cdeb
+== 118
+drop table insertconflict
+--
+d49e5f321854d67d
+== 119
+|--
+-- test insertion through view
+|--
+
+create table insertconflict (f1 int primary key, f2 text)
+--
+fb195945909eea0e
+== 120
+create view insertconflictv as
+  select * from insertconflict with cascaded check option
+--
+749670bee46815c0
+== 121
+insert into insertconflictv values (1,'foo')
+  on conflict (f1) do update set f2 = excluded.f2
+--
+fdd2d61c5b826dbe
+== 122
+select * from insertconflict
+--
+6107ad700debb16c
+== 123
+insert into insertconflictv values (1,'bar')
+  on conflict (f1) do update set f2 = excluded.f2
+--
+fdd2d61c5b826dbe
+== 124
+select * from insertconflict
+--
+6107ad700debb16c
+== 125
+drop view insertconflictv
+--
+c2cb24b5c071809b
+== 126
+drop table insertconflict
+--
+d49e5f321854d67d
+== 127
+-- ******************************************************************
+-- *                                                                *
+-- * Test inheritance (example taken from tutorial)                 *
+-- *                                                                *
+-- ******************************************************************
+create table cities (
+	name		text,
+	population	float8,
+	altitude	int		-- (in ft)
+)
+--
+8909d5c34edc1680
+== 128
+create table capitals (
+	state		char(2)
+) inherits (cities)
+--
+3a3c956cf64da0c2
+== 129
+-- Create unique indexes.  Due to a general limitation of inheritance,
+-- uniqueness is only enforced per-relation.  Unique index inference
+-- specification will do the right thing, though.
+create unique index cities_names_unique on cities (name)
+--
+d10943dcea67539b
+== 130
+create unique index capitals_names_unique on capitals (name)
+--
+49475bd03e6eff89
+== 131
+-- prepopulate the tables.
+insert into cities values ('San Francisco', 7.24E+5, 63)
+--
+b5496c3feafe01ea
+== 132
+insert into cities values ('Las Vegas', 2.583E+5, 2174)
+--
+b5496c3feafe01ea
+== 133
+insert into cities values ('Mariposa', 1200, 1953)
+--
+b5496c3feafe01ea
+== 134
+insert into capitals values ('Sacramento', 3.694E+5, 30, 'CA')
+--
+0cc08e581cf833b1
+== 135
+insert into capitals values ('Madison', 1.913E+5, 845, 'WI')
+--
+0cc08e581cf833b1
+== 136
+-- Tests proper for inheritance:
+select * from capitals
+--
+478bafee100a9b33
+== 137
+-- Succeeds:
+insert into cities values ('Las Vegas', 2.583E+5, 2174) on conflict do nothing
+--
+c3e1edce390c8775
+== 138
+insert into capitals values ('Sacramento', 4664.E+5, 30, 'CA') on conflict (name) do update set population = excluded.population
+--
+ac263fec416cfe67
+== 139
+-- Wrong "Sacramento", so do nothing:
+insert into capitals values ('Sacramento', 50, 2267, 'NE') on conflict (name) do nothing
+--
+b2640ea24fabad67
+== 140
+select * from capitals
+--
+478bafee100a9b33
+== 141
+insert into cities values ('Las Vegas', 5.83E+5, 2001) on conflict (name) do update set population = excluded.population, altitude = excluded.altitude
+--
+2ed7b16983e531ee
+== 142
+select tableoid::regclass, * from cities
+--
+14a6840f098857c8
+== 143
+insert into capitals values ('Las Vegas', 5.83E+5, 2222, 'NV') on conflict (name) do update set population = excluded.population
+--
+ac263fec416cfe67
+== 144
+-- Capitals will contain new capital, Las Vegas:
+select * from capitals
+--
+478bafee100a9b33
+== 145
+-- Cities contains two instances of "Las Vegas", since unique constraints don't
+-- work across inheritance:
+select tableoid::regclass, * from cities
+--
+14a6840f098857c8
+== 146
+-- This only affects "cities" version of "Las Vegas":
+insert into cities values ('Las Vegas', 5.86E+5, 2223) on conflict (name) do update set population = excluded.population, altitude = excluded.altitude
+--
+2ed7b16983e531ee
+== 147
+select tableoid::regclass, * from cities
+--
+14a6840f098857c8
+== 148
+-- clean up
+drop table capitals
+--
+005fdb310685ef1e
+== 149
+drop table cities
+--
+ab227940556eb8bb
+== 150
+-- Make sure a table named excluded is handled properly
+create table excluded(key int primary key, data text)
+--
+5a63d1fb0d3df3c1
+== 151
+insert into excluded values(1, '1')
+--
+650e31203fde8d38
+== 152
+-- error, ambiguous
+insert into excluded values(1, '2') on conflict (key) do update set data = excluded.data RETURNING *
+--
+e123afb0427b2af6
+== 153
+-- ok, aliased
+insert into excluded AS target values(1, '2') on conflict (key) do update set data = excluded.data RETURNING *
+--
+e123afb0427b2af6
+== 154
+-- ok, aliased
+insert into excluded AS target values(1, '2') on conflict (key) do update set data = target.data RETURNING *
+--
+c30ae19124be9cb8
+== 155
+-- make sure excluded isn't a problem in returning clause
+insert into excluded values(1, '2') on conflict (key) do update set data = 3 RETURNING excluded.*
+--
+1cb8b1b1e6cd8de0
+== 156
+-- clean up
+drop table excluded
+--
+b03e89a292acd845
+== 157
+-- check that references to columns after dropped columns are handled correctly
+create table dropcol(key int primary key, drop1 int, keep1 text, drop2 numeric, keep2 float)
+--
+b3deaa5a3533d82c
+== 158
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 1, '1', '1', 1)
+--
+ee110cfd20205e20
+== 159
+-- set using excluded
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 2, '2', '2', 2) on conflict(key)
+    do update set drop1 = excluded.drop1, keep1 = excluded.keep1, drop2 = excluded.drop2, keep2 = excluded.keep2
+    where excluded.drop1 is not null and excluded.keep1 is not null and excluded.drop2 is not null and excluded.keep2 is not null
+          and dropcol.drop1 is not null and dropcol.keep1 is not null and dropcol.drop2 is not null and dropcol.keep2 is not null
+    returning *
+--
+72fab0050a9e8ddb
+== 160
+-- set using existing table
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 3, '3', '3', 3) on conflict(key)
+    do update set drop1 = dropcol.drop1, keep1 = dropcol.keep1, drop2 = dropcol.drop2, keep2 = dropcol.keep2
+    returning *
+--
+0f4e1f46ad0fcd50
+== 161
+alter table dropcol drop column drop1, drop column drop2
+--
+236010d1f9917a29
+== 162
+-- set using excluded
+insert into dropcol(key, keep1, keep2) values(1, '4', 4) on conflict(key)
+    do update set keep1 = excluded.keep1, keep2 = excluded.keep2
+    where excluded.keep1 is not null and excluded.keep2 is not null
+          and dropcol.keep1 is not null and dropcol.keep2 is not null
+    returning *
+--
+55fe92a237de532a
+== 163
+-- set using existing table
+insert into dropcol(key, keep1, keep2) values(1, '5', 5) on conflict(key)
+    do update set keep1 = dropcol.keep1, keep2 = dropcol.keep2
+    returning *
+--
+610b172efa9d2722
+== 164
+DROP TABLE dropcol
+--
+9e7af52aff538fb0
+== 165
+-- check handling of regular btree constraint along with gist constraint
+
+create table twoconstraints (f1 int unique, f2 box,
+                             exclude using gist(f2 with &&))
+--
+e387274fd757c67e
+== 166
+insert into twoconstraints values(1, '((0,0),(1,1))')
+--
+4a67dd367577264d
+== 167
+insert into twoconstraints values(1, '((2,2),(3,3))')
+--
+4a67dd367577264d
+== 168
+-- fail on f1
+insert into twoconstraints values(2, '((0,0),(1,2))')
+--
+4a67dd367577264d
+== 169
+-- fail on f2
+insert into twoconstraints values(2, '((0,0),(1,2))')
+  on conflict on constraint twoconstraints_f1_key do nothing
+--
+41d705dd8668ba54
+== 170
+-- fail on f2
+insert into twoconstraints values(2, '((0,0),(1,2))')
+  on conflict on constraint twoconstraints_f2_excl do nothing
+--
+34264a92385c0b0d
+== 171
+-- do nothing
+select * from twoconstraints
+--
+223a439782981edc
+== 172
+drop table twoconstraints
+--
+d8c5bb388f55229c
+== 173
+-- check handling of self-conflicts at various isolation levels
+
+create table selfconflict (f1 int primary key, f2 int)
+--
+e189110c64170d4c
+== 174
+begin transaction isolation level read committed
+--
+b16b431979fc3e05
+== 175
+insert into selfconflict values (1,1), (1,2) on conflict do nothing
+--
+6f49a443813330ab
+== 176
+commit
+--
+7bbcde9cfab6c79c
+== 177
+begin transaction isolation level repeatable read
+--
+b16b431979fc3e05
+== 178
+insert into selfconflict values (2,1), (2,2) on conflict do nothing
+--
+6f49a443813330ab
+== 179
+commit
+--
+7bbcde9cfab6c79c
+== 180
+begin transaction isolation level serializable
+--
+b16b431979fc3e05
+== 181
+insert into selfconflict values (3,1), (3,2) on conflict do nothing
+--
+6f49a443813330ab
+== 182
+commit
+--
+7bbcde9cfab6c79c
+== 183
+begin transaction isolation level read committed
+--
+b16b431979fc3e05
+== 184
+insert into selfconflict values (4,1), (4,2) on conflict(f1) do update set f2 = 0
+--
+7d00f2cbfe136e6a
+== 185
+commit
+--
+7bbcde9cfab6c79c
+== 186
+begin transaction isolation level repeatable read
+--
+b16b431979fc3e05
+== 187
+insert into selfconflict values (5,1), (5,2) on conflict(f1) do update set f2 = 0
+--
+7d00f2cbfe136e6a
+== 188
+commit
+--
+7bbcde9cfab6c79c
+== 189
+begin transaction isolation level serializable
+--
+b16b431979fc3e05
+== 190
+insert into selfconflict values (6,1), (6,2) on conflict(f1) do update set f2 = 0
+--
+7d00f2cbfe136e6a
+== 191
+commit
+--
+7bbcde9cfab6c79c
+== 192
+select * from selfconflict
+--
+c06b78b0f6d5a8bb
+== 193
+drop table selfconflict
+--
+642ef8e4948bd7f6
+== 194
+-- check ON CONFLICT handling with partitioned tables
+create table parted_conflict_test (a int unique, b char) partition by list (a)
+--
+553e2c970a073119
+== 195
+create table parted_conflict_test_1 partition of parted_conflict_test (b unique) for values in (1, 2)
+--
+d4664fe1e20e86a3
+== 196
+-- no indexes required here
+insert into parted_conflict_test values (1, 'a') on conflict do nothing
+--
+6b0d36dcc32c8f16
+== 197
+-- index on a required, which does exist in parent
+insert into parted_conflict_test values (1, 'a') on conflict (a) do nothing
+--
+578e5196632bc132
+== 198
+insert into parted_conflict_test values (1, 'a') on conflict (a) do update set b = excluded.b
+--
+c7b3853b111db059
+== 199
+-- targeting partition directly will work
+insert into parted_conflict_test_1 values (1, 'a') on conflict (a) do nothing
+--
+747543b231583df1
+== 200
+insert into parted_conflict_test_1 values (1, 'b') on conflict (a) do update set b = excluded.b
+--
+0288722e5e99a5db
+== 201
+-- index on b required, which doesn't exist in parent
+insert into parted_conflict_test values (2, 'b') on conflict (b) do update set a = excluded.a
+--
+172a0b7e18cf1c9e
+== 202
+-- targeting partition directly will work
+insert into parted_conflict_test_1 values (2, 'b') on conflict (b) do update set a = excluded.a
+--
+5a7512de77deb6c2
+== 203
+-- should see (2, 'b')
+select * from parted_conflict_test order by a
+--
+95c5660ae4733f54
+== 204
+-- now check that DO UPDATE works correctly for target partition with
+-- different attribute numbers
+create table parted_conflict_test_2 (b char, a int unique)
+--
+d82a4b5cf9e31156
+== 205
+alter table parted_conflict_test attach partition parted_conflict_test_2 for values in (3)
+--
+6e0a85b2da01b7ac
+== 206
+truncate parted_conflict_test
+--
+3f2b86028d3d9d01
+== 207
+insert into parted_conflict_test values (3, 'a') on conflict (a) do update set b = excluded.b
+--
+c7b3853b111db059
+== 208
+insert into parted_conflict_test values (3, 'b') on conflict (a) do update set b = excluded.b
+--
+c7b3853b111db059
+== 209
+-- should see (3, 'b')
+select * from parted_conflict_test order by a
+--
+95c5660ae4733f54
+== 210
+-- case where parent will have a dropped column, but the partition won't
+alter table parted_conflict_test drop b, add b char
+--
+bb8ad768ee2fecac
+== 211
+create table parted_conflict_test_3 partition of parted_conflict_test for values in (4)
+--
+1452a9e602f7067a
+== 212
+truncate parted_conflict_test
+--
+3f2b86028d3d9d01
+== 213
+insert into parted_conflict_test (a, b) values (4, 'a') on conflict (a) do update set b = excluded.b
+--
+e8ab0bd6e9fa772d
+== 214
+insert into parted_conflict_test (a, b) values (4, 'b') on conflict (a) do update set b = excluded.b where parted_conflict_test.b = 'a'
+--
+744a47ac19201b5f
+== 215
+-- should see (4, 'b')
+select * from parted_conflict_test order by a
+--
+95c5660ae4733f54
+== 216
+-- case with multi-level partitioning
+create table parted_conflict_test_4 partition of parted_conflict_test for values in (5) partition by list (a)
+--
+5fbbcafe9d39a967
+== 217
+create table parted_conflict_test_4_1 partition of parted_conflict_test_4 for values in (5)
+--
+62e2bf2bb2e217db
+== 218
+truncate parted_conflict_test
+--
+3f2b86028d3d9d01
+== 219
+insert into parted_conflict_test (a, b) values (5, 'a') on conflict (a) do update set b = excluded.b
+--
+e8ab0bd6e9fa772d
+== 220
+insert into parted_conflict_test (a, b) values (5, 'b') on conflict (a) do update set b = excluded.b where parted_conflict_test.b = 'a'
+--
+744a47ac19201b5f
+== 221
+-- should see (5, 'b')
+select * from parted_conflict_test order by a
+--
+95c5660ae4733f54
+== 222
+-- test with multiple rows
+truncate parted_conflict_test
+--
+3f2b86028d3d9d01
+== 223
+insert into parted_conflict_test (a, b) values (1, 'a'), (2, 'a'), (4, 'a') on conflict (a) do update set b = excluded.b where excluded.b = 'b'
+--
+9381486e0cf307bb
+== 224
+insert into parted_conflict_test (a, b) values (1, 'b'), (2, 'c'), (4, 'b') on conflict (a) do update set b = excluded.b where excluded.b = 'b'
+--
+9381486e0cf307bb
+== 225
+-- should see (1, 'b'), (2, 'a'), (4, 'b')
+select * from parted_conflict_test order by a
+--
+95c5660ae4733f54
+== 226
+drop table parted_conflict_test
+--
+cb238476a1117276
+== 227
+-- test behavior of inserting a conflicting tuple into an intermediate
+-- partitioning level
+create table parted_conflict (a int primary key, b text) partition by range (a)
+--
+8927803f2dd924cb
+== 228
+create table parted_conflict_1 partition of parted_conflict for values from (0) to (1000) partition by range (a)
+--
+9bfddb37c42fbb08
+== 229
+create table parted_conflict_1_1 partition of parted_conflict_1 for values from (0) to (500)
+--
+188869259b33ce2d
+== 230
+insert into parted_conflict values (40, 'forty')
+--
+0b58d1df41f03b18
+== 231
+insert into parted_conflict_1 values (40, 'cuarenta')
+  on conflict (a) do update set b = excluded.b
+--
+03b7921b02540844
+== 232
+drop table parted_conflict
+--
+7e3270946084a86b
+== 233
+-- same thing, but this time try to use an index that's created not in the
+-- partition
+create table parted_conflict (a int, b text) partition by range (a)
+--
+a26adafbb4c8cb71
+== 234
+create table parted_conflict_1 partition of parted_conflict for values from (0) to (1000) partition by range (a)
+--
+9bfddb37c42fbb08
+== 235
+create table parted_conflict_1_1 partition of parted_conflict_1 for values from (0) to (500)
+--
+188869259b33ce2d
+== 236
+create unique index on only parted_conflict_1 (a)
+--
+d1949356ef5941a7
+== 237
+create unique index on only parted_conflict (a)
+--
+b5680aa15ed672dd
+== 238
+alter index parted_conflict_a_idx attach partition parted_conflict_1_a_idx
+--
+6bbb20447a704714
+== 239
+insert into parted_conflict values (40, 'forty')
+--
+0b58d1df41f03b18
+== 240
+insert into parted_conflict_1 values (40, 'cuarenta')
+  on conflict (a) do update set b = excluded.b
+--
+03b7921b02540844
+== 241
+drop table parted_conflict
+--
+7e3270946084a86b
+== 242
+-- test whole-row Vars in ON CONFLICT expressions
+create table parted_conflict (a int, b text, c int) partition by range (a)
+--
+97309b7b44d07b2f
+== 243
+create table parted_conflict_1 (drp text, c int, a int, b text)
+--
+660ef420c546377b
+== 244
+alter table parted_conflict_1 drop column drp
+--
+7b495892dd825ca4
+== 245
+create unique index on parted_conflict (a, b)
+--
+ed10dd6151b704ce
+== 246
+alter table parted_conflict attach partition parted_conflict_1 for values from (0) to (1000)
+--
+3b8bc3a51c9c168e
+== 247
+truncate parted_conflict
+--
+4124a8f0f2803b8f
+== 248
+insert into parted_conflict values (50, 'cincuenta', 1)
+--
+0b58d1df41f03b18
+== 249
+insert into parted_conflict values (50, 'cincuenta', 2)
+  on conflict (a, b) do update set (a, b, c) = row(excluded.*)
+  where parted_conflict = (50, text 'cincuenta', 1) and
+        excluded = (50, text 'cincuenta', 2)
+--
+26780fee8c31958b
+== 250
+-- should see (50, 'cincuenta', 2)
+select * from parted_conflict order by a
+--
+18194c33f0a26552
+== 251
+-- test with statement level triggers
+create or replace function parted_conflict_update_func() returns trigger as $$
+declare
+    r record;
+begin
+ for r in select * from inserted loop
+	raise notice 'a = %, b = %, c = %', r.a, r.b, r.c;
+ end loop;
+ return new;
+end;
+$$ language plpgsql
+--
+22adc1f595d87b8c
+== 252
+create trigger parted_conflict_update
+    after update on parted_conflict
+    referencing new table as inserted
+    for each statement
+    execute procedure parted_conflict_update_func()
+--
+00723f19c5920fde
+== 253
+truncate parted_conflict
+--
+4124a8f0f2803b8f
+== 254
+insert into parted_conflict values (0, 'cero', 1)
+--
+0b58d1df41f03b18
+== 255
+insert into parted_conflict values(0, 'cero', 1)
+  on conflict (a,b) do update set c = parted_conflict.c + 1
+--
+8272dba505b886c8
+== 256
+drop table parted_conflict
+--
+7e3270946084a86b
+== 257
+drop function parted_conflict_update_func()
+--
+b86e389d2e15340c

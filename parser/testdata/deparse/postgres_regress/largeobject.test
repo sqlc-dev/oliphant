@@ -1,0 +1,675 @@
+== 001
+|--
+-- Test large object support
+|--
+
+-- directory paths are passed to us in environment variables
+
+-- ensure consistent test output regardless of the default bytea format
+SET bytea_output TO escape
+--
+SET bytea_output TO escape
+== 002
+-- Test ALTER LARGE OBJECT OWNER
+CREATE ROLE regress_lo_user
+--
+CREATE ROLE regress_lo_user
+== 003
+SELECT lo_create(42)
+--
+SELECT lo_create(42)
+== 004
+ALTER LARGE OBJECT 42 OWNER TO regress_lo_user
+--
+ALTER LARGE OBJECT 42 OWNER TO regress_lo_user
+== 005
+-- Test GRANT, COMMENT as non-superuser
+SET SESSION AUTHORIZATION regress_lo_user
+--
+SET session_authorization TO regress_lo_user
+== 006
+GRANT SELECT ON LARGE OBJECT 42 TO public
+--
+GRANT select ON LARGE OBJECT 42 TO public
+== 007
+COMMENT ON LARGE OBJECT 42 IS 'the ultimate answer'
+--
+COMMENT ON LARGE OBJECT 42 IS 'the ultimate answer'
+== 008
+RESET SESSION AUTHORIZATION
+--
+RESET session_authorization
+== 009
+-- Test psql's \lo_list et al (we assume no other LOs exist yet)
+
+-- Load a file
+CREATE TABLE lotest_stash_values (loid oid, fd integer)
+--
+CREATE TABLE lotest_stash_values (loid oid, fd int)
+== 010
+-- lo_creat(mode integer) returns oid
+-- The mode arg to lo_creat is unused, some vestigal holdover from ancient times
+-- returns the large object id
+INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42)
+--
+INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42)
+== 011
+-- NOTE: large objects require transactions
+BEGIN
+--
+BEGIN
+== 012
+-- lo_open(lobjId oid, mode integer) returns integer
+-- The mode parameter to lo_open uses two constants:
+--   INV_WRITE = 0x20000
+--   INV_READ  = 0x40000
+-- The return value is a file descriptor-like value which remains valid for the
+-- transaction.
+UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+UPDATE lotest_stash_values SET fd = lo_open(loid, (x'20000' | x'40000')::int)
+== 013
+-- loread/lowrite names are wonky, different from other functions which are lo_*
+-- lowrite(fd integer, data bytea) returns integer
+-- the integer is the number of bytes written
+SELECT lowrite(fd, '
+I wandered lonely as a cloud
+That floats on high o''er vales and hills,
+When all at once I saw a crowd,
+A host, of golden daffodils;
+Beside the lake, beneath the trees,
+Fluttering and dancing in the breeze.
+
+Continuous as the stars that shine
+And twinkle on the milky way,
+They stretched in never-ending line
+Along the margin of a bay:
+Ten thousand saw I at a glance,
+Tossing their heads in sprightly dance.
+
+The waves beside them danced; but they
+Out-did the sparkling waves in glee:
+A poet could not but be gay,
+In such a jocund company:
+I gazed--and gazed--but little thought
+What wealth the show to me had brought:
+
+For oft, when on my couch I lie
+In vacant or in pensive mood,
+They flash upon that inward eye
+Which is the bliss of solitude;
+And then my heart with pleasure fills,
+And dances with the daffodils.
+
+         -- William Wordsworth
+') FROM lotest_stash_values
+--
+SELECT lowrite(fd, '
+I wandered lonely as a cloud
+That floats on high o''er vales and hills,
+When all at once I saw a crowd,
+A host, of golden daffodils;
+Beside the lake, beneath the trees,
+Fluttering and dancing in the breeze.
+
+Continuous as the stars that shine
+And twinkle on the milky way,
+They stretched in never-ending line
+Along the margin of a bay:
+Ten thousand saw I at a glance,
+Tossing their heads in sprightly dance.
+
+The waves beside them danced; but they
+Out-did the sparkling waves in glee:
+A poet could not but be gay,
+In such a jocund company:
+I gazed--and gazed--but little thought
+What wealth the show to me had brought:
+
+For oft, when on my couch I lie
+In vacant or in pensive mood,
+They flash upon that inward eye
+Which is the bliss of solitude;
+And then my heart with pleasure fills,
+And dances with the daffodils.
+
+         -- William Wordsworth
+') FROM lotest_stash_values
+== 014
+-- lo_close(fd integer) returns integer
+-- return value is 0 for success, or <0 for error (actually only -1, but...)
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+SELECT lo_close(fd) FROM lotest_stash_values
+== 015
+END
+--
+COMMIT
+== 016
+-- Copy to another large object.
+-- Note: we intentionally don't remove the object created here;
+-- it's left behind to help test pg_dump.
+
+SELECT lo_from_bytea(0, lo_get(loid)) AS newloid FROM lotest_stash_values
+
+-- Add a comment to it, as well, for pg_dump/pg_upgrade testing.
+COMMENT ON LARGE OBJECT :newloid IS 'I Wandered Lonely as a Cloud'
+--
+ERROR: syntax error at or near "ON"
+CURSORPOS: 289
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 017
+-- Read out a portion
+BEGIN
+--
+BEGIN
+== 018
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+UPDATE lotest_stash_values SET fd = lo_open(loid, (x'20000' | x'40000')::int)
+== 019
+-- lo_lseek(fd integer, offset integer, whence integer) returns integer
+-- offset is in bytes, whence is one of three values:
+--  SEEK_SET (= 0) meaning relative to beginning
+--  SEEK_CUR (= 1) meaning relative to current position
+--  SEEK_END (= 2) meaning relative to end (offset better be negative)
+-- returns current position in file
+SELECT lo_lseek(fd, 104, 0) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 104, 0) FROM lotest_stash_values
+== 020
+-- loread/lowrite names are wonky, different from other functions which are lo_*
+-- loread(fd integer, len integer) returns bytea
+SELECT loread(fd, 28) FROM lotest_stash_values
+--
+SELECT loread(fd, 28) FROM lotest_stash_values
+== 021
+SELECT lo_lseek(fd, -19, 1) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, -19, 1) FROM lotest_stash_values
+== 022
+SELECT lowrite(fd, 'n') FROM lotest_stash_values
+--
+SELECT lowrite(fd, 'n') FROM lotest_stash_values
+== 023
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+SELECT lo_tell(fd) FROM lotest_stash_values
+== 024
+SELECT lo_lseek(fd, -744, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, -744, 2) FROM lotest_stash_values
+== 025
+SELECT loread(fd, 28) FROM lotest_stash_values
+--
+SELECT loread(fd, 28) FROM lotest_stash_values
+== 026
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+SELECT lo_close(fd) FROM lotest_stash_values
+== 027
+END
+--
+COMMIT
+== 028
+-- Test resource management
+BEGIN
+--
+BEGIN
+== 029
+SELECT lo_open(loid, x'40000'::int) from lotest_stash_values
+--
+SELECT lo_open(loid, x'40000'::int) FROM lotest_stash_values
+== 030
+ABORT
+--
+ROLLBACK
+== 031
+DO :'dobody'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 4
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 032
+-- Test truncation.
+BEGIN
+--
+BEGIN
+== 033
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+UPDATE lotest_stash_values SET fd = lo_open(loid, (x'20000' | x'40000')::int)
+== 034
+SELECT lo_truncate(fd, 11) FROM lotest_stash_values
+--
+SELECT lo_truncate(fd, 11) FROM lotest_stash_values
+== 035
+SELECT loread(fd, 15) FROM lotest_stash_values
+--
+SELECT loread(fd, 15) FROM lotest_stash_values
+== 036
+SELECT lo_truncate(fd, 10000) FROM lotest_stash_values
+--
+SELECT lo_truncate(fd, 10000) FROM lotest_stash_values
+== 037
+SELECT loread(fd, 10) FROM lotest_stash_values
+--
+SELECT loread(fd, 10) FROM lotest_stash_values
+== 038
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+== 039
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+SELECT lo_tell(fd) FROM lotest_stash_values
+== 040
+SELECT lo_truncate(fd, 5000) FROM lotest_stash_values
+--
+SELECT lo_truncate(fd, 5000) FROM lotest_stash_values
+== 041
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+== 042
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+SELECT lo_tell(fd) FROM lotest_stash_values
+== 043
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+SELECT lo_close(fd) FROM lotest_stash_values
+== 044
+END
+--
+COMMIT
+== 045
+-- Test 64-bit large object functions.
+BEGIN
+--
+BEGIN
+== 046
+UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+UPDATE lotest_stash_values SET fd = lo_open(loid, (x'20000' | x'40000')::int)
+== 047
+SELECT lo_lseek64(fd, 4294967296, 0) FROM lotest_stash_values
+--
+SELECT lo_lseek64(fd, 4294967296, 0) FROM lotest_stash_values
+== 048
+SELECT lowrite(fd, 'offset:4GB') FROM lotest_stash_values
+--
+SELECT lowrite(fd, 'offset:4GB') FROM lotest_stash_values
+== 049
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+SELECT lo_tell64(fd) FROM lotest_stash_values
+== 050
+SELECT lo_lseek64(fd, -10, 1) FROM lotest_stash_values
+--
+SELECT lo_lseek64(fd, -10, 1) FROM lotest_stash_values
+== 051
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+SELECT lo_tell64(fd) FROM lotest_stash_values
+== 052
+SELECT loread(fd, 10) FROM lotest_stash_values
+--
+SELECT loread(fd, 10) FROM lotest_stash_values
+== 053
+SELECT lo_truncate64(fd, 5000000000) FROM lotest_stash_values
+--
+SELECT lo_truncate64(fd, 5000000000) FROM lotest_stash_values
+== 054
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+== 055
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+SELECT lo_tell64(fd) FROM lotest_stash_values
+== 056
+SELECT lo_truncate64(fd, 3000000000) FROM lotest_stash_values
+--
+SELECT lo_truncate64(fd, 3000000000) FROM lotest_stash_values
+== 057
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+== 058
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+SELECT lo_tell64(fd) FROM lotest_stash_values
+== 059
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+SELECT lo_close(fd) FROM lotest_stash_values
+== 060
+END
+--
+COMMIT
+== 061
+-- lo_unlink(lobjId oid) returns integer
+-- return value appears to always be 1
+SELECT lo_unlink(loid) from lotest_stash_values
+--
+SELECT lo_unlink(loid) FROM lotest_stash_values
+== 062
+TRUNCATE lotest_stash_values
+--
+TRUNCATE lotest_stash_values
+== 063
+INSERT INTO lotest_stash_values (loid) SELECT lo_import(:'filename')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 57
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 064
+BEGIN
+--
+BEGIN
+== 065
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+UPDATE lotest_stash_values SET fd = lo_open(loid, (x'20000' | x'40000')::int)
+== 066
+-- verify length of large object
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+== 067
+-- with the default BLCKSZ, LOBLKSIZE = 2048, so this positions us for a block
+-- edge case
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+== 068
+-- this should get half of the value from page 0 and half from page 1 of the
+-- large object
+SELECT loread(fd, 36) FROM lotest_stash_values
+--
+SELECT loread(fd, 36) FROM lotest_stash_values
+== 069
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+SELECT lo_tell(fd) FROM lotest_stash_values
+== 070
+SELECT lo_lseek(fd, -26, 1) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, -26, 1) FROM lotest_stash_values
+== 071
+SELECT lowrite(fd, 'abcdefghijklmnop') FROM lotest_stash_values
+--
+SELECT lowrite(fd, 'abcdefghijklmnop') FROM lotest_stash_values
+== 072
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+--
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+== 073
+SELECT loread(fd, 36) FROM lotest_stash_values
+--
+SELECT loread(fd, 36) FROM lotest_stash_values
+== 074
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+SELECT lo_close(fd) FROM lotest_stash_values
+== 075
+END
+--
+COMMIT
+== 076
+SELECT lo_export(loid, :'filename') FROM lotest_stash_values
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 077
+-- just make sure \lo_export does not barf
+
+-- This is a hack to test that export/import are reversible
+-- This uses knowledge about the inner workings of large object mechanism
+-- which should not be used outside it.  This makes it a HACK
+SELECT pageno, data FROM pg_largeobject WHERE loid = (SELECT loid from lotest_stash_values)
+EXCEPT
+SELECT pageno, data FROM pg_largeobject WHERE loid = :newloid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 393
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 078
+SELECT lo_unlink(loid) FROM lotest_stash_values
+--
+SELECT lo_unlink(loid) FROM lotest_stash_values
+== 079
+TRUNCATE lotest_stash_values
+--
+TRUNCATE lotest_stash_values
+== 080
+SELECT lo_from_bytea(0, lo_get(:newloid_1)) AS newloid_2
+
+SELECT fipshash(lo_get(:newloid_1)) = fipshash(lo_get(:newloid_2))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 081
+SELECT lo_get(:newloid_1, 0, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 082
+SELECT lo_get(:newloid_1, 10, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 083
+SELECT lo_put(:newloid_1, 5, decode('afafafaf', 'hex'))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 084
+SELECT lo_get(:newloid_1, 0, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 085
+SELECT lo_put(:newloid_1, 4294967310, 'foo')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 086
+SELECT lo_get(:newloid_1)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 087
+SELECT lo_get(:newloid_1, 4294967294, 100)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 088
+-- This object is left in the database for pg_dump test purposes
+SELECT lo_from_bytea(0, E'\\xdeadbeef') AS newloid
+
+SET bytea_output TO hex
+--
+ERROR: syntax error at or near "SET"
+CURSORPOS: 118
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 089
+SELECT lo_get(:newloid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 090
+-- Create one more object that we leave behind for testing pg_dump/pg_upgrade;
+-- this one intentionally has an OID in the system range
+SELECT lo_create(2121)
+--
+SELECT lo_create(2121)
+== 091
+COMMENT ON LARGE OBJECT 2121 IS 'testing comments'
+--
+COMMENT ON LARGE OBJECT 2121 IS 'testing comments'
+== 092
+-- Test writes on large objects in read-only transactions
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 093
+-- INV_READ ... ok
+SELECT lo_open(2121, x'40000'::int)
+--
+SELECT lo_open(2121, x'40000'::int)
+== 094
+-- INV_WRITE ... error
+SELECT lo_open(2121, x'20000'::int)
+--
+SELECT lo_open(2121, x'20000'::int)
+== 095
+ROLLBACK
+--
+ROLLBACK
+== 096
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 097
+SELECT lo_create(42)
+--
+SELECT lo_create(42)
+== 098
+ROLLBACK
+--
+ROLLBACK
+== 099
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 100
+SELECT lo_creat(42)
+--
+SELECT lo_creat(42)
+== 101
+ROLLBACK
+--
+ROLLBACK
+== 102
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 103
+SELECT lo_unlink(42)
+--
+SELECT lo_unlink(42)
+== 104
+ROLLBACK
+--
+ROLLBACK
+== 105
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 106
+SELECT lowrite(42, 'x')
+--
+SELECT lowrite(42, 'x')
+== 107
+ROLLBACK
+--
+ROLLBACK
+== 108
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 109
+SELECT lo_import(:'filename')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 18
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 110
+ROLLBACK
+--
+ROLLBACK
+== 111
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 112
+SELECT lo_truncate(42, 0)
+--
+SELECT lo_truncate(42, 0)
+== 113
+ROLLBACK
+--
+ROLLBACK
+== 114
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 115
+SELECT lo_truncate64(42, 0)
+--
+SELECT lo_truncate64(42, 0)
+== 116
+ROLLBACK
+--
+ROLLBACK
+== 117
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 118
+SELECT lo_from_bytea(0, 'x')
+--
+SELECT lo_from_bytea(0, 'x')
+== 119
+ROLLBACK
+--
+ROLLBACK
+== 120
+START TRANSACTION READ ONLY
+--
+START TRANSACTION READ ONLY
+== 121
+SELECT lo_put(42, 0, 'x')
+--
+SELECT lo_put(42, 0, 'x')
+== 122
+ROLLBACK
+--
+ROLLBACK
+== 123
+-- Clean up
+DROP TABLE lotest_stash_values
+--
+DROP TABLE lotest_stash_values
+== 124
+DROP ROLE regress_lo_user
+--
+DROP ROLE regress_lo_user

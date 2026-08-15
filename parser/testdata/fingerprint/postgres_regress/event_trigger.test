@@ -1,0 +1,1248 @@
+== 001
+-- should fail, return type mismatch
+create event trigger regress_event_trigger
+   on ddl_command_start
+   execute procedure pg_backend_pid()
+--
+f25fd8096818b51a
+== 002
+-- OK
+create function test_event_trigger() returns event_trigger as $$
+BEGIN
+    RAISE NOTICE 'test_event_trigger: % %', tg_event, tg_tag;
+END
+$$ language plpgsql
+--
+87630ec50ad4359e
+== 003
+-- should fail, can't call it as a plain function
+SELECT test_event_trigger()
+--
+9203e06958141508
+== 004
+-- should fail, event triggers cannot have declared arguments
+create function test_event_trigger_arg(name text)
+returns event_trigger as $$ BEGIN RETURN 1; END $$ language plpgsql
+--
+9220e8353dcb6560
+== 005
+-- should fail, SQL functions cannot be event triggers
+create function test_event_trigger_sql() returns event_trigger as $$
+SELECT 1 $$ language sql
+--
+e088b778ae335ddf
+== 006
+-- should fail, no elephant_bootstrap entry point
+create event trigger regress_event_trigger on elephant_bootstrap
+   execute procedure test_event_trigger()
+--
+a4e7bd47114563a9
+== 007
+-- OK
+create event trigger regress_event_trigger on ddl_command_start
+   execute procedure test_event_trigger()
+--
+0d21e9cc419eaae7
+== 008
+-- OK
+create event trigger regress_event_trigger_end on ddl_command_end
+   execute function test_event_trigger()
+--
+1ba3d7fe898d3be8
+== 009
+-- should fail, food is not a valid filter variable
+create event trigger regress_event_trigger2 on ddl_command_start
+   when food in ('sandwich')
+   execute procedure test_event_trigger()
+--
+3935490fc45094ee
+== 010
+-- should fail, sandwich is not a valid command tag
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('sandwich')
+   execute procedure test_event_trigger()
+--
+931cf7f115cf17ad
+== 011
+-- should fail, create skunkcabbage is not a valid command tag
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table', 'create skunkcabbage')
+   execute procedure test_event_trigger()
+--
+530b4d338a8e9e55
+== 012
+-- should fail, can't have event triggers on event triggers
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('DROP EVENT TRIGGER')
+   execute procedure test_event_trigger()
+--
+288a05e179476fda
+== 013
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE ROLE')
+   execute procedure test_event_trigger()
+--
+f60f2ae0cd5e03f7
+== 014
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE DATABASE')
+   execute procedure test_event_trigger()
+--
+71b6ce22efeb921c
+== 015
+-- should fail, can't have event triggers on global objects
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('CREATE TABLESPACE')
+   execute procedure test_event_trigger()
+--
+e8a7f1c03155ca93
+== 016
+-- should fail, can't have same filter variable twice
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table') and tag in ('CREATE FUNCTION')
+   execute procedure test_event_trigger()
+--
+6a79b2e251127dbd
+== 017
+-- should fail, can't have arguments
+create event trigger regress_event_trigger2 on ddl_command_start
+   execute procedure test_event_trigger('argument not allowed')
+--
+ERROR: syntax error at or near "'argument not allowed'"
+CURSORPOS: 143
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 018
+-- OK
+create event trigger regress_event_trigger2 on ddl_command_start
+   when tag in ('create table', 'CREATE FUNCTION')
+   execute procedure test_event_trigger()
+--
+e7ca5fca095b9877
+== 019
+-- OK
+comment on event trigger regress_event_trigger is 'test comment'
+--
+380b869c9727e556
+== 020
+-- drop as non-superuser should fail
+create role regress_evt_user
+--
+03f70f76fabb8398
+== 021
+set role regress_evt_user
+--
+56facc463e2de425
+== 022
+create event trigger regress_event_trigger_noperms on ddl_command_start
+   execute procedure test_event_trigger()
+--
+4c65fd70293f9387
+== 023
+reset role
+--
+01c32d8f5bb0e22a
+== 024
+-- test enabling and disabling
+alter event trigger regress_event_trigger disable
+--
+2f5e5701204ca5b5
+== 025
+-- fires _trigger2 and _trigger_end should fire, but not _trigger
+create table event_trigger_fire1 (a int)
+--
+f2430cb87d7dd123
+== 026
+alter event trigger regress_event_trigger enable
+--
+43eb7e922f02fc69
+== 027
+set session_replication_role = replica
+--
+fd0257911a86eca6
+== 028
+-- fires nothing
+create table event_trigger_fire2 (a int)
+--
+69edeed78b168332
+== 029
+alter event trigger regress_event_trigger enable replica
+--
+b735744f33d36671
+== 030
+-- fires only _trigger
+create table event_trigger_fire3 (a int)
+--
+5ade51f0315ac9fd
+== 031
+alter event trigger regress_event_trigger enable always
+--
+a51fb1cc338b28dc
+== 032
+-- fires only _trigger
+create table event_trigger_fire4 (a int)
+--
+56215eb1493868b7
+== 033
+reset session_replication_role
+--
+e2b02493026876b4
+== 034
+-- fires all three
+create table event_trigger_fire5 (a int)
+--
+5bc130cb48949c93
+== 035
+-- non-top-level command
+create function f1() returns int
+language plpgsql
+as $$
+begin
+  create table event_trigger_fire6 (a int);
+  return 0;
+end $$
+--
+e823bd4aa2695e5d
+== 036
+select f1()
+--
+5f27f701a2a8ce8f
+== 037
+-- non-top-level command
+create procedure p1()
+language plpgsql
+as $$
+begin
+  create table event_trigger_fire7 (a int);
+end $$
+--
+4159e867b54d8e4d
+== 038
+call p1()
+--
+2e558bca4ad1b1d1
+== 039
+-- clean up
+alter event trigger regress_event_trigger disable
+--
+2f5e5701204ca5b5
+== 040
+drop table event_trigger_fire2, event_trigger_fire3, event_trigger_fire4, event_trigger_fire5, event_trigger_fire6, event_trigger_fire7
+--
+9020b77466e6a272
+== 041
+drop routine f1(), p1()
+--
+825dc2a81f090a79
+== 042
+-- regress_event_trigger_end should fire on these commands
+grant all on table event_trigger_fire1 to public
+--
+97b2358fe69cf6c7
+== 043
+comment on table event_trigger_fire1 is 'here is a comment'
+--
+1629b4adbb5bc2d4
+== 044
+revoke all on table event_trigger_fire1 from public
+--
+51d77775ac8f7aae
+== 045
+drop table event_trigger_fire1
+--
+e612fbe0ac6b0331
+== 046
+create foreign data wrapper useless
+--
+7f8cc7db98029877
+== 047
+create server useless_server foreign data wrapper useless
+--
+5130ec8dbe6e39de
+== 048
+create user mapping for regress_evt_user server useless_server
+--
+1afb1490af4c86e3
+== 049
+alter default privileges for role regress_evt_user
+ revoke delete on tables from regress_evt_user
+--
+60e5b63a37548ff8
+== 050
+-- alter owner to non-superuser should fail
+alter event trigger regress_event_trigger owner to regress_evt_user
+--
+81389d7ae0465ac1
+== 051
+-- alter owner to superuser should work
+alter role regress_evt_user superuser
+--
+e0092174b520363f
+== 052
+alter event trigger regress_event_trigger owner to regress_evt_user
+--
+81389d7ae0465ac1
+== 053
+-- should fail, name collision
+alter event trigger regress_event_trigger rename to regress_event_trigger2
+--
+83102ece22a3e652
+== 054
+-- OK
+alter event trigger regress_event_trigger rename to regress_event_trigger3
+--
+4b551cd7ed992d84
+== 055
+-- should fail, doesn't exist any more
+drop event trigger regress_event_trigger
+--
+9850dbaf692594db
+== 056
+-- should fail, regress_evt_user owns some objects
+drop role regress_evt_user
+--
+1b6db89de31be44b
+== 057
+-- cleanup before next test
+-- these are all OK; the second one should emit a NOTICE
+drop event trigger if exists regress_event_trigger2
+--
+c8cb9eca0f3f5b49
+== 058
+drop event trigger if exists regress_event_trigger2
+--
+c8cb9eca0f3f5b49
+== 059
+drop event trigger regress_event_trigger3
+--
+772e78ffc9d2afc3
+== 060
+drop event trigger regress_event_trigger_end
+--
+9e603d64979196da
+== 061
+-- test support for dropped objects
+CREATE SCHEMA schema_one authorization regress_evt_user
+--
+16db642e0b07d35c
+== 062
+CREATE SCHEMA schema_two authorization regress_evt_user
+--
+26b06a0ee4a9b95b
+== 063
+CREATE SCHEMA audit_tbls authorization regress_evt_user
+--
+31ef9d1888975f12
+== 064
+CREATE TEMP TABLE a_temp_tbl ()
+--
+c4ffa91c4e58c194
+== 065
+SET SESSION AUTHORIZATION regress_evt_user
+--
+532a0ea53df105d9
+== 066
+CREATE TABLE schema_one.table_one(a int)
+--
+75094752e518109e
+== 067
+CREATE TABLE schema_one."table two"(a int)
+--
+af2fa0a341cf0f4f
+== 068
+CREATE TABLE schema_one.table_three(a int)
+--
+eb1fc7d7a02f45d1
+== 069
+CREATE TABLE audit_tbls.schema_one_table_two(the_value text)
+--
+fb7a4c5b7d787190
+== 070
+CREATE TABLE schema_two.table_two(a int)
+--
+b1740d9d176323bd
+== 071
+CREATE TABLE schema_two.table_three(a int, b text)
+--
+7793dd3e9fe174d4
+== 072
+CREATE TABLE audit_tbls.schema_two_table_three(the_value text)
+--
+d31d5649d8e508e3
+== 073
+CREATE OR REPLACE FUNCTION schema_two.add(int, int) RETURNS int LANGUAGE plpgsql
+  CALLED ON NULL INPUT
+  AS $$ BEGIN RETURN coalesce($1,0) + coalesce($2,0); END; $$
+--
+b5be36c51d8e52e3
+== 074
+CREATE AGGREGATE schema_two.newton
+  (BASETYPE = int, SFUNC = schema_two.add, STYPE = int)
+--
+c525eeb85859608c
+== 075
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 076
+CREATE TABLE undroppable_objs (
+	object_type text,
+	object_identity text
+)
+--
+5cd734ff22fde1d7
+== 077
+INSERT INTO undroppable_objs VALUES
+('table', 'schema_one.table_three'),
+('table', 'audit_tbls.schema_two_table_three')
+--
+39ebe14793399241
+== 078
+CREATE TABLE dropped_objects (
+	object_type text,
+	schema_name text,
+	object_name text,
+	object_identity text,
+	address_names text[],
+	address_args text[],
+	is_temporary bool,
+	original bool,
+	normal bool
+)
+--
+dcd6bc3b0d192126
+== 079
+-- This tests errors raised within event triggers; the one in audit_tbls
+-- uses 2nd-level recursive invocation via test_evtrig_dropped_objects().
+CREATE OR REPLACE FUNCTION undroppable() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+	obj record;
+BEGIN
+	PERFORM 1 FROM pg_tables WHERE tablename = 'undroppable_objs';
+	IF NOT FOUND THEN
+		RAISE NOTICE 'table undroppable_objs not found, skipping';
+		RETURN;
+	END IF;
+	FOR obj IN
+		SELECT * FROM pg_event_trigger_dropped_objects() JOIN
+			undroppable_objs USING (object_type, object_identity)
+	LOOP
+		RAISE EXCEPTION 'object % of type % cannot be dropped',
+			obj.object_identity, obj.object_type;
+	END LOOP;
+END;
+$$
+--
+2b5d4e5cae6ed9f0
+== 080
+CREATE EVENT TRIGGER undroppable ON sql_drop
+	EXECUTE PROCEDURE undroppable()
+--
+57e814400de932e2
+== 081
+CREATE OR REPLACE FUNCTION test_evtrig_dropped_objects() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
+    LOOP
+        IF obj.object_type = 'table' THEN
+                EXECUTE format('DROP TABLE IF EXISTS audit_tbls.%I',
+					format('%s_%s', obj.schema_name, obj.object_name));
+        END IF;
+
+	INSERT INTO dropped_objects
+		(object_type, schema_name, object_name,
+		 object_identity, address_names, address_args,
+		 is_temporary, original, normal) VALUES
+		(obj.object_type, obj.schema_name, obj.object_name,
+		 obj.object_identity, obj.address_names, obj.address_args,
+		 obj.is_temporary, obj.original, obj.normal);
+    END LOOP;
+END
+$$
+--
+3820b6e5c0302198
+== 082
+CREATE EVENT TRIGGER regress_event_trigger_drop_objects ON sql_drop
+	WHEN TAG IN ('drop table', 'drop function', 'drop view',
+		'drop owned', 'drop schema', 'alter table')
+	EXECUTE PROCEDURE test_evtrig_dropped_objects()
+--
+f8fd2176bd734755
+== 083
+ALTER TABLE schema_one.table_one DROP COLUMN a
+--
+b17dcd8729fa1608
+== 084
+DROP SCHEMA schema_one, schema_two CASCADE
+--
+38007e071fcc45d4
+== 085
+DELETE FROM undroppable_objs WHERE object_identity = 'audit_tbls.schema_two_table_three'
+--
+7420fe80d08b54d5
+== 086
+DROP SCHEMA schema_one, schema_two CASCADE
+--
+38007e071fcc45d4
+== 087
+DELETE FROM undroppable_objs WHERE object_identity = 'schema_one.table_three'
+--
+7420fe80d08b54d5
+== 088
+DROP SCHEMA schema_one, schema_two CASCADE
+--
+38007e071fcc45d4
+== 089
+-- exclude TOAST objects because they have unstable names
+SELECT * FROM dropped_objects
+  WHERE schema_name IS NULL OR schema_name <> 'pg_toast'
+--
+1d162a7a84faaecf
+== 090
+DROP OWNED BY regress_evt_user
+--
+21e6f3f1bc526838
+== 091
+SELECT * FROM dropped_objects WHERE object_type = 'schema'
+--
+dcf036d8e906b43f
+== 092
+DROP ROLE regress_evt_user
+--
+1b6db89de31be44b
+== 093
+DROP EVENT TRIGGER regress_event_trigger_drop_objects
+--
+2963c0fb25066e7b
+== 094
+DROP EVENT TRIGGER undroppable
+--
+75a216f22cbfa91c
+== 095
+-- Event triggers on relations.
+CREATE OR REPLACE FUNCTION event_trigger_report_dropped()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT * from pg_event_trigger_dropped_objects()
+    LOOP
+    IF NOT r.normal AND NOT r.original THEN
+        CONTINUE;
+    END IF;
+    RAISE NOTICE 'NORMAL: orig=% normal=% istemp=% type=% identity=% schema=% name=% addr=% args=%',
+        r.original, r.normal, r.is_temporary, r.object_type,
+        r.object_identity, r.schema_name, r.object_name,
+        r.address_names, r.address_args;
+    END LOOP;
+END; $$
+--
+9572c4bd496835fc
+== 096
+CREATE EVENT TRIGGER regress_event_trigger_report_dropped ON sql_drop
+    EXECUTE PROCEDURE event_trigger_report_dropped()
+--
+ac38369060d1225a
+== 097
+CREATE OR REPLACE FUNCTION event_trigger_report_end()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN SELECT * FROM pg_event_trigger_ddl_commands()
+    LOOP
+        RAISE NOTICE 'END: command_tag=% type=% identity=%',
+            r.command_tag, r.object_type, r.object_identity;
+    END LOOP;
+END; $$
+--
+801b473c144d6d15
+== 098
+CREATE EVENT TRIGGER regress_event_trigger_report_end ON ddl_command_end
+  EXECUTE PROCEDURE event_trigger_report_end()
+--
+8df3c57bf5cc2f5a
+== 099
+CREATE SCHEMA evttrig
+	CREATE TABLE one (col_a SERIAL PRIMARY KEY, col_b text DEFAULT 'forty two', col_c SERIAL)
+	CREATE INDEX one_idx ON one (col_b)
+	CREATE TABLE two (col_c INTEGER CHECK (col_c > 0) REFERENCES one DEFAULT 42)
+	CREATE TABLE id (col_d int NOT NULL GENERATED ALWAYS AS IDENTITY)
+--
+7ea823dbbea585b6
+== 100
+-- Partitioned tables with a partitioned index
+CREATE TABLE evttrig.parted (
+    id int PRIMARY KEY)
+    PARTITION BY RANGE (id)
+--
+1ec7c100058f7a24
+== 101
+CREATE TABLE evttrig.part_1_10 PARTITION OF evttrig.parted (id)
+  FOR VALUES FROM (1) TO (10)
+--
+76695e74d6cda219
+== 102
+CREATE TABLE evttrig.part_10_20 PARTITION OF evttrig.parted (id)
+  FOR VALUES FROM (10) TO (20) PARTITION BY RANGE (id)
+--
+57ebfe8a07d181dc
+== 103
+CREATE TABLE evttrig.part_10_15 PARTITION OF evttrig.part_10_20 (id)
+  FOR VALUES FROM (10) TO (15)
+--
+8dd7e0b2391ceea3
+== 104
+CREATE TABLE evttrig.part_15_20 PARTITION OF evttrig.part_10_20 (id)
+  FOR VALUES FROM (15) TO (20)
+--
+8dd7e0b2391ceea3
+== 105
+ALTER TABLE evttrig.two DROP COLUMN col_c
+--
+4ecff989c3ac282b
+== 106
+ALTER TABLE evttrig.one ALTER COLUMN col_b DROP DEFAULT
+--
+46625966e0992e1b
+== 107
+ALTER TABLE evttrig.one DROP CONSTRAINT one_pkey
+--
+cffd399862fea8c0
+== 108
+ALTER TABLE evttrig.one DROP COLUMN col_c
+--
+21b1ec8e708f6763
+== 109
+ALTER TABLE evttrig.id ALTER COLUMN col_d SET DATA TYPE bigint
+--
+76c3f01a37e4d0f1
+== 110
+ALTER TABLE evttrig.id ALTER COLUMN col_d DROP IDENTITY,
+  ALTER COLUMN col_d SET DATA TYPE int
+--
+dac39df53f150318
+== 111
+DROP INDEX evttrig.one_idx
+--
+2499be9505ec9b57
+== 112
+DROP SCHEMA evttrig CASCADE
+--
+d94e67f00d752c2a
+== 113
+DROP TABLE a_temp_tbl
+--
+81dbd8ef1cc925f4
+== 114
+-- check unfiltered results, too
+CREATE OR REPLACE FUNCTION event_trigger_report_dropped()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT * from pg_event_trigger_dropped_objects()
+    LOOP
+    RAISE NOTICE 'DROP: orig=% normal=% istemp=% type=% identity=% schema=% name=% addr=% args=%',
+        r.original, r.normal, r.is_temporary, r.object_type,
+        r.object_identity, r.schema_name, r.object_name,
+        r.address_names, r.address_args;
+    END LOOP;
+END; $$
+--
+9572c4bd496835fc
+== 115
+CREATE FUNCTION event_trigger_dummy_trigger()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN new;
+END; $$
+--
+d6bd7336906449a3
+== 116
+CREATE TABLE evtrg_nontemp_table (f1 int primary key, f2 int default 42)
+--
+8984644ca425ff9c
+== 117
+CREATE TRIGGER evtrg_nontemp_trig
+  BEFORE INSERT ON evtrg_nontemp_table
+  EXECUTE FUNCTION event_trigger_dummy_trigger()
+--
+267fa2457419908a
+== 118
+CREATE POLICY evtrg_nontemp_pol ON evtrg_nontemp_table USING (f2 > 0)
+--
+a569283587cdcf9e
+== 119
+DROP TABLE evtrg_nontemp_table
+--
+82f059343db721ba
+== 120
+CREATE TEMP TABLE a_temp_tbl (f1 int primary key, f2 int default 42)
+--
+0876333fce791a5c
+== 121
+CREATE TRIGGER a_temp_trig
+  BEFORE INSERT ON a_temp_tbl
+  EXECUTE FUNCTION event_trigger_dummy_trigger()
+--
+b79cb10e14196dc8
+== 122
+CREATE POLICY a_temp_pol ON a_temp_tbl USING (f2 > 0)
+--
+8f36c6e49bc5293b
+== 123
+DROP TABLE a_temp_tbl
+--
+81dbd8ef1cc925f4
+== 124
+DROP FUNCTION event_trigger_dummy_trigger()
+--
+e5c4a61d7a238683
+== 125
+-- CREATE OPERATOR CLASS without FAMILY clause should report
+-- both CREATE OPERATOR FAMILY and CREATE OPERATOR CLASS
+CREATE OPERATOR CLASS evttrigopclass FOR TYPE int USING btree AS STORAGE int
+--
+57d9f6dc1965ccdf
+== 126
+DROP EVENT TRIGGER regress_event_trigger_report_dropped
+--
+a0512523463ccbc6
+== 127
+DROP EVENT TRIGGER regress_event_trigger_report_end
+--
+66485156648937a3
+== 128
+-- only allowed from within an event trigger function, should fail
+select pg_event_trigger_table_rewrite_oid()
+--
+be4ab62c75467c2b
+== 129
+-- test Table Rewrite Event Trigger
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'rewrites not allowed';
+END;
+$$
+--
+86daefc48ac15343
+== 130
+create event trigger no_rewrite_allowed on table_rewrite
+  execute procedure test_evtrig_no_rewrite()
+--
+bd38ed3cf4054b40
+== 131
+create table rewriteme (id serial primary key, foo float, bar timestamptz)
+--
+6ae98ae181ca45c1
+== 132
+insert into rewriteme
+     select x * 1.001 from generate_series(1, 500) as t(x)
+--
+27759cc8d53f5e9f
+== 133
+alter table rewriteme alter column foo type numeric
+--
+63e2ca760c2157da
+== 134
+alter table rewriteme add column baz int default 0
+--
+5c734e348567a462
+== 135
+-- test with more than one reason to rewrite a single table
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'Table ''%'' is being rewritten (reason = %)',
+               pg_event_trigger_table_rewrite_oid()::regclass,
+               pg_event_trigger_table_rewrite_reason();
+END;
+$$
+--
+86daefc48ac15343
+== 136
+alter table rewriteme
+ add column onemore int default 0,
+ add column another int default -1,
+ alter column foo type numeric(10,4)
+--
+5577ae9fe3730fd2
+== 137
+-- matview rewrite when changing access method
+CREATE MATERIALIZED VIEW heapmv USING heap AS SELECT 1 AS a
+--
+e05d382f8cbace85
+== 138
+ALTER MATERIALIZED VIEW heapmv SET ACCESS METHOD heap2
+--
+2909fac9b2e7e791
+== 139
+DROP MATERIALIZED VIEW heapmv
+--
+b9b5f45116cbf793
+== 140
+-- shouldn't trigger a table_rewrite event
+alter table rewriteme alter column foo type numeric(12,4)
+--
+63e2ca760c2157da
+== 141
+begin
+--
+b16b431979fc3e05
+== 142
+set timezone to 'UTC'
+--
+23f8d6eb1d3125c3
+== 143
+alter table rewriteme alter column bar type timestamp
+--
+b0bb2dcc8e364908
+== 144
+set timezone to '0'
+--
+23f8d6eb1d3125c3
+== 145
+alter table rewriteme alter column bar type timestamptz
+--
+8b36924ef3c711cc
+== 146
+set timezone to 'Europe/London'
+--
+23f8d6eb1d3125c3
+== 147
+alter table rewriteme alter column bar type timestamp
+--
+b0bb2dcc8e364908
+== 148
+-- does rewrite
+rollback
+--
+a46081a556fda027
+== 149
+-- typed tables are rewritten when their type changes.  Don't emit table
+-- name, because firing order is not stable.
+CREATE OR REPLACE FUNCTION test_evtrig_no_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'Table is being rewritten (reason = %)',
+               pg_event_trigger_table_rewrite_reason();
+END;
+$$
+--
+86daefc48ac15343
+== 150
+create type rewritetype as (a int)
+--
+42f7b6e9852d5141
+== 151
+create table rewritemetoo1 of rewritetype
+--
+145156a8d6e0257e
+== 152
+create table rewritemetoo2 of rewritetype
+--
+5119a7128e14826c
+== 153
+alter type rewritetype alter attribute a type text cascade
+--
+684ab66107ee218d
+== 154
+-- but this doesn't work
+create table rewritemetoo3 (a rewritetype)
+--
+d53584b1409dddda
+== 155
+alter type rewritetype alter attribute a type varchar cascade
+--
+d8d8c997aad6bef1
+== 156
+drop table rewriteme
+--
+e6c04122ecc22995
+== 157
+drop event trigger no_rewrite_allowed
+--
+05d24d8192d6be17
+== 158
+drop function test_evtrig_no_rewrite()
+--
+db439b6a7f94c73e
+== 159
+-- Tests for REINDEX
+CREATE OR REPLACE FUNCTION reindex_start_command()
+RETURNS event_trigger AS $$
+BEGIN
+    RAISE NOTICE 'REINDEX START: % %', tg_event, tg_tag;
+END;
+$$ LANGUAGE plpgsql
+--
+1dfcd5815ab2d236
+== 160
+CREATE EVENT TRIGGER regress_reindex_start ON ddl_command_start
+    WHEN TAG IN ('REINDEX')
+    EXECUTE PROCEDURE reindex_start_command()
+--
+b0792b124ca80995
+== 161
+CREATE FUNCTION reindex_end_command()
+RETURNS event_trigger AS $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands()
+    LOOP
+        RAISE NOTICE 'REINDEX END: command_tag=% type=% identity=%',
+	    obj.command_tag, obj.object_type, obj.object_identity;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql
+--
+025e9750e7589442
+== 162
+CREATE EVENT TRIGGER regress_reindex_end ON ddl_command_end
+    WHEN TAG IN ('REINDEX')
+    EXECUTE PROCEDURE reindex_end_command()
+--
+a95e5cd85e984658
+== 163
+-- Extra event to force the use of a snapshot.
+CREATE FUNCTION reindex_end_command_snap() RETURNS EVENT_TRIGGER
+    AS $$ BEGIN PERFORM 1; END $$ LANGUAGE plpgsql
+--
+28ffcdc01da4179f
+== 164
+CREATE EVENT TRIGGER regress_reindex_end_snap ON ddl_command_end
+    EXECUTE FUNCTION reindex_end_command_snap()
+--
+6669c33670d65ad9
+== 165
+-- With simple relation
+CREATE TABLE concur_reindex_tab (c1 int)
+--
+7c8812f16ee0ac09
+== 166
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab (c1)
+--
+2d5ffaeccfea5cb7
+== 167
+-- Both start and end triggers enabled.
+REINDEX INDEX concur_reindex_ind
+--
+e5208f2f05fb706c
+== 168
+REINDEX TABLE concur_reindex_tab
+--
+18ab5aa6ab6e5e9f
+== 169
+REINDEX INDEX CONCURRENTLY concur_reindex_ind
+--
+335167ab2ee4c0bf
+== 170
+REINDEX TABLE CONCURRENTLY concur_reindex_tab
+--
+79dd380aeab67e45
+== 171
+-- with start trigger disabled.
+ALTER EVENT TRIGGER regress_reindex_start DISABLE
+--
+e59e802d8c33267e
+== 172
+REINDEX INDEX concur_reindex_ind
+--
+e5208f2f05fb706c
+== 173
+REINDEX INDEX CONCURRENTLY concur_reindex_ind
+--
+335167ab2ee4c0bf
+== 174
+-- without an index
+DROP INDEX concur_reindex_ind
+--
+cf1f0966a80e49f4
+== 175
+REINDEX TABLE concur_reindex_tab
+--
+18ab5aa6ab6e5e9f
+== 176
+REINDEX TABLE CONCURRENTLY concur_reindex_tab
+--
+79dd380aeab67e45
+== 177
+-- With a Schema
+CREATE SCHEMA concur_reindex_schema
+--
+5731db865b01d315
+== 178
+-- No indexes
+REINDEX SCHEMA concur_reindex_schema
+--
+050dd35954a13f0f
+== 179
+REINDEX SCHEMA CONCURRENTLY concur_reindex_schema
+--
+eb4243bc70ceea61
+== 180
+CREATE TABLE concur_reindex_schema.tab (a int)
+--
+c1860df35c9e2257
+== 181
+CREATE INDEX ind ON concur_reindex_schema.tab (a)
+--
+8485cd14f61e560c
+== 182
+-- One index reported
+REINDEX SCHEMA concur_reindex_schema
+--
+050dd35954a13f0f
+== 183
+REINDEX SCHEMA CONCURRENTLY concur_reindex_schema
+--
+eb4243bc70ceea61
+== 184
+-- One table on schema but no indexes
+DROP INDEX concur_reindex_schema.ind
+--
+d95b9f961d7f0b2c
+== 185
+REINDEX SCHEMA concur_reindex_schema
+--
+050dd35954a13f0f
+== 186
+REINDEX SCHEMA CONCURRENTLY concur_reindex_schema
+--
+eb4243bc70ceea61
+== 187
+DROP SCHEMA concur_reindex_schema CASCADE
+--
+ff139de5c1bfcbb8
+== 188
+-- With a partitioned table, and nothing else.
+CREATE TABLE concur_reindex_part (id int) PARTITION BY RANGE (id)
+--
+3bbab0ee826295b1
+== 189
+REINDEX TABLE concur_reindex_part
+--
+c4ce4961092f5ccc
+== 190
+REINDEX TABLE CONCURRENTLY concur_reindex_part
+--
+2b9ccc7348a0c910
+== 191
+-- Partition that would be reindexed, still nothing.
+CREATE TABLE concur_reindex_child PARTITION OF concur_reindex_part
+  FOR VALUES FROM (0) TO (10)
+--
+fee4598059436e07
+== 192
+REINDEX TABLE concur_reindex_part
+--
+c4ce4961092f5ccc
+== 193
+REINDEX TABLE CONCURRENTLY concur_reindex_part
+--
+2b9ccc7348a0c910
+== 194
+-- Now add some indexes.
+CREATE INDEX concur_reindex_partidx ON concur_reindex_part (id)
+--
+c8e396b203dc2539
+== 195
+REINDEX INDEX concur_reindex_partidx
+--
+7719ceb0ccf3c85e
+== 196
+REINDEX INDEX CONCURRENTLY concur_reindex_partidx
+--
+41e93dccbf3f6f5e
+== 197
+REINDEX TABLE concur_reindex_part
+--
+c4ce4961092f5ccc
+== 198
+REINDEX TABLE CONCURRENTLY concur_reindex_part
+--
+2b9ccc7348a0c910
+== 199
+DROP TABLE concur_reindex_part
+--
+9ccc8a2d6655f3a9
+== 200
+-- Clean up
+DROP EVENT TRIGGER regress_reindex_start
+--
+12162d01a628c0f7
+== 201
+DROP EVENT TRIGGER regress_reindex_end
+--
+de7423ff6af99a93
+== 202
+DROP EVENT TRIGGER regress_reindex_end_snap
+--
+16258567221d8123
+== 203
+DROP FUNCTION reindex_end_command()
+--
+ff1d72ddf347c5db
+== 204
+DROP FUNCTION reindex_end_command_snap()
+--
+1d81ce931526140e
+== 205
+DROP FUNCTION reindex_start_command()
+--
+65b8943d0f144e16
+== 206
+DROP TABLE concur_reindex_tab
+--
+a3982cdcbd5146b8
+== 207
+-- test Row Security Event Trigger
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 208
+CREATE TABLE event_trigger_test (a integer, b text)
+--
+fe59583331fcfef0
+== 209
+CREATE OR REPLACE FUNCTION start_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - ddl_command_start', tg_tag;
+END;
+$$ LANGUAGE plpgsql
+--
+b4e6aa61409c4ef8
+== 210
+CREATE OR REPLACE FUNCTION end_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - ddl_command_end', tg_tag;
+END;
+$$ LANGUAGE plpgsql
+--
+a27cf6bb823f021f
+== 211
+CREATE OR REPLACE FUNCTION drop_sql_command()
+RETURNS event_trigger AS $$
+BEGIN
+RAISE NOTICE '% - sql_drop', tg_tag;
+END;
+$$ LANGUAGE plpgsql
+--
+2337467a1d39fb07
+== 212
+CREATE EVENT TRIGGER start_rls_command ON ddl_command_start
+    WHEN TAG IN ('CREATE POLICY', 'ALTER POLICY', 'DROP POLICY') EXECUTE PROCEDURE start_command()
+--
+48f3399857fd03e6
+== 213
+CREATE EVENT TRIGGER end_rls_command ON ddl_command_end
+    WHEN TAG IN ('CREATE POLICY', 'ALTER POLICY', 'DROP POLICY') EXECUTE PROCEDURE end_command()
+--
+2078f5c46e9f6e16
+== 214
+CREATE EVENT TRIGGER sql_drop_command ON sql_drop
+    WHEN TAG IN ('DROP POLICY') EXECUTE PROCEDURE drop_sql_command()
+--
+8db7a797abe8921f
+== 215
+CREATE POLICY p1 ON event_trigger_test USING (FALSE)
+--
+6b37f308c23fad63
+== 216
+ALTER POLICY p1 ON event_trigger_test USING (TRUE)
+--
+3e4c807eb3059110
+== 217
+ALTER POLICY p1 ON event_trigger_test RENAME TO p2
+--
+40f81ab1175fc6c6
+== 218
+DROP POLICY p2 ON event_trigger_test
+--
+99392885ef2bc7c0
+== 219
+-- Check the object addresses of all the event triggers.
+SELECT
+    e.evtname,
+    pg_describe_object('pg_event_trigger'::regclass, e.oid, 0) as descr,
+    b.type, b.object_names, b.object_args,
+    pg_identify_object(a.classid, a.objid, a.objsubid) as ident
+  FROM pg_event_trigger as e,
+    LATERAL pg_identify_object_as_address('pg_event_trigger'::regclass, e.oid, 0) as b,
+    LATERAL pg_get_object_address(b.type, b.object_names, b.object_args) as a
+  ORDER BY e.evtname
+--
+cdd256e55d83c1c8
+== 220
+DROP EVENT TRIGGER start_rls_command
+--
+b62a1d3496d94abc
+== 221
+DROP EVENT TRIGGER end_rls_command
+--
+9c0c4a84968cbdb6
+== 222
+DROP EVENT TRIGGER sql_drop_command
+--
+17333c1194a629e5
+== 223
+-- Check the GUC for disabling event triggers
+CREATE FUNCTION test_event_trigger_guc() RETURNS event_trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+	obj record;
+BEGIN
+	FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
+	LOOP
+		RAISE NOTICE '% dropped %', tg_tag, obj.object_type;
+	END LOOP;
+END;
+$$
+--
+23c5b7197c69aa51
+== 224
+CREATE EVENT TRIGGER test_event_trigger_guc
+	ON sql_drop
+	WHEN TAG IN ('DROP POLICY') EXECUTE FUNCTION test_event_trigger_guc()
+--
+38597cbd6d971b1d
+== 225
+SET event_triggers = 'on'
+--
+ab48850aab78f42d
+== 226
+CREATE POLICY pguc ON event_trigger_test USING (FALSE)
+--
+0a3cb3dd9caf9068
+== 227
+DROP POLICY pguc ON event_trigger_test
+--
+aa615c2316ebc2fe
+== 228
+CREATE POLICY pguc ON event_trigger_test USING (FALSE)
+--
+0a3cb3dd9caf9068
+== 229
+SET event_triggers = 'off'
+--
+ab48850aab78f42d
+== 230
+DROP POLICY pguc ON event_trigger_test
+--
+aa615c2316ebc2fe

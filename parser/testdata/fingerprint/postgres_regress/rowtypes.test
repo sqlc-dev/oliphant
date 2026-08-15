@@ -1,0 +1,1185 @@
+== 001
+|--
+-- ROWTYPES
+|--
+
+-- Make both a standalone composite type and a table rowtype
+
+create type complex as (r float8, i float8)
+--
+9b73912a478ebdaf
+== 002
+create temp table fullname (first text, last text)
+--
+f9e7e6c60808790f
+== 003
+-- Nested composite
+
+create type quad as (c1 complex, c2 complex)
+--
+a1e1c24f2217a796
+== 004
+-- Some simple tests of I/O conversions and row construction
+
+select (1.1,2.2)::complex, row((3.3,4.4),(5.5,null))::quad
+--
+02215f85a9e9b082
+== 005
+select row('Joe', 'Blow')::fullname, '(Joe,Blow)'::fullname
+--
+1a63b8d13420bcec
+== 006
+select '(Joe,von Blow)'::fullname, '(Joe,d''Blow)'::fullname
+--
+50fde20626009aba
+== 007
+select '(Joe,"von""Blow")'::fullname, E'(Joe,d\\\\Blow)'::fullname
+--
+50fde20626009aba
+== 008
+select '(Joe,"Blow,Jr")'::fullname
+--
+50fde20626009aba
+== 009
+select '(Joe,)'::fullname
+--
+50fde20626009aba
+== 010
+-- ok, null 2nd column
+select '(Joe)'::fullname
+--
+50fde20626009aba
+== 011
+-- bad
+select '(Joe,,)'::fullname
+--
+50fde20626009aba
+== 012
+-- bad
+select '[]'::fullname
+--
+50fde20626009aba
+== 013
+-- bad
+select ' (Joe,Blow)  '::fullname
+--
+50fde20626009aba
+== 014
+-- ok, extra whitespace
+select '(Joe,Blow) /'::fullname
+--
+50fde20626009aba
+== 015
+-- bad
+
+-- test non-error-throwing API
+SELECT pg_input_is_valid('(1,2)', 'complex')
+--
+15f508bf2432ed80
+== 016
+SELECT pg_input_is_valid('(1,2', 'complex')
+--
+15f508bf2432ed80
+== 017
+SELECT pg_input_is_valid('(1,zed)', 'complex')
+--
+15f508bf2432ed80
+== 018
+SELECT * FROM pg_input_error_info('(1,zed)', 'complex')
+--
+3498aded7ef03791
+== 019
+SELECT * FROM pg_input_error_info('(1,1e400)', 'complex')
+--
+3498aded7ef03791
+== 020
+create temp table quadtable(f1 int, q quad)
+--
+af439e5545a3cc8c
+== 021
+insert into quadtable values (1, ((3.3,4.4),(5.5,6.6)))
+--
+5e2bff7dd475097d
+== 022
+insert into quadtable values (2, ((null,4.4),(5.5,6.6)))
+--
+5e2bff7dd475097d
+== 023
+select * from quadtable
+--
+94c122a2a1ff5385
+== 024
+select f1, q.c1 from quadtable
+--
+ff7491e9609715d4
+== 025
+-- fails, q is a table reference
+
+select f1, (q).c1, (qq.q).c1.i from quadtable qq
+--
+8fb788b92088ed38
+== 026
+create temp table people (fn fullname, bd date)
+--
+1f24ea5127ac82e1
+== 027
+insert into people values ('(Joe,Blow)', '1984-01-10')
+--
+03ef31bf9edcf9d3
+== 028
+select * from people
+--
+604ed3a4f9cb7cac
+== 029
+-- at the moment this will not work due to ALTER TABLE inadequacy:
+alter table fullname add column suffix text default ''
+--
+ee80f801bba3be23
+== 030
+-- but this should work:
+alter table fullname add column suffix text default null
+--
+ee80f801bba3be23
+== 031
+select * from people
+--
+604ed3a4f9cb7cac
+== 032
+-- test insertion/updating of subfields
+update people set fn.suffix = 'Jr'
+--
+a33ade9d68600659
+== 033
+select * from people
+--
+604ed3a4f9cb7cac
+== 034
+insert into quadtable (f1, q.c1.r, q.c2.i) values(44,55,66)
+--
+3be1cd8f8b39e511
+== 035
+update quadtable set q.c1.r = 12 where f1 = 2
+--
+570216dc40817a18
+== 036
+update quadtable set q.c1 = 12
+--
+2e2f25976fd56ad6
+== 037
+-- error, type mismatch
+
+select * from quadtable
+--
+94c122a2a1ff5385
+== 038
+-- The object here is to ensure that toasted references inside
+-- composite values don't cause problems.  The large f1 value will
+-- be toasted inside pp, it must still work after being copied to people.
+
+create temp table pp (f1 text)
+--
+7ea44b42efa9163f
+== 039
+insert into pp values (repeat('abcdefghijkl', 100000))
+--
+a9f55684e12cdd2f
+== 040
+insert into people select ('Jim', f1, null)::fullname, current_date from pp
+--
+f4c2de7057539f0a
+== 041
+select (fn).first, substr((fn).last, 1, 20), length((fn).last) from people
+--
+c9919720cb3653ce
+== 042
+-- try an update on a toasted composite value, too
+update people set fn.first = 'Jack'
+--
+b98debffdf677297
+== 043
+select (fn).first, substr((fn).last, 1, 20), length((fn).last) from people
+--
+c9919720cb3653ce
+== 044
+-- Test row comparison semantics.  Prior to PG 8.2 we did this in a totally
+-- non-spec-compliant way.
+
+select ROW(1,2) < ROW(1,3) as true
+--
+265c9fe5cf9f65ec
+== 045
+select ROW(1,2) < ROW(1,1) as false
+--
+265c9fe5cf9f65ec
+== 046
+select ROW(1,2) < ROW(1,NULL) as null
+--
+265c9fe5cf9f65ec
+== 047
+select ROW(1,2,3) < ROW(1,3,NULL) as true
+--
+265c9fe5cf9f65ec
+== 048
+-- the NULL is not examined
+select ROW(11,'ABC') < ROW(11,'DEF') as true
+--
+265c9fe5cf9f65ec
+== 049
+select ROW(11,'ABC') > ROW(11,'DEF') as false
+--
+2ad0d3967ef8b2ce
+== 050
+select ROW(12,'ABC') > ROW(11,'DEF') as true
+--
+2ad0d3967ef8b2ce
+== 051
+-- = and <> have different NULL-behavior than < etc
+select ROW(1,2,3) < ROW(1,NULL,4) as null
+--
+265c9fe5cf9f65ec
+== 052
+select ROW(1,2,3) = ROW(1,NULL,4) as false
+--
+4d749713321f88e0
+== 053
+select ROW(1,2,3) <> ROW(1,NULL,4) as true
+--
+144528f3a04a5f0f
+== 054
+-- We allow operators beyond the six standard ones, if they have btree
+-- operator classes.
+select ROW('ABC','DEF') ~<=~ ROW('DEF','ABC') as true
+--
+b69b82be6e3adee5
+== 055
+select ROW('ABC','DEF') ~>=~ ROW('DEF','ABC') as false
+--
+dcb77d9c19cea516
+== 056
+select ROW('ABC','DEF') ~~ ROW('DEF','ABC') as fail
+--
+9fe2fe4122c5047a
+== 057
+-- Comparisons of ROW() expressions can cope with some type mismatches
+select ROW(1,2) = ROW(1,2::int8)
+--
+4d749713321f88e0
+== 058
+select ROW(1,2) in (ROW(3,4), ROW(1,2))
+--
+4d749713321f88e0
+== 059
+select ROW(1,2) in (ROW(3,4), ROW(1,2::int8))
+--
+4d749713321f88e0
+== 060
+-- Check row comparison with a subselect
+select unique1, unique2 from tenk1
+where (unique1, unique2) < any (select ten, ten from tenk1 where hundred < 3)
+      and unique1 <= 20
+order by 1
+--
+ce8ecbe2b295ae6d
+== 061
+-- Also check row comparison with an indexable condition
+explain (costs off)
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= (997, 5000)
+order by thousand, tenthous
+--
+f0f8c7040c9778ce
+== 062
+select thousand, tenthous from tenk1
+where (thousand, tenthous) >= (997, 5000)
+order by thousand, tenthous
+--
+c09298192ce3341a
+== 063
+explain (costs off)
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > (998, 5000, 3)
+order by thousand, tenthous
+--
+10f881f46663289e
+== 064
+select thousand, tenthous, four from tenk1
+where (thousand, tenthous, four) > (998, 5000, 3)
+order by thousand, tenthous
+--
+635fd393c992cc68
+== 065
+explain (costs off)
+select thousand, tenthous from tenk1
+where (998, 5000) < (thousand, tenthous)
+order by thousand, tenthous
+--
+2defdb9b94991c4a
+== 066
+select thousand, tenthous from tenk1
+where (998, 5000) < (thousand, tenthous)
+order by thousand, tenthous
+--
+4f2d88cf8e13c0c1
+== 067
+explain (costs off)
+select thousand, hundred from tenk1
+where (998, 5000) < (thousand, hundred)
+order by thousand, hundred
+--
+cac569ad4f107b94
+== 068
+select thousand, hundred from tenk1
+where (998, 5000) < (thousand, hundred)
+order by thousand, hundred
+--
+ea320478943a1183
+== 069
+-- Test case for bug #14010: indexed row comparisons fail with nulls
+create temp table test_table (a text, b text)
+--
+96d00ae81a7a84c3
+== 070
+insert into test_table values ('a', 'b')
+--
+beae6d8f4261364b
+== 071
+insert into test_table select 'a', null from generate_series(1,1000)
+--
+3e0f4192e612528f
+== 072
+insert into test_table values ('b', 'a')
+--
+beae6d8f4261364b
+== 073
+create index on test_table (a,b)
+--
+737baa3bbd6a9329
+== 074
+set enable_sort = off
+--
+dbc5616b4af60b97
+== 075
+explain (costs off)
+select a,b from test_table where (a,b) > ('a','a') order by a,b
+--
+fcbf2297ee92a830
+== 076
+select a,b from test_table where (a,b) > ('a','a') order by a,b
+--
+2e1ea8269786ed69
+== 077
+reset enable_sort
+--
+29a0e20ec2f6fde2
+== 078
+-- Check row comparisons with IN
+select * from int8_tbl i8 where i8 in (row(123,456))
+--
+92328b5fadc8b732
+== 079
+-- fail, type mismatch
+
+explain (costs off)
+select * from int8_tbl i8
+where i8 in (row(123,456)::int8_tbl, '(4567890123456789,123)')
+--
+12d039bebc4620cf
+== 080
+select * from int8_tbl i8
+where i8 in (row(123,456)::int8_tbl, '(4567890123456789,123)')
+--
+89b66aab79a805b7
+== 081
+-- Check ability to select columns from an anonymous rowtype
+select (row(1, 2.0)).f1
+--
+1306ec20ae85f24a
+== 082
+select (row(1, 2.0)).f2
+--
+25e67143ebaee8c0
+== 083
+select (row(1, 2.0)).nosuch
+--
+8fa7d4d71698b9f4
+== 084
+-- fail
+select (row(1, 2.0)).*
+--
+08ffe5c7639b61c3
+== 085
+select (r).f1 from (select row(1, 2.0) as r) ss
+--
+5b13d750f44aee6c
+== 086
+select (r).f3 from (select row(1, 2.0) as r) ss
+--
+3053dcfec1cd6f15
+== 087
+-- fail
+select (r).* from (select row(1, 2.0) as r) ss
+--
+02c47f18e5835e0a
+== 088
+-- Check some corner cases involving empty rowtypes
+select ROW()
+--
+3689a3fa144a8f15
+== 089
+select ROW() IS NULL
+--
+36a5b33cf3920aae
+== 090
+select ROW() = ROW()
+--
+4d749713321f88e0
+== 091
+-- Check ability to create arrays of anonymous rowtypes
+select array[ row(1,2), row(3,4), row(5,6) ]
+--
+ef3d43eafb6591c3
+== 092
+-- Check ability to compare an anonymous row to elements of an array
+select row(1,1.1) = any (array[ row(7,7.7), row(1,1.1), row(0,0.0) ])
+--
+225a68892e59ffe5
+== 093
+select row(1,1.1) = any (array[ row(7,7.7), row(1,1.0), row(0,0.0) ])
+--
+225a68892e59ffe5
+== 094
+-- Check behavior with a non-comparable rowtype
+create type cantcompare as (p point, r float8)
+--
+891374cfce6f8e6a
+== 095
+create temp table cc (f1 cantcompare)
+--
+763d20586f4f3b9f
+== 096
+insert into cc values('("(1,2)",3)')
+--
+7a2dd2126cfd4c33
+== 097
+insert into cc values('("(4,5)",6)')
+--
+7a2dd2126cfd4c33
+== 098
+select * from cc order by f1
+--
+5a21757f3bb68c65
+== 099
+-- fail, but should complain about cantcompare
+
+|--
+-- Tests for record_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+--
+56acde439470cc1c
+== 100
+-- all true
+select row(1, 2)::testtype1 < row(1, 3)::testtype1
+--
+fbf830529d95d796
+== 101
+select row(1, 2)::testtype1 <= row(1, 3)::testtype1
+--
+9cbf65e41cbaa0b2
+== 102
+select row(1, 2)::testtype1 = row(1, 2)::testtype1
+--
+b282912a0a6e2927
+== 103
+select row(1, 2)::testtype1 <> row(1, 3)::testtype1
+--
+0f622474e20a1236
+== 104
+select row(1, 3)::testtype1 >= row(1, 2)::testtype1
+--
+4621ca26b64cbaa0
+== 105
+select row(1, 3)::testtype1 > row(1, 2)::testtype1
+--
+18b649625232d2d1
+== 106
+-- all false
+select row(1, -2)::testtype1 < row(1, -3)::testtype1
+--
+fbf830529d95d796
+== 107
+select row(1, -2)::testtype1 <= row(1, -3)::testtype1
+--
+9cbf65e41cbaa0b2
+== 108
+select row(1, -2)::testtype1 = row(1, -3)::testtype1
+--
+b282912a0a6e2927
+== 109
+select row(1, -2)::testtype1 <> row(1, -2)::testtype1
+--
+0f622474e20a1236
+== 110
+select row(1, -3)::testtype1 >= row(1, -2)::testtype1
+--
+4621ca26b64cbaa0
+== 111
+select row(1, -3)::testtype1 > row(1, -2)::testtype1
+--
+18b649625232d2d1
+== 112
+-- true, but see *< below
+select row(1, -2)::testtype1 < row(1, 3)::testtype1
+--
+fbf830529d95d796
+== 113
+-- mismatches
+create type testtype3 as (a int, b text)
+--
+cd76cc939be3a0e5
+== 114
+select row(1, 2)::testtype1 < row(1, 'abc')::testtype3
+--
+dcafae3971efcb88
+== 115
+select row(1, 2)::testtype1 <> row(1, 'abc')::testtype3
+--
+291e15882efe459f
+== 116
+create type testtype5 as (a int)
+--
+4e6901a5c4803b03
+== 117
+select row(1, 2)::testtype1 < row(1)::testtype5
+--
+a45330ea122a6424
+== 118
+select row(1, 2)::testtype1 <> row(1)::testtype5
+--
+f3c1956f6c637d2d
+== 119
+-- non-comparable types
+create type testtype6 as (a int, b point)
+--
+613233f552745fdc
+== 120
+select row(1, '(1,2)')::testtype6 < row(1, '(1,3)')::testtype6
+--
+5952d74e1eccf287
+== 121
+select row(1, '(1,2)')::testtype6 <> row(1, '(1,3)')::testtype6
+--
+d76d8773d8f82289
+== 122
+drop type testtype1, testtype3, testtype5, testtype6
+--
+16ce418bfb9d9b60
+== 123
+|--
+-- Tests for record_image_{eq,cmp}
+|--
+
+create type testtype1 as (a int, b int)
+--
+56acde439470cc1c
+== 124
+-- all true
+select row(1, 2)::testtype1 *< row(1, 3)::testtype1
+--
+a98d6a2211a31895
+== 125
+select row(1, 2)::testtype1 *<= row(1, 3)::testtype1
+--
+5fc5dbb727ec4312
+== 126
+select row(1, 2)::testtype1 *= row(1, 2)::testtype1
+--
+3ef364edd1037440
+== 127
+select row(1, 2)::testtype1 *<> row(1, 3)::testtype1
+--
+519c9d4f1dc89aac
+== 128
+select row(1, 3)::testtype1 *>= row(1, 2)::testtype1
+--
+339b67091ea75acb
+== 129
+select row(1, 3)::testtype1 *> row(1, 2)::testtype1
+--
+8f9af7264d68396d
+== 130
+-- all false
+select row(1, -2)::testtype1 *< row(1, -3)::testtype1
+--
+a98d6a2211a31895
+== 131
+select row(1, -2)::testtype1 *<= row(1, -3)::testtype1
+--
+5fc5dbb727ec4312
+== 132
+select row(1, -2)::testtype1 *= row(1, -3)::testtype1
+--
+3ef364edd1037440
+== 133
+select row(1, -2)::testtype1 *<> row(1, -2)::testtype1
+--
+519c9d4f1dc89aac
+== 134
+select row(1, -3)::testtype1 *>= row(1, -2)::testtype1
+--
+339b67091ea75acb
+== 135
+select row(1, -3)::testtype1 *> row(1, -2)::testtype1
+--
+8f9af7264d68396d
+== 136
+-- This returns the "wrong" order because record_image_cmp works on
+-- unsigned datums without knowing about the actual data type.
+select row(1, -2)::testtype1 *< row(1, 3)::testtype1
+--
+a98d6a2211a31895
+== 137
+-- other types
+create type testtype2 as (a smallint, b bool)
+--
+6de6a44f9510c840
+== 138
+-- byval different sizes
+select row(1, true)::testtype2 *< row(2, true)::testtype2
+--
+8f0b5057c0112262
+== 139
+select row(-2, true)::testtype2 *< row(-1, true)::testtype2
+--
+8f0b5057c0112262
+== 140
+select row(0, false)::testtype2 *< row(0, true)::testtype2
+--
+8f0b5057c0112262
+== 141
+select row(0, false)::testtype2 *<> row(0, true)::testtype2
+--
+cce76c350e774459
+== 142
+create type testtype3 as (a int, b text)
+--
+cd76cc939be3a0e5
+== 143
+-- variable length
+select row(1, 'abc')::testtype3 *< row(1, 'abd')::testtype3
+--
+c1f70c6b9f0afe91
+== 144
+select row(1, 'abc')::testtype3 *< row(1, 'abcd')::testtype3
+--
+c1f70c6b9f0afe91
+== 145
+select row(1, 'abc')::testtype3 *> row(1, 'abd')::testtype3
+--
+7fda6bc9f65e500d
+== 146
+select row(1, 'abc')::testtype3 *<> row(1, 'abd')::testtype3
+--
+86af33fcea62b461
+== 147
+create type testtype4 as (a int, b point)
+--
+19267cec53794167
+== 148
+-- by ref, fixed length
+select row(1, '(1,2)')::testtype4 *< row(1, '(1,3)')::testtype4
+--
+210dd0e18e5cb309
+== 149
+select row(1, '(1,2)')::testtype4 *<> row(1, '(1,3)')::testtype4
+--
+374a844379cdcf19
+== 150
+-- mismatches
+select row(1, 2)::testtype1 *< row(1, 'abc')::testtype3
+--
+0b57010f5c38bd9c
+== 151
+select row(1, 2)::testtype1 *<> row(1, 'abc')::testtype3
+--
+4943a0411b45a431
+== 152
+create type testtype5 as (a int)
+--
+4e6901a5c4803b03
+== 153
+select row(1, 2)::testtype1 *< row(1)::testtype5
+--
+c5563d75b3f87d7b
+== 154
+select row(1, 2)::testtype1 *<> row(1)::testtype5
+--
+b197be6651ca9bcb
+== 155
+-- non-comparable types
+create type testtype6 as (a int, b point)
+--
+613233f552745fdc
+== 156
+select row(1, '(1,2)')::testtype6 *< row(1, '(1,3)')::testtype6
+--
+ccf94083e251f8bd
+== 157
+select row(1, '(1,2)')::testtype6 *>= row(1, '(1,3)')::testtype6
+--
+ea7685698507c568
+== 158
+select row(1, '(1,2)')::testtype6 *<> row(1, '(1,3)')::testtype6
+--
+6f5adf46f23e761f
+== 159
+-- anonymous rowtypes in coldeflists
+select q.a, q.b = row(2), q.c = array[row(3)], q.d = row(row(4)) from
+    unnest(array[row(1, row(2), array[row(3)], row(row(4))),
+                 row(2, row(3), array[row(4)], row(row(5)))])
+      as q(a int, b record, c record[], d record)
+--
+8090a58b46c5e7cd
+== 160
+drop type testtype1, testtype2, testtype3, testtype4, testtype5, testtype6
+--
+0fca2aef6a1792ba
+== 161
+|--
+-- Test case derived from bug #5716: check multiple uses of a rowtype result
+|--
+
+BEGIN
+--
+b16b431979fc3e05
+== 162
+CREATE TABLE price (
+    id SERIAL PRIMARY KEY,
+    active BOOLEAN NOT NULL,
+    price NUMERIC
+)
+--
+1d13ac0d954f5ce5
+== 163
+CREATE TYPE price_input AS (
+    id INTEGER,
+    price NUMERIC
+)
+--
+a734291417d87f16
+== 164
+CREATE TYPE price_key AS (
+    id INTEGER
+)
+--
+26734b2af6f26bc7
+== 165
+CREATE FUNCTION price_key_from_table(price) RETURNS price_key AS $$
+    SELECT $1.id
+$$ LANGUAGE SQL
+--
+c30f5ad84423a97d
+== 166
+CREATE FUNCTION price_key_from_input(price_input) RETURNS price_key AS $$
+    SELECT $1.id
+$$ LANGUAGE SQL
+--
+f6f34a3ba4169417
+== 167
+insert into price values (1,false,42), (10,false,100), (11,true,17.99)
+--
+7f9f2388e54f03b9
+== 168
+UPDATE price
+    SET active = true, price = input_prices.price
+    FROM unnest(ARRAY[(10, 123.00), (11, 99.99)]::price_input[]) input_prices
+    WHERE price_key_from_table(price.*) = price_key_from_input(input_prices.*)
+--
+517bec0958308bd0
+== 169
+select * from price
+--
+1afe4fcbcb1ed8b5
+== 170
+rollback
+--
+a46081a556fda027
+== 171
+|--
+-- Test case derived from bug #9085: check * qualification of composite
+-- parameters for SQL functions
+|--
+
+create temp table compos (f1 int, f2 text)
+--
+4735d0a8afeca116
+== 172
+create function fcompos1(v compos) returns void as $$
+insert into compos values (v);  -- fail
+$$ language sql
+--
+9d92d73992b9224f
+== 173
+create function fcompos1(v compos) returns void as $$
+insert into compos values (v.*);
+$$ language sql
+--
+9d92d73992b9224f
+== 174
+create function fcompos2(v compos) returns void as $$
+select fcompos1(v);
+$$ language sql
+--
+a79313b16437e7ba
+== 175
+create function fcompos3(v compos) returns void as $$
+select fcompos1(fcompos3.v.*);
+$$ language sql
+--
+cf3ba51594cc77d1
+== 176
+select fcompos1(row(1,'one'))
+--
+df16437733ffdd97
+== 177
+select fcompos2(row(2,'two'))
+--
+9c2f74c545dc3575
+== 178
+select fcompos3(row(3,'three'))
+--
+01ba0f8738b91ed9
+== 179
+select * from compos
+--
+a586252cd19d2ef6
+== 180
+|--
+-- We allow I/O conversion casts from composite types to strings to be
+-- invoked via cast syntax, but not functional syntax.  This is because
+-- the latter is too prone to be invoked unintentionally.
+|--
+select cast (fullname as text) from fullname
+--
+57324ad37df6b3df
+== 181
+select fullname::text from fullname
+--
+57324ad37df6b3df
+== 182
+select text(fullname) from fullname
+--
+3b917183c8112b05
+== 183
+-- error
+select fullname.text from fullname
+--
+43ff412be311b07b
+== 184
+-- error
+-- same, but RECORD instead of named composite type:
+select cast (row('Jim', 'Beam') as text)
+--
+b17a0efceac5c659
+== 185
+select (row('Jim', 'Beam'))::text
+--
+b17a0efceac5c659
+== 186
+select text(row('Jim', 'Beam'))
+--
+bb4ba58ccafa9755
+== 187
+-- error
+select (row('Jim', 'Beam')).text
+--
+102fc3d21b4d9fe8
+== 188
+-- error
+
+|--
+-- Check the equivalence of functional and column notation
+|--
+insert into fullname values ('Joe', 'Blow')
+--
+75b9f41fd4362977
+== 189
+select f.last from fullname f
+--
+12094c50779b48c7
+== 190
+select last(f) from fullname f
+--
+46b3796a680e9691
+== 191
+create function longname(fullname) returns text language sql
+as $$select $1.first || ' ' || $1.last$$
+--
+2219166336dae1ed
+== 192
+select f.longname from fullname f
+--
+f89c5aeb8c78f68a
+== 193
+select longname(f) from fullname f
+--
+9bfde1cd8be679db
+== 194
+-- Starting in v11, the notational form does matter if there's ambiguity
+alter table fullname add column longname text
+--
+ee1a76a9aa91f033
+== 195
+select f.longname from fullname f
+--
+f89c5aeb8c78f68a
+== 196
+select longname(f) from fullname f
+--
+9bfde1cd8be679db
+== 197
+|--
+-- Test that composite values are seen to have the correct column names
+-- (bug #11210 and other reports)
+|--
+
+select row_to_json(i) from int8_tbl i
+--
+b2aaf459157f1f66
+== 198
+-- since "i" is of type "int8_tbl", attaching aliases doesn't change anything:
+select row_to_json(i) from int8_tbl i(x,y)
+--
+b2aaf459157f1f66
+== 199
+-- in these examples, we'll report the exposed column names of the subselect:
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl) as ss
+--
+dce65690bff58cde
+== 200
+select row_to_json(ss) from
+  (select q1, q2 from int8_tbl offset 0) as ss
+--
+64cb6a1b04bbd6e5
+== 201
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss
+--
+dce65690bff58cde
+== 202
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset 0) as ss
+--
+64cb6a1b04bbd6e5
+== 203
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl) as ss(x,y)
+--
+dce65690bff58cde
+== 204
+select row_to_json(ss) from
+  (select q1 as a, q2 as b from int8_tbl offset 0) as ss(x,y)
+--
+64cb6a1b04bbd6e5
+== 205
+explain (costs off)
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+d444f4912ba09ed2
+== 206
+select row_to_json(q) from
+  (select thousand, tenthous from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+90fd65869304dc01
+== 207
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q
+--
+90fd65869304dc01
+== 208
+select row_to_json(q) from
+  (select thousand as x, tenthous as y from tenk1
+   where thousand = 42 and tenthous < 2000 offset 0) q(a,b)
+--
+90fd65869304dc01
+== 209
+create temp table tt1 as select * from int8_tbl limit 2
+--
+eb4849e1ed255c9e
+== 210
+create temp table tt2 () inherits(tt1)
+--
+b0d6a91198fb9cee
+== 211
+insert into tt2 values(0,0)
+--
+006b9ccd7ba99bc5
+== 212
+select row_to_json(r) from (select q2,q1 from tt1 offset 0) r
+--
+3533eaf541887e1b
+== 213
+-- check no-op rowtype conversions
+create temp table tt3 () inherits(tt2)
+--
+2c6105ad5e3a2a81
+== 214
+insert into tt3 values(33,44)
+--
+5ef24b4b8f29baed
+== 215
+select row_to_json(tt3::tt2::tt1) from tt3
+--
+abd54caeb2baa065
+== 216
+|--
+-- IS [NOT] NULL should not recurse into nested composites (bug #14235)
+|--
+
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b)
+--
+59d65ad30998608b
+== 217
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b)
+--
+ba23f131b9daa73a
+== 218
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r
+--
+660a27339b57c44a
+== 219
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r
+--
+ca193ca3ec4e65b2
+== 220
+|--
+-- Check parsing of indirect references to composite values (bug #18077)
+|--
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+bba1edaddb8918c4
+== 221
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select * from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+9ad8486437d89156
+== 222
+-- Also check deparsing of such cases
+create view composite_v as
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select 1 as one from cte2 as t
+where (select * from (select c as c1) s
+       where (select (c1).f1 > 0)) is not null
+--
+0b6f43a7ef39dd15
+== 223
+select pg_get_viewdef('composite_v', true)
+--
+ab8a8d46fb75759f
+== 224
+drop view composite_v
+--
+4d5ea1094e64b45e
+== 225
+|--
+-- Check cases where the composite comes from a proven-dummy rel (bug #18576)
+|--
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[1,2]) AS a) ss
+--
+008714b5e5164bdc
+== 226
+explain (verbose, costs off)
+select (ss.a).x, (ss.a).n from
+  (select information_schema._pg_expandarray(array[1,2]) AS a) ss
+where false
+--
+008714b5e5164bdc
+== 227
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+--
+86d118d7909249c4
+== 228
+explain (verbose, costs off)
+with cte(c) as materialized (select row(1, 2)),
+     cte2(c) as (select * from cte)
+select (c).f1 from cte2 as t
+where false
+--
+86d118d7909249c4
+== 229
+|--
+-- Tests for component access / FieldSelect
+|--
+CREATE TABLE compositetable(a text, b text)
+--
+19737962447a62fc
+== 230
+INSERT INTO compositetable(a, b) VALUES('fa', 'fb')
+--
+009e3ddecf569fce
+== 231
+-- composite type columns can't directly be accessed (error)
+SELECT d.a FROM (SELECT compositetable AS d FROM compositetable) s
+--
+1243242714453a6d
+== 232
+-- but can be accessed with proper parens
+SELECT (d).a, (d).b FROM (SELECT compositetable AS d FROM compositetable) s
+--
+3c2a07b3cfc6d3f7
+== 233
+-- system columns can't be accessed in composite types (error)
+SELECT (d).ctid FROM (SELECT compositetable AS d FROM compositetable) s
+--
+0afb009b8144e9e6
+== 234
+-- accessing non-existing column in NULL datum errors out
+SELECT (NULL::compositetable).nonexistent
+--
+ada733e634b60397
+== 235
+-- existing column in a NULL composite yield NULL
+SELECT (NULL::compositetable).a
+--
+69485dd65c4e6294
+== 236
+-- oids can't be accessed in composite types (error)
+SELECT (NULL::compositetable).oid
+--
+6ee296c4c8e71d94
+== 237
+DROP TABLE compositetable
+--
+8dcc5a881157f501

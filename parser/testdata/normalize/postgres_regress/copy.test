@@ -1,0 +1,588 @@
+== 001
+|--
+-- COPY
+|--
+
+-- directory paths are passed to us in environment variables
+
+--- test copying in CSV mode with various styles
+--- of embedded line ending characters
+
+create temp table copytest (
+	style	text,
+	test 	text,
+	filler	int)
+--
+|--
+-- COPY
+|--
+
+-- directory paths are passed to us in environment variables
+
+--- test copying in CSV mode with various styles
+--- of embedded line ending characters
+
+create temp table copytest (
+	style	text,
+	test 	text,
+	filler	int)
+== 002
+insert into copytest values('DOS',E'abc\r\ndef',1)
+--
+insert into copytest values($1,$2,$3)
+== 003
+insert into copytest values('Unix',E'abc\ndef',2)
+--
+insert into copytest values($1,$2,$3)
+== 004
+insert into copytest values('Mac',E'abc\rdef',3)
+--
+insert into copytest values($1,$2,$3)
+== 005
+insert into copytest values(E'esc\\ape',E'a\\r\\\r\\\n\\nb',4)
+--
+insert into copytest values($1,$2,$3)
+== 006
+copy copytest to :'filename' csv
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 18
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 007
+create temp table copytest2 (like copytest)
+--
+create temp table copytest2 (like copytest)
+== 008
+copy copytest2 from :'filename' csv
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
+select * from copytest except select * from copytest2
+--
+select * from copytest except select * from copytest2
+== 010
+truncate copytest2
+--
+truncate copytest2
+== 011
+--- same test but with an escape char different from quote char
+
+copy copytest to :'filename' csv quote '''' escape E'\\'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 83
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 012
+copy copytest2 from :'filename' csv quote '''' escape E'\\'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 013
+select * from copytest except select * from copytest2
+--
+select * from copytest except select * from copytest2
+== 014
+-- test header line feature
+
+create temp table copytest3 (
+	c1 int,
+	"col with , comma" text,
+	"col with "" quote"  int)
+--
+-- test header line feature
+
+create temp table copytest3 (
+	c1 int,
+	"col with , comma" text,
+	"col with "" quote"  int)
+== 015
+copy copytest3 from stdin csv header
+--
+copy copytest3 from stdin csv header
+== 016
+copy copytest3 to stdout csv header
+--
+copy copytest3 to stdout csv header
+== 017
+create temp table copytest4 (
+	c1 int,
+	"colname with tab: 	" text)
+--
+create temp table copytest4 (
+	c1 int,
+	"colname with tab: 	" text)
+== 018
+copy copytest4 from stdin (header)
+--
+copy copytest4 from stdin (header)
+== 019
+copy copytest4 to stdout (header)
+--
+copy copytest4 to stdout (header)
+== 020
+-- test copy from with a partitioned table
+create table parted_copytest (
+	a int,
+	b int,
+	c text
+) partition by list (b)
+--
+-- test copy from with a partitioned table
+create table parted_copytest (
+	a int,
+	b int,
+	c text
+) partition by list (b)
+== 021
+create table parted_copytest_a1 (c text, b int, a int)
+--
+create table parted_copytest_a1 (c text, b int, a int)
+== 022
+create table parted_copytest_a2 (a int, c text, b int)
+--
+create table parted_copytest_a2 (a int, c text, b int)
+== 023
+alter table parted_copytest attach partition parted_copytest_a1 for values in(1)
+--
+alter table parted_copytest attach partition parted_copytest_a1 for values in(1)
+== 024
+alter table parted_copytest attach partition parted_copytest_a2 for values in(2)
+--
+alter table parted_copytest attach partition parted_copytest_a2 for values in(2)
+== 025
+-- We must insert enough rows to trigger multi-inserts.  These are only
+-- enabled adaptively when there are few enough partition changes.
+insert into parted_copytest select x,1,'One' from generate_series(1,1000) x
+--
+-- We must insert enough rows to trigger multi-inserts.  These are only
+-- enabled adaptively when there are few enough partition changes.
+insert into parted_copytest select x,$1,$2 from generate_series($3,$4) x
+== 026
+insert into parted_copytest select x,2,'Two' from generate_series(1001,1010) x
+--
+insert into parted_copytest select x,$1,$2 from generate_series($3,$4) x
+== 027
+insert into parted_copytest select x,1,'One' from generate_series(1011,1020) x
+--
+insert into parted_copytest select x,$1,$2 from generate_series($3,$4) x
+== 028
+copy (select * from parted_copytest order by a) to :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 52
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 029
+truncate parted_copytest
+--
+truncate parted_copytest
+== 030
+copy parted_copytest from :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 27
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 031
+-- Ensure COPY FREEZE errors for partitioned tables.
+begin
+--
+-- Ensure COPY FREEZE errors for partitioned tables.
+begin
+== 032
+truncate parted_copytest
+--
+truncate parted_copytest
+== 033
+copy parted_copytest from :'filename' (freeze)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 27
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 034
+rollback
+--
+rollback
+== 035
+select tableoid::regclass,count(*),sum(a) from parted_copytest
+group by tableoid order by tableoid::regclass::name
+--
+select tableoid::regclass,count(*),sum(a) from parted_copytest
+group by tableoid order by tableoid::regclass::name
+== 036
+truncate parted_copytest
+--
+truncate parted_copytest
+== 037
+-- create before insert row trigger on parted_copytest_a2
+create function part_ins_func() returns trigger language plpgsql as $$
+begin
+  return new;
+end;
+$$
+--
+-- create before insert row trigger on parted_copytest_a2
+create function part_ins_func() returns trigger language plpgsql as $1
+== 038
+create trigger part_ins_trig
+	before insert on parted_copytest_a2
+	for each row
+	execute procedure part_ins_func()
+--
+create trigger part_ins_trig
+	before insert on parted_copytest_a2
+	for each row
+	execute procedure part_ins_func()
+== 039
+copy parted_copytest from :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 27
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 040
+select tableoid::regclass,count(*),sum(a) from parted_copytest
+group by tableoid order by tableoid::regclass::name
+--
+select tableoid::regclass,count(*),sum(a) from parted_copytest
+group by tableoid order by tableoid::regclass::name
+== 041
+truncate table parted_copytest
+--
+truncate table parted_copytest
+== 042
+create index on parted_copytest (b)
+--
+create index on parted_copytest (b)
+== 043
+drop trigger part_ins_trig on parted_copytest_a2
+--
+drop trigger part_ins_trig on parted_copytest_a2
+== 044
+copy parted_copytest from stdin
+--
+copy parted_copytest from stdin
+== 045
+-- Ensure index entries were properly added during the copy.
+select * from parted_copytest where b = 1
+--
+-- Ensure index entries were properly added during the copy.
+select * from parted_copytest where b = $1
+== 046
+select * from parted_copytest where b = 2
+--
+select * from parted_copytest where b = $1
+== 047
+drop table parted_copytest
+--
+drop table parted_copytest
+== 048
+|--
+-- Progress reporting for COPY
+|--
+create table tab_progress_reporting (
+	name text,
+	age int4,
+	location point,
+	salary int4,
+	manager name
+)
+--
+|--
+-- Progress reporting for COPY
+|--
+create table tab_progress_reporting (
+	name text,
+	age int4,
+	location point,
+	salary int4,
+	manager name
+)
+== 049
+-- Add a trigger to catch and print the contents of the catalog view
+-- pg_stat_progress_copy during data insertion.  This allows to test
+-- the validation of some progress reports for COPY FROM where the trigger
+-- would fire.
+create function notice_after_tab_progress_reporting() returns trigger AS
+$$
+declare report record;
+begin
+  -- The fields ignored here are the ones that may not remain
+  -- consistent across multiple runs.  The sizes reported may differ
+  -- across platforms, so just check if these are strictly positive.
+  with progress_data as (
+    select
+       relid::regclass::text as relname,
+       command,
+       type,
+       bytes_processed > 0 as has_bytes_processed,
+       bytes_total > 0 as has_bytes_total,
+       tuples_processed,
+       tuples_excluded
+      from pg_stat_progress_copy
+      where pid = pg_backend_pid())
+  select into report (to_jsonb(r)) as value
+    from progress_data r;
+
+  raise info 'progress: %', report.value::text;
+  return new;
+end;
+$$ language plpgsql
+--
+-- Add a trigger to catch and print the contents of the catalog view
+-- pg_stat_progress_copy during data insertion.  This allows to test
+-- the validation of some progress reports for COPY FROM where the trigger
+-- would fire.
+create function notice_after_tab_progress_reporting() returns trigger AS
+$1 language plpgsql
+== 050
+create trigger check_after_tab_progress_reporting
+	after insert on tab_progress_reporting
+	for each statement
+	execute function notice_after_tab_progress_reporting()
+--
+create trigger check_after_tab_progress_reporting
+	after insert on tab_progress_reporting
+	for each statement
+	execute function notice_after_tab_progress_reporting()
+== 051
+-- Generate COPY FROM report with PIPE.
+copy tab_progress_reporting from stdin
+--
+-- Generate COPY FROM report with PIPE.
+copy tab_progress_reporting from stdin
+== 052
+-- Generate COPY FROM report with FILE, with some excluded tuples.
+truncate tab_progress_reporting
+--
+-- Generate COPY FROM report with FILE, with some excluded tuples.
+truncate tab_progress_reporting
+== 053
+copy tab_progress_reporting from :'filename'
+	where (salary < 2000)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 34
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 054
+drop trigger check_after_tab_progress_reporting on tab_progress_reporting
+--
+drop trigger check_after_tab_progress_reporting on tab_progress_reporting
+== 055
+drop function notice_after_tab_progress_reporting()
+--
+drop function notice_after_tab_progress_reporting()
+== 056
+drop table tab_progress_reporting
+--
+drop table tab_progress_reporting
+== 057
+-- Test header matching feature
+create table header_copytest (
+	a int,
+	b int,
+	c text
+)
+--
+-- Test header matching feature
+create table header_copytest (
+	a int,
+	b int,
+	c text
+)
+== 058
+-- Make sure it works with dropped columns
+alter table header_copytest drop column c
+--
+-- Make sure it works with dropped columns
+alter table header_copytest drop column c
+== 059
+alter table header_copytest add column c text
+--
+alter table header_copytest add column c text
+== 060
+copy header_copytest to stdout with (header match)
+--
+copy header_copytest to stdout with (header match)
+== 061
+copy header_copytest from stdin with (header wrong_choice)
+--
+copy header_copytest from stdin with (header wrong_choice)
+== 062
+copy header_copytest (c, a, b) from stdin with (header match)
+--
+copy header_copytest (c, a, b) from stdin with (header match)
+== 063
+copy header_copytest from stdin with (header match, format csv)
+--
+copy header_copytest from stdin with (header match, format csv)
+== 064
+-- errors
+copy header_copytest (c, b, a) from stdin with (header match)
+--
+-- errors
+copy header_copytest (c, b, a) from stdin with (header match)
+== 065
+copy header_copytest from stdin with (header match)
+--
+copy header_copytest from stdin with (header match)
+== 066
+copy header_copytest from stdin with (header match)
+--
+copy header_copytest from stdin with (header match)
+== 067
+copy header_copytest from stdin with (header match)
+--
+copy header_copytest from stdin with (header match)
+== 068
+copy header_copytest from stdin with (header match)
+--
+copy header_copytest from stdin with (header match)
+== 069
+SELECT * FROM header_copytest ORDER BY a
+--
+SELECT * FROM header_copytest ORDER BY a
+== 070
+-- Drop an extra column, in the middle of the existing set.
+alter table header_copytest drop column b
+--
+-- Drop an extra column, in the middle of the existing set.
+alter table header_copytest drop column b
+== 071
+-- works
+copy header_copytest (c, a) from stdin with (header match)
+--
+-- works
+copy header_copytest (c, a) from stdin with (header match)
+== 072
+copy header_copytest (a, c) from stdin with (header match)
+--
+copy header_copytest (a, c) from stdin with (header match)
+== 073
+-- errors
+copy header_copytest from stdin with (header match)
+--
+-- errors
+copy header_copytest from stdin with (header match)
+== 074
+copy header_copytest (a, c) from stdin with (header match)
+--
+copy header_copytest (a, c) from stdin with (header match)
+== 075
+SELECT * FROM header_copytest ORDER BY a
+--
+SELECT * FROM header_copytest ORDER BY a
+== 076
+drop table header_copytest
+--
+drop table header_copytest
+== 077
+-- test COPY with overlong column defaults
+create temp table oversized_column_default (
+    col1 varchar(5) DEFAULT 'more than 5 chars',
+    col2 varchar(5))
+--
+-- test COPY with overlong column defaults
+create temp table oversized_column_default (
+    col1 varchar(5) DEFAULT 'more than 5 chars',
+    col2 varchar(5))
+== 078
+-- normal COPY should work
+copy oversized_column_default from stdin
+--
+-- normal COPY should work
+copy oversized_column_default from stdin
+== 079
+-- error if the column is excluded
+copy oversized_column_default (col2) from stdin
+--
+-- error if the column is excluded
+copy oversized_column_default (col2) from stdin
+== 080
+-- error if the DEFAULT option is given
+copy oversized_column_default from stdin (default '')
+--
+-- error if the DEFAULT option is given
+copy oversized_column_default from stdin (default '')
+== 081
+drop table oversized_column_default
+--
+drop table oversized_column_default
+== 082
+|--
+-- Create partitioned table that does not allow bulk insertions, to test bugs
+-- related to the reuse of BulkInsertState across partitions (only done when
+-- not using bulk insert).  Switching between partitions often makes it more
+-- likely to encounter these bugs, so we just switch on roughly every insert
+-- by having an even/odd number partition and inserting evenly distributed
+-- data.
+|--
+CREATE TABLE parted_si (
+  id int not null,
+  data text not null,
+  -- prevent use of bulk insert by having a volatile function
+  rand float8 not null default random()
+)
+PARTITION BY LIST((id % 2))
+--
+|--
+-- Create partitioned table that does not allow bulk insertions, to test bugs
+-- related to the reuse of BulkInsertState across partitions (only done when
+-- not using bulk insert).  Switching between partitions often makes it more
+-- likely to encounter these bugs, so we just switch on roughly every insert
+-- by having an even/odd number partition and inserting evenly distributed
+-- data.
+|--
+CREATE TABLE parted_si (
+  id int not null,
+  data text not null,
+  -- prevent use of bulk insert by having a volatile function
+  rand float8 not null default random()
+)
+PARTITION BY LIST((id % 2))
+== 083
+CREATE TABLE parted_si_p_even PARTITION OF parted_si FOR VALUES IN (0)
+--
+CREATE TABLE parted_si_p_even PARTITION OF parted_si FOR VALUES IN (0)
+== 084
+CREATE TABLE parted_si_p_odd PARTITION OF parted_si FOR VALUES IN (1)
+--
+CREATE TABLE parted_si_p_odd PARTITION OF parted_si FOR VALUES IN (1)
+== 085
+-- Test that bulk relation extension handles reusing a single BulkInsertState
+-- across partitions.  Without the fix applied, this reliably reproduces
+-- #18130 unless shared_buffers is extremely small (preventing any use of bulk
+-- relation extension). See
+-- https://postgr.es/m/18130-7a86a7356a75209d%40postgresql.org
+-- https://postgr.es/m/257696.1695670946%40sss.pgh.pa.us
+COPY parted_si(id, data) FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 409
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 086
+-- An earlier bug (see commit b1ecb9b3fcf) could end up using a buffer from
+-- the wrong partition. This test is *not* guaranteed to trigger that bug, but
+-- does so when shared_buffers is small enough.  To test if we encountered the
+-- bug, check that the partition condition isn't violated.
+SELECT tableoid::regclass, id % 2 = 0 is_even, count(*) from parted_si GROUP BY 1, 2 ORDER BY 1
+--
+-- An earlier bug (see commit b1ecb9b3fcf) could end up using a buffer from
+-- the wrong partition. This test is *not* guaranteed to trigger that bug, but
+-- does so when shared_buffers is small enough.  To test if we encountered the
+-- bug, check that the partition condition isn't violated.
+SELECT tableoid::regclass, id % $1 = $2 is_even, count(*) from parted_si GROUP BY 1, 2 ORDER BY 1
+== 087
+DROP TABLE parted_si
+--
+DROP TABLE parted_si

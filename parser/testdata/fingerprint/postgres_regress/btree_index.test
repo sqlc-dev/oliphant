@@ -1,0 +1,538 @@
+== 001
+|--
+-- BTREE_INDEX
+|--
+
+-- directory paths are passed to us in environment variables
+
+CREATE TABLE bt_i4_heap (
+	seqno 		int4,
+	random 		int4
+)
+--
+de5f0b95953f4ef0
+== 002
+CREATE TABLE bt_name_heap (
+	seqno 		name,
+	random 		int4
+)
+--
+37cfd9a145a506bf
+== 003
+CREATE TABLE bt_txt_heap (
+	seqno 		text,
+	random 		int4
+)
+--
+2433cf62d139cf2f
+== 004
+CREATE TABLE bt_f8_heap (
+	seqno 		float8,
+	random 		int4
+)
+--
+bf50a89dd91452b7
+== 005
+COPY bt_i4_heap FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 006
+COPY bt_name_heap FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 007
+COPY bt_txt_heap FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 23
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+COPY bt_f8_heap FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
+ANALYZE bt_i4_heap
+--
+062926a157353dba
+== 010
+ANALYZE bt_name_heap
+--
+d5bf5f4374a7907c
+== 011
+ANALYZE bt_txt_heap
+--
+5fea1c46baf33a18
+== 012
+ANALYZE bt_f8_heap
+--
+8320f1d3d2014a61
+== 013
+|--
+-- BTREE ascending/descending cases
+|--
+-- we load int4/text from pure descending data (each key is a new
+-- low key) and name/f8 from pure ascending data (each key is a new
+-- high key).  we had a bug where new low keys would sometimes be
+-- "lost".
+|--
+CREATE INDEX bt_i4_index ON bt_i4_heap USING btree (seqno int4_ops)
+--
+e602ad05da0eb314
+== 014
+CREATE INDEX bt_name_index ON bt_name_heap USING btree (seqno name_ops)
+--
+01e27f32c5efb4d2
+== 015
+CREATE INDEX bt_txt_index ON bt_txt_heap USING btree (seqno text_ops)
+--
+a9855bf688a16ef5
+== 016
+CREATE INDEX bt_f8_index ON bt_f8_heap USING btree (seqno float8_ops)
+--
+de57525f0728b2fa
+== 017
+|--
+-- test retrieval of min/max keys for each index
+|--
+
+SELECT b.*
+   FROM bt_i4_heap b
+   WHERE b.seqno < 1
+--
+17d5e5a01832cc86
+== 018
+SELECT b.*
+   FROM bt_i4_heap b
+   WHERE b.seqno >= 9999
+--
+504fd06dfac210a2
+== 019
+SELECT b.*
+   FROM bt_i4_heap b
+   WHERE b.seqno = 4500
+--
+f13d31e4e61aaa7b
+== 020
+SELECT b.*
+   FROM bt_name_heap b
+   WHERE b.seqno < '1'::name
+--
+9ce73cf8ebc0c8e9
+== 021
+SELECT b.*
+   FROM bt_name_heap b
+   WHERE b.seqno >= '9999'::name
+--
+2d7714cb744b580c
+== 022
+SELECT b.*
+   FROM bt_name_heap b
+   WHERE b.seqno = '4500'::name
+--
+ca9ad22de32c4945
+== 023
+SELECT b.*
+   FROM bt_txt_heap b
+   WHERE b.seqno < '1'::text
+--
+31895da1fd81cb9b
+== 024
+SELECT b.*
+   FROM bt_txt_heap b
+   WHERE b.seqno >= '9999'::text
+--
+ee2dd666f6edefb8
+== 025
+SELECT b.*
+   FROM bt_txt_heap b
+   WHERE b.seqno = '4500'::text
+--
+3677dde567f2fc79
+== 026
+SELECT b.*
+   FROM bt_f8_heap b
+   WHERE b.seqno < '1'::float8
+--
+b42b96585fa9956f
+== 027
+SELECT b.*
+   FROM bt_f8_heap b
+   WHERE b.seqno >= '9999'::float8
+--
+09904d17aa7444ae
+== 028
+SELECT b.*
+   FROM bt_f8_heap b
+   WHERE b.seqno = '4500'::float8
+--
+1f9636a155dd762a
+== 029
+|--
+-- Add coverage for optimization of backwards scan index descents
+|--
+-- Here we expect _bt_search to descend straight to a leaf page containing a
+-- non-pivot tuple with the value '47', which comes last (after 11 similar
+-- non-pivot tuples).  Query execution should only need to visit a single
+-- leaf page here.
+|--
+-- Test case relies on tenk1_hundred index having a leaf page whose high key
+-- is '(48, -inf)'.  We use a low cardinality index to make our test case less
+-- sensitive to implementation details that may change in the future.
+set enable_seqscan to false
+--
+b6355b32597ef7db
+== 030
+set enable_indexscan to true
+--
+c95f6a280f5be733
+== 031
+set enable_bitmapscan to false
+--
+aa90c60f48f4fef4
+== 032
+explain (costs off)
+select hundred, twenty from tenk1 where hundred < 48 order by hundred desc limit 1
+--
+8fe5befd470c83b4
+== 033
+select hundred, twenty from tenk1 where hundred < 48 order by hundred desc limit 1
+--
+4e532a92b9529494
+== 034
+-- This variant of the query need only return a single tuple located to the immediate
+-- right of the '(48, -inf)' high key.  It also only needs to scan one single
+-- leaf page (the right sibling of the page scanned by the last test case):
+explain (costs off)
+select hundred, twenty from tenk1 where hundred <= 48 order by hundred desc limit 1
+--
+fbb3999638393bd4
+== 035
+select hundred, twenty from tenk1 where hundred <= 48 order by hundred desc limit 1
+--
+ffbaa69c5cfd7823
+== 036
+|--
+-- Add coverage for ScalarArrayOp btree quals with pivot tuple constants
+|--
+explain (costs off)
+select distinct hundred from tenk1 where hundred in (47, 48, 72, 82)
+--
+60782118cf70ecde
+== 037
+select distinct hundred from tenk1 where hundred in (47, 48, 72, 82)
+--
+ae82aa495551cdd8
+== 038
+explain (costs off)
+select distinct hundred from tenk1 where hundred in (47, 48, 72, 82) order by hundred desc
+--
+83491363480c6f20
+== 039
+select distinct hundred from tenk1 where hundred in (47, 48, 72, 82) order by hundred desc
+--
+2985b780b5a09102
+== 040
+explain (costs off)
+select thousand from tenk1 where thousand in (364, 366,380) and tenthous = 200000
+--
+dcd643e110ed7348
+== 041
+select thousand from tenk1 where thousand in (364, 366,380) and tenthous = 200000
+--
+f726308d58a4c7a3
+== 042
+|--
+-- Check correct optimization of LIKE (special index operator support)
+-- for both indexscan and bitmapscan cases
+|--
+
+set enable_seqscan to false
+--
+b6355b32597ef7db
+== 043
+set enable_indexscan to true
+--
+c95f6a280f5be733
+== 044
+set enable_bitmapscan to false
+--
+aa90c60f48f4fef4
+== 045
+explain (costs off)
+select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
+--
+a945fa22323f628c
+== 046
+select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
+--
+ddcce2261e7da21e
+== 047
+explain (costs off)
+select proname from pg_proc where proname ilike '00%foo' order by 1
+--
+77dee332af14f7d8
+== 048
+select proname from pg_proc where proname ilike '00%foo' order by 1
+--
+a6b48d18855c67c7
+== 049
+explain (costs off)
+select proname from pg_proc where proname ilike 'ri%foo' order by 1
+--
+77dee332af14f7d8
+== 050
+set enable_indexscan to false
+--
+c95f6a280f5be733
+== 051
+set enable_bitmapscan to true
+--
+aa90c60f48f4fef4
+== 052
+explain (costs off)
+select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
+--
+a945fa22323f628c
+== 053
+select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
+--
+ddcce2261e7da21e
+== 054
+explain (costs off)
+select proname from pg_proc where proname ilike '00%foo' order by 1
+--
+77dee332af14f7d8
+== 055
+select proname from pg_proc where proname ilike '00%foo' order by 1
+--
+a6b48d18855c67c7
+== 056
+explain (costs off)
+select proname from pg_proc where proname ilike 'ri%foo' order by 1
+--
+77dee332af14f7d8
+== 057
+reset enable_seqscan
+--
+4dec036bbc151e13
+== 058
+reset enable_indexscan
+--
+f0fcaf221af6b112
+== 059
+reset enable_bitmapscan
+--
+e4cb3f6b223046e8
+== 060
+-- Also check LIKE optimization with binary-compatible cases
+
+create temp table btree_bpchar (f1 text collate "C")
+--
+9d8e8e85fdedf434
+== 061
+create index on btree_bpchar(f1 bpchar_ops) WITH (deduplicate_items=on)
+--
+5a0fc5e45d98521e
+== 062
+insert into btree_bpchar values ('foo'), ('fool'), ('bar'), ('quux')
+--
+637eed318bbf17ac
+== 063
+-- doesn't match index:
+explain (costs off)
+select * from btree_bpchar where f1 like 'foo'
+--
+fa6bfce7949dc84f
+== 064
+select * from btree_bpchar where f1 like 'foo'
+--
+97ca3a96f7f995f5
+== 065
+explain (costs off)
+select * from btree_bpchar where f1 like 'foo%'
+--
+fa6bfce7949dc84f
+== 066
+select * from btree_bpchar where f1 like 'foo%'
+--
+97ca3a96f7f995f5
+== 067
+-- these do match the index:
+explain (costs off)
+select * from btree_bpchar where f1::bpchar like 'foo'
+--
+080bb21ec53e0b91
+== 068
+select * from btree_bpchar where f1::bpchar like 'foo'
+--
+1215891b10e3cf6a
+== 069
+explain (costs off)
+select * from btree_bpchar where f1::bpchar like 'foo%'
+--
+080bb21ec53e0b91
+== 070
+select * from btree_bpchar where f1::bpchar like 'foo%'
+--
+1215891b10e3cf6a
+== 071
+-- get test coverage for "single value" deduplication strategy:
+insert into btree_bpchar select 'foo' from generate_series(1,1500)
+--
+b34cde0b530295ed
+== 072
+|--
+-- Perform unique checking, with and without the use of deduplication
+|--
+CREATE TABLE dedup_unique_test_table (a int) WITH (autovacuum_enabled=false)
+--
+0f639d19b5a3a832
+== 073
+CREATE UNIQUE INDEX dedup_unique ON dedup_unique_test_table (a) WITH (deduplicate_items=on)
+--
+47a3a05dce6276e6
+== 074
+CREATE UNIQUE INDEX plain_unique ON dedup_unique_test_table (a) WITH (deduplicate_items=off)
+--
+01d83741dd2e9f1c
+== 075
+-- Generate enough garbage tuples in index to ensure that even the unique index
+-- with deduplication enabled has to check multiple leaf pages during unique
+-- checking (at least with a BLCKSZ of 8192 or less)
+DO $$
+BEGIN
+    FOR r IN 1..1350 LOOP
+        DELETE FROM dedup_unique_test_table;
+        INSERT INTO dedup_unique_test_table SELECT 1;
+    END LOOP;
+END$$
+--
+f936eab75b8c1b90
+== 076
+-- Exercise the LP_DEAD-bit-set tuple deletion code with a posting list tuple.
+-- The implementation prefers deleting existing items to merging any duplicate
+-- tuples into a posting list, so we need an explicit test to make sure we get
+-- coverage (note that this test also assumes BLCKSZ is 8192 or less):
+DROP INDEX plain_unique
+--
+1ddd6a4c2b251a4b
+== 077
+DELETE FROM dedup_unique_test_table WHERE a = 1
+--
+1a0125a345774574
+== 078
+INSERT INTO dedup_unique_test_table SELECT i FROM generate_series(0,450) i
+--
+1b7da979637cb03c
+== 079
+|--
+-- Test B-tree fast path (cache rightmost leaf page) optimization.
+|--
+
+-- First create a tree that's at least three levels deep (i.e. has one level
+-- between the root and leaf levels). The text inserted is long.  It won't be
+-- TOAST compressed because we use plain storage in the table.  Only a few
+-- index tuples fit on each internal page, allowing us to get a tall tree with
+-- few pages.  (A tall tree is required to trigger caching.)
+|--
+-- The text column must be the leading column in the index, since suffix
+-- truncation would otherwise truncate tuples on internal pages, leaving us
+-- with a short tree.
+create table btree_tall_tbl(id int4, t text)
+--
+45c44f536fd5f46f
+== 080
+alter table btree_tall_tbl alter COLUMN t set storage plain
+--
+1431385d4a866968
+== 081
+create index btree_tall_idx on btree_tall_tbl (t, id) with (fillfactor = 10)
+--
+247bf1613893134f
+== 082
+insert into btree_tall_tbl select g, repeat('x', 250)
+from generate_series(1, 130) g
+--
+f86d6ac46146394d
+== 083
+|--
+-- Test for multilevel page deletion
+|--
+CREATE TABLE delete_test_table (a bigint, b bigint, c bigint, d bigint)
+--
+01ebfddfd5c1e47b
+== 084
+INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1,80000) i
+--
+a42927da744308fc
+== 085
+ALTER TABLE delete_test_table ADD PRIMARY KEY (a,b,c,d)
+--
+662997b8ee56bf32
+== 086
+-- Delete most entries, and vacuum, deleting internal pages and creating "fast
+-- root"
+DELETE FROM delete_test_table WHERE a < 79990
+--
+5cd313296a14e4b6
+== 087
+VACUUM delete_test_table
+--
+e223dd46f2a17c17
+== 088
+|--
+-- Test B-tree insertion with a metapage update (XLOG_BTREE_INSERT_META
+-- WAL record type). This happens when a "fast root" page is split.  This
+-- also creates coverage for nbtree FSM page recycling.
+|--
+-- The vacuum above should've turned the leaf page into a fast root. We just
+-- need to insert some rows to cause the fast root page to split.
+INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1,1000) i
+--
+a42927da744308fc
+== 089
+-- Test unsupported btree opclass parameters
+create index on btree_tall_tbl (id int4_ops(foo=1))
+--
+f475a27d0b0fdcd9
+== 090
+-- Test case of ALTER INDEX with abuse of column names for indexes.
+-- This grammar is not officially supported, but the parser allows it.
+CREATE INDEX btree_tall_idx2 ON btree_tall_tbl (id)
+--
+fed368b7ad0792f6
+== 091
+ALTER INDEX btree_tall_idx2 ALTER COLUMN id SET (n_distinct=100)
+--
+0d3e4c5b15b4fa34
+== 092
+DROP INDEX btree_tall_idx2
+--
+62673cf91adb1328
+== 093
+-- Partitioned index
+CREATE TABLE btree_part (id int4) PARTITION BY RANGE (id)
+--
+d336580a4cd3a692
+== 094
+CREATE INDEX btree_part_idx ON btree_part(id)
+--
+bb2e34b7fd1bc024
+== 095
+ALTER INDEX btree_part_idx ALTER COLUMN id SET (n_distinct=100)
+--
+41b68b400c3c09e3
+== 096
+DROP TABLE btree_part
+--
+4dc1ce0f08b65fc5

@@ -1,0 +1,972 @@
+== 001
+-- relative tablespace locations are not allowed
+CREATE TABLESPACE regress_tblspace LOCATION 'relative'
+--
+543144b592a9bc7b
+== 002
+-- fail
+
+-- empty tablespace locations are not usually allowed
+CREATE TABLESPACE regress_tblspace LOCATION ''
+--
+543144b592a9bc7b
+== 003
+-- fail
+
+-- as a special developer-only option to allow us to use tablespaces
+-- with streaming replication on the same server, an empty location
+-- can be allowed as a way to say that the tablespace should be created
+-- as a directory in pg_tblspc, rather than being a symlink
+SET allow_in_place_tablespaces = true
+--
+166277b4fe516072
+== 004
+-- create a tablespace using WITH clause
+CREATE TABLESPACE regress_tblspacewith LOCATION '' WITH (some_nonexistent_parameter = true)
+--
+32afdfaae70b65ff
+== 005
+-- fail
+CREATE TABLESPACE regress_tblspacewith LOCATION '' WITH (random_page_cost = 3.0)
+--
+1b0264d09a747680
+== 006
+-- ok
+
+-- check to see the parameter was used
+SELECT spcoptions FROM pg_tablespace WHERE spcname = 'regress_tblspacewith'
+--
+c35976cfeaa35fb1
+== 007
+-- drop the tablespace so we can re-use the location
+DROP TABLESPACE regress_tblspacewith
+--
+dc14ca311c821ab6
+== 008
+-- This returns a relative path as of an effect of allow_in_place_tablespaces,
+-- masking the tablespace OID used in the path name.
+SELECT regexp_replace(pg_tablespace_location(oid), '(pg_tblspc)/(\d+)', '\1/NNN')
+  FROM pg_tablespace  WHERE spcname = 'regress_tblspace'
+--
+22ec25310c8e0b05
+== 009
+-- try setting and resetting some properties for the new tablespace
+ALTER TABLESPACE regress_tblspace SET (random_page_cost = 1.0, seq_page_cost = 1.1)
+--
+19db54e2bf2846ca
+== 010
+ALTER TABLESPACE regress_tblspace SET (some_nonexistent_parameter = true)
+--
+28ac4f64651b4f04
+== 011
+-- fail
+ALTER TABLESPACE regress_tblspace RESET (random_page_cost = 2.0)
+--
+5e571db4e7811643
+== 012
+-- fail
+ALTER TABLESPACE regress_tblspace RESET (random_page_cost, effective_io_concurrency)
+--
+16f8733892152eed
+== 013
+-- ok
+
+-- REINDEX (TABLESPACE)
+-- catalogs and system tablespaces
+-- system catalog, fail
+REINDEX (TABLESPACE regress_tblspace) TABLE pg_am
+--
+cd3722ba525023db
+== 014
+REINDEX (TABLESPACE regress_tblspace) TABLE CONCURRENTLY pg_am
+--
+ae803c3831aac4b8
+== 015
+-- shared catalog, fail
+REINDEX (TABLESPACE regress_tblspace) TABLE pg_authid
+--
+01769f64aecc2f72
+== 016
+REINDEX (TABLESPACE regress_tblspace) TABLE CONCURRENTLY pg_authid
+--
+e86d79b2ca124a3b
+== 017
+-- toast relations, fail
+REINDEX (TABLESPACE regress_tblspace) INDEX pg_toast.pg_toast_1260_index
+--
+efebc25122046ed5
+== 018
+REINDEX (TABLESPACE regress_tblspace) INDEX CONCURRENTLY pg_toast.pg_toast_1260_index
+--
+411086eabba9f7ea
+== 019
+REINDEX (TABLESPACE regress_tblspace) TABLE pg_toast.pg_toast_1260
+--
+d34ba4fda2c4ceb3
+== 020
+REINDEX (TABLESPACE regress_tblspace) TABLE CONCURRENTLY pg_toast.pg_toast_1260
+--
+b27f8706459879fc
+== 021
+-- system catalog, fail
+REINDEX (TABLESPACE pg_global) TABLE pg_authid
+--
+d35491a5b3d64b8a
+== 022
+REINDEX (TABLESPACE pg_global) TABLE CONCURRENTLY pg_authid
+--
+34e257aedb5a2c15
+== 023
+-- table with toast relation
+CREATE TABLE regress_tblspace_test_tbl (num1 bigint, num2 double precision, t text)
+--
+cc9242aa9ad22a11
+== 024
+INSERT INTO regress_tblspace_test_tbl (num1, num2, t)
+  SELECT round(random()*100), random(), 'text'
+  FROM generate_series(1, 10) s(i)
+--
+d913033b517cff44
+== 025
+CREATE INDEX regress_tblspace_test_tbl_idx ON regress_tblspace_test_tbl (num1)
+--
+00ccb92230bc3bef
+== 026
+-- move to global tablespace, fail
+REINDEX (TABLESPACE pg_global) INDEX regress_tblspace_test_tbl_idx
+--
+c92d464d7717bf1e
+== 027
+REINDEX (TABLESPACE pg_global) INDEX CONCURRENTLY regress_tblspace_test_tbl_idx
+--
+1b57abd93f3f5be1
+== 028
+-- check transactional behavior of REINDEX (TABLESPACE)
+BEGIN
+--
+b16b431979fc3e05
+== 029
+REINDEX (TABLESPACE regress_tblspace) INDEX regress_tblspace_test_tbl_idx
+--
+1bb2a266bb6bc026
+== 030
+REINDEX (TABLESPACE regress_tblspace) TABLE regress_tblspace_test_tbl
+--
+32fb42bbd7080883
+== 031
+ROLLBACK
+--
+a46081a556fda027
+== 032
+-- no relation moved to the new tablespace
+SELECT c.relname FROM pg_class c, pg_tablespace s
+  WHERE c.reltablespace = s.oid AND s.spcname = 'regress_tblspace'
+--
+5fa213eefb83d5c7
+== 033
+-- check that all indexes are moved to a new tablespace with different
+-- relfilenode.
+-- Save first the existing relfilenode for the toast and main relations.
+SELECT relfilenode as main_filenode FROM pg_class
+  WHERE relname = 'regress_tblspace_test_tbl_idx'
+--
+8453e209eb133710
+== 034
+SELECT relfilenode as toast_filenode FROM pg_class
+  WHERE oid =
+    (SELECT i.indexrelid
+       FROM pg_class c,
+            pg_index i
+       WHERE i.indrelid = c.reltoastrelid AND
+             c.relname = 'regress_tblspace_test_tbl')
+--
+79bbac4fe2c25f5c
+== 035
+REINDEX (TABLESPACE regress_tblspace) TABLE regress_tblspace_test_tbl
+--
+32fb42bbd7080883
+== 036
+SELECT c.relname FROM pg_class c, pg_tablespace s
+  WHERE c.reltablespace = s.oid AND s.spcname = 'regress_tblspace'
+  ORDER BY c.relname
+--
+84f0c57a6e3a1f05
+== 037
+ALTER TABLE regress_tblspace_test_tbl SET TABLESPACE regress_tblspace
+--
+6bf9368003d0aaae
+== 038
+ALTER TABLE regress_tblspace_test_tbl SET TABLESPACE pg_default
+--
+fe1d8aa49179413a
+== 039
+SELECT c.relname FROM pg_class c, pg_tablespace s
+  WHERE c.reltablespace = s.oid AND s.spcname = 'regress_tblspace'
+  ORDER BY c.relname
+--
+84f0c57a6e3a1f05
+== 040
+-- Move back to the default tablespace.
+ALTER INDEX regress_tblspace_test_tbl_idx SET TABLESPACE pg_default
+--
+f8095392fbba1944
+== 041
+SELECT c.relname FROM pg_class c, pg_tablespace s
+  WHERE c.reltablespace = s.oid AND s.spcname = 'regress_tblspace'
+  ORDER BY c.relname
+--
+84f0c57a6e3a1f05
+== 042
+REINDEX (TABLESPACE regress_tblspace, CONCURRENTLY) TABLE regress_tblspace_test_tbl
+--
+d3b3258a93c89218
+== 043
+SELECT c.relname FROM pg_class c, pg_tablespace s
+  WHERE c.reltablespace = s.oid AND s.spcname = 'regress_tblspace'
+  ORDER BY c.relname
+--
+84f0c57a6e3a1f05
+== 044
+SELECT relfilenode = :main_filenode AS main_same FROM pg_class
+  WHERE relname = 'regress_tblspace_test_tbl_idx'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 045
+SELECT relfilenode = :toast_filenode as toast_same FROM pg_class
+  WHERE oid =
+    (SELECT i.indexrelid
+       FROM pg_class c,
+            pg_index i
+       WHERE i.indrelid = c.reltoastrelid AND
+             c.relname = 'regress_tblspace_test_tbl')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 046
+DROP TABLE regress_tblspace_test_tbl
+--
+afb2fb376accde7b
+== 047
+-- REINDEX (TABLESPACE) with partitions
+-- Create a partition tree and check the set of relations reindexed
+-- with their new tablespace.
+CREATE TABLE tbspace_reindex_part (c1 int, c2 int) PARTITION BY RANGE (c1)
+--
+8db9cf6b661c3568
+== 048
+CREATE TABLE tbspace_reindex_part_0 PARTITION OF tbspace_reindex_part
+  FOR VALUES FROM (0) TO (10) PARTITION BY list (c2)
+--
+6d83a759ecd2b92c
+== 049
+CREATE TABLE tbspace_reindex_part_0_1 PARTITION OF tbspace_reindex_part_0
+  FOR VALUES IN (1)
+--
+184c349a650c0a36
+== 050
+CREATE TABLE tbspace_reindex_part_0_2 PARTITION OF tbspace_reindex_part_0
+  FOR VALUES IN (2)
+--
+840e72d6052e900c
+== 051
+-- This partitioned table will have no partitions.
+CREATE TABLE tbspace_reindex_part_10 PARTITION OF tbspace_reindex_part
+   FOR VALUES FROM (10) TO (20) PARTITION BY list (c2)
+--
+4b7040f393679622
+== 052
+-- Create some partitioned indexes
+CREATE INDEX tbspace_reindex_part_index ON ONLY tbspace_reindex_part (c1)
+--
+73292d3e527e34df
+== 053
+CREATE INDEX tbspace_reindex_part_index_0 ON ONLY tbspace_reindex_part_0 (c1)
+--
+ae3671ec66b922d5
+== 054
+ALTER INDEX tbspace_reindex_part_index ATTACH PARTITION tbspace_reindex_part_index_0
+--
+149e1e86800bb055
+== 055
+-- This partitioned index will have no partitions.
+CREATE INDEX tbspace_reindex_part_index_10 ON ONLY tbspace_reindex_part_10 (c1)
+--
+24aeda598e0a8c09
+== 056
+ALTER INDEX tbspace_reindex_part_index ATTACH PARTITION tbspace_reindex_part_index_10
+--
+34236456de2b210a
+== 057
+CREATE INDEX tbspace_reindex_part_index_0_1 ON ONLY tbspace_reindex_part_0_1 (c1)
+--
+996d54d4b73df7f5
+== 058
+ALTER INDEX tbspace_reindex_part_index_0 ATTACH PARTITION tbspace_reindex_part_index_0_1
+--
+0cb548a68e7eb323
+== 059
+CREATE INDEX tbspace_reindex_part_index_0_2 ON ONLY tbspace_reindex_part_0_2 (c1)
+--
+7a651c703f0dc9e1
+== 060
+ALTER INDEX tbspace_reindex_part_index_0 ATTACH PARTITION tbspace_reindex_part_index_0_2
+--
+f7d86c7573ccf60b
+== 061
+SELECT relid, parentrelid, level FROM pg_partition_tree('tbspace_reindex_part_index')
+  ORDER BY relid, level
+--
+4797bb58f66146d7
+== 062
+-- Track the original tablespace, relfilenode and OID of each index
+-- in the tree.
+CREATE TEMP TABLE reindex_temp_before AS
+  SELECT oid, relname, relfilenode, reltablespace
+  FROM pg_class
+    WHERE relname ~ 'tbspace_reindex_part_index'
+--
+9a0ec747c7e87078
+== 063
+REINDEX (TABLESPACE regress_tblspace, CONCURRENTLY) TABLE tbspace_reindex_part
+--
+8c414156a9cc57f5
+== 064
+-- REINDEX CONCURRENTLY changes the OID of the old relation, hence a check
+-- based on the relation name below.
+SELECT b.relname,
+       CASE WHEN a.relfilenode = b.relfilenode THEN 'relfilenode is unchanged'
+       ELSE 'relfilenode has changed' END AS filenode,
+       CASE WHEN a.reltablespace = b.reltablespace THEN 'reltablespace is unchanged'
+       ELSE 'reltablespace has changed' END AS tbspace
+  FROM reindex_temp_before b JOIN pg_class a ON b.relname = a.relname
+  ORDER BY 1
+--
+c99e562c6ff1d749
+== 065
+DROP TABLE tbspace_reindex_part
+--
+64bbac1b33dfa701
+== 066
+-- create a schema we can use
+CREATE SCHEMA testschema
+--
+6a71a2888c768aa7
+== 067
+-- try a table
+CREATE TABLE testschema.foo (i int) TABLESPACE regress_tblspace
+--
+5075219f19693252
+== 068
+SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
+    where c.reltablespace = t.oid AND c.relname = 'foo'
+--
+e5c10dee0cfffdbd
+== 069
+INSERT INTO testschema.foo VALUES(1)
+--
+310a546ab709b8c5
+== 070
+INSERT INTO testschema.foo VALUES(2)
+--
+310a546ab709b8c5
+== 071
+-- tables from dynamic sources
+CREATE TABLE testschema.asselect TABLESPACE regress_tblspace AS SELECT 1
+--
+30bd4d86c223315a
+== 072
+SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
+    where c.reltablespace = t.oid AND c.relname = 'asselect'
+--
+e5c10dee0cfffdbd
+== 073
+PREPARE selectsource(int) AS SELECT $1
+--
+8566c5907ec4de0e
+== 074
+CREATE TABLE testschema.asexecute TABLESPACE regress_tblspace
+    AS EXECUTE selectsource(2)
+--
+6e9bd172fe6da00e
+== 075
+SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
+    where c.reltablespace = t.oid AND c.relname = 'asexecute'
+--
+e5c10dee0cfffdbd
+== 076
+-- index
+CREATE INDEX foo_idx on testschema.foo(i) TABLESPACE regress_tblspace
+--
+3be16a422a667282
+== 077
+SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
+    where c.reltablespace = t.oid AND c.relname = 'foo_idx'
+--
+e5c10dee0cfffdbd
+== 078
+-- check \d output
+
+|--
+-- partitioned table
+|--
+CREATE TABLE testschema.part (a int) PARTITION BY LIST (a)
+--
+3ae69aa0929f7801
+== 079
+SET default_tablespace TO pg_global
+--
+60c0fbe3530b96e4
+== 080
+CREATE TABLE testschema.part_1 PARTITION OF testschema.part FOR VALUES IN (1)
+--
+9a2e8e48ea162713
+== 081
+RESET default_tablespace
+--
+6a581115ef511768
+== 082
+CREATE TABLE testschema.part_1 PARTITION OF testschema.part FOR VALUES IN (1)
+--
+9a2e8e48ea162713
+== 083
+SET default_tablespace TO regress_tblspace
+--
+60c0fbe3530b96e4
+== 084
+CREATE TABLE testschema.part_2 PARTITION OF testschema.part FOR VALUES IN (2)
+--
+da759bfb6a6e173a
+== 085
+SET default_tablespace TO pg_global
+--
+60c0fbe3530b96e4
+== 086
+CREATE TABLE testschema.part_3 PARTITION OF testschema.part FOR VALUES IN (3)
+--
+58a4f20583e5ea41
+== 087
+ALTER TABLE testschema.part SET TABLESPACE regress_tblspace
+--
+a63332b4617a900c
+== 088
+CREATE TABLE testschema.part_3 PARTITION OF testschema.part FOR VALUES IN (3)
+--
+58a4f20583e5ea41
+== 089
+CREATE TABLE testschema.part_4 PARTITION OF testschema.part FOR VALUES IN (4)
+  TABLESPACE pg_default
+--
+f2aa2cba4703321f
+== 090
+CREATE TABLE testschema.part_56 PARTITION OF testschema.part FOR VALUES IN (5, 6)
+  PARTITION BY LIST (a)
+--
+c64b4871e4f3b9b4
+== 091
+ALTER TABLE testschema.part SET TABLESPACE pg_default
+--
+93fb3f1d71fcfbeb
+== 092
+CREATE TABLE testschema.part_78 PARTITION OF testschema.part FOR VALUES IN (7, 8)
+  PARTITION BY LIST (a)
+--
+c64b4871e4f3b9b4
+== 093
+CREATE TABLE testschema.part_910 PARTITION OF testschema.part FOR VALUES IN (9, 10)
+  PARTITION BY LIST (a) TABLESPACE regress_tblspace
+--
+3c25e963f872917e
+== 094
+RESET default_tablespace
+--
+6a581115ef511768
+== 095
+CREATE TABLE testschema.part_78 PARTITION OF testschema.part FOR VALUES IN (7, 8)
+  PARTITION BY LIST (a)
+--
+c64b4871e4f3b9b4
+== 096
+SELECT relname, spcname FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON (c.relnamespace = n.oid)
+    LEFT JOIN pg_catalog.pg_tablespace t ON c.reltablespace = t.oid
+    where c.relname LIKE 'part%' AND n.nspname = 'testschema' order by relname
+--
+de75ce8b1681bc42
+== 097
+RESET default_tablespace
+--
+6a581115ef511768
+== 098
+DROP TABLE testschema.part
+--
+b2801de927b885b0
+== 099
+-- partitioned index
+CREATE TABLE testschema.part (a int) PARTITION BY LIST (a)
+--
+3ae69aa0929f7801
+== 100
+CREATE TABLE testschema.part1 PARTITION OF testschema.part FOR VALUES IN (1)
+--
+2c5eaaec4797bde0
+== 101
+CREATE INDEX part_a_idx ON testschema.part (a) TABLESPACE regress_tblspace
+--
+f23608b0fecbc231
+== 102
+CREATE TABLE testschema.part2 PARTITION OF testschema.part FOR VALUES IN (2)
+--
+51e4afb3a1d3a891
+== 103
+SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
+    where c.reltablespace = t.oid AND c.relname LIKE 'part%_idx' ORDER BY relname
+--
+00296a2f14851d6c
+== 104
+-- partitioned rels cannot specify the default tablespace.  These fail:
+CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION BY LIST (a) TABLESPACE pg_default
+--
+98a2e123b0cd8a9a
+== 105
+CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE pg_default) PARTITION BY LIST (a)
+--
+ecc6095dc8bf3d03
+== 106
+SET default_tablespace TO 'pg_default'
+--
+60c0fbe3530b96e4
+== 107
+CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION BY LIST (a) TABLESPACE regress_tblspace
+--
+20ff0b0724959319
+== 108
+CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE regress_tblspace) PARTITION BY LIST (a)
+--
+f398e399540ca777
+== 109
+-- but these work:
+CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE regress_tblspace) PARTITION BY LIST (a) TABLESPACE regress_tblspace
+--
+16505031f1edcabe
+== 110
+SET default_tablespace TO ''
+--
+60c0fbe3530b96e4
+== 111
+CREATE TABLE testschema.dflt2 (a int PRIMARY KEY) PARTITION BY LIST (a)
+--
+b72927d2a4b46903
+== 112
+DROP TABLE testschema.dflt, testschema.dflt2
+--
+0d9cba14829d6bb1
+== 113
+-- check that default_tablespace doesn't affect ALTER TABLE index rebuilds
+CREATE TABLE testschema.test_default_tab(id bigint) TABLESPACE regress_tblspace
+--
+d9f30aa2d12ebe64
+== 114
+INSERT INTO testschema.test_default_tab VALUES (1)
+--
+448bf5d11c7d45f3
+== 115
+CREATE INDEX test_index1 on testschema.test_default_tab (id)
+--
+eeb0fae7f2ab8b91
+== 116
+CREATE INDEX test_index2 on testschema.test_default_tab (id) TABLESPACE regress_tblspace
+--
+1a598cf56930219d
+== 117
+ALTER TABLE testschema.test_default_tab ADD CONSTRAINT test_index3 PRIMARY KEY (id)
+--
+85468b5418f609ff
+== 118
+ALTER TABLE testschema.test_default_tab ADD CONSTRAINT test_index4 UNIQUE (id) USING INDEX TABLESPACE regress_tblspace
+--
+5bf873c80c0fc2fc
+== 119
+-- use a custom tablespace for default_tablespace
+SET default_tablespace TO regress_tblspace
+--
+60c0fbe3530b96e4
+== 120
+-- tablespace should not change if no rewrite
+ALTER TABLE testschema.test_default_tab ALTER id TYPE bigint
+--
+33aa6a276c4afb88
+== 121
+SELECT * FROM testschema.test_default_tab
+--
+96cb7ef73980424c
+== 122
+-- tablespace should not change even if there is an index rewrite
+ALTER TABLE testschema.test_default_tab ALTER id TYPE int
+--
+cdc7bf88734da36d
+== 123
+SELECT * FROM testschema.test_default_tab
+--
+96cb7ef73980424c
+== 124
+-- now use the default tablespace for default_tablespace
+SET default_tablespace TO ''
+--
+60c0fbe3530b96e4
+== 125
+-- tablespace should not change if no rewrite
+ALTER TABLE testschema.test_default_tab ALTER id TYPE int
+--
+cdc7bf88734da36d
+== 126
+-- tablespace should not change even if there is an index rewrite
+ALTER TABLE testschema.test_default_tab ALTER id TYPE bigint
+--
+33aa6a276c4afb88
+== 127
+DROP TABLE testschema.test_default_tab
+--
+8addcb0cab86b0ba
+== 128
+-- check that default_tablespace doesn't affect ALTER TABLE index rebuilds
+-- (this time with a partitioned table)
+CREATE TABLE testschema.test_default_tab_p(id bigint, val bigint)
+    PARTITION BY LIST (id) TABLESPACE regress_tblspace
+--
+243fa5e1bb2e92fa
+== 129
+CREATE TABLE testschema.test_default_tab_p1 PARTITION OF testschema.test_default_tab_p
+    FOR VALUES IN (1)
+--
+53162d4248b03265
+== 130
+INSERT INTO testschema.test_default_tab_p VALUES (1)
+--
+cd2bf68aaae1f814
+== 131
+CREATE INDEX test_index1 on testschema.test_default_tab_p (val)
+--
+cf1dcef79685ea18
+== 132
+CREATE INDEX test_index2 on testschema.test_default_tab_p (val) TABLESPACE regress_tblspace
+--
+de911ae41b402a68
+== 133
+ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT test_index3 PRIMARY KEY (id)
+--
+f62127a97ed566fc
+== 134
+ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT test_index4 UNIQUE (id) USING INDEX TABLESPACE regress_tblspace
+--
+e1087be8f32e77af
+== 135
+-- use a custom tablespace for default_tablespace
+SET default_tablespace TO regress_tblspace
+--
+60c0fbe3530b96e4
+== 136
+-- tablespace should not change if no rewrite
+ALTER TABLE testschema.test_default_tab_p ALTER val TYPE bigint
+--
+da8d0de22c3b8fd6
+== 137
+SELECT * FROM testschema.test_default_tab_p
+--
+fa0ca2854b4b905d
+== 138
+-- tablespace should not change even if there is an index rewrite
+ALTER TABLE testschema.test_default_tab_p ALTER val TYPE int
+--
+62867016bb380340
+== 139
+SELECT * FROM testschema.test_default_tab_p
+--
+fa0ca2854b4b905d
+== 140
+-- now use the default tablespace for default_tablespace
+SET default_tablespace TO ''
+--
+60c0fbe3530b96e4
+== 141
+-- tablespace should not change if no rewrite
+ALTER TABLE testschema.test_default_tab_p ALTER val TYPE int
+--
+62867016bb380340
+== 142
+-- tablespace should not change even if there is an index rewrite
+ALTER TABLE testschema.test_default_tab_p ALTER val TYPE bigint
+--
+da8d0de22c3b8fd6
+== 143
+DROP TABLE testschema.test_default_tab_p
+--
+bed4c8a4be21f779
+== 144
+-- check that default_tablespace affects index additions in ALTER TABLE
+CREATE TABLE testschema.test_tab(id int) TABLESPACE regress_tblspace
+--
+fc352c9795eab00b
+== 145
+INSERT INTO testschema.test_tab VALUES (1)
+--
+a28953a57e782bc4
+== 146
+SET default_tablespace TO regress_tblspace
+--
+60c0fbe3530b96e4
+== 147
+ALTER TABLE testschema.test_tab ADD CONSTRAINT test_tab_unique UNIQUE (id)
+--
+f857caf1e933cc49
+== 148
+SET default_tablespace TO ''
+--
+60c0fbe3530b96e4
+== 149
+ALTER TABLE testschema.test_tab ADD CONSTRAINT test_tab_pkey PRIMARY KEY (id)
+--
+ccd024ce3bed2cc4
+== 150
+SELECT * FROM testschema.test_tab
+--
+ea818a3b0a3267d8
+== 151
+DROP TABLE testschema.test_tab
+--
+77f874e244c96141
+== 152
+-- check that default_tablespace is handled correctly by multi-command
+-- ALTER TABLE that includes a tablespace-preserving rewrite
+CREATE TABLE testschema.test_tab(a int, b int, c int)
+--
+b56ddabc9a287d3f
+== 153
+SET default_tablespace TO regress_tblspace
+--
+60c0fbe3530b96e4
+== 154
+ALTER TABLE testschema.test_tab ADD CONSTRAINT test_tab_unique UNIQUE (a)
+--
+2a7f3edbfe3ca3bb
+== 155
+CREATE INDEX test_tab_a_idx ON testschema.test_tab (a)
+--
+e71c2fa65939de1a
+== 156
+SET default_tablespace TO ''
+--
+60c0fbe3530b96e4
+== 157
+CREATE INDEX test_tab_b_idx ON testschema.test_tab (b)
+--
+bd76edd7ecbe8765
+== 158
+ALTER TABLE testschema.test_tab ALTER b TYPE bigint, ADD UNIQUE (c)
+--
+1f25cd480acef26b
+== 159
+DROP TABLE testschema.test_tab
+--
+77f874e244c96141
+== 160
+-- let's try moving a table from one place to another
+CREATE TABLE testschema.atable AS VALUES (1), (2)
+--
+1e49fa727120403e
+== 161
+CREATE UNIQUE INDEX anindex ON testschema.atable(column1)
+--
+b56550390b3e3f4d
+== 162
+ALTER TABLE testschema.atable SET TABLESPACE regress_tblspace
+--
+09517c405436917d
+== 163
+ALTER INDEX testschema.anindex SET TABLESPACE regress_tblspace
+--
+004386718b47f5a8
+== 164
+ALTER INDEX testschema.part_a_idx SET TABLESPACE pg_global
+--
+1b64e0be950f8684
+== 165
+ALTER INDEX testschema.part_a_idx SET TABLESPACE pg_default
+--
+ec6cd8dd84510487
+== 166
+ALTER INDEX testschema.part_a_idx SET TABLESPACE regress_tblspace
+--
+4d11f856bf644c71
+== 167
+INSERT INTO testschema.atable VALUES(3)
+--
+feae9be679bfe8d8
+== 168
+-- ok
+INSERT INTO testschema.atable VALUES(1)
+--
+feae9be679bfe8d8
+== 169
+-- fail (checks index)
+SELECT COUNT(*) FROM testschema.atable
+--
+f35d3b1f4dd8c5f1
+== 170
+-- checks heap
+
+-- let's try moving a materialized view from one place to another
+CREATE MATERIALIZED VIEW testschema.amv AS SELECT * FROM testschema.atable
+--
+1299133e801c85d9
+== 171
+ALTER MATERIALIZED VIEW testschema.amv SET TABLESPACE regress_tblspace
+--
+ec6b57bfafcea32a
+== 172
+REFRESH MATERIALIZED VIEW testschema.amv
+--
+23a07a026aafca5f
+== 173
+SELECT COUNT(*) FROM testschema.amv
+--
+8b4a39e0bd6b6b94
+== 174
+-- Will fail with bad path
+CREATE TABLESPACE regress_badspace LOCATION '/no/such/location'
+--
+0cd964e9bafc8a3b
+== 175
+-- No such tablespace
+CREATE TABLE bar (i int) TABLESPACE regress_nosuchspace
+--
+258ebbcb388f5345
+== 176
+-- Fail, in use for some partitioned object
+DROP TABLESPACE regress_tblspace
+--
+7613a30023fed10f
+== 177
+ALTER INDEX testschema.part_a_idx SET TABLESPACE pg_default
+--
+ec6cd8dd84510487
+== 178
+-- Fail, not empty
+DROP TABLESPACE regress_tblspace
+--
+7613a30023fed10f
+== 179
+-- Adequate cache initialization before GRANT
+BEGIN
+--
+b16b431979fc3e05
+== 180
+GRANT ALL ON TABLESPACE regress_tblspace TO PUBLIC
+--
+31c6a48602a91707
+== 181
+ROLLBACK
+--
+a46081a556fda027
+== 182
+CREATE ROLE regress_tablespace_user1 login
+--
+b67c85f988796a36
+== 183
+CREATE ROLE regress_tablespace_user2 login
+--
+ca3d20ae1afaed0c
+== 184
+GRANT USAGE ON SCHEMA testschema TO regress_tablespace_user2
+--
+58056d3808e7c4f1
+== 185
+ALTER TABLESPACE regress_tblspace OWNER TO regress_tablespace_user1
+--
+7aeca3d1deb3a243
+== 186
+CREATE TABLE testschema.tablespace_acl (c int)
+--
+d0d270e518846cb8
+== 187
+-- new owner lacks permission to create this index from scratch
+CREATE INDEX k ON testschema.tablespace_acl (c) TABLESPACE regress_tblspace
+--
+be834c5baa8dc3a9
+== 188
+ALTER TABLE testschema.tablespace_acl OWNER TO regress_tablespace_user2
+--
+6d3edac105b72b66
+== 189
+SET SESSION ROLE regress_tablespace_user2
+--
+56facc463e2de425
+== 190
+CREATE TABLE tablespace_table (i int) TABLESPACE regress_tblspace
+--
+559921eb172a653c
+== 191
+-- fail
+ALTER TABLE testschema.tablespace_acl ALTER c TYPE bigint
+--
+38bcb409076eabb4
+== 192
+REINDEX (TABLESPACE regress_tblspace) TABLE tablespace_table
+--
+5310027ff76c2222
+== 193
+-- fail
+REINDEX (TABLESPACE regress_tblspace, CONCURRENTLY) TABLE tablespace_table
+--
+45ca16d0e5c21fa1
+== 194
+-- fail
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 195
+ALTER TABLESPACE regress_tblspace RENAME TO regress_tblspace_renamed
+--
+420af4ab43fc6e73
+== 196
+ALTER TABLE ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default
+--
+e176146f771c9dd9
+== 197
+ALTER INDEX ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default
+--
+abf437e52fcdfe90
+== 198
+ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default
+--
+a8f1d22f0e90b334
+== 199
+-- Should show notice that nothing was done
+ALTER TABLE ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default
+--
+e176146f771c9dd9
+== 200
+ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPACE pg_default
+--
+a8f1d22f0e90b334
+== 201
+-- Should succeed
+DROP TABLESPACE regress_tblspace_renamed
+--
+10304df81b91e9ba
+== 202
+DROP SCHEMA testschema CASCADE
+--
+5bdf0e8cae9d0064
+== 203
+DROP ROLE regress_tablespace_user1
+--
+d869a0bac59273a5
+== 204
+DROP ROLE regress_tablespace_user2
+--
+fe5f081ecb374658

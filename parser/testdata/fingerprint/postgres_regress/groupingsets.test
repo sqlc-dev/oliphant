@@ -1,0 +1,1008 @@
+== 001
+|--
+-- grouping sets
+|--
+
+-- test data sources
+
+create temp view gstest1(a,b,v)
+  as values (1,1,10),(1,1,11),(1,2,12),(1,2,13),(1,3,14),
+            (2,3,15),
+            (3,3,16),(3,4,17),
+            (4,1,18),(4,1,19)
+--
+d11bab24083ea839
+== 002
+create temp table gstest2 (a integer, b integer, c integer, d integer,
+                           e integer, f integer, g integer, h integer)
+--
+be03184012176be1
+== 003
+copy gstest2 from stdin
+--
+bbf21e63bf3527af
+== 004
+create temp table gstest3 (a integer, b integer, c integer, d integer)
+--
+4c1c86b4d5bf9309
+== 005
+copy gstest3 from stdin
+--
+8dab9d893b2a6849
+== 006
+alter table gstest3 add primary key (a)
+--
+f86e3b22a9a90ffa
+== 007
+create temp table gstest4(id integer, v integer,
+                          unhashable_col bit(4), unsortable_col xid)
+--
+a7b5c71574f84b19
+== 008
+insert into gstest4
+values (1,1,b'0000','1'), (2,2,b'0001','1'),
+       (3,4,b'0010','2'), (4,8,b'0011','2'),
+       (5,16,b'0000','2'), (6,32,b'0001','2'),
+       (7,64,b'0010','1'), (8,128,b'0011','1')
+--
+8a753ab595b7e566
+== 009
+create temp table gstest_empty (a integer, b integer, v integer)
+--
+e1000cff49be480d
+== 010
+create function gstest_data(v integer, out a integer, out b integer)
+  returns setof record
+  as $f$
+    begin
+      return query select v, i from generate_series(1,3) i;
+    end;
+  $f$ language plpgsql
+--
+a42cc5cf93715fc5
+== 011
+-- basic functionality
+
+set enable_hashagg = false
+--
+a83598b3841af185
+== 012
+-- test hashing explicitly later
+
+-- simple rollup with multiple plain aggregates, with and without ordering
+-- (and with ordering differing from grouping)
+
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b)
+--
+1dd4a5ba45b3ca10
+== 013
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by a,b
+--
+d700d1dae787c25c
+== 014
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by b desc, a
+--
+534fad6cd14dbac6
+== 015
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by coalesce(a,0)+coalesce(b,0)
+--
+582004ea13876ad5
+== 016
+-- various types of ordered aggs
+select a, b, grouping(a,b),
+       array_agg(v order by v),
+       string_agg(v::text, ':' order by v desc),
+       percentile_disc(0.5) within group (order by v),
+       rank(1,2,12) within group (order by a,b,v)
+  from gstest1 group by rollup (a,b) order by a,b
+--
+9ad6f68ff7b49b62
+== 017
+-- test usage of grouped columns in direct args of aggs
+select grouping(a), a, array_agg(b),
+       rank(a) within group (order by b nulls first),
+       rank(a) within group (order by b nulls last)
+  from (values (1,1),(1,4),(1,5),(3,1),(3,2)) v(a,b)
+ group by rollup (a) order by a
+--
+0ee9c246011142c2
+== 018
+-- nesting with window functions
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by rollup (a,b) order by rsum, a, b
+--
+03adee5f2ef93b18
+== 019
+-- nesting with grouping sets
+select sum(c) from gstest2
+  group by grouping sets((), grouping sets((), grouping sets(())))
+  order by 1 desc
+--
+50757f1f9f50f247
+== 020
+select sum(c) from gstest2
+  group by grouping sets((), grouping sets((), grouping sets(((a, b)))))
+  order by 1 desc
+--
+dbed14c84961dc7a
+== 021
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(rollup(c), grouping sets(cube(c))))
+  order by 1 desc
+--
+720c08cd07f176a4
+== 022
+select sum(c) from gstest2
+  group by grouping sets(a, grouping sets(a, cube(b)))
+  order by 1 desc
+--
+a8ed0c4ced05d594
+== 023
+select sum(c) from gstest2
+  group by grouping sets(grouping sets((a, (b))))
+  order by 1 desc
+--
+abbaa8622b66fd50
+== 024
+select sum(c) from gstest2
+  group by grouping sets(grouping sets((a, b)))
+  order by 1 desc
+--
+abbaa8622b66fd50
+== 025
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(a, grouping sets(a), a))
+  order by 1 desc
+--
+62e9718a3f4424ff
+== 026
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(a, grouping sets(a, grouping sets(a), ((a)), a, grouping sets(a), (a)), a))
+  order by 1 desc
+--
+6c6a2398e5d5f36c
+== 027
+select sum(c) from gstest2
+  group by grouping sets((a,(a,b)), grouping sets((a,(a,b)),a))
+  order by 1 desc
+--
+da27d26c386be7a5
+== 028
+-- empty input: first is 0 rows, second 1, third 3 etc.
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+4464096bad5a5d2f
+== 029
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),())
+--
+e6840873854e3271
+== 030
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+97fab6024bf33633
+== 031
+select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+4df8990930e42d86
+== 032
+-- empty input with joins tests some important code paths
+select t1.a, t2.b, sum(t1.v), count(*) from gstest_empty t1, gstest_empty t2
+ group by grouping sets ((t1.a,t2.b),())
+--
+f91eae24f3b8dd47
+== 033
+-- simple joins, var resolution, GROUPING on join vars
+select t1.a, t2.b, grouping(t1.a, t2.b), sum(t1.v), max(t2.a)
+  from gstest1 t1, gstest2 t2
+ group by grouping sets ((t1.a, t2.b), ())
+--
+b0056a188fbd0da3
+== 034
+select t1.a, t2.b, grouping(t1.a, t2.b), sum(t1.v), max(t2.a)
+  from gstest1 t1 join gstest2 t2 on (t1.a=t2.a)
+ group by grouping sets ((t1.a, t2.b), ())
+--
+f79b84648229ce56
+== 035
+select a, b, grouping(a, b), sum(t1.v), max(t2.c)
+  from gstest1 t1 join gstest2 t2 using (a,b)
+ group by grouping sets ((a, b), ())
+--
+28dd9d03cc531dd5
+== 036
+-- check that functionally dependent cols are not nulled
+select a, d, grouping(a,b,c)
+  from gstest3
+ group by grouping sets ((a,b), (a,c))
+--
+e76aba6caf65402b
+== 037
+-- check that distinct grouping columns are kept separate
+-- even if they are equal()
+explain (costs off)
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2)
+--
+7089c95b41daf9e2
+== 038
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2)
+--
+0902d3d7fbdf37f4
+== 039
+-- check that pulled-up subquery outputs still go to null when appropriate
+select four, x
+  from (select four, ten, 'foo'::text as x from tenk1) as t
+  group by grouping sets (four, x)
+  having x = 'foo'
+--
+63d527eff6d2b915
+== 040
+select four, x || 'x'
+  from (select four, ten, 'foo'::text as x from tenk1) as t
+  group by grouping sets (four, x)
+  order by four
+--
+67ebb02dcbf4c00a
+== 041
+select (x+y)*1, sum(z)
+ from (select 1 as x, 2 as y, 3 as z) s
+ group by grouping sets (x+y, x)
+--
+e0071db95d8d1709
+== 042
+select x, not x as not_x, q2 from
+  (select *, q1 = 1 as x from int8_tbl i1) as t
+  group by grouping sets(x, q2)
+  order by x, q2
+--
+1edac1f5f1cb91b3
+== 043
+-- check qual push-down rules for a subquery with grouping sets
+explain (verbose, costs off)
+select * from (
+  select 1 as x, q1, sum(q2)
+  from int8_tbl i1
+  group by grouping sets(1, 2)
+) ss
+where x = 1 and q1 = 123
+--
+02c26f28226efb84
+== 044
+select * from (
+  select 1 as x, q1, sum(q2)
+  from int8_tbl i1
+  group by grouping sets(1, 2)
+) ss
+where x = 1 and q1 = 123
+--
+e449e315f918b127
+== 045
+-- check handling of pulled-up SubPlan in GROUPING() argument (bug #17479)
+explain (verbose, costs off)
+select grouping(ss.x)
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+00b5d94125a01de9
+== 046
+select grouping(ss.x)
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+6e03a9b04fa0f014
+== 047
+explain (verbose, costs off)
+select (select grouping(ss.x))
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+3a1c2c56f10b4ab8
+== 048
+select (select grouping(ss.x))
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+d9713a75b2fd9ee7
+== 049
+-- simple rescan tests
+
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by rollup (a,b)
+--
+474bfd8cf6b5ad3d
+== 050
+select *
+  from (values (1),(2)) v(x),
+       lateral (select a, b, sum(v.x) from gstest_data(v.x) group by rollup (a,b)) s
+--
+df332f818aca99f6
+== 051
+-- min max optimization should still work with GROUP BY ()
+explain (costs off)
+  select min(unique1) from tenk1 GROUP BY ()
+--
+0f08635af32a70a1
+== 052
+-- Views with GROUPING SET queries
+CREATE VIEW gstest_view AS select a, b, grouping(a,b), sum(c), count(*), max(c)
+  from gstest2 group by rollup ((a,b,c),(c,d))
+--
+c77c89b69e184d44
+== 053
+select pg_get_viewdef('gstest_view'::regclass, true)
+--
+ab8a8d46fb75759f
+== 054
+-- Nested queries with 3 or more levels of nesting
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+31d734bdc1e5e40c
+== 055
+select(select (select grouping(e,f) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+d02fdb81cb5f6d8b
+== 056
+select(select (select grouping(c) from (values (1)) v2(c) GROUP BY c) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+5dcdf17d6a9013f8
+== 057
+-- Combinations of operations
+select a, b, c, d from gstest2 group by rollup(a,b),grouping sets(c,d)
+--
+c8b7ee3dbf9ba639
+== 058
+select a, b from (values (1,2),(2,3)) v(a,b) group by a,b, grouping sets(a)
+--
+915382ebe72333c7
+== 059
+-- Tests for chained aggregates
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+1b8af7a88fda53ea
+== 060
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP((e+1),(f+1))
+--
+76e354c9a21905cc
+== 061
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY CUBE((e+1),(f+1)) ORDER BY (e+1),(f+1)
+--
+a0ed52a848ed7d31
+== 062
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by cube (a,b) order by rsum, a, b
+--
+5f181ae605bbe39c
+== 063
+select a, b, sum(c) from (values (1,1,10),(1,1,11),(1,2,12),(1,2,13),(1,3,14),(2,3,15),(3,3,16),(3,4,17),(4,1,18),(4,1,19)) v(a,b,c) group by rollup (a,b)
+--
+f9e3a93e35ce2fdd
+== 064
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by cube (a,b) order by a,b
+--
+3308cadf20f73158
+== 065
+-- Test reordering of grouping sets
+explain (costs off)
+select * from gstest1 group by grouping sets((a,b,v),(v)) order by v,b,a
+--
+02790bbb5385bdbe
+== 066
+-- Agg level check. This query should error out.
+select (select grouping(a,b) from gstest2) from gstest2 group by a,b
+--
+1e24d5c913f45142
+== 067
+--Nested queries
+select a, b, sum(c), count(*) from gstest2 group by grouping sets (rollup(a,b),a)
+--
+8265f768bdc4e944
+== 068
+-- HAVING queries
+select ten, sum(distinct four) from onek a
+group by grouping sets((ten,four),(ten))
+having exists (select 1 from onek b where sum(distinct a.four) = b.four)
+--
+93aad45f6ea1a218
+== 069
+-- Tests around pushdown of HAVING clauses, partially testing against previous bugs
+select a,count(*) from gstest2 group by rollup(a) order by a
+--
+d5bb0b0b9fa6478a
+== 070
+select a,count(*) from gstest2 group by rollup(a) having a is distinct from 1 order by a
+--
+a8627f1199550035
+== 071
+explain (costs off)
+  select a,count(*) from gstest2 group by rollup(a) having a is distinct from 1 order by a
+--
+711d44af4d2561f2
+== 072
+select v.c, (select count(*) from gstest2 group by () having v.c)
+  from (values (false),(true)) v(c) order by v.c
+--
+4eead1088c7cd79f
+== 073
+explain (costs off)
+  select v.c, (select count(*) from gstest2 group by () having v.c)
+    from (values (false),(true)) v(c) order by v.c
+--
+3c59d52272472be0
+== 074
+-- HAVING with GROUPING queries
+select ten, grouping(ten) from onek
+group by grouping sets(ten) having grouping(ten) >= 0
+order by 2,1
+--
+e90b8a6709be9cd6
+== 075
+select ten, grouping(ten) from onek
+group by grouping sets(ten, four) having grouping(ten) > 0
+order by 2,1
+--
+82e54a03b65b9ba3
+== 076
+select ten, grouping(ten) from onek
+group by rollup(ten) having grouping(ten) > 0
+order by 2,1
+--
+3ff4bd90338bb9cc
+== 077
+select ten, grouping(ten) from onek
+group by cube(ten) having grouping(ten) > 0
+order by 2,1
+--
+973451e46cf8701f
+== 078
+select ten, grouping(ten) from onek
+group by (ten) having grouping(ten) >= 0
+order by 2,1
+--
+7d9b1da24c3fe767
+== 079
+-- FILTER queries
+select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
+group by rollup(ten)
+--
+2cdec7f0499ef9dc
+== 080
+-- More rescan tests
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by cube(four,ten)) s on true order by v.a,four,ten
+--
+c1ae2abed4f77dd1
+== 081
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by cube(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+8fc77ea5392af2a8
+== 082
+-- Grouping on text columns
+select sum(ten) from onek group by two, rollup(four::text) order by 1
+--
+53790ba603d31679
+== 083
+select sum(ten) from onek group by rollup(four::text), two order by 1
+--
+739656886c4f3b3f
+== 084
+-- hashing support
+
+set enable_hashagg = true
+--
+a83598b3841af185
+== 085
+-- failure cases
+
+select count(*) from gstest4 group by rollup(unhashable_col,unsortable_col)
+--
+109ab073a2420ec1
+== 086
+select array_agg(v order by v) from gstest4 group by grouping sets ((id,unsortable_col),(id))
+--
+bc6b90a12606b095
+== 087
+-- simple cases
+
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a),(b)) order by 3,1,2
+--
+52beef6d7f35caec
+== 088
+explain (costs off) select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a),(b)) order by 3,1,2
+--
+6f37aaecfb70622a
+== 089
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by cube(a,b) order by 3,1,2
+--
+bee966fe087cdd50
+== 090
+explain (costs off) select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by cube(a,b) order by 3,1,2
+--
+c3cdf11a8cfd346f
+== 091
+-- shouldn't try and hash
+explain (costs off)
+  select a, b, grouping(a,b), array_agg(v order by v)
+    from gstest1 group by cube(a,b)
+--
+6366d91cb86dee2d
+== 092
+-- unsortable cases
+select unsortable_col, count(*)
+  from gstest4 group by grouping sets ((unsortable_col),(unsortable_col))
+  order by unsortable_col::text
+--
+b30e9d95b6081ddb
+== 093
+-- mixed hashable/sortable cases
+select unhashable_col, unsortable_col,
+       grouping(unhashable_col, unsortable_col),
+       count(*), sum(v)
+  from gstest4 group by grouping sets ((unhashable_col),(unsortable_col))
+ order by 3, 5
+--
+e87535cd6840c480
+== 094
+explain (costs off)
+  select unhashable_col, unsortable_col,
+         grouping(unhashable_col, unsortable_col),
+         count(*), sum(v)
+    from gstest4 group by grouping sets ((unhashable_col),(unsortable_col))
+   order by 3,5
+--
+260c2bf872dfbedd
+== 095
+select unhashable_col, unsortable_col,
+       grouping(unhashable_col, unsortable_col),
+       count(*), sum(v)
+  from gstest4 group by grouping sets ((v,unhashable_col),(v,unsortable_col))
+ order by 3,5
+--
+9e2122c4406d9b48
+== 096
+explain (costs off)
+  select unhashable_col, unsortable_col,
+         grouping(unhashable_col, unsortable_col),
+         count(*), sum(v)
+    from gstest4 group by grouping sets ((v,unhashable_col),(v,unsortable_col))
+   order by 3,5
+--
+04e0ea5bcf567ed0
+== 097
+-- empty input: first is 0 rows, second 1, third 3 etc.
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+4464096bad5a5d2f
+== 098
+explain (costs off)
+  select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+2f123b7dfa995654
+== 099
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),())
+--
+e6840873854e3271
+== 100
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+97fab6024bf33633
+== 101
+explain (costs off)
+  select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+0e4cc79e6a7d3a60
+== 102
+select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+4df8990930e42d86
+== 103
+explain (costs off)
+  select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+3bd0fd1e8d63df80
+== 104
+-- check that functionally dependent cols are not nulled
+select a, d, grouping(a,b,c)
+  from gstest3
+ group by grouping sets ((a,b), (a,c))
+--
+e76aba6caf65402b
+== 105
+explain (costs off)
+  select a, d, grouping(a,b,c)
+    from gstest3
+   group by grouping sets ((a,b), (a,c))
+--
+4203b8f32d9199fc
+== 106
+-- simple rescan tests
+
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by grouping sets (a,b)
+ order by 1, 2, 3
+--
+47b70b7742e14157
+== 107
+explain (costs off)
+  select a, b, sum(v.x)
+    from (values (1),(2)) v(x), gstest_data(v.x)
+   group by grouping sets (a,b)
+   order by 3, 1, 2
+--
+7d6d29a1623355a8
+== 108
+select *
+  from (values (1),(2)) v(x),
+       lateral (select a, b, sum(v.x) from gstest_data(v.x) group by grouping sets (a,b)) s
+--
+72a8718a0139778c
+== 109
+explain (costs off)
+  select *
+    from (values (1),(2)) v(x),
+         lateral (select a, b, sum(v.x) from gstest_data(v.x) group by grouping sets (a,b)) s
+--
+bca02c5907f0b99f
+== 110
+-- Tests for chained aggregates
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+1b8af7a88fda53ea
+== 111
+explain (costs off)
+  select a, b, grouping(a,b), sum(v), count(*), max(v)
+    from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+e6600e08ca996b9b
+== 112
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by cube (a,b) order by rsum, a, b
+--
+5f181ae605bbe39c
+== 113
+explain (costs off)
+  select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+    from gstest2 group by cube (a,b) order by rsum, a, b
+--
+c792d9c87e567e07
+== 114
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by cube (a,b) order by a,b
+--
+3308cadf20f73158
+== 115
+explain (costs off)
+  select a, b, sum(v.x)
+    from (values (1),(2)) v(x), gstest_data(v.x)
+   group by cube (a,b) order by a,b
+--
+e1b289621e7474d6
+== 116
+-- Verify that we correctly handle the child node returning a
+-- non-minimal slot, which happens if the input is pre-sorted,
+-- e.g. due to an index scan.
+BEGIN
+--
+b16b431979fc3e05
+== 117
+SET LOCAL enable_hashagg = false
+--
+744b4ea65bf44f48
+== 118
+EXPLAIN (COSTS OFF) SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+a82ce2d1e8ae8033
+== 119
+SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+1b201a028901d31c
+== 120
+SET LOCAL enable_seqscan = false
+--
+47651b1ae733ae02
+== 121
+EXPLAIN (COSTS OFF) SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+a82ce2d1e8ae8033
+== 122
+SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+1b201a028901d31c
+== 123
+COMMIT
+--
+7bbcde9cfab6c79c
+== 124
+-- More rescan tests
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by cube(four,ten)) s on true order by v.a,four,ten
+--
+c1ae2abed4f77dd1
+== 125
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by cube(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+8fc77ea5392af2a8
+== 126
+-- Rescan logic changes when there are no empty grouping sets, so test
+-- that too:
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by grouping sets(four,ten)) s on true order by v.a,four,ten
+--
+36dbac01c9fb9fd3
+== 127
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by grouping sets(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+0820e61c7692a8a9
+== 128
+-- test the knapsack
+
+set enable_indexscan = false
+--
+c95f6a280f5be733
+== 129
+set hash_mem_multiplier = 1.0
+--
+3b6eb92872bcb84b
+== 130
+set work_mem = '64kB'
+--
+8a6e71e5b3e06483
+== 131
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,twothousand,thousand,hundred,ten,four,two)
+--
+03156b9023fe2bef
+== 132
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,hundred,ten,four,two)
+--
+ae4cddf0926fd219
+== 133
+set work_mem = '384kB'
+--
+8a6e71e5b3e06483
+== 134
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,twothousand,thousand,hundred,ten,four,two)
+--
+03156b9023fe2bef
+== 135
+-- check collation-sensitive matching between grouping expressions
+-- (similar to a check for aggregates, but there are additional code
+-- paths for GROUPING, so check again here)
+
+select v||'a', case grouping(v||'a') when 1 then 1 else 0 end, count(*)
+  from unnest(array[1,1], array['a','b']) u(i,v)
+ group by rollup(i, v||'a') order by 1,3
+--
+914fe7215c1f5e5e
+== 136
+select v||'a', case when grouping(v||'a') = 1 then 1 else 0 end, count(*)
+  from unnest(array[1,1], array['a','b']) u(i,v)
+ group by rollup(i, v||'a') order by 1,3
+--
+80f8eb3c058caa9e
+== 137
+-- Bug #16784
+create table bug_16784(i int, j int)
+--
+b88744dcc9e3b5cd
+== 138
+analyze bug_16784
+--
+67b43456f92aa9dc
+== 139
+alter table bug_16784 set (autovacuum_enabled = 'false')
+--
+5d3db9e3489090d9
+== 140
+update pg_class set reltuples = 10 where relname='bug_16784'
+--
+cd08f2f9b40ccb32
+== 141
+insert into bug_16784 select g/10, g from generate_series(1,40) g
+--
+6a664e24e7cd5fc9
+== 142
+set work_mem='64kB'
+--
+8a6e71e5b3e06483
+== 143
+set enable_sort = false
+--
+dbc5616b4af60b97
+== 144
+select * from
+  (values (1),(2)) v(a),
+  lateral (select a, i, j, count(*) from
+             bug_16784 group by cube(i,j)) s
+  order by v.a, i, j
+--
+d92aaac630e12727
+== 145
+|--
+-- Compare results between plans using sorting and plans using hash
+-- aggregation. Force spilling in both cases by setting work_mem low
+-- and altering the statistics.
+|--
+
+create table gs_data_1 as
+select g%1000 as g1000, g%100 as g100, g%10 as g10, g
+   from generate_series(0,1999) g
+--
+4a5f60d46a78f17e
+== 146
+analyze gs_data_1
+--
+7834e7991cb582d8
+== 147
+alter table gs_data_1 set (autovacuum_enabled = 'false')
+--
+07bbd6d24dbaaf07
+== 148
+update pg_class set reltuples = 10 where relname='gs_data_1'
+--
+cd08f2f9b40ccb32
+== 149
+set work_mem='64kB'
+--
+8a6e71e5b3e06483
+== 150
+-- Produce results with sorting.
+
+set enable_sort = true
+--
+dbc5616b4af60b97
+== 151
+set enable_hashagg = false
+--
+a83598b3841af185
+== 152
+set jit_above_cost = 0
+--
+0e330e7816b408f4
+== 153
+explain (costs off)
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+4afa68bbaa1d8169
+== 154
+create table gs_group_1 as
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+363e245f9c19eb5a
+== 155
+-- Produce results with hash aggregation.
+
+set enable_hashagg = true
+--
+a83598b3841af185
+== 156
+set enable_sort = false
+--
+dbc5616b4af60b97
+== 157
+explain (costs off)
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+4afa68bbaa1d8169
+== 158
+create table gs_hash_1 as
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+8a3bd536b2d01f33
+== 159
+set enable_sort = true
+--
+dbc5616b4af60b97
+== 160
+set work_mem to default
+--
+42da79a4b621d97f
+== 161
+set hash_mem_multiplier to default
+--
+0102587c8ae4370f
+== 162
+-- Compare results
+
+(select * from gs_hash_1 except select * from gs_group_1)
+  union all
+(select * from gs_group_1 except select * from gs_hash_1)
+--
+35024397c04561a5
+== 163
+drop table gs_group_1
+--
+60594596bad20807
+== 164
+drop table gs_hash_1
+--
+50b6a6aa29ed93d4
+== 165
+-- GROUP BY DISTINCT
+
+-- "normal" behavior...
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by all rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+9e139d380db19b44
+== 166
+-- ...which is also the default
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+9e139d380db19b44
+== 167
+-- "group by distinct" behavior...
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by distinct rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+8288230302a1dbfc
+== 168
+-- ...which is not the same as "select distinct"
+select distinct a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+13fba1f738072f92
+== 169
+-- test handling of outer GroupingFunc within subqueries
+explain (costs off)
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by cube(v1)
+--
+0d50c187cb019c42
+== 170
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by cube(v1)
+--
+46aa478ef699096a
+== 171
+explain (costs off)
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by v1
+--
+09c6755ebb13a2a2
+== 172
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by v1
+--
+69e1ffd41f4e4481

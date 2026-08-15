@@ -1,0 +1,259 @@
+== 001
+CREATE TABLE test_tablesample (id int, name text) WITH (fillfactor=10)
+--
+499aae4b84575250
+== 002
+-- use fillfactor so we don't have to load too much data to get multiple pages
+
+INSERT INTO test_tablesample
+  SELECT i, repeat(i::text, 200) FROM generate_series(0, 9) s(i)
+--
+d769a6f5a2479cfb
+== 003
+SELECT t.id FROM test_tablesample AS t TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+12ec3a5ceee99d3d
+== 004
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (100.0/11) REPEATABLE (0)
+--
+f8482cccdcdb9c59
+== 005
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+2097c33e70e9361d
+== 006
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (50) REPEATABLE (0)
+--
+e5e93d45ac5f633f
+== 007
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (5.5) REPEATABLE (0)
+--
+e5e93d45ac5f633f
+== 008
+-- 100% should give repeatable count results (ie, all rows) in any case
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100)
+--
+d3d1dc43d5ed70c2
+== 009
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100) REPEATABLE (1+2)
+--
+e2b7cf4032df1228
+== 010
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100) REPEATABLE (0.4)
+--
+d3d1dc43d5ed70c2
+== 011
+CREATE VIEW test_tablesample_v1 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (10*2) REPEATABLE (2)
+--
+0c6ee82c906a4e5a
+== 012
+CREATE VIEW test_tablesample_v2 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (99)
+--
+42d39f64d7b3cc4d
+== 013
+-- check a sampled query doesn't affect cursor in progress
+BEGIN
+--
+b16b431979fc3e05
+== 014
+DECLARE tablesample_cur SCROLL CURSOR FOR
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+8fab625e78520010
+== 015
+FETCH FIRST FROM tablesample_cur
+--
+f311bc209888b596
+== 016
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 017
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 018
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+2097c33e70e9361d
+== 019
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 020
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 021
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 022
+FETCH FIRST FROM tablesample_cur
+--
+f311bc209888b596
+== 023
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 024
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 025
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 026
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 027
+FETCH NEXT FROM tablesample_cur
+--
+81daee5623e71d72
+== 028
+CLOSE tablesample_cur
+--
+2c7963684fc2bad9
+== 029
+END
+--
+7bbcde9cfab6c79c
+== 030
+EXPLAIN (COSTS OFF)
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (2)
+--
+beb413e9cd7cd9f8
+== 031
+EXPLAIN (COSTS OFF)
+  SELECT * FROM test_tablesample_v1
+--
+0d9debb930855ca3
+== 032
+-- check inheritance behavior
+explain (costs off)
+  select count(*) from person tablesample bernoulli (100)
+--
+97d48b5b1e026086
+== 033
+select count(*) from person tablesample bernoulli (100)
+--
+ad5014cdedddf953
+== 034
+select count(*) from person
+--
+e6f23d40439a5090
+== 035
+-- check that collations get assigned within the tablesample arguments
+SELECT count(*) FROM test_tablesample TABLESAMPLE bernoulli (('1'::text < '0'::text)::int)
+--
+a2de80ce976afa31
+== 036
+-- check behavior during rescans, as well as correct handling of min/max pct
+select * from
+  (values (0),(100)) v(pct),
+  lateral (select count(*) from tenk1 tablesample bernoulli (pct)) ss
+--
+6407c9116fc44f30
+== 037
+select * from
+  (values (0),(100)) v(pct),
+  lateral (select count(*) from tenk1 tablesample system (pct)) ss
+--
+005d7da261865abc
+== 038
+explain (costs off)
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+--
+878f59aa53e610bb
+== 039
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+--
+3454237b8358517d
+== 040
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample system (pct)) ss
+  group by pct
+--
+3326114e85f60443
+== 041
+-- errors
+SELECT id FROM test_tablesample TABLESAMPLE FOOBAR (1)
+--
+36b36b783e8c29c5
+== 042
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (NULL)
+--
+2097c33e70e9361d
+== 043
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (NULL)
+--
+2097c33e70e9361d
+== 044
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (-1)
+--
+e5e93d45ac5f633f
+== 045
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (200)
+--
+e5e93d45ac5f633f
+== 046
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (-1)
+--
+2097c33e70e9361d
+== 047
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (200)
+--
+2097c33e70e9361d
+== 048
+SELECT id FROM test_tablesample_v1 TABLESAMPLE BERNOULLI (1)
+--
+dc172b029fa9940d
+== 049
+INSERT INTO test_tablesample_v1 VALUES(1)
+--
+6d434f2b897e5922
+== 050
+WITH query_select AS (SELECT * FROM test_tablesample)
+SELECT * FROM query_select TABLESAMPLE BERNOULLI (5.5) REPEATABLE (1)
+--
+406b5693f4ad837d
+== 051
+SELECT q.* FROM (SELECT * FROM test_tablesample) as q TABLESAMPLE BERNOULLI (5)
+--
+ERROR: syntax error at or near "TABLESAMPLE"
+CURSORPOS: 55
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 052
+-- check partitioned tables support tablesample
+create table parted_sample (a int) partition by list (a)
+--
+4b0efb29a806e7cd
+== 053
+create table parted_sample_1 partition of parted_sample for values in (1)
+--
+a4f26c2e819cef64
+== 054
+create table parted_sample_2 partition of parted_sample for values in (2)
+--
+e0a1927002441958
+== 055
+explain (costs off)
+  select * from parted_sample tablesample bernoulli (100)
+--
+e25bb00d5d234a30
+== 056
+drop table parted_sample, parted_sample_1, parted_sample_2
+--
+a802c4dc17a25e4e

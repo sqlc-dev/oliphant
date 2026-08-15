@@ -1,0 +1,200 @@
+== 001
+|--
+-- Test assorted system views
+|--
+-- This test is mainly meant to provide some code coverage for the
+-- set-returning functions that underlie certain system views.
+-- The output of most of these functions is very environment-dependent,
+-- so our ability to test with fixed expected output is pretty limited;
+-- but even a trivial check of count(*) will exercise the normal code path
+-- through the SRF.
+
+select count(*) >= 0 as ok from pg_available_extension_versions
+--
+|--
+-- Test assorted system views
+|--
+-- This test is mainly meant to provide some code coverage for the
+-- set-returning functions that underlie certain system views.
+-- The output of most of these functions is very environment-dependent,
+-- so our ability to test with fixed expected output is pretty limited;
+-- but even a trivial check of count(*) will exercise the normal code path
+-- through the SRF.
+
+select count(*) >= $1 as ok from pg_available_extension_versions
+== 002
+select count(*) >= 0 as ok from pg_available_extensions
+--
+select count(*) >= $1 as ok from pg_available_extensions
+== 003
+-- The entire output of pg_backend_memory_contexts is not stable,
+-- we test only the existence and basic condition of TopMemoryContext.
+select name, ident, parent, level, total_bytes >= free_bytes
+  from pg_backend_memory_contexts where level = 0
+--
+-- The entire output of pg_backend_memory_contexts is not stable,
+-- we test only the existence and basic condition of TopMemoryContext.
+select name, ident, parent, level, total_bytes >= free_bytes
+  from pg_backend_memory_contexts where level = $1
+== 004
+-- We can exercise some MemoryContext type stats functions.  Most of the
+-- column values are too platform-dependant to display.
+
+-- Ensure stats from the bump allocator look sane.  Bump isn't a commonly
+-- used context, but it is used in tuplesort.c, so open a cursor to keep
+-- the tuplesort alive long enough for us to query the context stats.
+begin
+--
+-- We can exercise some MemoryContext type stats functions.  Most of the
+-- column values are too platform-dependant to display.
+
+-- Ensure stats from the bump allocator look sane.  Bump isn't a commonly
+-- used context, but it is used in tuplesort.c, so open a cursor to keep
+-- the tuplesort alive long enough for us to query the context stats.
+begin
+== 005
+declare cur cursor for select left(a,10), b
+  from (values(repeat('a', 512 * 1024),1),(repeat('b', 512),2)) v(a,b)
+  order by v.a desc
+--
+declare cur cursor for select left(a,$1), b
+  from (values(repeat($2, $3 * $4),$5),(repeat($6, $7),$8)) v(a,b)
+  order by v.a desc
+== 006
+fetch 1 from cur
+--
+fetch 1 from cur
+== 007
+select name, parent, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
+from pg_backend_memory_contexts where name = 'Caller tuples'
+--
+select name, parent, total_bytes > $1, total_nblocks, free_bytes > $2, free_chunks
+from pg_backend_memory_contexts where name = $3
+== 008
+rollback
+--
+rollback
+== 009
+-- At introduction, pg_config had 23 entries; it may grow
+select count(*) > 20 as ok from pg_config
+--
+-- At introduction, pg_config had 23 entries; it may grow
+select count(*) > $1 as ok from pg_config
+== 010
+-- We expect no cursors in this test; see also portals.sql
+select count(*) = 0 as ok from pg_cursors
+--
+-- We expect no cursors in this test; see also portals.sql
+select count(*) = $1 as ok from pg_cursors
+== 011
+select count(*) >= 0 as ok from pg_file_settings
+--
+select count(*) >= $1 as ok from pg_file_settings
+== 012
+-- There will surely be at least one rule, with no errors.
+select count(*) > 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
+  from pg_hba_file_rules
+--
+-- There will surely be at least one rule, with no errors.
+select count(*) > $1 as ok, count(*) FILTER (WHERE error IS NOT NULL) = $2 AS no_err
+  from pg_hba_file_rules
+== 013
+-- There may be no rules, and there should be no errors.
+select count(*) >= 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
+  from pg_ident_file_mappings
+--
+-- There may be no rules, and there should be no errors.
+select count(*) >= $1 as ok, count(*) FILTER (WHERE error IS NOT NULL) = $2 AS no_err
+  from pg_ident_file_mappings
+== 014
+-- There will surely be at least one active lock
+select count(*) > 0 as ok from pg_locks
+--
+-- There will surely be at least one active lock
+select count(*) > $1 as ok from pg_locks
+== 015
+-- We expect no prepared statements in this test; see also prepare.sql
+select count(*) = 0 as ok from pg_prepared_statements
+--
+-- We expect no prepared statements in this test; see also prepare.sql
+select count(*) = $1 as ok from pg_prepared_statements
+== 016
+-- See also prepared_xacts.sql
+select count(*) >= 0 as ok from pg_prepared_xacts
+--
+-- See also prepared_xacts.sql
+select count(*) >= $1 as ok from pg_prepared_xacts
+== 017
+-- There will surely be at least one SLRU cache
+select count(*) > 0 as ok from pg_stat_slru
+--
+-- There will surely be at least one SLRU cache
+select count(*) > $1 as ok from pg_stat_slru
+== 018
+-- There must be only one record
+select count(*) = 1 as ok from pg_stat_wal
+--
+-- There must be only one record
+select count(*) = $1 as ok from pg_stat_wal
+== 019
+-- We expect no walreceiver running in this test
+select count(*) = 0 as ok from pg_stat_wal_receiver
+--
+-- We expect no walreceiver running in this test
+select count(*) = $1 as ok from pg_stat_wal_receiver
+== 020
+-- This is to record the prevailing planner enable_foo settings during
+-- a regression test run.
+select name, setting from pg_settings where name like 'enable%'
+--
+-- This is to record the prevailing planner enable_foo settings during
+-- a regression test run.
+select name, setting from pg_settings where name like $1
+== 021
+-- There are always wait event descriptions for various types.  InjectionPoint
+-- may be present or absent, depending on history since last postmaster start.
+select type, count(*) > 0 as ok FROM pg_wait_events
+  where type <> 'InjectionPoint' group by type order by type COLLATE "C"
+--
+-- There are always wait event descriptions for various types.  InjectionPoint
+-- may be present or absent, depending on history since last postmaster start.
+select type, count(*) > $1 as ok FROM pg_wait_events
+  where type <> $2 group by type order by type COLLATE "C"
+== 022
+-- Test that the pg_timezone_names and pg_timezone_abbrevs views are
+-- more-or-less working.  We can't test their contents in any great detail
+-- without the outputs changing anytime IANA updates the underlying data,
+-- but it seems reasonable to expect at least one entry per major meridian.
+-- (At the time of writing, the actual counts are around 38 because of
+-- zones using fractional GMT offsets, so this is a pretty loose test.)
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_names
+--
+-- Test that the pg_timezone_names and pg_timezone_abbrevs views are
+-- more-or-less working.  We can't test their contents in any great detail
+-- without the outputs changing anytime IANA updates the underlying data,
+-- but it seems reasonable to expect at least one entry per major meridian.
+-- (At the time of writing, the actual counts are around 38 because of
+-- zones using fractional GMT offsets, so this is a pretty loose test.)
+select count(distinct utc_offset) >= $1 as ok from pg_timezone_names
+== 023
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs
+== 024
+-- Let's check the non-default timezone abbreviation sets, too
+set timezone_abbreviations = 'Australia'
+--
+-- Let's check the non-default timezone abbreviation sets, too
+set timezone_abbreviations = $1
+== 025
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs
+== 026
+set timezone_abbreviations = 'India'
+--
+set timezone_abbreviations = $1
+== 027
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs

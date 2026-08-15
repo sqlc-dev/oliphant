@@ -1,0 +1,998 @@
+== 001
+/*
+ * This test is for Linux/glibc systems and assumes that a full set of
+ * locales is installed.  It must be run in a database with UTF-8 encoding,
+ * because other encodings don't support all the characters used.
+ */
+
+SELECT getdatabaseencoding() <> 'UTF8' OR
+       (SELECT count(*) FROM pg_collation WHERE collname IN ('de_DE', 'en_US', 'sv_SE', 'tr_TR') AND collencoding = pg_char_to_encoding('UTF8')) <> 4 OR
+       version() !~ 'linux-gnu'
+       AS skip_test
+--
+c88d5cae5c282250
+== 002
+SET client_encoding TO UTF8
+--
+0c529bd70ef90fb4
+== 003
+CREATE SCHEMA collate_tests
+--
+6f8f187213537753
+== 004
+SET search_path = collate_tests
+--
+972eb2e22f47f95c
+== 005
+CREATE TABLE collate_test1 (
+    a int,
+    b text COLLATE "en_US" NOT NULL
+)
+--
+6f811cbb627eff67
+== 006
+CREATE TABLE collate_test_fail (
+    a int,
+    b text COLLATE "ja_JP.eucjp"
+)
+--
+291488c7654f6000
+== 007
+CREATE TABLE collate_test_fail (
+    a int,
+    b text COLLATE "foo"
+)
+--
+db1dd29ac3969a43
+== 008
+CREATE TABLE collate_test_fail (
+    a int COLLATE "en_US",
+    b text
+)
+--
+485d04b74716a2cf
+== 009
+CREATE TABLE collate_test_like (
+    LIKE collate_test1
+)
+--
+358c420565fecc26
+== 010
+CREATE TABLE collate_test2 (
+    a int,
+    b text COLLATE "sv_SE"
+)
+--
+45377a6bfef19a0c
+== 011
+CREATE TABLE collate_test3 (
+    a int,
+    b text COLLATE "C"
+)
+--
+5eb2b634522561d9
+== 012
+INSERT INTO collate_test1 VALUES (1, 'abc'), (2, 'äbc'), (3, 'bbc'), (4, 'ABC')
+--
+1e6fb486a8c3b08a
+== 013
+INSERT INTO collate_test2 SELECT * FROM collate_test1
+--
+6ab448edf10bb22b
+== 014
+INSERT INTO collate_test3 SELECT * FROM collate_test1
+--
+42cda4a0410e7b64
+== 015
+SELECT * FROM collate_test1 WHERE b >= 'bbc'
+--
+2911f01a44d70b09
+== 016
+SELECT * FROM collate_test2 WHERE b >= 'bbc'
+--
+d48aaa7186c68fcc
+== 017
+SELECT * FROM collate_test3 WHERE b >= 'bbc'
+--
+92d4e4cc5c71c674
+== 018
+SELECT * FROM collate_test3 WHERE b >= 'BBC'
+--
+92d4e4cc5c71c674
+== 019
+SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc'
+--
+e176478c475a8b2a
+== 020
+SELECT * FROM collate_test1 WHERE b >= 'bbc' COLLATE "C"
+--
+925150c7f7a2cea7
+== 021
+SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc' COLLATE "C"
+--
+3c6130ea13579473
+== 022
+SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc' COLLATE "en_US"
+--
+d5545bd7f86c0092
+== 023
+CREATE DOMAIN testdomain_sv AS text COLLATE "sv_SE"
+--
+bcecafbb6ce63807
+== 024
+CREATE DOMAIN testdomain_i AS int COLLATE "sv_SE"
+--
+85c7764fe80d83f5
+== 025
+-- fails
+CREATE TABLE collate_test4 (
+    a int,
+    b testdomain_sv
+)
+--
+9eb4bff3a75e418c
+== 026
+INSERT INTO collate_test4 SELECT * FROM collate_test1
+--
+361ed585d0a9a012
+== 027
+SELECT a, b FROM collate_test4 ORDER BY b
+--
+0be8a6b8b63846fb
+== 028
+CREATE TABLE collate_test5 (
+    a int,
+    b testdomain_sv COLLATE "en_US"
+)
+--
+50f6fdbe41da6bd5
+== 029
+INSERT INTO collate_test5 SELECT * FROM collate_test1
+--
+34308cc758ad5e69
+== 030
+SELECT a, b FROM collate_test5 ORDER BY b
+--
+dc718794b0708a0b
+== 031
+SELECT a, b FROM collate_test1 ORDER BY b
+--
+746ca647a1a68db6
+== 032
+SELECT a, b FROM collate_test2 ORDER BY b
+--
+a5171620e444071d
+== 033
+SELECT a, b FROM collate_test3 ORDER BY b
+--
+8c38f7ccea8bb0f5
+== 034
+SELECT a, b FROM collate_test1 ORDER BY b COLLATE "C"
+--
+b586efc7d0dc910e
+== 035
+-- star expansion
+SELECT * FROM collate_test1 ORDER BY b
+--
+45dccf3f487aff4d
+== 036
+SELECT * FROM collate_test2 ORDER BY b
+--
+788a0a484430066a
+== 037
+SELECT * FROM collate_test3 ORDER BY b
+--
+5678c1bc49d6c789
+== 038
+-- constant expression folding
+SELECT 'bbc' COLLATE "en_US" > 'äbc' COLLATE "en_US" AS "true"
+--
+302f059f724a34be
+== 039
+SELECT 'bbc' COLLATE "sv_SE" > 'äbc' COLLATE "sv_SE" AS "false"
+--
+5f96b599fecfd6d3
+== 040
+-- upper/lower
+
+CREATE TABLE collate_test10 (
+    a int,
+    x text COLLATE "en_US",
+    y text COLLATE "tr_TR"
+)
+--
+d02899d2145bf402
+== 041
+INSERT INTO collate_test10 VALUES (1, 'hij', 'hij'), (2, 'HIJ', 'HIJ')
+--
+fb7251dfc5192eaa
+== 042
+SELECT a, lower(x), lower(y), upper(x), upper(y), initcap(x), initcap(y) FROM collate_test10
+--
+0771539858c65b2c
+== 043
+SELECT a, lower(x COLLATE "C"), lower(y COLLATE "C") FROM collate_test10
+--
+2c68c9c13c6dc8a2
+== 044
+SELECT a, x, y FROM collate_test10 ORDER BY lower(y), a
+--
+ff4b5b5b73bfe76f
+== 045
+-- LIKE/ILIKE
+
+SELECT * FROM collate_test1 WHERE b LIKE 'abc'
+--
+b670b19920217519
+== 046
+SELECT * FROM collate_test1 WHERE b LIKE 'abc%'
+--
+b670b19920217519
+== 047
+SELECT * FROM collate_test1 WHERE b LIKE '%bc%'
+--
+b670b19920217519
+== 048
+SELECT * FROM collate_test1 WHERE b ILIKE 'abc'
+--
+b3383b4d0b2139cc
+== 049
+SELECT * FROM collate_test1 WHERE b ILIKE 'abc%'
+--
+b3383b4d0b2139cc
+== 050
+SELECT * FROM collate_test1 WHERE b ILIKE '%bc%'
+--
+b3383b4d0b2139cc
+== 051
+SELECT 'Türkiye' COLLATE "en_US" ILIKE '%KI%' AS "true"
+--
+f2f375400b105048
+== 052
+SELECT 'Türkiye' COLLATE "tr_TR" ILIKE '%KI%' AS "false"
+--
+d19034176be7009d
+== 053
+SELECT 'bıt' ILIKE 'BIT' COLLATE "en_US" AS "false"
+--
+dcdc4356e0fee8ab
+== 054
+SELECT 'bıt' ILIKE 'BIT' COLLATE "tr_TR" AS "true"
+--
+49a654935838d22d
+== 055
+-- The following actually exercises the selectivity estimation for ILIKE.
+SELECT relname FROM pg_class WHERE relname ILIKE 'abc%'
+--
+5836e68fe643a930
+== 056
+-- regular expressions
+
+SELECT * FROM collate_test1 WHERE b ~ '^abc$'
+--
+3cdf3ced09a0bf2d
+== 057
+SELECT * FROM collate_test1 WHERE b ~ '^abc'
+--
+3cdf3ced09a0bf2d
+== 058
+SELECT * FROM collate_test1 WHERE b ~ 'bc'
+--
+3cdf3ced09a0bf2d
+== 059
+SELECT * FROM collate_test1 WHERE b ~* '^abc$'
+--
+d4808e3df6133130
+== 060
+SELECT * FROM collate_test1 WHERE b ~* '^abc'
+--
+d4808e3df6133130
+== 061
+SELECT * FROM collate_test1 WHERE b ~* 'bc'
+--
+d4808e3df6133130
+== 062
+CREATE TABLE collate_test6 (
+    a int,
+    b text COLLATE "en_US"
+)
+--
+2a72c9561491d768
+== 063
+INSERT INTO collate_test6 VALUES (1, 'abc'), (2, 'ABC'), (3, '123'), (4, 'ab1'),
+                                 (5, 'a1!'), (6, 'a c'), (7, '!.;'), (8, '   '),
+                                 (9, 'äbç'), (10, 'ÄBÇ')
+--
+86ce8e60fbebd297
+== 064
+SELECT b,
+       b ~ '^[[:alpha:]]+$' AS is_alpha,
+       b ~ '^[[:upper:]]+$' AS is_upper,
+       b ~ '^[[:lower:]]+$' AS is_lower,
+       b ~ '^[[:digit:]]+$' AS is_digit,
+       b ~ '^[[:alnum:]]+$' AS is_alnum,
+       b ~ '^[[:graph:]]+$' AS is_graph,
+       b ~ '^[[:print:]]+$' AS is_print,
+       b ~ '^[[:punct:]]+$' AS is_punct,
+       b ~ '^[[:space:]]+$' AS is_space
+FROM collate_test6
+--
+b1a27de980c900ae
+== 065
+SELECT 'Türkiye' COLLATE "en_US" ~* 'KI' AS "true"
+--
+cdc6d718bcf5d968
+== 066
+SELECT 'Türkiye' COLLATE "tr_TR" ~* 'KI' AS "false"
+--
+8957725c0cd79768
+== 067
+SELECT 'bıt' ~* 'BIT' COLLATE "en_US" AS "false"
+--
+2e39cf0f02730dd9
+== 068
+SELECT 'bıt' ~* 'BIT' COLLATE "tr_TR" AS "true"
+--
+43b1266623f51019
+== 069
+-- The following actually exercises the selectivity estimation for ~*.
+SELECT relname FROM pg_class WHERE relname ~* '^abc'
+--
+7e2d173f70df75d8
+== 070
+-- to_char
+
+SET lc_time TO 'tr_TR'
+--
+335f878a8608a83d
+== 071
+SELECT to_char(date '2010-02-01', 'DD TMMON YYYY')
+--
+ddf8591cafa26595
+== 072
+SELECT to_char(date '2010-02-01', 'DD TMMON YYYY' COLLATE "tr_TR")
+--
+446c31a60c396831
+== 073
+SELECT to_char(date '2010-04-01', 'DD TMMON YYYY')
+--
+ddf8591cafa26595
+== 074
+SELECT to_char(date '2010-04-01', 'DD TMMON YYYY' COLLATE "tr_TR")
+--
+446c31a60c396831
+== 075
+-- to_date
+
+SELECT to_date('01 ŞUB 2010', 'DD TMMON YYYY')
+--
+d42c83d3c5dae4b2
+== 076
+SELECT to_date('01 Şub 2010', 'DD TMMON YYYY')
+--
+d42c83d3c5dae4b2
+== 077
+SELECT to_date('1234567890ab 2010', 'TMMONTH YYYY')
+--
+d42c83d3c5dae4b2
+== 078
+-- fail
+
+
+-- backwards parsing
+
+CREATE VIEW collview1 AS SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc'
+--
+9a2bc201f4614766
+== 079
+CREATE VIEW collview2 AS SELECT a, b FROM collate_test1 ORDER BY b COLLATE "C"
+--
+21e1a34250ec61e2
+== 080
+CREATE VIEW collview3 AS SELECT a, lower((x || x) COLLATE "C") FROM collate_test10
+--
+83381a6657480255
+== 081
+SELECT table_name, view_definition FROM information_schema.views
+  WHERE table_name LIKE 'collview%' ORDER BY 1
+--
+28296e773753a881
+== 082
+-- collation propagation in various expression types
+
+SELECT a, coalesce(b, 'foo') FROM collate_test1 ORDER BY 2
+--
+e9867eaaa6256b3f
+== 083
+SELECT a, coalesce(b, 'foo') FROM collate_test2 ORDER BY 2
+--
+84256868ad274fb0
+== 084
+SELECT a, coalesce(b, 'foo') FROM collate_test3 ORDER BY 2
+--
+273de4bd70ac6a9d
+== 085
+SELECT a, lower(coalesce(x, 'foo')), lower(coalesce(y, 'foo')) FROM collate_test10
+--
+0c804eaa17de2049
+== 086
+SELECT a, b, greatest(b, 'CCC') FROM collate_test1 ORDER BY 3
+--
+916ca50a00dc2704
+== 087
+SELECT a, b, greatest(b, 'CCC') FROM collate_test2 ORDER BY 3
+--
+4e4bf0ff52c37c3c
+== 088
+SELECT a, b, greatest(b, 'CCC') FROM collate_test3 ORDER BY 3
+--
+53907987cbafbccb
+== 089
+SELECT a, x, y, lower(greatest(x, 'foo')), lower(greatest(y, 'foo')) FROM collate_test10
+--
+827690ff79faec25
+== 090
+SELECT a, nullif(b, 'abc') FROM collate_test1 ORDER BY 2
+--
+59dad96353fd0916
+== 091
+SELECT a, nullif(b, 'abc') FROM collate_test2 ORDER BY 2
+--
+3fb463c2f009d27f
+== 092
+SELECT a, nullif(b, 'abc') FROM collate_test3 ORDER BY 2
+--
+5edf7a50368966cb
+== 093
+SELECT a, lower(nullif(x, 'foo')), lower(nullif(y, 'foo')) FROM collate_test10
+--
+7b9f3aaee56fc39e
+== 094
+SELECT a, CASE b WHEN 'abc' THEN 'abcd' ELSE b END FROM collate_test1 ORDER BY 2
+--
+e48fb4845b2ef7b9
+== 095
+SELECT a, CASE b WHEN 'abc' THEN 'abcd' ELSE b END FROM collate_test2 ORDER BY 2
+--
+e138394b0b8117ff
+== 096
+SELECT a, CASE b WHEN 'abc' THEN 'abcd' ELSE b END FROM collate_test3 ORDER BY 2
+--
+c43b255207143aa3
+== 097
+CREATE DOMAIN testdomain AS text
+--
+d71d58919a1514ea
+== 098
+SELECT a, b::testdomain FROM collate_test1 ORDER BY 2
+--
+4ac0746b94832aa4
+== 099
+SELECT a, b::testdomain FROM collate_test2 ORDER BY 2
+--
+5461a3f50301e1fd
+== 100
+SELECT a, b::testdomain FROM collate_test3 ORDER BY 2
+--
+83399dce4775478a
+== 101
+SELECT a, b::testdomain_sv FROM collate_test3 ORDER BY 2
+--
+74b373aeeaf6085f
+== 102
+SELECT a, lower(x::testdomain), lower(y::testdomain) FROM collate_test10
+--
+d723639b9d8312ec
+== 103
+SELECT min(b), max(b) FROM collate_test1
+--
+b3700feb28093a44
+== 104
+SELECT min(b), max(b) FROM collate_test2
+--
+42a5d103a5a54dd0
+== 105
+SELECT min(b), max(b) FROM collate_test3
+--
+3e77972a527d9158
+== 106
+SELECT array_agg(b ORDER BY b) FROM collate_test1
+--
+a6b02b1dcef4c0a1
+== 107
+SELECT array_agg(b ORDER BY b) FROM collate_test2
+--
+6d4d1468f0086294
+== 108
+SELECT array_agg(b ORDER BY b) FROM collate_test3
+--
+bf889fe267761906
+== 109
+SELECT a, b FROM collate_test1 UNION ALL SELECT a, b FROM collate_test1 ORDER BY 2
+--
+cc886b008a01c22b
+== 110
+SELECT a, b FROM collate_test2 UNION SELECT a, b FROM collate_test2 ORDER BY 2
+--
+ba4a36ed80bb7369
+== 111
+SELECT a, b FROM collate_test3 WHERE a < 4 INTERSECT SELECT a, b FROM collate_test3 WHERE a > 1 ORDER BY 2
+--
+b876d87e8ff1b48b
+== 112
+SELECT a, b FROM collate_test3 EXCEPT SELECT a, b FROM collate_test3 WHERE a < 2 ORDER BY 2
+--
+bc0afea44bf5796d
+== 113
+SELECT a, b FROM collate_test1 UNION ALL SELECT a, b FROM collate_test3 ORDER BY 2
+--
+f2e45d108aa08730
+== 114
+-- fail
+SELECT a, b FROM collate_test1 UNION ALL SELECT a, b FROM collate_test3
+--
+68b7fbe40ad32c73
+== 115
+-- ok
+SELECT a, b FROM collate_test1 UNION SELECT a, b FROM collate_test3 ORDER BY 2
+--
+3c322ec61f8e024a
+== 116
+-- fail
+SELECT a, b COLLATE "C" FROM collate_test1 UNION SELECT a, b FROM collate_test3 ORDER BY 2
+--
+e22ffd3086c9525e
+== 117
+-- ok
+SELECT a, b FROM collate_test1 INTERSECT SELECT a, b FROM collate_test3 ORDER BY 2
+--
+b89aecc612fb2bea
+== 118
+-- fail
+SELECT a, b FROM collate_test1 EXCEPT SELECT a, b FROM collate_test3 ORDER BY 2
+--
+ccb1a233bffc9ccb
+== 119
+-- fail
+
+CREATE TABLE test_u AS SELECT a, b FROM collate_test1 UNION ALL SELECT a, b FROM collate_test3
+--
+b138fcc73e5e0cb0
+== 120
+-- fail
+
+-- ideally this would be a parse-time error, but for now it must be run-time:
+select x < y from collate_test10
+--
+15db014231fb5e39
+== 121
+-- fail
+select x || y from collate_test10
+--
+1788c1452bbe1457
+== 122
+-- ok, because || is not collation aware
+select x, y from collate_test10 order by x || y
+--
+aec96324601cc833
+== 123
+-- not so ok
+
+-- collation mismatch between recursive and non-recursive term
+WITH RECURSIVE foo(x) AS
+   (SELECT x FROM (VALUES('a' COLLATE "en_US"),('b')) t(x)
+   UNION ALL
+   SELECT (x || 'c') COLLATE "de_DE" FROM foo WHERE length(x) < 10)
+SELECT * FROM foo
+--
+f1e93734e6bf6475
+== 124
+-- casting
+
+SELECT CAST('42' AS text COLLATE "C")
+--
+ERROR: syntax error at or near "COLLATE"
+CURSORPOS: 38
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 125
+SELECT a, CAST(b AS varchar) FROM collate_test1 ORDER BY 2
+--
+46aadd60503e9bcc
+== 126
+SELECT a, CAST(b AS varchar) FROM collate_test2 ORDER BY 2
+--
+807ee9428a42281e
+== 127
+SELECT a, CAST(b AS varchar) FROM collate_test3 ORDER BY 2
+--
+09c98f6d0aedf7d6
+== 128
+-- propagation of collation in SQL functions (inlined and non-inlined cases)
+-- and plpgsql functions too
+
+CREATE FUNCTION mylt (text, text) RETURNS boolean LANGUAGE sql
+    AS $$ select $1 < $2 $$
+--
+838a0fe6366ca113
+== 129
+CREATE FUNCTION mylt_noninline (text, text) RETURNS boolean LANGUAGE sql
+    AS $$ select $1 < $2 limit 1 $$
+--
+e92bc3b238c699f9
+== 130
+CREATE FUNCTION mylt_plpgsql (text, text) RETURNS boolean LANGUAGE plpgsql
+    AS $$ begin return $1 < $2; end $$
+--
+6591937542acd890
+== 131
+SELECT a.b AS a, b.b AS b, a.b < b.b AS lt,
+       mylt(a.b, b.b), mylt_noninline(a.b, b.b), mylt_plpgsql(a.b, b.b)
+FROM collate_test1 a, collate_test1 b
+ORDER BY a.b, b.b
+--
+f51494b4e694fb03
+== 132
+SELECT a.b AS a, b.b AS b, a.b < b.b COLLATE "C" AS lt,
+       mylt(a.b, b.b COLLATE "C"), mylt_noninline(a.b, b.b COLLATE "C"),
+       mylt_plpgsql(a.b, b.b COLLATE "C")
+FROM collate_test1 a, collate_test1 b
+ORDER BY a.b, b.b
+--
+42346a9ba9cd9983
+== 133
+-- collation override in plpgsql
+
+CREATE FUNCTION mylt2 (x text, y text) RETURNS boolean LANGUAGE plpgsql AS $$
+declare
+  xx text := x;
+  yy text := y;
+begin
+  return xx < yy;
+end
+$$
+--
+5f449569be796bda
+== 134
+SELECT mylt2('a', 'B' collate "en_US") as t, mylt2('a', 'B' collate "C") as f
+--
+792acc514a7e689d
+== 135
+CREATE OR REPLACE FUNCTION
+  mylt2 (x text, y text) RETURNS boolean LANGUAGE plpgsql AS $$
+declare
+  xx text COLLATE "POSIX" := x;
+  yy text := y;
+begin
+  return xx < yy;
+end
+$$
+--
+f0b50b0202e9e0cd
+== 136
+SELECT mylt2('a', 'B') as f
+--
+40cf29196db29911
+== 137
+SELECT mylt2('a', 'B' collate "C") as fail
+--
+bb2b44ecab55e7b6
+== 138
+-- conflicting collations
+SELECT mylt2('a', 'B' collate "POSIX") as f
+--
+73bd3961dd67ba4c
+== 139
+-- polymorphism
+
+SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test1)) ORDER BY 1
+--
+28124f82057231d6
+== 140
+SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test2)) ORDER BY 1
+--
+a714cf3f95a517bd
+== 141
+SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test3)) ORDER BY 1
+--
+c2a0b08832c6983e
+== 142
+CREATE FUNCTION dup (anyelement) RETURNS anyelement
+    AS 'select $1' LANGUAGE sql
+--
+617d6db9f158f2ca
+== 143
+SELECT a, dup(b) FROM collate_test1 ORDER BY 2
+--
+8dac9bed342ca49b
+== 144
+SELECT a, dup(b) FROM collate_test2 ORDER BY 2
+--
+1a4be916376e0a6e
+== 145
+SELECT a, dup(b) FROM collate_test3 ORDER BY 2
+--
+ad9cbbfeba829e5f
+== 146
+-- indexes
+
+CREATE INDEX collate_test1_idx1 ON collate_test1 (b)
+--
+1256d02220051072
+== 147
+CREATE INDEX collate_test1_idx2 ON collate_test1 (b COLLATE "C")
+--
+d12c3f1f8b09af2f
+== 148
+CREATE INDEX collate_test1_idx3 ON collate_test1 ((b COLLATE "C"))
+--
+5f59c423820ee002
+== 149
+-- this is different grammatically
+CREATE INDEX collate_test1_idx4 ON collate_test1 (((b||'foo') COLLATE "POSIX"))
+--
+317c6c07741e92a6
+== 150
+CREATE INDEX collate_test1_idx5 ON collate_test1 (a COLLATE "C")
+--
+60f21491b705a93f
+== 151
+-- fail
+CREATE INDEX collate_test1_idx6 ON collate_test1 ((a COLLATE "C"))
+--
+cc95faf8ac8956b4
+== 152
+-- fail
+
+SELECT relname, pg_get_indexdef(oid) FROM pg_class WHERE relname LIKE 'collate_test%_idx%' ORDER BY 1
+--
+381063e9a623e3b1
+== 153
+-- schema manipulation commands
+
+CREATE ROLE regress_test_role
+--
+049f81b1d313ee7b
+== 154
+CREATE SCHEMA test_schema
+--
+15a8e0b057d807df
+== 155
+-- We need to do this this way to cope with varying names for encodings:
+do $$
+BEGIN
+  EXECUTE 'CREATE COLLATION test0 (locale = ' ||
+          quote_literal((SELECT datcollate FROM pg_database WHERE datname = current_database())) || ');';
+END
+$$
+--
+f936eab75b8c1b90
+== 156
+CREATE COLLATION test0 FROM "C"
+--
+cb60ffb6d1e163a7
+== 157
+-- fail, duplicate name
+CREATE COLLATION IF NOT EXISTS test0 FROM "C"
+--
+6fa0b7d81824dbfc
+== 158
+-- ok, skipped
+CREATE COLLATION IF NOT EXISTS test0 (locale = 'foo')
+--
+1d0ff61e2b22f608
+== 159
+-- ok, skipped
+do $$
+BEGIN
+  EXECUTE 'CREATE COLLATION test1 (lc_collate = ' ||
+          quote_literal((SELECT datcollate FROM pg_database WHERE datname = current_database())) ||
+          ', lc_ctype = ' ||
+          quote_literal((SELECT datctype FROM pg_database WHERE datname = current_database())) || ');';
+END
+$$
+--
+f936eab75b8c1b90
+== 160
+CREATE COLLATION test3 (lc_collate = 'en_US.utf8')
+--
+b60d52eaae576972
+== 161
+-- fail, need lc_ctype
+CREATE COLLATION testx (locale = 'nonsense')
+--
+af41adc316d17368
+== 162
+-- fail
+
+CREATE COLLATION test4 FROM nonsense
+--
+282721fe662c4a07
+== 163
+CREATE COLLATION test5 FROM test0
+--
+07662745142b7d5a
+== 164
+SELECT collname FROM pg_collation WHERE collname LIKE 'test%' ORDER BY 1
+--
+1e60747c7a1f075f
+== 165
+ALTER COLLATION test1 RENAME TO test11
+--
+c80f4d0b38d63daf
+== 166
+ALTER COLLATION test0 RENAME TO test11
+--
+5d8b2afeb9a0c308
+== 167
+-- fail
+ALTER COLLATION test1 RENAME TO test22
+--
+f2cc535cc5ab1fe8
+== 168
+-- fail
+
+ALTER COLLATION test11 OWNER TO regress_test_role
+--
+4285932eef4a365b
+== 169
+ALTER COLLATION test11 OWNER TO nonsense
+--
+a9e7565f0eef1e89
+== 170
+ALTER COLLATION test11 SET SCHEMA test_schema
+--
+60750be931f430bc
+== 171
+COMMENT ON COLLATION test0 IS 'US English'
+--
+be401c91ff15f74a
+== 172
+SELECT collname, nspname, obj_description(pg_collation.oid, 'pg_collation')
+    FROM pg_collation JOIN pg_namespace ON (collnamespace = pg_namespace.oid)
+    WHERE collname LIKE 'test%'
+    ORDER BY 1
+--
+1c5f2912c48a19bb
+== 173
+DROP COLLATION test0, test_schema.test11, test5
+--
+0de112b72e1a2e16
+== 174
+DROP COLLATION test0
+--
+544e04978c041d1e
+== 175
+-- fail
+DROP COLLATION IF EXISTS test0
+--
+3abf7b4f42719ae8
+== 176
+SELECT collname FROM pg_collation WHERE collname LIKE 'test%'
+--
+b671f8550adf283a
+== 177
+DROP SCHEMA test_schema
+--
+64267c2bd65c789a
+== 178
+DROP ROLE regress_test_role
+--
+3fc592e86e32c1b6
+== 179
+-- ALTER
+
+ALTER COLLATION "en_US" REFRESH VERSION
+--
+eb3efefd826cebd8
+== 180
+-- also test for database while we are here
+SELECT current_database() AS datname
+--
+9dbbb4ff3937637a
+== 181
+ALTER DATABASE :"datname" REFRESH COLLATION VERSION
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 16
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 182
+-- dependencies
+
+CREATE COLLATION test0 FROM "C"
+--
+cb60ffb6d1e163a7
+== 183
+CREATE TABLE collate_dep_test1 (a int, b text COLLATE test0)
+--
+0edc4f4b262c9724
+== 184
+CREATE DOMAIN collate_dep_dom1 AS text COLLATE test0
+--
+20ad3fd90b5f76c9
+== 185
+CREATE TYPE collate_dep_test2 AS (x int, y text COLLATE test0)
+--
+fe3bb2b378983b08
+== 186
+CREATE VIEW collate_dep_test3 AS SELECT text 'foo' COLLATE test0 AS foo
+--
+9cfd04796a7efb75
+== 187
+CREATE TABLE collate_dep_test4t (a int, b text)
+--
+570912b5fef6e245
+== 188
+CREATE INDEX collate_dep_test4i ON collate_dep_test4t (b COLLATE test0)
+--
+2d217609f15ec395
+== 189
+DROP COLLATION test0 RESTRICT
+--
+544e04978c041d1e
+== 190
+-- fail
+DROP COLLATION test0 CASCADE
+--
+5fbfce1fcd96f7e2
+== 191
+DROP TABLE collate_dep_test1, collate_dep_test4t
+--
+2a4aa64448e6b73c
+== 192
+DROP TYPE collate_dep_test2
+--
+1f1b51a953963d16
+== 193
+-- test range types and collations
+
+create type textrange_c as range(subtype=text, collation="C")
+--
+40c3df26a409dbfb
+== 194
+create type textrange_en_us as range(subtype=text, collation="en_US")
+--
+d42b0cb5ab278cc9
+== 195
+select textrange_c('A','Z') @> 'b'::text
+--
+c15f5aa3a5c27ddf
+== 196
+select textrange_en_us('A','Z') @> 'b'::text
+--
+932dcc54e174229f
+== 197
+drop type textrange_c
+--
+dd746758df6f0bb6
+== 198
+drop type textrange_en_us
+--
+6281a6e0da42c33c
+== 199
+-- standard collations
+
+SELECT * FROM collate_test2 ORDER BY b COLLATE UCS_BASIC
+--
+8fc3658989121a67
+== 200
+-- nondeterministic collations
+-- (not supported with libc provider)
+
+CREATE COLLATION ctest_det (locale = 'en_US.utf8', deterministic = true)
+--
+edf73e7d6746c5a5
+== 201
+CREATE COLLATION ctest_nondet (locale = 'en_US.utf8', deterministic = false)
+--
+c878915ef25a7486
+== 202
+-- cleanup
+SET client_min_messages TO warning
+--
+9aa16c9ee5067614
+== 203
+DROP SCHEMA collate_tests CASCADE
+--
+b9ee34039cbfceb9

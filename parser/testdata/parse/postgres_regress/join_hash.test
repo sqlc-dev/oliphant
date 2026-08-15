@@ -1,0 +1,1428 @@
+== 001
+|--
+-- exercises for the hash join code
+|--
+
+begin
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 002
+set local min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":41}}],"is_local":true}}}]}
+== 003
+set local parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":32}}],"is_local":true}}}]}
+== 004
+set local enable_hashjoin = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashjoin","args":[{"A_Const":{"sval":{"sval":"on"},"location":28}}],"is_local":true}}}]}
+== 005
+-- Extract bucket and batch counts from an explain analyze plan.  In
+-- general we can't make assertions about how many batches (or
+-- buckets) will be required because it can vary, but we can in some
+-- special cases and we can check for growth.
+create or replace function find_hash(node json)
+returns json language plpgsql
+as
+$$
+declare
+  x json;
+  child json;
+begin
+  if node->>'Node Type' = 'Hash' then
+    return node;
+  else
+    for child in select json_array_elements(node->'Plans')
+    loop
+      x := find_hash(child);
+      if x is not null then
+        return x;
+      end if;
+    end loop;
+    return null;
+  end if;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"find_hash"}}],"parameters":[{"FunctionParameter":{"name":"node","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":289},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"json"}}],"typemod":-1,"location":303},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":308}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  x json;\n  child json;\nbegin\n  if node-\u003e\u003e'Node Type' = 'Hash' then\n    return node;\n  else\n    for child in select json_array_elements(node-\u003e'Plans')\n    loop\n      x := find_hash(child);\n      if x is not null then\n        return x;\n      end if;\n    end loop;\n    return null;\n  end if;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":325}}]}}}]}
+== 006
+create or replace function hash_join_batches(query text)
+returns table (original int, final int) language plpgsql
+as
+$$
+declare
+  whole_plan json;
+  hash_node json;
+begin
+  for whole_plan in
+    execute 'explain (analyze, format ''json'') ' || query
+  loop
+    hash_node := find_hash(json_extract_path(whole_plan, '0', 'Plan'));
+    original := hash_node->>'Original Hash Batches';
+    final := hash_node->>'Hash Batches';
+    return next;
+  end loop;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"hash_join_batches"}}],"parameters":[{"FunctionParameter":{"name":"query","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":51},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"original","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":81},"mode":"FUNC_PARAM_TABLE"}},{"FunctionParameter":{"name":"final","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":92},"mode":"FUNC_PARAM_TABLE"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"record"}}],"setof":true,"typemod":-1,"location":65},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":97}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  whole_plan json;\n  hash_node json;\nbegin\n  for whole_plan in\n    execute 'explain (analyze, format ''json'') ' || query\n  loop\n    hash_node := find_hash(json_extract_path(whole_plan, '0', 'Plan'));\n    original := hash_node-\u003e\u003e'Original Hash Batches';\n    final := hash_node-\u003e\u003e'Hash Batches';\n    return next;\n  end loop;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":114}}]}}}]}
+== 007
+-- Make a simple relation with well distributed keys and correctly
+-- estimated size.
+create table simple as
+  select generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":134}},{"A_Const":{"ival":{"ival":20000},"location":137}}],"funcformat":"COERCE_EXPLICIT_CALL","location":118}},"location":118}},{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"location":151}},"location":151}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"simple","inh":true,"relpersistence":"p","location":99},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 008
+alter table simple set (parallel_workers = 2)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"simple","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{"ival":2}},"defaction":"DEFELEM_UNSPEC","location":24}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 009
+analyze simple
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"simple","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 010
+-- Make a relation whose size we will under-estimate.  We want stats
+-- to say 1000 rows, but actually there are 20,000 rows.
+create table bigger_than_it_looks as
+  select generate_series(1, 20000) as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":188}},{"A_Const":{"ival":{"ival":20000},"location":191}}],"funcformat":"COERCE_EXPLICIT_CALL","location":172}},"location":172}},{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"location":205}},"location":205}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","location":139},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 011
+alter table bigger_than_it_looks set (autovacuum_enabled = 'false')
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"autovacuum_enabled","arg":{"String":{"sval":"false"}},"defaction":"DEFELEM_UNSPEC","location":38}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 012
+alter table bigger_than_it_looks set (parallel_workers = 2)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{"ival":2}},"defaction":"DEFELEM_UNSPEC","location":38}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 013
+analyze bigger_than_it_looks
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 014
+update pg_class set reltuples = 1000 where relname = 'bigger_than_it_looks'
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"pg_class","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"reltuples","val":{"A_Const":{"ival":{"ival":1000},"location":32}},"location":20}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":43}},"rexpr":{"A_Const":{"sval":{"sval":"bigger_than_it_looks"},"location":53}},"location":51}}}}}]}
+== 015
+-- Make a relation whose size we underestimate and that also has a
+-- kind of skew that breaks our batching scheme.  We want stats to say
+-- 2 rows, but actually there are 20,000 rows with the same key.
+create table extremely_skewed (id int, t text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","location":216},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":237},"is_local":true,"location":234}},{"ColumnDef":{"colname":"t","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":244},"is_local":true,"location":242}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 016
+alter table extremely_skewed set (autovacuum_enabled = 'false')
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"autovacuum_enabled","arg":{"String":{"sval":"false"}},"defaction":"DEFELEM_UNSPEC","location":34}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 017
+alter table extremely_skewed set (parallel_workers = 2)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{"ival":2}},"defaction":"DEFELEM_UNSPEC","location":34}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 018
+analyze extremely_skewed
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 019
+insert into extremely_skewed
+  select 42 as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  from generate_series(1, 20000)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"A_Const":{"ival":{"ival":42},"location":38}},"location":38}},{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"location":48}},"location":48}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":108}},{"A_Const":{"ival":{"ival":20000},"location":111}}],"funcformat":"COERCE_EXPLICIT_CALL","location":92}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 020
+update pg_class
+  set reltuples = 2, relpages = pg_relation_size('extremely_skewed') / 8192
+  where relname = 'extremely_skewed'
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"pg_class","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"reltuples","val":{"A_Const":{"ival":{"ival":2},"location":34}},"location":22}},{"ResTarget":{"name":"relpages","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"/"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_relation_size"}}],"args":[{"A_Const":{"sval":{"sval":"extremely_skewed"},"location":65}}],"funcformat":"COERCE_EXPLICIT_CALL","location":48}},"rexpr":{"A_Const":{"ival":{"ival":8192},"location":87}},"location":85}},"location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":100}},"rexpr":{"A_Const":{"sval":{"sval":"extremely_skewed"},"location":110}},"location":108}}}}}]}
+== 021
+-- Make a relation with a couple of enormous tuples.
+create table wide as select generate_series(1, 2) as id, rpad('', 320000, 'x') as t
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":97}},{"A_Const":{"ival":{"ival":2},"location":100}}],"funcformat":"COERCE_EXPLICIT_CALL","location":81}},"location":81}},{"ResTarget":{"name":"t","val":{"FuncCall":{"funcname":[{"String":{"sval":"rpad"}}],"args":[{"A_Const":{"sval":{"sval":""},"location":115}},{"A_Const":{"ival":{"ival":320000},"location":119}},{"A_Const":{"sval":{"sval":"x"},"location":127}}],"funcformat":"COERCE_EXPLICIT_CALL","location":110}},"location":110}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"wide","inh":true,"relpersistence":"p","location":66},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 022
+alter table wide set (parallel_workers = 2)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"wide","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{"ival":2}},"defaction":"DEFELEM_UNSPEC","location":22}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 023
+-- The "optimal" case: the hash table fits in memory; we plan for 1
+-- batch, we stick to that number, and peak memory usage stays within
+-- our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":188}}}]}
+== 024
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 025
+set local work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":21}}],"is_local":true}}}]}
+== 026
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 027
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 028
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 029
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 031
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":56}}}]}
+== 032
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 033
+set local work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":21}}],"is_local":true}}}]}
+== 034
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 035
+set local enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":33}}],"is_local":true}}}]}
+== 036
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 037
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 038
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 039
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 040
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":52}}}]}
+== 041
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 042
+set local work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":21}}],"is_local":true}}}]}
+== 043
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 044
+set local enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":33}}],"is_local":true}}}]}
+== 045
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 046
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 047
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 048
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 049
+-- The "good" case: batches required, but we plan the right number; we
+-- plan for some number of batches, and we stick to that number, and
+-- peak memory usage says within our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":220}}}]}
+== 050
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 051
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 052
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 053
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 054
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 055
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 056
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 057
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":56}}}]}
+== 058
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 059
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 060
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 061
+set local enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":33}}],"is_local":true}}}]}
+== 062
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 063
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 064
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 065
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 066
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":52}}}]}
+== 067
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 068
+set local work_mem = '192kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"192kB"},"location":21}}],"is_local":true}}}]}
+== 069
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 070
+set local enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":33}}],"is_local":true}}}]}
+== 071
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 072
+select count(*) from simple r join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 073
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 074
+-- parallel full multi-batch hash join
+select count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":46}},"location":46}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":60}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":85}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 075
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 076
+-- The "bad" case: during execution we need to increase number of
+-- batches; in this case we plan for 1 batch, and increase at least a
+-- couple of times, and peak memory usage stays within our work_mem
+-- budget
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":241}}}]}
+== 077
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 078
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 079
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 080
+explain (costs off)
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 081
+select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 082
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 083
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 084
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":56}}}]}
+== 085
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 086
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 087
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 088
+set local enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":33}}],"is_local":true}}}]}
+== 089
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 090
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 091
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join bigger_than_it_looks s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 092
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 093
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":52}}}]}
+== 094
+set local max_parallel_workers_per_gather = 1
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":1},"location":44}}],"is_local":true}}}]}
+== 095
+set local work_mem = '192kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"192kB"},"location":21}}],"is_local":true}}}]}
+== 096
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 097
+set local enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":33}}],"is_local":true}}}]}
+== 098
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 099
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"bigger_than_it_looks","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"initially_multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":18}},"location":16}},"location":7}},{"ResTarget":{"name":"increased_batches","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":45}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"original"}}],"location":53}},"location":51}},"location":45}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join bigger_than_it_looks s using (id);\n"},"location":109}}],"funcformat":"COERCE_EXPLICIT_CALL","location":90}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 101
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 102
+-- The "ugly" case: increasing the number of batches during execution
+-- doesn't help, so stop trying to fit in work_mem and hope for the
+-- best; in this case we plan for 1 batch, increases just once and
+-- then stop increasing because that didn't help at all, so we blow
+-- right through the work_mem budget and hope for the best...
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":362}}}]}
+== 103
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 104
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 105
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 106
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 107
+select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 108
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join extremely_skewed s using (id);\n"},"location":33}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 109
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 110
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":56}}}]}
+== 111
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 112
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 113
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 114
+set local enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":33}}],"is_local":true}}}]}
+== 115
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 116
+select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 117
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join extremely_skewed s using (id);\n"},"location":33}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 118
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 119
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":52}}}]}
+== 120
+set local max_parallel_workers_per_gather = 1
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":1},"location":44}}],"is_local":true}}}]}
+== 121
+set local work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":21}}],"is_local":true}}}]}
+== 122
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 123
+set local enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":33}}],"is_local":true}}}]}
+== 124
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":43}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":57}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 125
+select count(*) from simple r join extremely_skewed s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":21}},"rarg":{"RangeVar":{"relname":"extremely_skewed","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":35}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 126
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join extremely_skewed s using (id);\n"},"location":33}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 127
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 128
+-- A couple of other hash join tests unrelated to work_mem management.
+
+-- Check that EXPLAIN ANALYZE has data even if the leader doesn't participate
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":160}}}]}
+== 129
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 130
+set local work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":21}}],"is_local":true}}}]}
+== 131
+set local hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":32}}],"is_local":true}}}]}
+== 132
+set local parallel_leader_participation = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_leader_participation","args":[{"A_Const":{"sval":{"sval":"off"},"location":42}}],"is_local":true}}}]}
+== 133
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from simple r join simple s using (id);\n"},"location":33}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 134
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 135
+-- Exercise rescans.  We'll turn off parallel_leader_participation so
+-- that we can check that instrumentation comes back correctly.
+
+create table join_foo as select generate_series(1, 3) as id, 'xxxxx'::text as t
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":183}},{"A_Const":{"ival":{"ival":3},"location":186}}],"funcformat":"COERCE_EXPLICIT_CALL","location":167}},"location":167}},{"ResTarget":{"name":"t","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"xxxxx"},"location":196}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":205},"location":203}},"location":196}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"join_foo","inh":true,"relpersistence":"p","location":148},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 136
+alter table join_foo set (parallel_workers = 0)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"join_foo","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{}},"defaction":"DEFELEM_UNSPEC","location":26}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 137
+create table join_bar as select generate_series(1, 10000) as id, 'xxxxx'::text as t
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":48}},{"A_Const":{"ival":{"ival":10000},"location":51}}],"funcformat":"COERCE_EXPLICIT_CALL","location":32}},"location":32}},{"ResTarget":{"name":"t","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"xxxxx"},"location":65}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":74},"location":72}},"location":65}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"join_bar","inh":true,"relpersistence":"p","location":13},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 138
+alter table join_bar set (parallel_workers = 2)
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"join_bar","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetRelOptions","def":{"List":{"items":[{"DefElem":{"defname":"parallel_workers","arg":{"Integer":{"ival":2}},"defaction":"DEFELEM_UNSPEC","location":26}}]}},"behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 139
+-- multi-batch with rescan, parallel-oblivious
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":57}}}]}
+== 140
+set enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":27}}]}}}]}
+== 141
+set parallel_leader_participation = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_leader_participation","args":[{"A_Const":{"sval":{"sval":"off"},"location":36}}]}}}]}
+== 142
+set min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 143
+set parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 144
+set parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 145
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 146
+set enable_material = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":22}}]}}}]}
+== 147
+set enable_mergejoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":23}}]}}}]}
+== 148
+set work_mem = '64kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"64kB"},"location":15}}]}}}]}
+== 149
+set hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":26}}]}}}]}
+== 150
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":43}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":74}},"location":74}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":81}},"location":81}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":91}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":108}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":142}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":156}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":164}},"location":162}},"location":154}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":170}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":184}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":192}},"location":190}},"location":182}}],"location":166}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 151
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":21}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":50}},"location":50}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":57}},"location":57}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":67}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":84}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":116}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":130}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":138}},"location":136}},"location":128}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":144}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":158}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":166}},"location":164}},"location":156}}],"location":140}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 152
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":15}},"location":13}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from join_foo\n    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss\n    on join_foo.id \u003c ss.id + 1 and join_foo.id \u003e ss.id - 1;\n"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 153
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 154
+-- single-batch with rescan, parallel-oblivious
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":58}}}]}
+== 155
+set enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":27}}]}}}]}
+== 156
+set parallel_leader_participation = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_leader_participation","args":[{"A_Const":{"sval":{"sval":"off"},"location":36}}]}}}]}
+== 157
+set min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 158
+set parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 159
+set parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 160
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 161
+set enable_material = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":22}}]}}}]}
+== 162
+set enable_mergejoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":23}}]}}}]}
+== 163
+set work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":15}}]}}}]}
+== 164
+set hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":26}}]}}}]}
+== 165
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":43}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":74}},"location":74}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":81}},"location":81}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":91}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":108}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":142}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":156}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":164}},"location":162}},"location":154}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":170}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":184}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":192}},"location":190}},"location":182}}],"location":166}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 166
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":21}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":50}},"location":50}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":57}},"location":57}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":67}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":84}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":116}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":130}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":138}},"location":136}},"location":128}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":144}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":158}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":166}},"location":164}},"location":156}}],"location":140}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 167
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":15}},"location":13}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from join_foo\n    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss\n    on join_foo.id \u003c ss.id + 1 and join_foo.id \u003e ss.id - 1;\n"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 168
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 169
+-- multi-batch with rescan, parallel-aware
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":53}}}]}
+== 170
+set enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":27}}]}}}]}
+== 171
+set parallel_leader_participation = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_leader_participation","args":[{"A_Const":{"sval":{"sval":"off"},"location":36}}]}}}]}
+== 172
+set min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 173
+set parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 174
+set parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 175
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 176
+set enable_material = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":22}}]}}}]}
+== 177
+set enable_mergejoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":23}}]}}}]}
+== 178
+set work_mem = '64kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"64kB"},"location":15}}]}}}]}
+== 179
+set hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":26}}]}}}]}
+== 180
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":43}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":74}},"location":74}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":81}},"location":81}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":91}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":108}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":142}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":156}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":164}},"location":162}},"location":154}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":170}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":184}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":192}},"location":190}},"location":182}}],"location":166}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 181
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":21}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":50}},"location":50}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":57}},"location":57}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":67}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":84}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":116}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":130}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":138}},"location":136}},"location":128}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":144}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":158}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":166}},"location":164}},"location":156}}],"location":140}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 182
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":15}},"location":13}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from join_foo\n    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss\n    on join_foo.id \u003c ss.id + 1 and join_foo.id \u003e ss.id - 1;\n"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 183
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 184
+-- single-batch with rescan, parallel-aware
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":54}}}]}
+== 185
+set enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":27}}]}}}]}
+== 186
+set parallel_leader_participation = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_leader_participation","args":[{"A_Const":{"sval":{"sval":"off"},"location":36}}]}}}]}
+== 187
+set min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 188
+set parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 189
+set parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 190
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 191
+set enable_material = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":22}}]}}}]}
+== 192
+set enable_mergejoin = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":23}}]}}}]}
+== 193
+set work_mem = '4MB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"4MB"},"location":15}}]}}}]}
+== 194
+set hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":26}}]}}}]}
+== 195
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":43}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":74}},"location":74}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":81}},"location":81}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":91}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":108}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":142}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":156}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":164}},"location":162}},"location":154}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":170}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":184}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":192}},"location":190}},"location":182}}],"location":166}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 196
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"join_foo","inh":true,"relpersistence":"p","location":21}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"id"}}],"location":50}},"location":50}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"b1"}},{"String":{"sval":"t"}}],"location":57}},"location":57}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b1"},"location":67}},"rarg":{"RangeVar":{"relname":"join_bar","inh":true,"relpersistence":"p","alias":{"aliasname":"b2"},"location":84}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}},"quals":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":116}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":130}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":138}},"location":136}},"location":128}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"join_foo"}},{"String":{"sval":"id"}}],"location":144}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"String":{"sval":"id"}}],"location":158}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":166}},"location":164}},"location":156}}],"location":140}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 197
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":15}},"location":13}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select count(*) from join_foo\n    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss\n    on join_foo.id \u003c ss.id + 1 and join_foo.id \u003e ss.id - 1;\n"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 198
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 199
+-- A full outer join where every record is matched.
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":79}}}]}
+== 200
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 201
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 202
+select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 203
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 204
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":77}}}]}
+== 205
+set enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":27}}]}}}]}
+== 206
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 207
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 208
+select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 209
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 210
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":72}}}]}
+== 211
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 212
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 213
+select  count(*) from simple r full outer join simple s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 214
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 215
+-- A full outer join where every record is not matched.
+
+-- non-parallel
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":83}}}]}
+== 216
+set local max_parallel_workers_per_gather = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{},"location":44}}],"is_local":true}}}]}
+== 217
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":85}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":92}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":96}},"location":94}},"location":90}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 218
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":60}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":67}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":71}},"location":69}},"location":65}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 219
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 220
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":77}}}]}
+== 221
+set enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":27}}]}}}]}
+== 222
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 223
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":85}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":92}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":96}},"location":94}},"location":90}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 224
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":60}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":67}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":71}},"location":69}},"location":65}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 225
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 226
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":72}}}]}
+== 227
+set local max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":44}}],"is_local":true}}}]}
+== 228
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":47}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":72}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":85}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":92}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":96}},"location":94}},"location":90}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 229
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":8}},"location":8}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"r"},"location":22}},"rarg":{"RangeVar":{"relname":"simple","inh":true,"relpersistence":"p","alias":{"aliasname":"s"},"location":47}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}},{"String":{"sval":"id"}}],"location":60}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{},"location":67}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"id"}}],"location":71}},"location":69}},"location":65}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 230
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 231
+-- exercise special code paths for huge tuples (note use of non-strict
+-- expression and left join required to get the detoasted tuple into
+-- the hash table)
+
+-- parallel with parallel-aware hash join (hits ExecParallelHashLoadTuple and
+-- sts_puttuple oversized tuple cases because it's multi-batch)
+savepoint settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":312}}}]}
+== 232
+set max_parallel_workers_per_gather = 2
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"max_parallel_workers_per_gather","args":[{"A_Const":{"ival":{"ival":2},"location":38}}]}}}]}
+== 233
+set enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":27}}]}}}]}
+== 234
+set work_mem = '128kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"sval":{"sval":"128kB"},"location":15}}]}}}]}
+== 235
+set hash_mem_multiplier = 1.0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"hash_mem_multiplier","args":[{"A_Const":{"fval":{"fval":"1.0"},"location":26}}]}}}]}
+== 236
+explain (costs off)
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"length"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"t"}}],"location":40}}],"funcformat":"COERCE_EXPLICIT_CALL","location":36}}],"funcformat":"COERCE_EXPLICIT_CALL","location":29}},"location":29}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"wide","inh":true,"relpersistence":"p","location":53}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":76}},"location":76}},{"ResTarget":{"name":"t","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"CoalesceExpr":{"args":[{"ColumnRef":{"fields":[{"String":{"sval":"t"}}],"location":89}},{"A_Const":{"sval":{"sval":""},"location":92}}],"location":80}},"rexpr":{"A_Const":{"sval":{"sval":""},"location":99}},"location":96}},"location":80}}],"fromClause":[{"RangeVar":{"relname":"wide","inh":true,"relpersistence":"p","location":112}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 237
+select length(max(s.t))
+from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"length"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"s"}},{"String":{"sval":"t"}}],"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_LEFT","larg":{"RangeVar":{"relname":"wide","inh":true,"relpersistence":"p","location":29}},"rarg":{"RangeSubselect":{"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":52}},"location":52}},{"ResTarget":{"name":"t","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"CoalesceExpr":{"args":[{"ColumnRef":{"fields":[{"String":{"sval":"t"}}],"location":65}},{"A_Const":{"sval":{"sval":""},"location":68}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":""},"location":75}},"location":72}},"location":56}}],"fromClause":[{"RangeVar":{"relname":"wide","inh":true,"relpersistence":"p","location":88}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"s"}}},"usingClause":[{"String":{"sval":"id"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 238
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+$$)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"multibatch","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"final"}}],"location":7}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":15}},"location":13}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"hash_join_batches"}}],"args":[{"A_Const":{"sval":{"sval":"\n  select length(max(s.t))\n  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);\n"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 239
+rollback to settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 240
+-- Hash join reuses the HOT status bit to indicate match status. This can only
+-- be guaranteed to produce correct results if all the hash join tuple match
+-- bits are reset before reuse. This is done upon loading them into the
+-- hashtable.
+SAVEPOINT settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"settings","location":252}}}]}
+== 241
+SET enable_parallel_hash = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"on"},"location":27}}]}}}]}
+== 242
+SET min_parallel_table_scan_size = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"min_parallel_table_scan_size","args":[{"A_Const":{"ival":{},"location":35}}]}}}]}
+== 243
+SET parallel_setup_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_setup_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 244
+SET parallel_tuple_cost = 0
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"parallel_tuple_cost","args":[{"A_Const":{"ival":{},"location":26}}]}}}]}
+== 245
+CREATE TABLE hjtest_matchbits_t1(id int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"hjtest_matchbits_t1","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":36},"is_local":true,"location":33}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 246
+CREATE TABLE hjtest_matchbits_t2(id int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"hjtest_matchbits_t2","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":36},"is_local":true,"location":33}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 247
+INSERT INTO hjtest_matchbits_t1 VALUES (1)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_matchbits_t1","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":40}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 248
+INSERT INTO hjtest_matchbits_t2 VALUES (2)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_matchbits_t2","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":2},"location":40}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 249
+-- Update should create a HOT tuple. If this status bit isn't cleared, we won't
+-- correctly emit the NULL-extended unmatching tuple in full hash join.
+UPDATE hjtest_matchbits_t2 set id = 2
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"hjtest_matchbits_t2","inh":true,"relpersistence":"p","location":159},"targetList":[{"ResTarget":{"name":"id","val":{"A_Const":{"ival":{"ival":2},"location":188}},"location":183}}]}}}]}
+== 250
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+  ORDER BY t1.id
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"hjtest_matchbits_t1","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":14}},"rarg":{"RangeVar":{"relname":"hjtest_matchbits_t2","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":47}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"id"}}],"location":73}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"id"}}],"location":81}},"location":79}}}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"id"}}],"location":98}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 251
+-- Test serial full hash join.
+-- Resetting parallel_setup_cost should force a serial plan.
+-- Just to be safe, however, set enable_parallel_hash to off, as parallel full
+-- hash joins are only supported with shared hashtables.
+RESET parallel_setup_cost
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"parallel_setup_cost"}}}]}
+== 252
+SET enable_parallel_hash = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_parallel_hash","args":[{"A_Const":{"sval":{"sval":"off"},"location":27}}]}}}]}
+== 253
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_FULL","larg":{"RangeVar":{"relname":"hjtest_matchbits_t1","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":14}},"rarg":{"RangeVar":{"relname":"hjtest_matchbits_t2","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":47}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"id"}}],"location":73}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"id"}}],"location":81}},"location":79}}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 254
+ROLLBACK TO settings
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"settings","location":12}}}]}
+== 255
+rollback
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 256
+-- Verify that hash key expressions reference the correct
+-- nodes. Hashjoin's hashkeys need to reference its outer plan, Hash's
+-- need to reference Hash's outer plan (which is below HashJoin's
+-- inner plan). It's not trivial to verify that the references are
+-- correct (we don't display the hashkeys themselves), but if the
+-- hashkeys contain subplan references, those will be displayed. Force
+-- subplans to appear just about everywhere.
+|--
+-- Bug report:
+-- https://www.postgresql.org/message-id/CAPpHfdvGVegF_TKKRiBrSmatJL2dR9uwFCuR%2BteQ_8tEXU8mxg%40mail.gmail.com
+|--
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 257
+SET LOCAL enable_sort = OFF
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_sort","args":[{"A_Const":{"sval":{"sval":"off"},"location":24}}],"is_local":true}}}]}
+== 258
+-- avoid mergejoins
+SET LOCAL from_collapse_limit = 1
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"from_collapse_limit","args":[{"A_Const":{"ival":{"ival":1},"location":52}}],"is_local":true}}}]}
+== 259
+-- allows easy changing of join order
+
+CREATE TABLE hjtest_1 (a text, b int, id int, c bool)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":52},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":64},"is_local":true,"location":62}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":72},"is_local":true,"location":70}},{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":80},"is_local":true,"location":77}},{"ColumnDef":{"colname":"c","typeName":{"names":[{"String":{"sval":"bool"}}],"typemod":-1,"location":87},"is_local":true,"location":85}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 260
+CREATE TABLE hjtest_2 (a bool, id int, b text, c int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"bool"}}],"typemod":-1,"location":25},"is_local":true,"location":23}},{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":34},"is_local":true,"location":31}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":41},"is_local":true,"location":39}},{"ColumnDef":{"colname":"c","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":49},"is_local":true,"location":47}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 261
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 2, 1, false)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":12},"cols":[{"ResTarget":{"name":"a","location":21}},{"ResTarget":{"name":"b","location":24}},{"ResTarget":{"name":"id","location":27}},{"ResTarget":{"name":"c","location":31}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"text"},"location":42}},{"A_Const":{"ival":{"ival":2},"location":50}},{"A_Const":{"ival":{"ival":1},"location":53}},{"A_Const":{"boolval":{},"location":56}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 262
+-- matches
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 2, false)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":23},"cols":[{"ResTarget":{"name":"a","location":32}},{"ResTarget":{"name":"b","location":35}},{"ResTarget":{"name":"id","location":38}},{"ResTarget":{"name":"c","location":42}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"text"},"location":53}},{"A_Const":{"ival":{"ival":1},"location":61}},{"A_Const":{"ival":{"ival":2},"location":64}},{"A_Const":{"boolval":{},"location":67}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 263
+-- fails id join condition
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 20, 1, false)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":39},"cols":[{"ResTarget":{"name":"a","location":48}},{"ResTarget":{"name":"b","location":51}},{"ResTarget":{"name":"id","location":54}},{"ResTarget":{"name":"c","location":58}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"text"},"location":69}},{"A_Const":{"ival":{"ival":20},"location":77}},{"A_Const":{"ival":{"ival":1},"location":81}},{"A_Const":{"boolval":{},"location":84}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 264
+-- fails < 50
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 1, false)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":26},"cols":[{"ResTarget":{"name":"a","location":35}},{"ResTarget":{"name":"b","location":38}},{"ResTarget":{"name":"id","location":41}},{"ResTarget":{"name":"c","location":45}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"text"},"location":56}},{"A_Const":{"ival":{"ival":1},"location":64}},{"A_Const":{"ival":{"ival":1},"location":67}},{"A_Const":{"boolval":{},"location":70}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 265
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 2)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":70},"cols":[{"ResTarget":{"name":"a","location":79}},{"ResTarget":{"name":"id","location":82}},{"ResTarget":{"name":"b","location":86}},{"ResTarget":{"name":"c","location":89}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"boolval":{"boolval":true},"location":100}},{"A_Const":{"ival":{"ival":1},"location":106}},{"A_Const":{"sval":{"sval":"another"},"location":109}},{"A_Const":{"ival":{"ival":2},"location":120}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 266
+-- matches
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 3, 'another', 7)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":23},"cols":[{"ResTarget":{"name":"a","location":32}},{"ResTarget":{"name":"id","location":35}},{"ResTarget":{"name":"b","location":39}},{"ResTarget":{"name":"c","location":42}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"boolval":{"boolval":true},"location":53}},{"A_Const":{"ival":{"ival":3},"location":59}},{"A_Const":{"sval":{"sval":"another"},"location":62}},{"A_Const":{"ival":{"ival":7},"location":73}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 267
+-- fails id join condition
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 90)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":39},"cols":[{"ResTarget":{"name":"a","location":48}},{"ResTarget":{"name":"id","location":51}},{"ResTarget":{"name":"b","location":55}},{"ResTarget":{"name":"c","location":58}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"boolval":{"boolval":true},"location":69}},{"A_Const":{"ival":{"ival":1},"location":75}},{"A_Const":{"sval":{"sval":"another"},"location":78}},{"A_Const":{"ival":{"ival":90},"location":89}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 268
+-- fails < 55
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 3)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":26},"cols":[{"ResTarget":{"name":"a","location":35}},{"ResTarget":{"name":"id","location":38}},{"ResTarget":{"name":"b","location":42}},{"ResTarget":{"name":"c","location":45}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"boolval":{"boolval":true},"location":56}},{"A_Const":{"ival":{"ival":1},"location":62}},{"A_Const":{"sval":{"sval":"another"},"location":65}},{"A_Const":{"ival":{"ival":3},"location":76}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 269
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'text', 1)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":69},"cols":[{"ResTarget":{"name":"a","location":78}},{"ResTarget":{"name":"id","location":81}},{"ResTarget":{"name":"b","location":85}},{"ResTarget":{"name":"c","location":88}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"boolval":{"boolval":true},"location":99}},{"A_Const":{"ival":{"ival":1},"location":105}},{"A_Const":{"sval":{"sval":"text"},"location":108}},{"A_Const":{"ival":{"ival":1},"location":116}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 270
+--  fails hjtest_1.a <> hjtest_2.b;
+
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a1","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":73}},"location":73}},{"ResTarget":{"name":"a2","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"a"}}],"location":88}},"location":88}},{"ResTarget":{"name":"t1","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"tableoid"}}],"location":102}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":121},"location":119}},"location":102}},{"ResTarget":{"name":"t2","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"tableoid"}}],"location":134}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":153},"location":151}},"location":134}}],"fromClause":[{"RangeVar":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":170}},{"RangeVar":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":180}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"id"}}],"location":199}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":221}},"location":221}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"id"}}],"location":229}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":243}},"location":241}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":213}},"location":211}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":262}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":275}},"location":273}},"location":262}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":254}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":288}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":299}},"location":298}},"location":288}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":280}},"location":278}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":318}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":331}},"location":329}},"location":318}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":310}},"rexpr":{"A_Const":{"ival":{"ival":50},"location":336}},"location":334}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":355}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":368}},"location":366}},"location":355}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":347}},"rexpr":{"A_Const":{"ival":{"ival":55},"location":373}},"location":371}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":384}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"b"}}],"location":398}},"location":395}}],"location":250}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":46}},{"DefElem":{"defname":"verbose","defaction":"DEFELEM_UNSPEC","location":57}}]}}}]}
+== 271
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a1","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":7}},"location":7}},{"ResTarget":{"name":"a2","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"a"}}],"location":22}},"location":22}},{"ResTarget":{"name":"t1","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"tableoid"}}],"location":36}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":55},"location":53}},"location":36}},{"ResTarget":{"name":"t2","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"tableoid"}}],"location":68}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":87},"location":85}},"location":68}}],"fromClause":[{"RangeVar":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":104}},{"RangeVar":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":114}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"id"}}],"location":133}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":155}},"location":155}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"id"}}],"location":163}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":177}},"location":175}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":147}},"location":145}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":196}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":209}},"location":207}},"location":196}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":188}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":222}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":233}},"location":232}},"location":222}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":214}},"location":212}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":252}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":265}},"location":263}},"location":252}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":244}},"rexpr":{"A_Const":{"ival":{"ival":50},"location":270}},"location":268}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":289}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":302}},"location":300}},"location":289}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":281}},"rexpr":{"A_Const":{"ival":{"ival":55},"location":307}},"location":305}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":318}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"b"}}],"location":332}},"location":329}}],"location":184}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 272
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a1","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":36}},"location":36}},{"ResTarget":{"name":"a2","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"a"}}],"location":51}},"location":51}},{"ResTarget":{"name":"t1","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"tableoid"}}],"location":65}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":84},"location":82}},"location":65}},{"ResTarget":{"name":"t2","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"tableoid"}}],"location":97}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":116},"location":114}},"location":97}}],"fromClause":[{"RangeVar":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":133}},{"RangeVar":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":143}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"id"}}],"location":162}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":184}},"location":184}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"id"}}],"location":192}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":206}},"location":204}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":176}},"location":174}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":225}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":238}},"location":236}},"location":225}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":217}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":251}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":262}},"location":261}},"location":251}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":243}},"location":241}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":281}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":294}},"location":292}},"location":281}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":273}},"rexpr":{"A_Const":{"ival":{"ival":50},"location":299}},"location":297}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":318}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":331}},"location":329}},"location":318}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":310}},"rexpr":{"A_Const":{"ival":{"ival":55},"location":336}},"location":334}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":347}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"b"}}],"location":361}},"location":358}}],"location":213}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}},{"DefElem":{"defname":"verbose","defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 273
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a1","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":7}},"location":7}},{"ResTarget":{"name":"a2","val":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"a"}}],"location":22}},"location":22}},{"ResTarget":{"name":"t1","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"tableoid"}}],"location":36}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":55},"location":53}},"location":36}},{"ResTarget":{"name":"t2","val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"tableoid"}}],"location":68}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":87},"location":85}},"location":68}}],"fromClause":[{"RangeVar":{"relname":"hjtest_2","inh":true,"relpersistence":"p","location":104}},{"RangeVar":{"relname":"hjtest_1","inh":true,"relpersistence":"p","location":114}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"id"}}],"location":133}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":155}},"location":155}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"id"}}],"location":163}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":177}},"location":175}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":147}},"location":145}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":196}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":209}},"location":207}},"location":196}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":188}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":222}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":233}},"location":232}},"location":222}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":214}},"location":212}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"b"}}],"location":252}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":265}},"location":263}},"location":252}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":244}},"rexpr":{"A_Const":{"ival":{"ival":50},"location":270}},"location":268}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"c"}}],"location":289}},"rexpr":{"A_Const":{"ival":{"ival":5},"location":302}},"location":300}},"location":289}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":281}},"rexpr":{"A_Const":{"ival":{"ival":55},"location":307}},"location":305}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_1"}},{"String":{"sval":"a"}}],"location":318}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"hjtest_2"}},{"String":{"sval":"b"}}],"location":332}},"location":329}}],"location":184}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 274
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 275
+-- Verify that we behave sanely when the inner hash keys contain parameters
+-- (that is, outer or lateral references).  This situation has to defeat
+-- re-use of the inner hash table across rescans.
+begin
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 276
+set local enable_hashjoin = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashjoin","args":[{"A_Const":{"sval":{"sval":"on"},"location":28}}],"is_local":true}}}]}
+== 277
+explain (costs off)
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i8"}},{"String":{"sval":"q2"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"A_Star":{}}],"location":34}},"location":34}}],"fromClause":[{"RangeVar":{"relname":"int8_tbl","inh":true,"relpersistence":"p","alias":{"aliasname":"i8"},"location":44}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"fivethous"}}],"location":73}},"location":73}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i4"}},{"String":{"sval":"f1"}}],"location":87}},"location":87}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":98}},"rarg":{"RangeVar":{"relname":"int4_tbl","inh":true,"relpersistence":"p","alias":{"aliasname":"i4"},"location":112}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"fivethous"}}],"location":136}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i4"}},{"String":{"sval":"f1"}}],"location":151}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i8"}},{"String":{"sval":"q2"}}],"location":157}},"location":156}},"location":149}}}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":172}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":174}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 278
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i8"}},{"String":{"sval":"q2"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ss"}},{"A_Star":{}}],"location":14}},"location":14}}],"fromClause":[{"RangeVar":{"relname":"int8_tbl","inh":true,"relpersistence":"p","alias":{"aliasname":"i8"},"location":24}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"fivethous"}}],"location":53}},"location":53}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i4"}},{"String":{"sval":"f1"}}],"location":67}},"location":67}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"tenk1","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":78}},"rarg":{"RangeVar":{"relname":"int4_tbl","inh":true,"relpersistence":"p","alias":{"aliasname":"i4"},"location":92}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t1"}},{"String":{"sval":"fivethous"}}],"location":116}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i4"}},{"String":{"sval":"f1"}}],"location":131}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i8"}},{"String":{"sval":"q2"}}],"location":137}},"location":136}},"location":129}}}}],"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":152}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":154}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"ss"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 279
+rollback
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}

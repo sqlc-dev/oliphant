@@ -1,0 +1,706 @@
+== 001
+-- When there is a LIMIT clause, incremental sort is beneficial because
+-- it only has to sort some of the groups, and not the entire table.
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+limit 1
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM tenk1 ORDER BY four) t ORDER BY four, ten LIMIT 1
+== 002
+-- When work_mem is not enough to sort the entire table, incremental sort
+-- may be faster if individual groups still fit into work_mem.
+set work_mem to '2MB'
+--
+SET work_mem TO "2MB"
+== 003
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM tenk1 ORDER BY four) t ORDER BY four, ten
+== 004
+reset work_mem
+--
+RESET work_mem
+== 005
+create table t(a integer, b integer)
+--
+CREATE TABLE t (a int, b int)
+== 006
+create or replace function explain_analyze_without_memory(query text)
+returns table (out_line text) language plpgsql
+as
+$$
+declare
+  line text;
+begin
+  for line in
+    execute 'explain (analyze, costs off, summary off, timing off) ' || query
+  loop
+    out_line := regexp_replace(line, '\d+kB', 'NNkB', 'g');
+    return next;
+  end loop;
+end;
+$$
+--
+CREATE OR REPLACE FUNCTION explain_analyze_without_memory(query text) RETURNS TABLE (out_line text) LANGUAGE plpgsql AS $$
+declare
+  line text;
+begin
+  for line in
+    execute 'explain (analyze, costs off, summary off, timing off) ' || query
+  loop
+    out_line := regexp_replace(line, '\d+kB', 'NNkB', 'g');
+    return next;
+  end loop;
+end;
+$$
+== 007
+create or replace function explain_analyze_inc_sort_nodes(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  elements jsonb;
+  element jsonb;
+  matching_nodes jsonb := '[]'::jsonb;
+begin
+  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;
+  while jsonb_array_length(elements) > 0 loop
+    element := elements->0;
+    elements := elements - 0;
+    case jsonb_typeof(element)
+    when 'array' then
+      if jsonb_array_length(element) > 0 then
+        elements := elements || element;
+      end if;
+    when 'object' then
+      if element ? 'Plan' then
+        elements := elements || jsonb_build_array(element->'Plan');
+        element := element - 'Plan';
+      else
+        if element ? 'Plans' then
+          elements := elements || jsonb_build_array(element->'Plans');
+          element := element - 'Plans';
+        end if;
+        if (element->>'Node Type')::text = 'Incremental Sort' then
+          matching_nodes := matching_nodes || element;
+        end if;
+      end if;
+    end case;
+  end loop;
+  return matching_nodes;
+end;
+$$
+--
+CREATE OR REPLACE FUNCTION explain_analyze_inc_sort_nodes(query text) RETURNS jsonb LANGUAGE plpgsql AS $$
+declare
+  elements jsonb;
+  element jsonb;
+  matching_nodes jsonb := '[]'::jsonb;
+begin
+  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;
+  while jsonb_array_length(elements) > 0 loop
+    element := elements->0;
+    elements := elements - 0;
+    case jsonb_typeof(element)
+    when 'array' then
+      if jsonb_array_length(element) > 0 then
+        elements := elements || element;
+      end if;
+    when 'object' then
+      if element ? 'Plan' then
+        elements := elements || jsonb_build_array(element->'Plan');
+        element := element - 'Plan';
+      else
+        if element ? 'Plans' then
+          elements := elements || jsonb_build_array(element->'Plans');
+          element := element - 'Plans';
+        end if;
+        if (element->>'Node Type')::text = 'Incremental Sort' then
+          matching_nodes := matching_nodes || element;
+        end if;
+      end if;
+    end case;
+  end loop;
+  return matching_nodes;
+end;
+$$
+== 008
+create or replace function explain_analyze_inc_sort_nodes_without_memory(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  nodes jsonb := '[]'::jsonb;
+  node jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        node := jsonb_set(node, array[group_key, space_key, 'Average Sort Space Used'], '"NN"', false);
+        node := jsonb_set(node, array[group_key, space_key, 'Peak Sort Space Used'], '"NN"', false);
+      end loop;
+    end loop;
+    nodes := nodes || node;
+  end loop;
+  return nodes;
+end;
+$$
+--
+CREATE OR REPLACE FUNCTION explain_analyze_inc_sort_nodes_without_memory(query text) RETURNS jsonb LANGUAGE plpgsql AS $$
+declare
+  nodes jsonb := '[]'::jsonb;
+  node jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        node := jsonb_set(node, array[group_key, space_key, 'Average Sort Space Used'], '"NN"', false);
+        node := jsonb_set(node, array[group_key, space_key, 'Peak Sort Space Used'], '"NN"', false);
+      end loop;
+    end loop;
+    nodes := nodes || node;
+  end loop;
+  return nodes;
+end;
+$$
+== 009
+create or replace function explain_analyze_inc_sort_nodes_verify_invariants(query text)
+returns bool language plpgsql
+as
+$$
+declare
+  node jsonb;
+  group_stats jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      group_stats := node->group_key;
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        if (group_stats->space_key->'Peak Sort Space Used')::bigint < (group_stats->space_key->'Peak Sort Space Used')::bigint then
+          raise exception '% has invalid max space < average space', group_key;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return true;
+end;
+$$
+--
+CREATE OR REPLACE FUNCTION explain_analyze_inc_sort_nodes_verify_invariants(query text) RETURNS bool LANGUAGE plpgsql AS $$
+declare
+  node jsonb;
+  group_stats jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      group_stats := node->group_key;
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        if (group_stats->space_key->'Peak Sort Space Used')::bigint < (group_stats->space_key->'Peak Sort Space Used')::bigint then
+          raise exception '% has invalid max space < average space', group_key;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return true;
+end;
+$$
+== 010
+-- A single large group tested around each mode transition point.
+insert into t(a, b) select i/100 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+INSERT INTO t (a, b) SELECT (i / 100) + 1, i + 1 FROM generate_series(0, 999) n(i)
+== 011
+analyze t
+--
+ANALYZE t
+== 012
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 013
+select * from (select * from t order by a) s order by a, b limit 31
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 014
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 015
+select * from (select * from t order by a) s order by a, b limit 32
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 016
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 017
+select * from (select * from t order by a) s order by a, b limit 33
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 018
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 019
+select * from (select * from t order by a) s order by a, b limit 65
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 020
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 021
+select * from (select * from t order by a) s order by a, b limit 66
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 022
+delete from t
+--
+DELETE FROM t
+== 023
+-- An initial large group followed by a small group.
+insert into t(a, b) select i/50 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+INSERT INTO t (a, b) SELECT (i / 50) + 1, i + 1 FROM generate_series(0, 999) n(i)
+== 024
+analyze t
+--
+ANALYZE t
+== 025
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 55
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 55
+== 026
+select * from (select * from t order by a) s order by a, b limit 55
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 55
+== 027
+-- Test EXPLAIN ANALYZE with only a fullsort group.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 55')
+--
+SELECT explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 55')
+== 028
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 55'))
+--
+SELECT jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 55'))
+== 029
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 55')
+--
+SELECT explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 55')
+== 030
+delete from t
+--
+DELETE FROM t
+== 031
+-- An initial small group followed by a large group.
+insert into t(a, b) select (case when i < 5 then i else 9 end), i from generate_series(1, 1000) n(i)
+--
+INSERT INTO t (a, b) SELECT CASE WHEN i < 5 THEN i ELSE 9 END, i FROM generate_series(1, 1000) n(i)
+== 032
+analyze t
+--
+ANALYZE t
+== 033
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 70
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 70
+== 034
+select * from (select * from t order by a) s order by a, b limit 70
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 70
+== 035
+-- Checks case where we hit a group boundary at the last tuple of a batch.
+-- Because the full sort state is bounded, we scan 64 tuples (the mode
+-- transition point) but only retain 5. Thus when we transition modes, all
+-- tuples in the full sort state have different prefix keys.
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 5
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 5
+== 036
+select * from (select * from t order by a) s order by a, b limit 5
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 5
+== 037
+-- Test rescan.
+begin
+--
+BEGIN
+== 038
+-- We force the planner to choose a plan with incremental sort on the right side
+-- of a nested loop join node. That way we trigger the rescan code path.
+set local enable_hashjoin = off
+--
+SET LOCAL enable_hashjoin TO OFF
+== 039
+set local enable_mergejoin = off
+--
+SET LOCAL enable_mergejoin TO OFF
+== 040
+set local enable_material = off
+--
+SET LOCAL enable_material TO OFF
+== 041
+set local enable_sort = off
+--
+SET LOCAL enable_sort TO OFF
+== 042
+explain (costs off) select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+EXPLAIN (COSTS OFF) SELECT * FROM t LEFT JOIN (SELECT * FROM (SELECT * FROM t ORDER BY a) v ORDER BY a, b) s ON s.a = t.a WHERE t.a IN (1, 2)
+== 043
+select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+SELECT * FROM t LEFT JOIN (SELECT * FROM (SELECT * FROM t ORDER BY a) v ORDER BY a, b) s ON s.a = t.a WHERE t.a IN (1, 2)
+== 044
+rollback
+--
+ROLLBACK
+== 045
+-- Test EXPLAIN ANALYZE with both fullsort and presorted groups.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 70')
+--
+SELECT explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 70')
+== 046
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 70'))
+--
+SELECT jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 70'))
+== 047
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 70')
+--
+SELECT explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 70')
+== 048
+delete from t
+--
+DELETE FROM t
+== 049
+-- Small groups of 10 tuples each tested around each mode transition point.
+insert into t(a, b) select i / 10, i from generate_series(1, 1000) n(i)
+--
+INSERT INTO t (a, b) SELECT i / 10, i FROM generate_series(1, 1000) n(i)
+== 050
+analyze t
+--
+ANALYZE t
+== 051
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 052
+select * from (select * from t order by a) s order by a, b limit 31
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 053
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 054
+select * from (select * from t order by a) s order by a, b limit 32
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 055
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 056
+select * from (select * from t order by a) s order by a, b limit 33
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 057
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 058
+select * from (select * from t order by a) s order by a, b limit 65
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 059
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 060
+select * from (select * from t order by a) s order by a, b limit 66
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 061
+delete from t
+--
+DELETE FROM t
+== 062
+-- Small groups of only 1 tuple each tested around each mode transition point.
+insert into t(a, b) select i, i from generate_series(1, 1000) n(i)
+--
+INSERT INTO t (a, b) SELECT i, i FROM generate_series(1, 1000) n(i)
+== 063
+analyze t
+--
+ANALYZE t
+== 064
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 065
+select * from (select * from t order by a) s order by a, b limit 31
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 31
+== 066
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 067
+select * from (select * from t order by a) s order by a, b limit 32
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 32
+== 068
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 069
+select * from (select * from t order by a) s order by a, b limit 33
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 33
+== 070
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 071
+select * from (select * from t order by a) s order by a, b limit 65
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 65
+== 072
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 073
+select * from (select * from t order by a) s order by a, b limit 66
+--
+SELECT * FROM (SELECT * FROM t ORDER BY a) s ORDER BY a, b LIMIT 66
+== 074
+delete from t
+--
+DELETE FROM t
+== 075
+drop table t
+--
+DROP TABLE t
+== 076
+-- Incremental sort vs. parallel queries
+set min_parallel_table_scan_size = '1kB'
+--
+SET min_parallel_table_scan_size TO "1kB"
+== 077
+set min_parallel_index_scan_size = '1kB'
+--
+SET min_parallel_index_scan_size TO "1kB"
+== 078
+set parallel_setup_cost = 0
+--
+SET parallel_setup_cost TO 0
+== 079
+set parallel_tuple_cost = 0
+--
+SET parallel_tuple_cost TO 0
+== 080
+set max_parallel_workers_per_gather = 2
+--
+SET max_parallel_workers_per_gather TO 2
+== 081
+create table t (a int, b int, c int)
+--
+CREATE TABLE t (a int, b int, c int)
+== 082
+insert into t select mod(i,10),mod(i,10),i from generate_series(1,10000) s(i)
+--
+INSERT INTO t SELECT mod(i, 10), mod(i, 10), i FROM generate_series(1, 10000) s(i)
+== 083
+create index on t (a)
+--
+CREATE INDEX ON t USING btree (a)
+== 084
+analyze t
+--
+ANALYZE t
+== 085
+set enable_incremental_sort = off
+--
+SET enable_incremental_sort TO OFF
+== 086
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+EXPLAIN (COSTS OFF) SELECT a, b, sum(c) FROM t GROUP BY 1, 2 ORDER BY 1, 2, 3 LIMIT 1
+== 087
+set enable_incremental_sort = on
+--
+SET enable_incremental_sort TO ON
+== 088
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+EXPLAIN (COSTS OFF) SELECT a, b, sum(c) FROM t GROUP BY 1, 2 ORDER BY 1, 2, 3 LIMIT 1
+== 089
+-- Incremental sort vs. set operations with varno 0
+set enable_hashagg to off
+--
+SET enable_hashagg TO OFF
+== 090
+explain (costs off) select * from t union select * from t order by 1,3
+--
+EXPLAIN (COSTS OFF) SELECT * FROM t UNION SELECT * FROM t ORDER BY 1, 3
+== 091
+-- Full sort, not just incremental sort can be pushed below a gather merge path
+-- by generate_useful_gather_paths.
+explain (costs off) select distinct a,b from t
+--
+EXPLAIN (COSTS OFF) SELECT DISTINCT a, b FROM t
+== 092
+drop table t
+--
+DROP TABLE t
+== 093
+-- Sort pushdown can't go below where expressions are part of the rel target.
+-- In particular this is interesting for volatile expressions which have to
+-- go above joins since otherwise we'll incorrectly use expression evaluations
+-- across multiple rows.
+set enable_hashagg=off
+--
+SET enable_hashagg TO OFF
+== 094
+set enable_seqscan=off
+--
+SET enable_seqscan TO OFF
+== 095
+set enable_incremental_sort = off
+--
+SET enable_incremental_sort TO OFF
+== 096
+set parallel_tuple_cost=0
+--
+SET parallel_tuple_cost TO 0
+== 097
+set parallel_setup_cost=0
+--
+SET parallel_setup_cost TO 0
+== 098
+set min_parallel_table_scan_size = 0
+--
+SET min_parallel_table_scan_size TO 0
+== 099
+set min_parallel_index_scan_size = 0
+--
+SET min_parallel_index_scan_size TO 0
+== 100
+-- Parallel sort below join.
+explain (costs off) select distinct sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+EXPLAIN (COSTS OFF) SELECT DISTINCT sub.unique1, stringu1 FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub
+== 101
+explain (costs off) select sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+EXPLAIN (COSTS OFF) SELECT sub.unique1, stringu1 FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub ORDER BY 1, 2
+== 102
+-- Parallel sort but with expression that can be safely generated at the base rel.
+explain (costs off) select distinct sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+EXPLAIN (COSTS OFF) SELECT DISTINCT sub.unique1, md5(stringu1) FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub
+== 103
+explain (costs off) select sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+EXPLAIN (COSTS OFF) SELECT sub.unique1, md5(stringu1) FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub ORDER BY 1, 2
+== 104
+-- Parallel sort with an aggregate that can be safely generated in parallel,
+-- but we can't sort by partial aggregate values.
+explain (costs off) select count(*)
+from tenk1 t1
+join tenk1 t2 on t1.unique1 = t2.unique2
+join tenk1 t3 on t2.unique1 = t3.unique1
+order by count(*)
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.unique1 = t2.unique2 JOIN tenk1 t3 ON t2.unique1 = t3.unique1 ORDER BY count(*)
+== 105
+-- Parallel sort but with expression (correlated subquery) that
+-- is prohibited in parallel plans.
+explain (costs off) select distinct
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+--
+EXPLAIN (COSTS OFF) SELECT DISTINCT unique1, (SELECT t.unique1 FROM tenk1 WHERE tenk1.unique1 = t.unique1) FROM tenk1 t, generate_series(1, 1000)
+== 106
+explain (costs off) select
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+order by 1, 2
+--
+EXPLAIN (COSTS OFF) SELECT unique1, (SELECT t.unique1 FROM tenk1 WHERE tenk1.unique1 = t.unique1) FROM tenk1 t, generate_series(1, 1000) ORDER BY 1, 2
+== 107
+-- Parallel sort but with expression not available until the upper rel.
+explain (costs off) select distinct sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+EXPLAIN (COSTS OFF) SELECT DISTINCT sub.unique1, stringu1 || random()::text FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub
+== 108
+explain (costs off) select sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+EXPLAIN (COSTS OFF) SELECT sub.unique1, stringu1 || random()::text FROM tenk1, LATERAL (SELECT tenk1.unique1 FROM generate_series(1, 1000)) sub ORDER BY 1, 2
+== 109
+reset enable_hashagg
+--
+RESET enable_hashagg
+== 110
+reset enable_seqscan
+--
+RESET enable_seqscan
+== 111
+reset enable_incremental_sort
+--
+RESET enable_incremental_sort
+== 112
+reset parallel_tuple_cost
+--
+RESET parallel_tuple_cost
+== 113
+reset parallel_setup_cost
+--
+RESET parallel_setup_cost
+== 114
+reset min_parallel_table_scan_size
+--
+RESET min_parallel_table_scan_size
+== 115
+reset min_parallel_index_scan_size
+--
+RESET min_parallel_index_scan_size
+== 116
+-- Ensure incremental sorts work for amcanorderbyop type indexes
+create table point_table (a point, b int)
+--
+CREATE TABLE point_table (a point, b int)
+== 117
+create index point_table_a_idx on point_table using gist(a)
+--
+CREATE INDEX point_table_a_idx ON point_table USING gist (a)
+== 118
+-- Ensure we get an incremental sort plan for both of the following queries
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b limit 1
+--
+EXPLAIN (COSTS OFF) SELECT a, b, a <-> point(5, 5) AS dist FROM point_table ORDER BY dist, b LIMIT 1
+== 119
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b desc limit 1
+--
+EXPLAIN (COSTS OFF) SELECT a, b, a <-> point(5, 5) AS dist FROM point_table ORDER BY dist, b DESC LIMIT 1

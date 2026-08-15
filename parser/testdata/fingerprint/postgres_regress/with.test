@@ -1,0 +1,2364 @@
+== 001
+|--
+-- Tests for common table expressions (WITH query, ... SELECT ...)
+|--
+
+-- Basic WITH
+WITH q1(x,y) AS (SELECT 1,2)
+SELECT * FROM q1, q1 AS q2
+--
+6f8d472fbca14330
+== 002
+-- Multiple uses are evaluated only once
+SELECT count(*) FROM (
+  WITH q1(x) AS (SELECT random() FROM generate_series(1, 5))
+    SELECT * FROM q1
+  UNION
+    SELECT * FROM q1
+) ss
+--
+7b7cabbf683b66af
+== 003
+-- WITH RECURSIVE
+
+-- sum of 1..100
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 100
+)
+SELECT sum(n) FROM t
+--
+eaa7a6d14bceaec1
+== 004
+WITH RECURSIVE t(n) AS (
+    SELECT (VALUES(1))
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 5
+)
+SELECT * FROM t
+--
+4c3a4977b2ca3ce9
+== 005
+-- UNION DISTINCT requires hashable type
+WITH RECURSIVE t(n) AS (
+    VALUES ('01'::varbit)
+UNION
+    SELECT n || '10'::varbit FROM t WHERE n < '100'::varbit
+)
+SELECT n FROM t
+--
+9a07870c3b2867b7
+== 006
+-- recursive view
+CREATE RECURSIVE VIEW nums (n) AS
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM nums WHERE n < 5
+--
+a2366435ac93c8bf
+== 007
+SELECT * FROM nums
+--
+48e7b3508f282951
+== 008
+CREATE OR REPLACE RECURSIVE VIEW nums (n) AS
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM nums WHERE n < 6
+--
+7b690251c94dac1f
+== 009
+SELECT * FROM nums
+--
+48e7b3508f282951
+== 010
+-- This is an infinite loop with UNION ALL, but not with UNION
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+UNION
+    SELECT 10-n FROM t)
+SELECT * FROM t
+--
+178561e61ada5b1d
+== 011
+-- This'd be an infinite loop, but outside query reads only as much as needed
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t)
+SELECT * FROM t LIMIT 10
+--
+b52137c7fa4cc84e
+== 012
+-- UNION case should have same property
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+UNION
+    SELECT n+1 FROM t)
+SELECT * FROM t LIMIT 10
+--
+e423079824dea4e2
+== 013
+-- Test behavior with an unknown-type literal in the WITH
+WITH q AS (SELECT 'foo' AS x)
+SELECT x, pg_typeof(x) FROM q
+--
+573218b4b24b212c
+== 014
+WITH RECURSIVE t(n) AS (
+    SELECT 'foo'
+UNION ALL
+    SELECT n || ' bar' FROM t WHERE length(n) < 20
+)
+SELECT n, pg_typeof(n) FROM t
+--
+5b299cf58705bccd
+== 015
+-- In a perfect world, this would work and resolve the literal as int ...
+-- but for now, we have to be content with resolving to text too soon.
+WITH RECURSIVE t(n) AS (
+    SELECT '7'
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 10
+)
+SELECT n, pg_typeof(n) FROM t
+--
+bf49c8373f5b6529
+== 016
+-- Deeply nested WITH caused a list-munging problem in v13
+-- Detection of cross-references and self-references
+WITH RECURSIVE w1(c1) AS
+ (WITH w2(c2) AS
+  (WITH w3(c3) AS
+   (WITH w4(c4) AS
+    (WITH w5(c5) AS
+     (WITH RECURSIVE w6(c6) AS
+      (WITH w6(c6) AS
+       (WITH w8(c8) AS
+        (SELECT 1)
+        SELECT * FROM w8)
+       SELECT * FROM w6)
+      SELECT * FROM w6)
+     SELECT * FROM w5)
+    SELECT * FROM w4)
+   SELECT * FROM w3)
+  SELECT * FROM w2)
+SELECT * FROM w1
+--
+ed65d5d472d574aa
+== 017
+-- Detection of invalid self-references
+WITH RECURSIVE outermost(x) AS (
+ SELECT 1
+ UNION (WITH innermost1 AS (
+  SELECT 2
+  UNION (WITH innermost2 AS (
+   SELECT 3
+   UNION (WITH innermost3 AS (
+    SELECT 4
+    UNION (WITH innermost4 AS (
+     SELECT 5
+     UNION (WITH innermost5 AS (
+      SELECT 6
+      UNION (WITH innermost6 AS
+       (SELECT 7)
+       SELECT * FROM innermost6))
+      SELECT * FROM innermost5))
+     SELECT * FROM innermost4))
+    SELECT * FROM innermost3))
+   SELECT * FROM innermost2))
+  SELECT * FROM outermost
+  UNION SELECT * FROM innermost1)
+ )
+ SELECT * FROM outermost ORDER BY 1
+--
+174a7a3606584d50
+== 018
+|--
+-- Some examples with a tree
+|--
+-- department structure represented here is as follows:
+|--
+-- ROOT-+->A-+->B-+->C
+--      |         |
+--      |         +->D-+->F
+--      +->E-+->G
+
+CREATE TEMP TABLE department (
+	id INTEGER PRIMARY KEY,  -- department ID
+	parent_department INTEGER REFERENCES department, -- upper department ID
+	name TEXT -- department name
+)
+--
+94d420980b606f6d
+== 019
+INSERT INTO department VALUES (0, NULL, 'ROOT')
+--
+224f1343f096a7b8
+== 020
+INSERT INTO department VALUES (1, 0, 'A')
+--
+224f1343f096a7b8
+== 021
+INSERT INTO department VALUES (2, 1, 'B')
+--
+224f1343f096a7b8
+== 022
+INSERT INTO department VALUES (3, 2, 'C')
+--
+224f1343f096a7b8
+== 023
+INSERT INTO department VALUES (4, 2, 'D')
+--
+224f1343f096a7b8
+== 024
+INSERT INTO department VALUES (5, 0, 'E')
+--
+224f1343f096a7b8
+== 025
+INSERT INTO department VALUES (6, 4, 'F')
+--
+224f1343f096a7b8
+== 026
+INSERT INTO department VALUES (7, 5, 'G')
+--
+224f1343f096a7b8
+== 027
+-- extract all departments under 'A'. Result should be A, B, C, D and F
+WITH RECURSIVE subdepartment AS
+(
+	-- non recursive term
+	SELECT name as root_name, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.root_name, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+71302eef49e74872
+== 028
+-- extract all departments under 'A' with "level" number
+WITH RECURSIVE subdepartment(level, id, parent_department, name) AS
+(
+	-- non recursive term
+	SELECT 1, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.level + 1, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+0c5a0ff3c27efb14
+== 029
+-- extract all departments under 'A' with "level" number.
+-- Only shows level 2 or more
+WITH RECURSIVE subdepartment(level, id, parent_department, name) AS
+(
+	-- non recursive term
+	SELECT 1, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.level + 1, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment WHERE level >= 2 ORDER BY name
+--
+a48f8605a342afbd
+== 030
+-- "RECURSIVE" is ignored if the query has no self-reference
+WITH RECURSIVE subdepartment AS
+(
+	-- note lack of recursive UNION structure
+	SELECT * FROM department WHERE name = 'A'
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+485c7688f06790cf
+== 031
+-- inside subqueries
+SELECT count(*) FROM (
+    WITH RECURSIVE t(n) AS (
+        SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 500
+    )
+    SELECT * FROM t) AS t WHERE n < (
+        SELECT count(*) FROM (
+            WITH RECURSIVE t(n) AS (
+                   SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 100
+                )
+            SELECT * FROM t WHERE n < 50000
+         ) AS t WHERE n < 100)
+--
+68b231a898769b20
+== 032
+-- use same CTE twice at different subquery levels
+WITH q1(x,y) AS (
+    SELECT hundred, sum(ten) FROM tenk1 GROUP BY hundred
+  )
+SELECT count(*) FROM q1 WHERE y > (SELECT sum(y)/100 FROM q1 qsub)
+--
+a4bbce013b805067
+== 033
+-- via a VIEW
+CREATE TEMPORARY VIEW vsubdepartment AS
+	WITH RECURSIVE subdepartment AS
+	(
+		 -- non recursive term
+		SELECT * FROM department WHERE name = 'A'
+		UNION ALL
+		-- recursive term
+		SELECT d.* FROM department AS d, subdepartment AS sd
+			WHERE d.parent_department = sd.id
+	)
+	SELECT * FROM subdepartment
+--
+950557a12788b0fb
+== 034
+SELECT * FROM vsubdepartment ORDER BY name
+--
+e712cfed095b24ec
+== 035
+-- Check reverse listing
+SELECT pg_get_viewdef('vsubdepartment'::regclass)
+--
+ab8a8d46fb75759f
+== 036
+SELECT pg_get_viewdef('vsubdepartment'::regclass, true)
+--
+ab8a8d46fb75759f
+== 037
+-- Another reverse-listing example
+CREATE VIEW sums_1_100 AS
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 100
+)
+SELECT sum(n) FROM t
+--
+3f6bee9a094c355f
+== 038
+-- corner case in which sub-WITH gets initialized first
+with recursive q as (
+      select * from department
+    union all
+      (with x as (select * from q)
+       select * from x)
+    )
+select * from q limit 24
+--
+7a4bfeb472d0cae7
+== 039
+with recursive q as (
+      select * from department
+    union all
+      (with recursive x as (
+           select * from department
+         union all
+           (select * from q union all select * from x)
+        )
+       select * from x)
+    )
+select * from q limit 32
+--
+d25ed9fa52c8ea51
+== 040
+-- recursive term has sub-UNION
+WITH RECURSIVE t(i,j) AS (
+	VALUES (1,2)
+	UNION ALL
+	SELECT t2.i, t.j+1 FROM
+		(SELECT 2 AS i UNION ALL SELECT 3 AS i) AS t2
+		JOIN t ON (t2.i = t.i+1))
+
+	SELECT * FROM t
+--
+45951dff5f788b56
+== 041
+|--
+-- different tree example
+|--
+CREATE TEMPORARY TABLE tree(
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER REFERENCES tree(id)
+)
+--
+bdd7fa4bfe0a78f6
+== 042
+INSERT INTO tree
+VALUES (1, NULL), (2, 1), (3,1), (4,2), (5,2), (6,2), (7,3), (8,3),
+       (9,4), (10,4), (11,7), (12,7), (13,7), (14, 9), (15,11), (16,11)
+--
+5932028151e5a932
+== 043
+|--
+-- get all paths from "second level" nodes to leaf nodes
+|--
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.*, t2.* FROM t AS t1 JOIN t AS t2 ON
+	(t1.path[1] = t2.path[1] AND
+	array_upper(t1.path,1) = 1 AND
+	array_upper(t2.path,1) > 1)
+	ORDER BY t1.id, t2.id
+--
+2a16d23b65fcb803
+== 044
+-- just count 'em
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.id, count(t2.*) FROM t AS t1 JOIN t AS t2 ON
+	(t1.path[1] = t2.path[1] AND
+	array_upper(t1.path,1) = 1 AND
+	array_upper(t2.path,1) > 1)
+	GROUP BY t1.id
+	ORDER BY t1.id
+--
+34ed83dd64ee091b
+== 045
+-- this variant tickled a whole-row-variable bug in 8.4devel
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.id, t2.path, t2 FROM t AS t1 JOIN t AS t2 ON
+(t1.id=t2.id)
+--
+d1c8a6f9fd83f923
+== 046
+CREATE TEMP TABLE duplicates (a INT NOT NULL)
+--
+e4bcd7ae57376a8b
+== 047
+INSERT INTO duplicates VALUES(1), (1)
+--
+ec29cd600b97ae80
+== 048
+-- Try out a recursive UNION case where the non-recursive part's table slot
+-- uses TTSOpsBufferHeapTuple and contains duplicate rows.
+WITH RECURSIVE cte (a) as (
+	SELECT a FROM duplicates
+	UNION
+	SELECT a FROM cte
+)
+SELECT a FROM cte
+--
+27aea4ccec982b07
+== 049
+-- test that column statistics from a materialized CTE are available
+-- to upper planner (otherwise, we'd get a stupider plan)
+explain (costs off)
+with x as materialized (select unique1 from tenk1 b)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+4ab25bc7cdbd8bcd
+== 050
+explain (costs off)
+with x as materialized (insert into tenk1 default values returning unique1)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+43d7b23f515c74a5
+== 051
+-- test that pathkeys from a materialized CTE are propagated up to the
+-- outer query
+explain (costs off)
+with x as materialized (select unique1 from tenk1 b order by unique1)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+e90e034f546a1f00
+== 052
+-- SEARCH clause
+
+create temp table graph0( f int, t int, label text )
+--
+af3132866fc1989d
+== 053
+insert into graph0 values
+	(1, 2, 'arc 1 -> 2'),
+	(1, 3, 'arc 1 -> 3'),
+	(2, 3, 'arc 2 -> 3'),
+	(1, 4, 'arc 1 -> 4'),
+	(4, 5, 'arc 4 -> 5')
+--
+c4443b8b53727f64
+== 054
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+d1fbf76f69d23202
+== 055
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+67a52feb79c7b356
+== 056
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union distinct
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+3ade1dd8d8666c65
+== 057
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+95cbd51fcdffe19c
+== 058
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+8258b9fcd765e156
+== 059
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union distinct
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+9de1cdf6414b6aa7
+== 060
+-- a constant initial value causes issues for EXPLAIN
+explain (verbose, costs off)
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search depth first by x set y
+select * from test limit 5
+--
+5040c13974085509
+== 061
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search depth first by x set y
+select * from test limit 5
+--
+f57b851ea223ab21
+== 062
+explain (verbose, costs off)
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search breadth first by x set y
+select * from test limit 5
+--
+4455d5b9a129bf58
+== 063
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search breadth first by x set y
+select * from test limit 5
+--
+47f53fad15f24fa6
+== 064
+-- various syntax errors
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by foo, tar set seq
+select * from search_graph
+--
+b1082f2990bb716b
+== 065
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set label
+select * from search_graph
+--
+177c3e349087b4a1
+== 066
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t, f set seq
+select * from search_graph
+--
+56377bb957dd2ddc
+== 067
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+bbf1fa4e41d1d069
+== 068
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	(select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t)
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+de620e5a1bed034c
+== 069
+-- check that we distinguish same CTE name used at different levels
+-- (this case could be supported, perhaps, but it isn't today)
+with recursive x(col) as (
+	select 1
+	union
+	(with x as (select * from x)
+	 select * from x)
+) search depth first by col set seq
+select * from x
+--
+5c289be1c6a1fe2f
+== 070
+-- test ruleutils and view expansion
+create temp view v_search as
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select f, t, label from search_graph
+--
+9f593baa714da754
+== 071
+select pg_get_viewdef('v_search')
+--
+ab8a8d46fb75759f
+== 072
+select * from v_search
+--
+95c71300389e260e
+== 073
+|--
+-- test cycle detection
+|--
+create temp table graph( f int, t int, label text )
+--
+af3132866fc1989d
+== 074
+insert into graph values
+	(1, 2, 'arc 1 -> 2'),
+	(1, 3, 'arc 1 -> 3'),
+	(2, 3, 'arc 2 -> 3'),
+	(1, 4, 'arc 1 -> 4'),
+	(4, 5, 'arc 4 -> 5'),
+	(5, 1, 'arc 5 -> 1')
+--
+6589d1650809b022
+== 075
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union all
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph
+--
+229e4114ac33d16a
+== 076
+-- UNION DISTINCT exercises row type hashing support
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union distinct
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph
+--
+e7b1032ab9e35c30
+== 077
+-- ordering by the path column has same effect as SEARCH DEPTH FIRST
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union all
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph order by path
+--
+924ebe34229b8993
+== 078
+-- CYCLE clause
+
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select * from search_graph
+--
+538b5091119c1e53
+== 079
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select * from search_graph
+--
+404fcf338100446f
+== 080
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union distinct
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to 'Y' default 'N' using path
+select * from search_graph
+--
+552d05739955bf06
+== 081
+explain (verbose, costs off)
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+) cycle x set is_cycle using path
+select * from test
+--
+3ba84907f0057774
+== 082
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+) cycle x set is_cycle using path
+select * from test
+--
+efcbbb93073a4fb5
+== 083
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+    where not is_cycle  -- redundant, but legal
+) cycle x set is_cycle using path
+select * from test
+--
+aefe5eb9e970f91e
+== 084
+-- multiple CTEs
+with recursive
+graph(f, t, label) as (
+  values (1, 2, 'arc 1 -> 2'),
+         (1, 3, 'arc 1 -> 3'),
+         (2, 3, 'arc 2 -> 3'),
+         (1, 4, 'arc 1 -> 4'),
+         (4, 5, 'arc 4 -> 5'),
+         (5, 1, 'arc 5 -> 1')
+),
+search_graph(f, t, label) as (
+        select * from graph g
+        union all
+        select g.*
+        from graph g, search_graph sg
+        where g.f = sg.t
+) cycle f, t set is_cycle to true default false using path
+select f, t, label from search_graph
+--
+fd2d123a03a49676
+== 085
+-- star expansion
+with recursive a as (
+	select 1 as b
+	union all
+	select * from a
+) cycle b set c using p
+select * from a
+--
+87b90c9332a289f0
+== 086
+-- search+cycle
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+  cycle f, t set is_cycle using path
+select * from search_graph
+--
+247a35f512add80e
+== 087
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+  cycle f, t set is_cycle using path
+select * from search_graph
+--
+7077bee304d8ed8e
+== 088
+-- various syntax errors
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle foo, tar set is_cycle using path
+select * from search_graph
+--
+69982db90249a8e4
+== 089
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to true default 55 using path
+select * from search_graph
+--
+404fcf338100446f
+== 090
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to point '(1,1)' default point '(0,0)' using path
+select * from search_graph
+--
+404fcf338100446f
+== 091
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set label to true default false using path
+select * from search_graph
+--
+68f16980d2158e0a
+== 092
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to true default false using label
+select * from search_graph
+--
+8753078350f1b408
+== 093
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set foo to true default false using foo
+select * from search_graph
+--
+5dcc88b594164d1c
+== 094
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t, f set is_cycle to true default false using path
+select * from search_graph
+--
+4e15d66cd67325c3
+== 095
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set foo
+  cycle f, t set foo to true default false using path
+select * from search_graph
+--
+852ff6173eb6b770
+== 096
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set foo
+  cycle f, t set is_cycle to true default false using foo
+select * from search_graph
+--
+9456c9240350a4e4
+== 097
+-- test ruleutils and view expansion
+create temp view v_cycle1 as
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select f, t, label from search_graph
+--
+a3861ffb6a22bb0e
+== 098
+create temp view v_cycle2 as
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to 'Y' default 'N' using path
+select f, t, label from search_graph
+--
+a3861ffb6a22bb0e
+== 099
+select pg_get_viewdef('v_cycle1')
+--
+ab8a8d46fb75759f
+== 100
+select pg_get_viewdef('v_cycle2')
+--
+ab8a8d46fb75759f
+== 101
+select * from v_cycle1
+--
+ebc386bc6b9b2a9b
+== 102
+select * from v_cycle2
+--
+97707fc146e93121
+== 103
+|--
+-- test multiple WITH queries
+|--
+WITH RECURSIVE
+  y (id) AS (VALUES (1)),
+  x (id) AS (SELECT * FROM y UNION ALL SELECT id+1 FROM x WHERE id < 5)
+SELECT * FROM x
+--
+fd29e997eacb98e4
+== 104
+-- forward reference OK
+WITH RECURSIVE
+    x(id) AS (SELECT * FROM y UNION ALL SELECT id+1 FROM x WHERE id < 5),
+    y(id) AS (values (1))
+ SELECT * FROM x
+--
+9ade21c21df1ca22
+== 105
+WITH RECURSIVE
+   x(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 5),
+   y(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM y WHERE id < 10)
+ SELECT y.*, x.* FROM y LEFT JOIN x USING (id)
+--
+274a10798ca5c57e
+== 106
+WITH RECURSIVE
+   x(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 5),
+   y(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 10)
+ SELECT y.*, x.* FROM y LEFT JOIN x USING (id)
+--
+619b4dfa8e2d4f90
+== 107
+WITH RECURSIVE
+   x(id) AS
+     (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 3 ),
+   y(id) AS
+     (SELECT * FROM x UNION ALL SELECT * FROM x),
+   z(id) AS
+     (SELECT * FROM x UNION ALL SELECT id+1 FROM z WHERE id < 10)
+ SELECT * FROM z
+--
+7ab38309d68bf02c
+== 108
+WITH RECURSIVE
+   x(id) AS
+     (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 3 ),
+   y(id) AS
+     (SELECT * FROM x UNION ALL SELECT * FROM x),
+   z(id) AS
+     (SELECT * FROM y UNION ALL SELECT id+1 FROM z WHERE id < 10)
+ SELECT * FROM z
+--
+bb4d4fc7d5440786
+== 109
+|--
+-- Test WITH attached to a data-modifying statement
+|--
+
+CREATE TEMPORARY TABLE y (a INTEGER)
+--
+bf4f5b4f6f8b713d
+== 110
+INSERT INTO y SELECT generate_series(1, 10)
+--
+e0b7e72970d9c22b
+== 111
+WITH t AS (
+	SELECT a FROM y
+)
+INSERT INTO y
+SELECT a+20 FROM t RETURNING *
+--
+f4142b27ee6ae6cc
+== 112
+SELECT * FROM y
+--
+873d734006cb90d7
+== 113
+WITH t AS (
+	SELECT a FROM y
+)
+UPDATE y SET a = y.a-10 FROM t WHERE y.a > 20 AND t.a = y.a RETURNING y.a
+--
+a8da433236bda816
+== 114
+SELECT * FROM y
+--
+873d734006cb90d7
+== 115
+WITH RECURSIVE t(a) AS (
+	SELECT 11
+	UNION ALL
+	SELECT a+1 FROM t WHERE a < 50
+)
+DELETE FROM y USING t WHERE t.a = y.a RETURNING y.a
+--
+75159e453c580796
+== 116
+SELECT * FROM y
+--
+873d734006cb90d7
+== 117
+DROP TABLE y
+--
+e064a27c8755821f
+== 118
+|--
+-- error cases
+|--
+
+WITH x(n, b) AS (SELECT 1)
+SELECT * FROM x
+--
+4d55f581504646b5
+== 119
+-- INTERSECT
+WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+407b637ef1d950d9
+== 120
+WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT ALL SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+a2fb454d9fdfa76a
+== 121
+-- EXCEPT
+WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+68d3458f57ef1b05
+== 122
+WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT ALL SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+713e36d20bf634c5
+== 123
+-- no non-recursive term
+WITH RECURSIVE x(n) AS (SELECT n FROM x)
+	SELECT * FROM x
+--
+506d13627b54bd9a
+== 124
+-- recursive term in the left hand side (strictly speaking, should allow this)
+WITH RECURSIVE x(n) AS (SELECT n FROM x UNION ALL SELECT 1)
+	SELECT * FROM x
+--
+1124da568bef7ca6
+== 125
+-- allow this, because we historically have
+WITH RECURSIVE x(n) AS (
+  WITH x1 AS (SELECT 1 AS n)
+    SELECT 0
+    UNION
+    SELECT * FROM x1)
+	SELECT * FROM x
+--
+05e473174f9ee664
+== 126
+-- but this should be rejected
+WITH RECURSIVE x(n) AS (
+  WITH x1 AS (SELECT 1 FROM x)
+    SELECT 0
+    UNION
+    SELECT * FROM x1)
+	SELECT * FROM x
+--
+4abe5875d34babc5
+== 127
+-- and this too
+WITH RECURSIVE x(n) AS (
+  (WITH x1 AS (SELECT 1 FROM x) SELECT * FROM x1)
+  UNION
+  SELECT 0)
+	SELECT * FROM x
+--
+03aa77fc273c3aa6
+== 128
+-- and this
+WITH RECURSIVE x(n) AS (
+  SELECT 0 UNION SELECT 1
+  ORDER BY (SELECT n FROM x))
+	SELECT * FROM x
+--
+30f6253ded8ea0cf
+== 129
+-- and this
+WITH RECURSIVE x(n) AS (
+  WITH sub_cte AS (SELECT * FROM x)
+  DELETE FROM graph RETURNING f)
+	SELECT * FROM x
+--
+ac182668c38112bf
+== 130
+CREATE TEMPORARY TABLE y (a INTEGER)
+--
+bf4f5b4f6f8b713d
+== 131
+INSERT INTO y SELECT generate_series(1, 10)
+--
+e0b7e72970d9c22b
+== 132
+-- LEFT JOIN
+
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM y LEFT JOIN x ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+41c1479a2d47b483
+== 133
+-- RIGHT JOIN
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM x RIGHT JOIN y ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+ffa1efe51a334741
+== 134
+-- FULL JOIN
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM x FULL JOIN y ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+099b9cf7407c64ec
+== 135
+-- subquery
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x
+                          WHERE n IN (SELECT * FROM x))
+  SELECT * FROM x
+--
+2e48818cecb40860
+== 136
+-- aggregate functions
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT count(*) FROM x)
+  SELECT * FROM x
+--
+a09d01e133db9b7a
+== 137
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT sum(n) FROM x)
+  SELECT * FROM x
+--
+2156ecb3f857f404
+== 138
+-- ORDER BY
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x ORDER BY 1)
+  SELECT * FROM x
+--
+cc745f60ff9846b0
+== 139
+-- LIMIT/OFFSET
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x LIMIT 10 OFFSET 1)
+  SELECT * FROM x
+--
+4d9066860d21b5eb
+== 140
+-- FOR UPDATE
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x FOR UPDATE)
+  SELECT * FROM x
+--
+62726bb7995c69e6
+== 141
+-- target list has a recursive query name
+WITH RECURSIVE x(id) AS (values (1)
+    UNION ALL
+    SELECT (SELECT * FROM x) FROM x WHERE id < 5
+) SELECT * FROM x
+--
+72d8cb9821a0fe98
+== 142
+-- mutual recursive query (not implemented)
+WITH RECURSIVE
+  x (id) AS (SELECT 1 UNION ALL SELECT id+1 FROM y WHERE id < 5),
+  y (id) AS (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 5)
+SELECT * FROM x
+--
+c6da1c9536f2196d
+== 143
+-- non-linear recursion is not allowed
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          UNION ALL
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+ceef9e609226a66b
+== 144
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+	   SELECT * FROM
+       (SELECT i+1 FROM foo WHERE i < 10
+          UNION ALL
+       SELECT i+1 FROM foo WHERE i < 5) AS t
+) SELECT * FROM foo
+--
+e06d3791dc1b0432
+== 145
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          EXCEPT
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+6089a74ee76b68fb
+== 146
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          INTERSECT
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+972cd9c4427c1d1c
+== 147
+-- Wrong type induced from non-recursive term
+WITH RECURSIVE foo(i) AS
+   (SELECT i FROM (VALUES(1),(2)) t(i)
+   UNION ALL
+   SELECT (i+1)::numeric(10,0) FROM foo WHERE i < 10)
+SELECT * FROM foo
+--
+ddf414fef2d02151
+== 148
+-- rejects different typmod, too (should we allow this?)
+WITH RECURSIVE foo(i) AS
+   (SELECT i::numeric(3,0) FROM (VALUES(1),(2)) t(i)
+   UNION ALL
+   SELECT (i+1)::numeric(10,0) FROM foo WHERE i < 10)
+SELECT * FROM foo
+--
+c198eaf63f960d0c
+== 149
+-- disallow OLD/NEW reference in CTE
+CREATE TEMPORARY TABLE x (n integer)
+--
+b1d924864452c3a9
+== 150
+CREATE RULE r2 AS ON UPDATE TO x DO INSTEAD
+    WITH t AS (SELECT OLD.*) UPDATE y SET a = t.n FROM t
+--
+cb60c7c0555cb4ca
+== 151
+|--
+-- test for bug #4902
+|--
+with cte(foo) as ( values(42) ) values((select foo from cte))
+--
+42b75a52f4e36c4a
+== 152
+with cte(foo) as ( select 42 ) select * from ((select foo from cte)) q
+--
+65029145f82365a0
+== 153
+-- test CTE referencing an outer-level variable (to see that changed-parameter
+-- signaling still works properly after fixing this bug)
+select ( with cte(foo) as ( values(f1) )
+         select (select foo from cte) )
+from int4_tbl
+--
+c2455d6bd0e969a8
+== 154
+select ( with cte(foo) as ( values(f1) )
+          values((select foo from cte)) )
+from int4_tbl
+--
+66678ac42ff1629a
+== 155
+|--
+-- test for bug #19055: interaction of WITH with aggregates
+|--
+-- The reference to cte1 must determine the aggregate's level,
+-- even though it contains no Vars referencing cte1
+explain (verbose, costs off)
+select f1, (with cte1(x,y) as (select 1,2)
+            select count((select i4.f1 from cte1))) as ss
+from int4_tbl i4
+--
+71bd95b94fbfa31f
+== 156
+select f1, (with cte1(x,y) as (select 1,2)
+            select count((select i4.f1 from cte1))) as ss
+from int4_tbl i4
+--
+93a4f7074f709de3
+== 157
+|--
+-- test for nested-recursive-WITH bug
+|--
+WITH RECURSIVE t(j) AS (
+    WITH RECURSIVE s(i) AS (
+        VALUES (1)
+        UNION ALL
+        SELECT i+1 FROM s WHERE i < 10
+    )
+    SELECT i FROM s
+    UNION ALL
+    SELECT j+1 FROM t WHERE j < 10
+)
+SELECT * FROM t
+--
+5378d059a4fae352
+== 158
+|--
+-- test WITH attached to intermediate-level set operation
+|--
+
+WITH outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM innermost
+         UNION SELECT 3)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+c0684d58793417d1
+== 159
+WITH outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM outermost  -- fail
+         UNION SELECT * FROM innermost)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+cce9209ee7ea9f3b
+== 160
+WITH RECURSIVE outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM outermost
+         UNION SELECT * FROM innermost)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+6ac44d61acd47f45
+== 161
+WITH RECURSIVE outermost(x) AS (
+  WITH innermost as (SELECT 2 FROM outermost) -- fail
+    SELECT * FROM innermost
+    UNION SELECT * from outermost
+)
+SELECT * FROM outermost ORDER BY 1
+--
+4c179b2ceff48f03
+== 162
+|--
+-- This test will fail with the old implementation of PARAM_EXEC parameter
+-- assignment, because the "q1" Var passed down to A's targetlist subselect
+-- looks exactly like the "A.id" Var passed down to C's subselect, causing
+-- the old code to give them the same runtime PARAM_EXEC slot.  But the
+-- lifespans of the two parameters overlap, thanks to B also reading A.
+|--
+
+with
+A as ( select q2 as id, (select q1) as x from int8_tbl ),
+B as ( select id, row_number() over (partition by id) as r from A ),
+C as ( select A.id, array(select B.id from B where B.id = A.id) from A )
+select * from C
+--
+eaed0e2b6c57f7d3
+== 163
+|--
+-- Test CTEs read in non-initialization orders
+|--
+
+WITH RECURSIVE
+  tab(id_key,link) AS (VALUES (1,17), (2,17), (3,17), (4,17), (6,17), (5,17)),
+  iter (id_key, row_type, link) AS (
+      SELECT 0, 'base', 17
+    UNION ALL (
+      WITH remaining(id_key, row_type, link, min) AS (
+        SELECT tab.id_key, 'true'::text, iter.link, MIN(tab.id_key) OVER ()
+        FROM tab INNER JOIN iter USING (link)
+        WHERE tab.id_key > iter.id_key
+      ),
+      first_remaining AS (
+        SELECT id_key, row_type, link
+        FROM remaining
+        WHERE id_key=min
+      ),
+      effect AS (
+        SELECT tab.id_key, 'new'::text, tab.link
+        FROM first_remaining e INNER JOIN tab ON e.id_key=tab.id_key
+        WHERE e.row_type = 'false'
+      )
+      SELECT * FROM first_remaining
+      UNION ALL SELECT * FROM effect
+    )
+  )
+SELECT * FROM iter
+--
+c577b2d5919c037c
+== 164
+WITH RECURSIVE
+  tab(id_key,link) AS (VALUES (1,17), (2,17), (3,17), (4,17), (6,17), (5,17)),
+  iter (id_key, row_type, link) AS (
+      SELECT 0, 'base', 17
+    UNION (
+      WITH remaining(id_key, row_type, link, min) AS (
+        SELECT tab.id_key, 'true'::text, iter.link, MIN(tab.id_key) OVER ()
+        FROM tab INNER JOIN iter USING (link)
+        WHERE tab.id_key > iter.id_key
+      ),
+      first_remaining AS (
+        SELECT id_key, row_type, link
+        FROM remaining
+        WHERE id_key=min
+      ),
+      effect AS (
+        SELECT tab.id_key, 'new'::text, tab.link
+        FROM first_remaining e INNER JOIN tab ON e.id_key=tab.id_key
+        WHERE e.row_type = 'false'
+      )
+      SELECT * FROM first_remaining
+      UNION ALL SELECT * FROM effect
+    )
+  )
+SELECT * FROM iter
+--
+af24d91701c32252
+== 165
+|--
+-- Data-modifying statements in WITH
+|--
+
+-- INSERT ... RETURNING
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (11),
+        (12),
+        (13),
+        (14),
+        (15),
+        (16),
+        (17),
+        (18),
+        (19),
+        (20)
+    RETURNING *
+)
+SELECT * FROM t
+--
+040eb179905adb72
+== 166
+SELECT * FROM y
+--
+873d734006cb90d7
+== 167
+-- UPDATE ... RETURNING
+WITH t AS (
+    UPDATE y
+    SET a=a+1
+    RETURNING *
+)
+SELECT * FROM t
+--
+cc250806bea399d5
+== 168
+SELECT * FROM y
+--
+873d734006cb90d7
+== 169
+-- DELETE ... RETURNING
+WITH t AS (
+    DELETE FROM y
+    WHERE a <= 10
+    RETURNING *
+)
+SELECT * FROM t
+--
+358601905739a579
+== 170
+SELECT * FROM y
+--
+873d734006cb90d7
+== 171
+-- forward reference
+WITH RECURSIVE t AS (
+	INSERT INTO y
+		SELECT a+5 FROM t2 WHERE a > 5
+	RETURNING *
+), t2 AS (
+	UPDATE y SET a=a-11 RETURNING *
+)
+SELECT * FROM t
+UNION ALL
+SELECT * FROM t2
+--
+e26b8e4b442970f1
+== 172
+SELECT * FROM y
+--
+873d734006cb90d7
+== 173
+-- unconditional DO INSTEAD rule
+CREATE RULE y_rule AS ON DELETE TO y DO INSTEAD
+  INSERT INTO y VALUES(42) RETURNING *
+--
+64dcec625574c7c5
+== 174
+WITH t AS (
+	DELETE FROM y RETURNING *
+)
+SELECT * FROM t
+--
+fa15d58cc2083702
+== 175
+SELECT * FROM y
+--
+873d734006cb90d7
+== 176
+DROP RULE y_rule ON y
+--
+f9f51beb7174d459
+== 177
+-- check merging of outer CTE with CTE in a rule action
+CREATE TEMP TABLE bug6051 AS
+  select i from generate_series(1,3) as t(i)
+--
+e39401c7e9195a02
+== 178
+SELECT * FROM bug6051
+--
+995bdc3e30216b8f
+== 179
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+fed4e6c850a3512e
+== 180
+SELECT * FROM bug6051
+--
+995bdc3e30216b8f
+== 181
+CREATE TEMP TABLE bug6051_2 (i int)
+--
+731ae6d462518d34
+== 182
+CREATE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD
+ INSERT INTO bug6051_2
+ VALUES(NEW.i)
+--
+34cd354fd434117e
+== 183
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+fed4e6c850a3512e
+== 184
+SELECT * FROM bug6051
+--
+995bdc3e30216b8f
+== 185
+SELECT * FROM bug6051_2
+--
+f4c0857eee144158
+== 186
+-- check INSERT ... SELECT rule actions are disallowed on commands
+-- that have modifyingCTEs
+CREATE OR REPLACE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD
+ INSERT INTO bug6051_2
+ SELECT NEW.i
+--
+8c24bc11cdedf49a
+== 187
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+fed4e6c850a3512e
+== 188
+-- silly example to verify that hasModifyingCTE flag is propagated
+CREATE TEMP TABLE bug6051_3 AS
+  SELECT a FROM generate_series(11,13) AS a
+--
+e7e7c07f59cef01e
+== 189
+CREATE RULE bug6051_3_ins AS ON INSERT TO bug6051_3 DO INSTEAD
+  SELECT i FROM bug6051_2
+--
+a7d898f6a5773d9b
+== 190
+BEGIN
+--
+b16b431979fc3e05
+== 191
+SET LOCAL debug_parallel_query = on
+--
+e7a010ed09b7d457
+== 192
+WITH t1 AS ( DELETE FROM bug6051_3 RETURNING * )
+  INSERT INTO bug6051_3 SELECT * FROM t1
+--
+0cae03e50d8b5352
+== 193
+COMMIT
+--
+7bbcde9cfab6c79c
+== 194
+SELECT * FROM bug6051_3
+--
+39c061fbfa7d4a3b
+== 195
+-- check case where CTE reference is removed due to optimization
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT q1 FROM
+(
+  WITH t_cte AS (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+827daec7a8972671
+== 196
+SELECT q1 FROM
+(
+  WITH t_cte AS (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+c90f7b4357668931
+== 197
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT q1 FROM
+(
+  WITH t_cte AS MATERIALIZED (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+254356b7b9afc69b
+== 198
+SELECT q1 FROM
+(
+  WITH t_cte AS MATERIALIZED (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+78134ac2ac1765d8
+== 199
+-- a truly recursive CTE in the same list
+WITH RECURSIVE t(a) AS (
+	SELECT 0
+		UNION ALL
+	SELECT a+1 FROM t WHERE a+1 < 5
+), t2 as (
+	INSERT INTO y
+		SELECT * FROM t RETURNING *
+)
+SELECT * FROM t2 JOIN y USING (a) ORDER BY a
+--
+2b37909d5adb2d24
+== 200
+SELECT * FROM y
+--
+873d734006cb90d7
+== 201
+-- data-modifying WITH in a modifying statement
+WITH t AS (
+    DELETE FROM y
+    WHERE a <= 10
+    RETURNING *
+)
+INSERT INTO y SELECT -a FROM t RETURNING *
+--
+6f333182ac8633fe
+== 202
+SELECT * FROM y
+--
+873d734006cb90d7
+== 203
+-- check that WITH query is run to completion even if outer query isn't
+WITH t AS (
+    UPDATE y SET a = a * 100 RETURNING *
+)
+SELECT * FROM t LIMIT 10
+--
+a30918bbcec60ec7
+== 204
+SELECT * FROM y
+--
+873d734006cb90d7
+== 205
+-- data-modifying WITH containing INSERT...ON CONFLICT DO UPDATE
+CREATE TABLE withz AS SELECT i AS k, (i || ' v')::text v FROM generate_series(1, 16, 3) i
+--
+a91514ce2b3130ac
+== 206
+ALTER TABLE withz ADD UNIQUE (k)
+--
+b69c6e05eaffc553
+== 207
+WITH t AS (
+    INSERT INTO withz SELECT i, 'insert'
+    FROM generate_series(0, 16) i
+    ON CONFLICT (k) DO UPDATE SET v = withz.v || ', now update'
+    RETURNING *
+)
+SELECT * FROM t JOIN y ON t.k = y.a ORDER BY a, k
+--
+0489fe255ef5f8cd
+== 208
+-- Test EXCLUDED.* reference within CTE
+WITH aa AS (
+    INSERT INTO withz VALUES(1, 5) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v
+    WHERE withz.k != EXCLUDED.k
+    RETURNING *
+)
+SELECT * FROM aa
+--
+6234f6a9f4531a33
+== 209
+-- New query/snapshot demonstrates side-effects of previous query.
+SELECT * FROM withz ORDER BY k
+--
+192f7cfbb7f65e5d
+== 210
+|--
+-- Ensure subqueries within the update clause work, even if they
+-- reference outside values
+|--
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+a779b6a00ea98921
+== 211
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = ' update' WHERE withz.k = (SELECT a FROM aa)
+--
+006a3c238eef2ff6
+== 212
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+a779b6a00ea98921
+== 213
+WITH aa AS (SELECT 'a' a, 'b' b UNION ALL SELECT 'a' a, 'b' b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 'a' LIMIT 1)
+--
+dce3ecc4226109f6
+== 214
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, (SELECT b || ' insert' FROM aa WHERE a = 1 ))
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+9f31bafc9f216cfd
+== 215
+-- Update a row more than once, in different parts of a wCTE. That is
+-- an allowed, presumably very rare, edge case, but since it was
+-- broken in the past, having a test seems worthwhile.
+WITH simpletup AS (
+  SELECT 2 k, 'Green' v),
+upsert_cte AS (
+  INSERT INTO withz VALUES(2, 'Blue') ON CONFLICT (k) DO
+    UPDATE SET (k, v) = (SELECT k, v FROM simpletup WHERE simpletup.k = withz.k)
+    RETURNING k, v)
+INSERT INTO withz VALUES(2, 'Red') ON CONFLICT (k) DO
+UPDATE SET (k, v) = (SELECT k, v FROM upsert_cte WHERE upsert_cte.k = withz.k)
+RETURNING k, v
+--
+fec76663d951b901
+== 216
+DROP TABLE withz
+--
+2c412d9eedf27187
+== 217
+-- WITH referenced by MERGE statement
+CREATE TABLE m AS SELECT i AS k, (i || ' v')::text v FROM generate_series(1, 16, 3) i
+--
+2c0d95f8d74fabf3
+== 218
+ALTER TABLE m ADD UNIQUE (k)
+--
+3d33df2dac720353
+== 219
+WITH RECURSIVE cte_basic AS (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+a2bb7223ad15ff09
+== 220
+-- Basic:
+WITH cte_basic AS MATERIALIZED (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+3caa6c4046d51d1f
+== 221
+-- Examine
+SELECT * FROM m where k = 0
+--
+c925c6cecfcb5125
+== 222
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH cte_basic AS MATERIALIZED (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+ed1b049d723c81c5
+== 223
+-- InitPlan
+WITH cte_init AS MATERIALIZED (SELECT 1 a, 'cte_init val' b)
+MERGE INTO m USING (select 1 k, 'merge source InitPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_init WHERE a = 1 LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+65af7459fce1d8e9
+== 224
+-- Examine
+SELECT * FROM m where k = 1
+--
+c925c6cecfcb5125
+== 225
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH cte_init AS MATERIALIZED (SELECT 1 a, 'cte_init val' b)
+MERGE INTO m USING (select 1 k, 'merge source InitPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_init WHERE a = 1 LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+7f566770dad1dee7
+== 226
+-- MERGE source comes from CTE:
+WITH merge_source_cte AS MATERIALIZED (SELECT 15 a, 'merge_source_cte val' b)
+MERGE INTO m USING (select * from merge_source_cte) o ON m.k=o.a
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || merge_source_cte.*::text || ' merge update' FROM merge_source_cte WHERE a = 15)
+WHEN NOT MATCHED THEN INSERT VALUES(o.a, o.b || (SELECT merge_source_cte.*::text || ' merge insert' FROM merge_source_cte))
+--
+b7762fa149e1805a
+== 227
+-- Examine
+SELECT * FROM m where k = 15
+--
+c925c6cecfcb5125
+== 228
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH merge_source_cte AS MATERIALIZED (SELECT 15 a, 'merge_source_cte val' b)
+MERGE INTO m USING (select * from merge_source_cte) o ON m.k=o.a
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || merge_source_cte.*::text || ' merge update' FROM merge_source_cte WHERE a = 15)
+WHEN NOT MATCHED THEN INSERT VALUES(o.a, o.b || (SELECT merge_source_cte.*::text || ' merge insert' FROM merge_source_cte))
+--
+835b2af50daa289d
+== 229
+DROP TABLE m
+--
+b75e8c44e951644e
+== 230
+-- check that run to completion happens in proper ordering
+
+TRUNCATE TABLE y
+--
+845ed6d7da9db4a2
+== 231
+INSERT INTO y SELECT generate_series(1, 3)
+--
+e0b7e72970d9c22b
+== 232
+CREATE TEMPORARY TABLE yy (a INTEGER)
+--
+bf4f5b4f6f8b713d
+== 233
+WITH RECURSIVE t1 AS (
+  INSERT INTO y SELECT * FROM y RETURNING *
+), t2 AS (
+  INSERT INTO yy SELECT * FROM t1 RETURNING *
+)
+SELECT 1
+--
+232376df39918863
+== 234
+SELECT * FROM y
+--
+873d734006cb90d7
+== 235
+SELECT * FROM yy
+--
+ee2bef790935d640
+== 236
+WITH RECURSIVE t1 AS (
+  INSERT INTO yy SELECT * FROM t2 RETURNING *
+), t2 AS (
+  INSERT INTO y SELECT * FROM y RETURNING *
+)
+SELECT 1
+--
+5ccf951936a32c7a
+== 237
+SELECT * FROM y
+--
+873d734006cb90d7
+== 238
+SELECT * FROM yy
+--
+ee2bef790935d640
+== 239
+-- triggers
+
+TRUNCATE TABLE y
+--
+845ed6d7da9db4a2
+== 240
+INSERT INTO y SELECT generate_series(1, 10)
+--
+e0b7e72970d9c22b
+== 241
+CREATE FUNCTION y_trigger() RETURNS trigger AS $$
+begin
+  raise notice 'y_trigger: a = %', new.a;
+  return new;
+end;
+$$ LANGUAGE plpgsql
+--
+e1bda7912be28126
+== 242
+CREATE TRIGGER y_trig BEFORE INSERT ON y FOR EACH ROW
+    EXECUTE PROCEDURE y_trigger()
+--
+b16993aaba0a0fda
+== 243
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (21),
+        (22),
+        (23)
+    RETURNING *
+)
+SELECT * FROM t
+--
+040eb179905adb72
+== 244
+SELECT * FROM y
+--
+873d734006cb90d7
+== 245
+DROP TRIGGER y_trig ON y
+--
+c89b237a5ec27749
+== 246
+CREATE TRIGGER y_trig AFTER INSERT ON y FOR EACH ROW
+    EXECUTE PROCEDURE y_trigger()
+--
+aa171014fa033c0f
+== 247
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (31),
+        (32),
+        (33)
+    RETURNING *
+)
+SELECT * FROM t LIMIT 1
+--
+eb19f80d94927ed6
+== 248
+SELECT * FROM y
+--
+873d734006cb90d7
+== 249
+DROP TRIGGER y_trig ON y
+--
+c89b237a5ec27749
+== 250
+CREATE OR REPLACE FUNCTION y_trigger() RETURNS trigger AS $$
+begin
+  raise notice 'y_trigger';
+  return null;
+end;
+$$ LANGUAGE plpgsql
+--
+d2bba2f6bfc7cddf
+== 251
+CREATE TRIGGER y_trig AFTER INSERT ON y FOR EACH STATEMENT
+    EXECUTE PROCEDURE y_trigger()
+--
+3233185f82d10e20
+== 252
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (41),
+        (42),
+        (43)
+    RETURNING *
+)
+SELECT * FROM t
+--
+040eb179905adb72
+== 253
+SELECT * FROM y
+--
+873d734006cb90d7
+== 254
+DROP TRIGGER y_trig ON y
+--
+c89b237a5ec27749
+== 255
+DROP FUNCTION y_trigger()
+--
+ab70aa17c0594de1
+== 256
+-- WITH attached to inherited UPDATE or DELETE
+
+CREATE TEMP TABLE parent ( id int, val text )
+--
+f953fd19d34a7069
+== 257
+CREATE TEMP TABLE child1 ( ) INHERITS ( parent )
+--
+e9ff7fbf6321c794
+== 258
+CREATE TEMP TABLE child2 ( ) INHERITS ( parent )
+--
+e9ff7fbf6321c794
+== 259
+INSERT INTO parent VALUES ( 1, 'p1' )
+--
+331c5824c406f426
+== 260
+INSERT INTO child1 VALUES ( 11, 'c11' ),( 12, 'c12' )
+--
+f5ee071320fd06fc
+== 261
+INSERT INTO child2 VALUES ( 23, 'c21' ),( 24, 'c22' )
+--
+acf5f7e025990ecf
+== 262
+WITH rcte AS ( SELECT sum(id) AS totalid FROM parent )
+UPDATE parent SET id = id + totalid FROM rcte
+--
+596a2fffa7796f3c
+== 263
+SELECT * FROM parent
+--
+4112379bac11dfbc
+== 264
+WITH wcte AS ( INSERT INTO child1 VALUES ( 42, 'new' ) RETURNING id AS newid )
+UPDATE parent SET id = id + newid FROM wcte
+--
+7c5cdebc12c284c9
+== 265
+SELECT * FROM parent
+--
+4112379bac11dfbc
+== 266
+WITH rcte AS ( SELECT max(id) AS maxid FROM parent )
+DELETE FROM parent USING rcte WHERE id = maxid
+--
+f63c1dd97d21c8f7
+== 267
+SELECT * FROM parent
+--
+4112379bac11dfbc
+== 268
+WITH wcte AS ( INSERT INTO child2 VALUES ( 42, 'new2' ) RETURNING id AS newid )
+DELETE FROM parent USING wcte WHERE id = newid
+--
+a787c7510e119594
+== 269
+SELECT * FROM parent
+--
+4112379bac11dfbc
+== 270
+-- check EXPLAIN VERBOSE for a wCTE with RETURNING
+
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH wcte AS ( INSERT INTO int8_tbl VALUES ( 42, 47 ) RETURNING q2 )
+DELETE FROM a_star USING wcte WHERE aa = q2
+--
+4117b5c265d37445
+== 271
+-- error cases
+
+-- data-modifying WITH tries to use its own output
+WITH RECURSIVE t AS (
+	INSERT INTO y
+		SELECT * FROM t
+)
+VALUES(FALSE)
+--
+220f3c18270d9035
+== 272
+-- no RETURNING in a referenced data-modifying WITH
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+SELECT * FROM t
+--
+952885a9c84fa133
+== 273
+-- RETURNING tries to return its own output
+WITH RECURSIVE t(action, a) AS (
+	MERGE INTO y USING (VALUES (11)) v(a) ON y.a = v.a
+		WHEN NOT MATCHED THEN INSERT VALUES (v.a)
+		RETURNING merge_action(), (SELECT a FROM t)
+)
+SELECT * FROM t
+--
+87da3687e78d791f
+== 274
+-- data-modifying WITH allowed only at the top level
+SELECT * FROM (
+	WITH t AS (UPDATE y SET a=a+1 RETURNING *)
+	SELECT * FROM t
+) ss
+--
+4ea7a6d301f82cb8
+== 275
+-- most variants of rules aren't allowed
+CREATE RULE y_rule AS ON INSERT TO y WHERE a=0 DO INSTEAD DELETE FROM y
+--
+c9815e2dfb79bb36
+== 276
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+7556ab903693cb29
+== 277
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTHING
+--
+8d1f4407f2ea32d2
+== 278
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+7556ab903693cb29
+== 279
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTIFY foo
+--
+049ccb3eeb6cae92
+== 280
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+7556ab903693cb29
+== 281
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO ALSO NOTIFY foo
+--
+fb64a7c7e0b704a4
+== 282
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+7556ab903693cb29
+== 283
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y
+  DO INSTEAD (NOTIFY foo; NOTIFY bar)
+--
+e86e92cfea6bb333
+== 284
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+7556ab903693cb29
+== 285
+DROP RULE y_rule ON y
+--
+f9f51beb7174d459
+== 286
+-- check that parser lookahead for WITH doesn't cause any odd behavior
+create table foo (with baz)
+--
+ERROR: syntax error at or near "with"
+CURSORPOS: 90
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 287
+-- fail, WITH is a reserved word
+create table foo (with ordinality)
+--
+ERROR: syntax error at or near "with"
+CURSORPOS: 52
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 288
+-- fail, WITH is a reserved word
+with ordinality as (select 1 as x) select * from ordinality
+--
+4cd1439d13016952
+== 289
+-- check sane response to attempt to modify CTE relation
+WITH with_test AS (SELECT 42) INSERT INTO with_test VALUES (1)
+--
+879162da15e7baf1
+== 290
+-- check response to attempt to modify table with same name as a CTE (perhaps
+-- surprisingly it works, because CTEs don't hide tables from data-modifying
+-- statements)
+create temp table with_test (i int)
+--
+731ae6d462518d34
+== 291
+with with_test as (select 42) insert into with_test select * from with_test
+--
+242d24147c973426
+== 292
+select * from with_test
+--
+37d71ac72cf131ed
+== 293
+drop table with_test
+--
+e1bfeefe7993d8c0

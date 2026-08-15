@@ -1,0 +1,352 @@
+== 001
+|--
+-- Test GIN indexes.
+|--
+-- There are other tests to test different GIN opclasses. This is for testing
+-- GIN itself.
+
+-- Create and populate a test table with a GIN index.
+create table gin_test_tbl(i int4[]) with (autovacuum_enabled = off)
+--
+CREATE TABLE gin_test_tbl (i int4[]) WITH (autovacuum_enabled=off)
+== 002
+create index gin_test_idx on gin_test_tbl using gin (i)
+  with (fastupdate = on, gin_pending_list_limit = 4096)
+--
+CREATE INDEX gin_test_idx ON gin_test_tbl USING gin (i) WITH (fastupdate=on, gin_pending_list_limit=4096)
+== 003
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 20000) g
+--
+INSERT INTO gin_test_tbl SELECT ARRAY[1, 2, g] FROM generate_series(1, 20000) g
+== 004
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+INSERT INTO gin_test_tbl SELECT ARRAY[1, 3, g] FROM generate_series(1, 1000) g
+== 005
+select gin_clean_pending_list('gin_test_idx')>10 as many
+--
+SELECT gin_clean_pending_list('gin_test_idx') > 10 AS many
+== 006
+-- flush the fastupdate buffers
+
+insert into gin_test_tbl select array[3, 1, g] from generate_series(1, 1000) g
+--
+INSERT INTO gin_test_tbl SELECT ARRAY[3, 1, g] FROM generate_series(1, 1000) g
+== 007
+vacuum gin_test_tbl
+--
+VACUUM gin_test_tbl
+== 008
+-- flush the fastupdate buffers
+
+select gin_clean_pending_list('gin_test_idx')
+--
+SELECT gin_clean_pending_list('gin_test_idx')
+== 009
+-- nothing to flush
+
+-- Test vacuuming
+delete from gin_test_tbl where i @> array[2]
+--
+DELETE FROM gin_test_tbl WHERE i @> ARRAY[2]
+== 010
+vacuum gin_test_tbl
+--
+VACUUM gin_test_tbl
+== 011
+-- Disable fastupdate, and do more insertions. With fastupdate enabled, most
+-- insertions (by flushing the list pages) cause page splits. Without
+-- fastupdate, we get more churn in the GIN data leaf pages, and exercise the
+-- recompression codepaths.
+alter index gin_test_idx set (fastupdate = off)
+--
+ALTER INDEX gin_test_idx SET (fastupdate=off)
+== 012
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 1000) g
+--
+INSERT INTO gin_test_tbl SELECT ARRAY[1, 2, g] FROM generate_series(1, 1000) g
+== 013
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+INSERT INTO gin_test_tbl SELECT ARRAY[1, 3, g] FROM generate_series(1, 1000) g
+== 014
+delete from gin_test_tbl where i @> array[2]
+--
+DELETE FROM gin_test_tbl WHERE i @> ARRAY[2]
+== 015
+vacuum gin_test_tbl
+--
+VACUUM gin_test_tbl
+== 016
+-- Test for "rare && frequent" searches
+explain (costs off)
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM gin_test_tbl WHERE i @> ARRAY[1, 999]
+== 017
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+SELECT count(*) FROM gin_test_tbl WHERE i @> ARRAY[1, 999]
+== 018
+-- Very weak test for gin_fuzzy_search_limit
+set gin_fuzzy_search_limit = 1000
+--
+SET gin_fuzzy_search_limit TO 1000
+== 019
+explain (costs off)
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+EXPLAIN (COSTS OFF) SELECT count(*) > 0 AS ok FROM gin_test_tbl WHERE i @> ARRAY[1]
+== 020
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+SELECT count(*) > 0 AS ok FROM gin_test_tbl WHERE i @> ARRAY[1]
+== 021
+reset gin_fuzzy_search_limit
+--
+RESET gin_fuzzy_search_limit
+== 022
+-- Test optimization of empty queries
+create temp table t_gin_test_tbl(i int4[], j int4[])
+--
+CREATE TEMPORARY TABLE t_gin_test_tbl (i int4[], j int4[])
+== 023
+create index on t_gin_test_tbl using gin (i, j)
+--
+CREATE INDEX ON t_gin_test_tbl USING gin (i, j)
+== 024
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   null),
+  ('{1,2}', null),
+  (null,    '{}'),
+  (null,    '{10}'),
+  ('{1,2}', '{10}'),
+  ('{2}',   '{10}'),
+  ('{1,3}', '{}'),
+  ('{1,1}', '{10}')
+--
+INSERT INTO t_gin_test_tbl VALUES (NULL, NULL), ('{}', NULL), ('{1}', NULL), ('{1,2}', NULL), (NULL, '{}'), (NULL, '{10}'), ('{1,2}', '{10}'), ('{2}', '{10}'), ('{1,3}', '{}'), ('{1,1}', '{10}')
+== 025
+set enable_seqscan = off
+--
+SET enable_seqscan TO OFF
+== 026
+explain (costs off)
+select * from t_gin_test_tbl where array[0] <@ i
+--
+EXPLAIN (COSTS OFF) SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i
+== 027
+select * from t_gin_test_tbl where array[0] <@ i
+--
+SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i
+== 028
+select * from t_gin_test_tbl where array[0] <@ i and '{}'::int4[] <@ j
+--
+SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i AND '{}'::int4[] <@ j
+== 029
+explain (costs off)
+select * from t_gin_test_tbl where i @> '{}'
+--
+EXPLAIN (COSTS OFF) SELECT * FROM t_gin_test_tbl WHERE i @> '{}'
+== 030
+select * from t_gin_test_tbl where i @> '{}'
+--
+SELECT * FROM t_gin_test_tbl WHERE i @> '{}'
+== 031
+create function explain_query_json(query_sql text)
+returns table (explain_line json)
+language plpgsql as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute 'EXPLAIN (ANALYZE, FORMAT json) ' || query_sql;
+end;
+$$
+--
+CREATE FUNCTION explain_query_json(query_sql text) RETURNS TABLE (explain_line pg_catalog.json) LANGUAGE plpgsql AS $$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute 'EXPLAIN (ANALYZE, FORMAT json) ' || query_sql;
+end;
+$$
+== 032
+create function execute_text_query_index(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute query_sql;
+end;
+$$
+--
+CREATE FUNCTION execute_text_query_index(query_sql text) RETURNS SETOF text LANGUAGE plpgsql AS $$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute query_sql;
+end;
+$$
+== 033
+create function execute_text_query_heap(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = on;
+  set enable_bitmapscan = off;
+  return query execute query_sql;
+end;
+$$
+--
+CREATE FUNCTION execute_text_query_heap(query_sql text) RETURNS SETOF text LANGUAGE plpgsql AS $$
+begin
+  set enable_seqscan = on;
+  set enable_bitmapscan = off;
+  return query execute query_sql;
+end;
+$$
+== 034
+-- check number of rows returned by index and removed by recheck
+select
+  query,
+  js->0->'Plan'->'Plans'->0->'Actual Rows' as "return by index",
+  js->0->'Plan'->'Rows Removed by Index Recheck' as "removed by recheck",
+  (res_index = res_heap) as "match"
+from
+  (values
+    ($$ i @> '{}' $$),
+    ($$ j @> '{}' $$),
+    ($$ i @> '{}' and j @> '{}' $$),
+    ($$ i @> '{1}' $$),
+    ($$ i @> '{1}' and j @> '{}' $$),
+    ($$ i @> '{1}' and i @> '{}' and j @> '{}' $$),
+    ($$ j @> '{10}' $$),
+    ($$ j @> '{10}' and i @> '{}' $$),
+    ($$ j @> '{10}' and j @> '{}' and i @> '{}' $$),
+    ($$ i @> '{1}' and j @> '{10}' $$)
+  ) q(query),
+  lateral explain_query_json($$select * from t_gin_test_tbl where $$ || query) js,
+  lateral execute_text_query_index($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_index,
+  lateral execute_text_query_heap($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_heap
+--
+SELECT query, ((((js -> 0) -> 'Plan') -> 'Plans') -> 0) -> 'Actual Rows' AS "return by index", ((js -> 0) -> 'Plan') -> 'Rows Removed by Index Recheck' AS "removed by recheck", res_index = res_heap AS match FROM (VALUES (' i @> ''{}'' '), (' j @> ''{}'' '), (' i @> ''{}'' and j @> ''{}'' '), (' i @> ''{1}'' '), (' i @> ''{1}'' and j @> ''{}'' '), (' i @> ''{1}'' and i @> ''{}'' and j @> ''{}'' '), (' j @> ''{10}'' '), (' j @> ''{10}'' and i @> ''{}'' '), (' j @> ''{10}'' and j @> ''{}'' and i @> ''{}'' '), (' i @> ''{1}'' and j @> ''{10}'' ')) q(query), LATERAL explain_query_json('select * from t_gin_test_tbl where ' || query) js, LATERAL execute_text_query_index('select string_agg((i, j)::text, '' '') from t_gin_test_tbl where ' || query) res_index, LATERAL execute_text_query_heap('select string_agg((i, j)::text, '' '') from t_gin_test_tbl where ' || query) res_heap
+== 035
+reset enable_seqscan
+--
+RESET enable_seqscan
+== 036
+reset enable_bitmapscan
+--
+RESET enable_bitmapscan
+== 037
+-- re-purpose t_gin_test_tbl to test scans involving posting trees
+insert into t_gin_test_tbl select array[1, g, g/10], array[2, g, g/10]
+  from generate_series(1, 20000) g
+--
+INSERT INTO t_gin_test_tbl SELECT ARRAY[1, g, g / 10], ARRAY[2, g, g / 10] FROM generate_series(1, 20000) g
+== 038
+select gin_clean_pending_list('t_gin_test_tbl_i_j_idx') is not null
+--
+SELECT gin_clean_pending_list('t_gin_test_tbl_i_j_idx') IS NOT NULL
+== 039
+analyze t_gin_test_tbl
+--
+ANALYZE t_gin_test_tbl
+== 040
+set enable_seqscan = off
+--
+SET enable_seqscan TO OFF
+== 041
+set enable_bitmapscan = on
+--
+SET enable_bitmapscan TO ON
+== 042
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]
+== 043
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]
+== 044
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]
+== 045
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]
+== 046
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]
+== 047
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]
+== 048
+-- test vacuuming of posting trees
+delete from t_gin_test_tbl where j @> array[2]
+--
+DELETE FROM t_gin_test_tbl WHERE j @> ARRAY[2]
+== 049
+vacuum t_gin_test_tbl
+--
+VACUUM t_gin_test_tbl
+== 050
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]
+== 051
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]
+== 052
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]
+== 053
+reset enable_seqscan
+--
+RESET enable_seqscan
+== 054
+reset enable_bitmapscan
+--
+RESET enable_bitmapscan
+== 055
+drop table t_gin_test_tbl
+--
+DROP TABLE t_gin_test_tbl
+== 056
+-- test an unlogged table, mostly to get coverage of ginbuildempty
+create unlogged table t_gin_test_tbl(i int4[], j int4[])
+--
+CREATE UNLOGGED TABLE t_gin_test_tbl (i int4[], j int4[])
+== 057
+create index on t_gin_test_tbl using gin (i, j)
+--
+CREATE INDEX ON t_gin_test_tbl USING gin (i, j)
+== 058
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   '{2,3}')
+--
+INSERT INTO t_gin_test_tbl VALUES (NULL, NULL), ('{}', NULL), ('{1}', '{2,3}')
+== 059
+drop table t_gin_test_tbl
+--
+DROP TABLE t_gin_test_tbl

@@ -1,0 +1,827 @@
+== 001
+-- create a table to use as a basis for views and materialized views in various combinations
+CREATE TABLE mvtest_t (id int NOT NULL PRIMARY KEY, type text NOT NULL, amt numeric NOT NULL)
+--
+2cbcf629b5fc91f3
+== 002
+INSERT INTO mvtest_t VALUES
+  (1, 'x', 2),
+  (2, 'x', 3),
+  (3, 'y', 5),
+  (4, 'y', 7),
+  (5, 'z', 11)
+--
+aaa14252173dcb55
+== 003
+-- we want a view based on the table, too, since views present additional challenges
+CREATE VIEW mvtest_tv AS SELECT type, sum(amt) AS totamt FROM mvtest_t GROUP BY type
+--
+ec296e8fb73cb9f5
+== 004
+SELECT * FROM mvtest_tv ORDER BY type
+--
+a10bfa12adef2825
+== 005
+-- create a materialized view with no data, and confirm correct behavior
+EXPLAIN (costs off)
+  CREATE MATERIALIZED VIEW mvtest_tm AS SELECT type, sum(amt) AS totamt FROM mvtest_t GROUP BY type WITH NO DATA
+--
+792732a33962cb67
+== 006
+CREATE MATERIALIZED VIEW mvtest_tm AS SELECT type, sum(amt) AS totamt FROM mvtest_t GROUP BY type WITH NO DATA
+--
+43bd457d868434b6
+== 007
+SELECT relispopulated FROM pg_class WHERE oid = 'mvtest_tm'::regclass
+--
+0d0b239d5799286b
+== 008
+SELECT * FROM mvtest_tm ORDER BY type
+--
+c479be496d3f6b27
+== 009
+REFRESH MATERIALIZED VIEW mvtest_tm
+--
+4af4f4cb849771ee
+== 010
+SELECT relispopulated FROM pg_class WHERE oid = 'mvtest_tm'::regclass
+--
+0d0b239d5799286b
+== 011
+CREATE UNIQUE INDEX mvtest_tm_type ON mvtest_tm (type)
+--
+10be8225193de83c
+== 012
+SELECT * FROM mvtest_tm ORDER BY type
+--
+c479be496d3f6b27
+== 013
+-- create various views
+EXPLAIN (costs off)
+  CREATE MATERIALIZED VIEW mvtest_tvm AS SELECT * FROM mvtest_tv ORDER BY type
+--
+02fe542d3b89397c
+== 014
+CREATE MATERIALIZED VIEW mvtest_tvm AS SELECT * FROM mvtest_tv ORDER BY type
+--
+4061d6697858333f
+== 015
+SELECT * FROM mvtest_tvm
+--
+240f01e9f009dad3
+== 016
+CREATE MATERIALIZED VIEW mvtest_tmm AS SELECT sum(totamt) AS grandtot FROM mvtest_tm
+--
+1240f9e69ddb0c3e
+== 017
+CREATE MATERIALIZED VIEW mvtest_tvmm AS SELECT sum(totamt) AS grandtot FROM mvtest_tvm
+--
+716540e2ffdbf78c
+== 018
+CREATE UNIQUE INDEX mvtest_tvmm_expr ON mvtest_tvmm ((grandtot > 0))
+--
+4a4a401d7e35456e
+== 019
+CREATE UNIQUE INDEX mvtest_tvmm_pred ON mvtest_tvmm (grandtot) WHERE grandtot < 0
+--
+9b8ee74ba46fc297
+== 020
+CREATE VIEW mvtest_tvv AS SELECT sum(totamt) AS grandtot FROM mvtest_tv
+--
+b2153f8f976156c0
+== 021
+EXPLAIN (costs off)
+  CREATE MATERIALIZED VIEW mvtest_tvvm AS SELECT * FROM mvtest_tvv
+--
+7b0e8e20901ded43
+== 022
+CREATE MATERIALIZED VIEW mvtest_tvvm AS SELECT * FROM mvtest_tvv
+--
+2b0e9d9e5a2b22e6
+== 023
+CREATE VIEW mvtest_tvvmv AS SELECT * FROM mvtest_tvvm
+--
+ed7195c4fae6d570
+== 024
+CREATE MATERIALIZED VIEW mvtest_bb AS SELECT * FROM mvtest_tvvmv
+--
+88aab6700a9d5fea
+== 025
+CREATE INDEX mvtest_aa ON mvtest_bb (grandtot)
+--
+1f5278a83793483a
+== 026
+-- check that plans seem reasonable
+
+-- test schema behavior
+CREATE SCHEMA mvtest_mvschema
+--
+3829ef383139d499
+== 027
+ALTER MATERIALIZED VIEW mvtest_tvm SET SCHEMA mvtest_mvschema
+--
+934faa9582c97eae
+== 028
+SET search_path = mvtest_mvschema, public
+--
+972eb2e22f47f95c
+== 029
+-- modify the underlying table data
+INSERT INTO mvtest_t VALUES (6, 'z', 13)
+--
+aaa14252173dcb55
+== 030
+-- confirm pre- and post-refresh contents of fairly simple materialized views
+SELECT * FROM mvtest_tm ORDER BY type
+--
+c479be496d3f6b27
+== 031
+SELECT * FROM mvtest_tvm ORDER BY type
+--
+8911d5c3a5f0e32f
+== 032
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_tm
+--
+67521590156096c9
+== 033
+REFRESH MATERIALIZED VIEW mvtest_tvm
+--
+56f441c578382b9e
+== 034
+SELECT * FROM mvtest_tm ORDER BY type
+--
+c479be496d3f6b27
+== 035
+SELECT * FROM mvtest_tvm ORDER BY type
+--
+8911d5c3a5f0e32f
+== 036
+RESET search_path
+--
+e97698aade82a29f
+== 037
+-- confirm pre- and post-refresh contents of nested materialized views
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tmm
+--
+4d0804138b61999c
+== 038
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tvmm
+--
+b84f40fddaaf7f34
+== 039
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tvvm
+--
+a61bcf07fea73527
+== 040
+SELECT * FROM mvtest_tmm
+--
+5d668340d6e9c79e
+== 041
+SELECT * FROM mvtest_tvmm
+--
+c3f333978e209e08
+== 042
+SELECT * FROM mvtest_tvvm
+--
+9babb86ec1710663
+== 043
+REFRESH MATERIALIZED VIEW mvtest_tmm
+--
+7f6ffa0b5f0e8035
+== 044
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_tvmm
+--
+1e1db275bbc06e57
+== 045
+REFRESH MATERIALIZED VIEW mvtest_tvmm
+--
+8477e5a7a8dfcb55
+== 046
+REFRESH MATERIALIZED VIEW mvtest_tvvm
+--
+4f69040ebbb10640
+== 047
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tmm
+--
+4d0804138b61999c
+== 048
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tvmm
+--
+b84f40fddaaf7f34
+== 049
+EXPLAIN (costs off)
+  SELECT * FROM mvtest_tvvm
+--
+a61bcf07fea73527
+== 050
+SELECT * FROM mvtest_tmm
+--
+5d668340d6e9c79e
+== 051
+SELECT * FROM mvtest_tvmm
+--
+c3f333978e209e08
+== 052
+SELECT * FROM mvtest_tvvm
+--
+9babb86ec1710663
+== 053
+-- test diemv when the mv does not exist
+DROP MATERIALIZED VIEW IF EXISTS no_such_mv
+--
+dde1215c04f2686b
+== 054
+-- make sure invalid combination of options is prohibited
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_tvmm WITH NO DATA
+--
+d65238504f2ca7c7
+== 055
+-- no tuple locks on materialized views
+SELECT * FROM mvtest_tvvm FOR SHARE
+--
+7e4ff81607364832
+== 056
+-- test join of mv and view
+SELECT type, m.totamt AS mtot, v.totamt AS vtot FROM mvtest_tm m LEFT JOIN mvtest_tv v USING (type) ORDER BY type
+--
+42418dd29c7a9f3c
+== 057
+-- make sure that dependencies are reported properly when they block the drop
+DROP TABLE mvtest_t
+--
+8b2b6346adda5c57
+== 058
+-- make sure dependencies are dropped and reported
+-- and make sure that transactional behavior is correct on rollback
+-- incidentally leaving some interesting materialized views for pg_dump testing
+BEGIN
+--
+b16b431979fc3e05
+== 059
+DROP TABLE mvtest_t CASCADE
+--
+45c25905c874150c
+== 060
+ROLLBACK
+--
+a46081a556fda027
+== 061
+-- some additional tests not using base tables
+CREATE VIEW mvtest_vt1 AS SELECT 1 moo
+--
+e219dc5a784b8755
+== 062
+CREATE VIEW mvtest_vt2 AS SELECT moo, 2*moo FROM mvtest_vt1 UNION ALL SELECT moo, 3*moo FROM mvtest_vt1
+--
+62dace112079f995
+== 063
+CREATE MATERIALIZED VIEW mv_test2 AS SELECT moo, 2*moo FROM mvtest_vt2 UNION ALL SELECT moo, 3*moo FROM mvtest_vt2
+--
+613430023553e801
+== 064
+CREATE MATERIALIZED VIEW mv_test3 AS SELECT * FROM mv_test2 WHERE moo = 12345
+--
+83316ad14a3da4cc
+== 065
+SELECT relispopulated FROM pg_class WHERE oid = 'mv_test3'::regclass
+--
+0d0b239d5799286b
+== 066
+DROP VIEW mvtest_vt1 CASCADE
+--
+7bf03709ae711671
+== 067
+-- test that duplicate values on unique index prevent refresh
+CREATE TABLE mvtest_foo(a, b) AS VALUES(1, 10)
+--
+e3858901df44a0c7
+== 068
+CREATE MATERIALIZED VIEW mvtest_mv AS SELECT * FROM mvtest_foo
+--
+1ccdde73186ee0ae
+== 069
+CREATE UNIQUE INDEX ON mvtest_mv(a)
+--
+6ccf885194388c80
+== 070
+INSERT INTO mvtest_foo SELECT * FROM mvtest_foo
+--
+e837a3ba0069ff86
+== 071
+REFRESH MATERIALIZED VIEW mvtest_mv
+--
+bef69dbeaffec914
+== 072
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_mv
+--
+436b7b01aee7a09f
+== 073
+DROP TABLE mvtest_foo CASCADE
+--
+3e5b3d39d13c10c1
+== 074
+-- make sure that all columns covered by unique indexes works
+CREATE TABLE mvtest_foo(a, b, c) AS VALUES(1, 2, 3)
+--
+4c39eb98bd8486ea
+== 075
+CREATE MATERIALIZED VIEW mvtest_mv AS SELECT * FROM mvtest_foo
+--
+1ccdde73186ee0ae
+== 076
+CREATE UNIQUE INDEX ON mvtest_mv (a)
+--
+6ccf885194388c80
+== 077
+CREATE UNIQUE INDEX ON mvtest_mv (b)
+--
+175a1b2a81f4ae2b
+== 078
+CREATE UNIQUE INDEX on mvtest_mv (c)
+--
+10cf6e573290b19c
+== 079
+INSERT INTO mvtest_foo VALUES(2, 3, 4)
+--
+5fbe715ee7e2a1dd
+== 080
+INSERT INTO mvtest_foo VALUES(3, 4, 5)
+--
+5fbe715ee7e2a1dd
+== 081
+REFRESH MATERIALIZED VIEW mvtest_mv
+--
+bef69dbeaffec914
+== 082
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_mv
+--
+436b7b01aee7a09f
+== 083
+DROP TABLE mvtest_foo CASCADE
+--
+3e5b3d39d13c10c1
+== 084
+-- allow subquery to reference unpopulated matview if WITH NO DATA is specified
+CREATE MATERIALIZED VIEW mvtest_mv1 AS SELECT 1 AS col1 WITH NO DATA
+--
+204fd53efafd1bf7
+== 085
+CREATE MATERIALIZED VIEW mvtest_mv2 AS SELECT * FROM mvtest_mv1
+  WHERE col1 = (SELECT LEAST(col1) FROM mvtest_mv1) WITH NO DATA
+--
+95df762cce6659c2
+== 086
+DROP MATERIALIZED VIEW mvtest_mv1 CASCADE
+--
+5da264e21be8c5ec
+== 087
+-- make sure that types with unusual equality tests work
+CREATE TABLE mvtest_boxes (id serial primary key, b box)
+--
+9071ff048b9fd016
+== 088
+INSERT INTO mvtest_boxes (b) VALUES
+  ('(32,32),(31,31)'),
+  ('(2.0000004,2.0000004),(1,1)'),
+  ('(1.9999996,1.9999996),(1,1)')
+--
+5cc88ee8eea1d72a
+== 089
+CREATE MATERIALIZED VIEW mvtest_boxmv AS SELECT * FROM mvtest_boxes
+--
+e8f35a9c16fe6df9
+== 090
+CREATE UNIQUE INDEX mvtest_boxmv_id ON mvtest_boxmv (id)
+--
+59cace2f81ae2f2a
+== 091
+UPDATE mvtest_boxes SET b = '(2,2),(1,1)' WHERE id = 2
+--
+340818f40507c512
+== 092
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_boxmv
+--
+127fece07cb4139f
+== 093
+SELECT * FROM mvtest_boxmv ORDER BY id
+--
+985b902e13ee86fa
+== 094
+DROP TABLE mvtest_boxes CASCADE
+--
+54531c813d2117bf
+== 095
+-- make sure that column names are handled correctly
+CREATE TABLE mvtest_v (i int, j int)
+--
+99fce4c86d135646
+== 096
+CREATE MATERIALIZED VIEW mvtest_mv_v (ii, jj, kk) AS SELECT i, j FROM mvtest_v
+--
+51daef91b7f290d0
+== 097
+-- error
+CREATE MATERIALIZED VIEW mvtest_mv_v (ii, jj) AS SELECT i, j FROM mvtest_v
+--
+8ca6f20a61d4edbe
+== 098
+-- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_2 (ii) AS SELECT i, j FROM mvtest_v
+--
+7265dd0ad1189f0f
+== 099
+-- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_3 (ii, jj, kk) AS SELECT i, j FROM mvtest_v WITH NO DATA
+--
+16522253e1b650c1
+== 100
+-- error
+CREATE MATERIALIZED VIEW mvtest_mv_v_3 (ii, jj) AS SELECT i, j FROM mvtest_v WITH NO DATA
+--
+c95d12c611de2a43
+== 101
+-- ok
+CREATE MATERIALIZED VIEW mvtest_mv_v_4 (ii) AS SELECT i, j FROM mvtest_v WITH NO DATA
+--
+b1d39bd29e3b9f2a
+== 102
+-- ok
+ALTER TABLE mvtest_v RENAME COLUMN i TO x
+--
+dbf5eaa86876d0ea
+== 103
+INSERT INTO mvtest_v values (1, 2)
+--
+4d80a7ff62e3eda3
+== 104
+CREATE UNIQUE INDEX mvtest_mv_v_ii ON mvtest_mv_v (ii)
+--
+012ca00fabf2b050
+== 105
+REFRESH MATERIALIZED VIEW mvtest_mv_v
+--
+ae9493df752e300a
+== 106
+UPDATE mvtest_v SET j = 3 WHERE x = 1
+--
+8f16b912512e00e4
+== 107
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_mv_v
+--
+45cf842fb9dba6a2
+== 108
+REFRESH MATERIALIZED VIEW mvtest_mv_v_2
+--
+72082d9f5cf4f670
+== 109
+REFRESH MATERIALIZED VIEW mvtest_mv_v_3
+--
+f20cead7367ce741
+== 110
+REFRESH MATERIALIZED VIEW mvtest_mv_v_4
+--
+6fe83725a2e271a3
+== 111
+SELECT * FROM mvtest_v
+--
+c89d9bc3aff79e94
+== 112
+SELECT * FROM mvtest_mv_v
+--
+6ae4769900ccbf21
+== 113
+SELECT * FROM mvtest_mv_v_2
+--
+f883a88b0b6b577c
+== 114
+SELECT * FROM mvtest_mv_v_3
+--
+835529367afe65f0
+== 115
+SELECT * FROM mvtest_mv_v_4
+--
+f769201935c9bd4c
+== 116
+DROP TABLE mvtest_v CASCADE
+--
+1484336d4fe20298
+== 117
+-- Check that unknown literals are converted to "text" in CREATE MATVIEW,
+-- so that we don't end up with unknown-type columns.
+CREATE MATERIALIZED VIEW mv_unspecified_types AS
+  SELECT 42 as i, 42.5 as num, 'foo' as u, 'foo'::unknown as u2, null as n
+--
+46bc05f1f9178bce
+== 118
+SELECT * FROM mv_unspecified_types
+--
+dcaa69bfee979d19
+== 119
+DROP MATERIALIZED VIEW mv_unspecified_types
+--
+b9707050948de92e
+== 120
+-- make sure that create WITH NO DATA does not plan the query (bug #13907)
+create materialized view mvtest_error as select 1/0 as x
+--
+e72e31411c2ac90c
+== 121
+-- fail
+create materialized view mvtest_error as select 1/0 as x with no data
+--
+d453c0840ba2716e
+== 122
+refresh materialized view mvtest_error
+--
+51086b5146bb896c
+== 123
+-- fail here
+drop materialized view mvtest_error
+--
+8ccfab7654078219
+== 124
+-- make sure that matview rows can be referenced as source rows (bug #9398)
+CREATE TABLE mvtest_v AS SELECT generate_series(1,10) AS a
+--
+3151070e7906586a
+== 125
+CREATE MATERIALIZED VIEW mvtest_mv_v AS SELECT a FROM mvtest_v WHERE a <= 5
+--
+846e62eb7df14a11
+== 126
+DELETE FROM mvtest_v WHERE EXISTS ( SELECT * FROM mvtest_mv_v WHERE mvtest_mv_v.a = mvtest_v.a )
+--
+6c6bfd70a5faa1cf
+== 127
+SELECT * FROM mvtest_v
+--
+c89d9bc3aff79e94
+== 128
+SELECT * FROM mvtest_mv_v
+--
+6ae4769900ccbf21
+== 129
+DROP TABLE mvtest_v CASCADE
+--
+1484336d4fe20298
+== 130
+-- make sure running as superuser works when MV owned by another role (bug #11208)
+CREATE ROLE regress_user_mvtest
+--
+aed3eb7e0cfb6b77
+== 131
+SET ROLE regress_user_mvtest
+--
+56facc463e2de425
+== 132
+-- this test case also checks for ambiguity in the queries issued by
+-- refresh_by_match_merge(), by choosing column names that intentionally
+-- duplicate all the aliases used in those queries
+CREATE TABLE mvtest_foo_data AS SELECT i,
+  i+1 AS tid,
+  fipshash(random()::text) AS mv,
+  fipshash(random()::text) AS newdata,
+  fipshash(random()::text) AS newdata2,
+  fipshash(random()::text) AS diff
+  FROM generate_series(1, 10) i
+--
+5dd900e662f2eff3
+== 133
+CREATE MATERIALIZED VIEW mvtest_mv_foo AS SELECT * FROM mvtest_foo_data
+--
+367c120de7be38e1
+== 134
+CREATE MATERIALIZED VIEW mvtest_mv_foo AS SELECT * FROM mvtest_foo_data
+--
+367c120de7be38e1
+== 135
+CREATE MATERIALIZED VIEW IF NOT EXISTS mvtest_mv_foo AS SELECT * FROM mvtest_foo_data
+--
+86978dd28919497d
+== 136
+CREATE UNIQUE INDEX ON mvtest_mv_foo (i)
+--
+fd88038706a0dcf2
+== 137
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 138
+REFRESH MATERIALIZED VIEW mvtest_mv_foo
+--
+ee5c6b77cd9d6ae4
+== 139
+REFRESH MATERIALIZED VIEW CONCURRENTLY mvtest_mv_foo
+--
+6ae643797ffcd23a
+== 140
+DROP OWNED BY regress_user_mvtest CASCADE
+--
+ac73d3d2a2ad35b1
+== 141
+DROP ROLE regress_user_mvtest
+--
+e281f6b7e3f0fd9f
+== 142
+-- Concurrent refresh requires a unique index on the materialized
+-- view. Test what happens if it's dropped during the refresh.
+SET search_path = mvtest_mvschema, public
+--
+972eb2e22f47f95c
+== 143
+CREATE OR REPLACE FUNCTION mvtest_drop_the_index()
+  RETURNS bool AS $$
+BEGIN
+  EXECUTE 'DROP INDEX IF EXISTS mvtest_mvschema.mvtest_drop_idx';
+  RETURN true;
+END;
+$$ LANGUAGE plpgsql
+--
+750eb32ae774c11b
+== 144
+CREATE MATERIALIZED VIEW drop_idx_matview AS
+  SELECT 1 as i WHERE mvtest_drop_the_index()
+--
+aa4504de5b637a11
+== 145
+CREATE UNIQUE INDEX mvtest_drop_idx ON drop_idx_matview (i)
+--
+c6d70765d196c718
+== 146
+REFRESH MATERIALIZED VIEW CONCURRENTLY drop_idx_matview
+--
+4ad19f46b499b46f
+== 147
+DROP MATERIALIZED VIEW drop_idx_matview
+--
+c3b9e941ef556136
+== 148
+-- clean up
+RESET search_path
+--
+e97698aade82a29f
+== 149
+-- make sure that create WITH NO DATA works via SPI
+BEGIN
+--
+b16b431979fc3e05
+== 150
+CREATE FUNCTION mvtest_func()
+  RETURNS void AS $$
+BEGIN
+  CREATE MATERIALIZED VIEW mvtest1 AS SELECT 1 AS x;
+  CREATE MATERIALIZED VIEW mvtest2 AS SELECT 1 AS x WITH NO DATA;
+END;
+$$ LANGUAGE plpgsql
+--
+f5e17bc045e06f7b
+== 151
+SELECT mvtest_func()
+--
+78249947dbf2a7f7
+== 152
+SELECT * FROM mvtest1
+--
+6eba00e2c74e6595
+== 153
+SELECT * FROM mvtest2
+--
+b9bbc42705d09620
+== 154
+ROLLBACK
+--
+a46081a556fda027
+== 155
+-- INSERT privileges if relation owner is not allowed to insert.
+CREATE SCHEMA matview_schema
+--
+4ad0276ab193eaba
+== 156
+CREATE USER regress_matview_user
+--
+39ace658d4e04c10
+== 157
+ALTER DEFAULT PRIVILEGES FOR ROLE regress_matview_user
+  REVOKE INSERT ON TABLES FROM regress_matview_user
+--
+58a2e34566bece63
+== 158
+GRANT ALL ON SCHEMA matview_schema TO public
+--
+67308d283a3e3d7a
+== 159
+SET SESSION AUTHORIZATION regress_matview_user
+--
+532a0ea53df105d9
+== 160
+CREATE MATERIALIZED VIEW matview_schema.mv_withdata1 (a) AS
+  SELECT generate_series(1, 10) WITH DATA
+--
+d188893b13d4d7b9
+== 161
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW matview_schema.mv_withdata2 (a) AS
+  SELECT generate_series(1, 10) WITH DATA
+--
+7918731db6613d4f
+== 162
+REFRESH MATERIALIZED VIEW matview_schema.mv_withdata2
+--
+effdc9de88ca016d
+== 163
+CREATE MATERIALIZED VIEW matview_schema.mv_nodata1 (a) AS
+  SELECT generate_series(1, 10) WITH NO DATA
+--
+c5702107953e0237
+== 164
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW matview_schema.mv_nodata2 (a) AS
+  SELECT generate_series(1, 10) WITH NO DATA
+--
+68fc1131e5bac0e9
+== 165
+REFRESH MATERIALIZED VIEW matview_schema.mv_nodata2
+--
+683780b9aa2e6640
+== 166
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 167
+ALTER DEFAULT PRIVILEGES FOR ROLE regress_matview_user
+  GRANT INSERT ON TABLES TO regress_matview_user
+--
+353499493fcb0aa5
+== 168
+DROP SCHEMA matview_schema CASCADE
+--
+8118e247d54d4cce
+== 169
+DROP USER regress_matview_user
+--
+ed88eb52625d7c79
+== 170
+-- CREATE MATERIALIZED VIEW ... IF NOT EXISTS
+CREATE MATERIALIZED VIEW matview_ine_tab AS SELECT 1
+--
+cf5875c56ae89eee
+== 171
+CREATE MATERIALIZED VIEW matview_ine_tab AS SELECT 1 / 0
+--
+f58db374848d49cb
+== 172
+-- error
+CREATE MATERIALIZED VIEW IF NOT EXISTS matview_ine_tab AS
+  SELECT 1 / 0
+--
+1fdd9803ed72e358
+== 173
+-- ok
+CREATE MATERIALIZED VIEW matview_ine_tab AS
+  SELECT 1 / 0 WITH NO DATA
+--
+cf518e2a3bffb90a
+== 174
+-- error
+CREATE MATERIALIZED VIEW IF NOT EXISTS matview_ine_tab AS
+  SELECT 1 / 0 WITH NO DATA
+--
+f484209682c6868e
+== 175
+-- ok
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW matview_ine_tab AS
+    SELECT 1 / 0
+--
+aebc20ed4d7bec3d
+== 176
+-- error
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW IF NOT EXISTS matview_ine_tab AS
+    SELECT 1 / 0
+--
+6df0a1b3b6ad5441
+== 177
+-- ok
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW matview_ine_tab AS
+    SELECT 1 / 0 WITH NO DATA
+--
+09a4bf3dd18cfac7
+== 178
+-- error
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+  CREATE MATERIALIZED VIEW IF NOT EXISTS matview_ine_tab AS
+    SELECT 1 / 0 WITH NO DATA
+--
+b2c0d9dd4a0e187e
+== 179
+-- ok
+DROP MATERIALIZED VIEW matview_ine_tab
+--
+8a72939d4fa92167

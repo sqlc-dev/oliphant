@@ -1,0 +1,371 @@
+== 001
+|--
+-- PREPARED TRANSACTIONS (two-phase commit)
+|--
+-- We can't readily test persistence of prepared xacts within the
+-- regression script framework, unfortunately.  Note that a crash
+-- isn't really needed ... stopping and starting the postmaster would
+-- be enough, but we can't even do that here.
+
+
+-- create a simple table that we'll use in the tests
+CREATE TABLE pxtest1 (foobar VARCHAR(10))
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":366},"tableElts":[{"ColumnDef":{"colname":"foobar","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"varchar"}}],"typmods":[{"A_Const":{"ival":{"ival":10},"location":390}}],"typemod":-1,"location":382},"is_local":true,"location":375}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 002
+INSERT INTO pxtest1 VALUES ('aaa')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"aaa"},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 003
+-- Test PREPARE TRANSACTION
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":62}},"defaction":"DEFELEM_UNSPEC","location":46}}],"location":-1}}}]}
+== 004
+UPDATE pxtest1 SET foobar = 'bbb' WHERE foobar = 'aaa'
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"foobar","val":{"A_Const":{"sval":{"sval":"bbb"},"location":28}},"location":19}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"foobar"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"aaa"},"location":49}},"location":47}}}}}]}
+== 005
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 006
+PREPARE TRANSACTION 'regress_foo1'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo1","location":20}}}]}
+== 007
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 008
+-- Test pg_prepared_xacts system view
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":45}},"location":45}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":54}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":78}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":84}},"location":82}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":105}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 009
+-- Test ROLLBACK PREPARED
+ROLLBACK PREPARED 'regress_foo1'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_PREPARED","gid":"regress_foo1","location":44}}}]}
+== 010
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 011
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":16}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":46}},"location":44}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 012
+-- Test COMMIT PREPARED
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":58}},"defaction":"DEFELEM_UNSPEC","location":42}}],"location":-1}}}]}
+== 013
+INSERT INTO pxtest1 VALUES ('ddd')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"ddd"},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 014
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 015
+PREPARE TRANSACTION 'regress_foo2'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo2","location":20}}}]}
+== 016
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 017
+COMMIT PREPARED 'regress_foo2'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT_PREPARED","gid":"regress_foo2","location":16}}}]}
+== 018
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 019
+-- Test duplicate gids
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":57}},"defaction":"DEFELEM_UNSPEC","location":41}}],"location":-1}}}]}
+== 020
+UPDATE pxtest1 SET foobar = 'eee' WHERE foobar = 'ddd'
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"foobar","val":{"A_Const":{"sval":{"sval":"eee"},"location":28}},"location":19}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"foobar"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"ddd"},"location":49}},"location":47}}}}}]}
+== 021
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
+PREPARE TRANSACTION 'regress_foo3'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo3","location":20}}}]}
+== 023
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":16}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":46}},"location":44}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 024
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":34}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 025
+INSERT INTO pxtest1 VALUES ('fff')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"fff"},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 026
+-- This should fail, because the gid foo3 is already in use
+PREPARE TRANSACTION 'regress_foo3'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo3","location":80}}}]}
+== 027
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+ROLLBACK PREPARED 'regress_foo3'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_PREPARED","gid":"regress_foo3","location":18}}}]}
+== 029
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+-- Test serialization failure (SSI)
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":70}},"defaction":"DEFELEM_UNSPEC","location":54}}],"location":-1}}}]}
+== 031
+UPDATE pxtest1 SET foobar = 'eee' WHERE foobar = 'ddd'
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"foobar","val":{"A_Const":{"sval":{"sval":"eee"},"location":28}},"location":19}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"foobar"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"ddd"},"location":49}},"location":47}}}}}]}
+== 032
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 033
+PREPARE TRANSACTION 'regress_foo4'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo4","location":20}}}]}
+== 034
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":16}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":46}},"location":44}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 035
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":34}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 036
+SELECT * FROM pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 037
+-- This should fail, because the two transactions have a write-skew anomaly
+INSERT INTO pxtest1 VALUES ('fff')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest1","inh":true,"relpersistence":"p","location":88},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"fff"},"location":104}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 038
+PREPARE TRANSACTION 'regress_foo5'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo5","location":20}}}]}
+== 039
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":16}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":46}},"location":44}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 040
+ROLLBACK PREPARED 'regress_foo4'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_PREPARED","gid":"regress_foo4","location":18}}}]}
+== 041
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":16}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":40}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":46}},"location":44}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":67}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 042
+-- Clean up
+DROP TABLE pxtest1
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"pxtest1"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 043
+-- Test detection of session-level and xact-level locks on same object
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 044
+SELECT pg_advisory_lock(1)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_advisory_lock"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":24}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 045
+SELECT pg_advisory_xact_lock_shared(1)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_advisory_xact_lock_shared"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":36}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 046
+PREPARE TRANSACTION 'regress_foo6'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_foo6","location":20}}}]}
+== 047
+-- fails
+
+-- Test subtransactions
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":68}},"defaction":"DEFELEM_UNSPEC","location":52}}],"location":-1}}}]}
+== 048
+CREATE TABLE pxtest2 (a int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":24},"is_local":true,"location":22}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 049
+INSERT INTO pxtest2 VALUES (1)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 050
+SAVEPOINT a
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"a","location":10}}}]}
+== 051
+INSERT INTO pxtest2 VALUES (2)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":2},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 052
+ROLLBACK TO a
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"a","location":12}}}]}
+== 053
+SAVEPOINT b
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"b","location":10}}}]}
+== 054
+INSERT INTO pxtest2 VALUES (3)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":3},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 055
+PREPARE TRANSACTION 'regress_sub1'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_sub1","location":20}}}]}
+== 056
+CREATE TABLE pxtest3(fff int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"pxtest3","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"fff","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":25},"is_local":true,"location":21}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 057
+-- Test shared invalidation
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","options":[{"DefElem":{"defname":"transaction_isolation","arg":{"A_Const":{"sval":{"sval":"serializable"},"location":62}},"defaction":"DEFELEM_UNSPEC","location":46}}],"location":-1}}}]}
+== 058
+DROP TABLE pxtest3
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"pxtest3"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 059
+CREATE TABLE pxtest4 (a int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"pxtest4","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":24},"is_local":true,"location":22}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 060
+INSERT INTO pxtest4 VALUES (1)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest4","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 061
+INSERT INTO pxtest4 VALUES (2)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"pxtest4","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":2},"location":28}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 062
+DECLARE foo CURSOR FOR SELECT * FROM pxtest4
+--
+{"version":170007,"stmts":[{"stmt":{"DeclareCursorStmt":{"portalname":"foo","options":256,"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":30}},"location":30}}],"fromClause":[{"RangeVar":{"relname":"pxtest4","inh":true,"relpersistence":"p","location":37}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
+== 063
+-- Fetch 1 tuple, keeping the cursor open
+  FETCH 1 FROM foo
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_FORWARD","howMany":1,"portalname":"foo"}}}]}
+== 064
+PREPARE TRANSACTION 'regress_sub2'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_PREPARE","gid":"regress_sub2","location":20}}}]}
+== 065
+-- No such cursor
+FETCH 1 FROM foo
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_FORWARD","howMany":1,"portalname":"foo"}}}]}
+== 066
+-- Table doesn't exist, the creation hasn't been committed yet
+SELECT * FROM pxtest2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":70}},"location":70}}],"fromClause":[{"RangeVar":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":77}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 067
+-- There should be two prepared transactions
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":52}},"location":52}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":61}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":85}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":91}},"location":89}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":112}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 068
+-- pxtest3 should be locked because of the pending DROP
+begin
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 069
+lock table pxtest3 in access share mode nowait
+--
+{"version":170007,"stmts":[{"stmt":{"LockStmt":{"relations":[{"RangeVar":{"relname":"pxtest3","inh":true,"relpersistence":"p","location":11}}],"mode":1,"nowait":true}}}]}
+== 070
+rollback
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 071
+-- Disconnect, we will continue testing in a different backend
+
+-- There should still be two prepared transactions
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":122}},"location":122}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":131}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":155}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":161}},"location":159}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":182}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 072
+-- pxtest3 should still be locked because of the pending DROP
+begin
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 073
+lock table pxtest3 in access share mode nowait
+--
+{"version":170007,"stmts":[{"stmt":{"LockStmt":{"relations":[{"RangeVar":{"relname":"pxtest3","inh":true,"relpersistence":"p","location":11}}],"mode":1,"nowait":true}}}]}
+== 074
+rollback
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 075
+-- Commit table creation
+COMMIT PREPARED 'regress_sub1'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT_PREPARED","gid":"regress_sub1","location":41}}}]}
+== 076
+SELECT * FROM pxtest2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest2","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 077
+-- There should be one prepared transaction
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":51}},"location":51}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":60}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":84}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":90}},"location":88}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":111}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 078
+-- Commit table drop
+COMMIT PREPARED 'regress_sub2'
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT_PREPARED","gid":"regress_sub2","location":37}}}]}
+== 079
+SELECT * FROM pxtest3
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pxtest3","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 080
+-- There should be no prepared transactions
+SELECT gid FROM pg_prepared_xacts WHERE gid ~ '^regress_' ORDER BY gid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":51}},"location":51}}],"fromClause":[{"RangeVar":{"relname":"pg_prepared_xacts","inh":true,"relpersistence":"p","location":60}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":84}},"rexpr":{"A_Const":{"sval":{"sval":"^regress_"},"location":90}},"location":88}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"gid"}}],"location":111}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 081
+-- Clean up
+DROP TABLE pxtest2
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"pxtest2"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 082
+DROP TABLE pxtest3
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"pxtest3"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 083
+-- will still be there if prepared xacts are disabled
+DROP TABLE pxtest4
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"pxtest4"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}

@@ -1,0 +1,636 @@
+== 001
+|--
+-- EXPLAIN
+|--
+-- There are many test cases elsewhere that use EXPLAIN as a vehicle for
+-- checking something else (usually planner behavior).  This file is
+-- concerned with testing EXPLAIN in its own right.
+|--
+
+-- To produce stable regression test output, it's usually necessary to
+-- ignore details such as exact costs or row counts.  These filter
+-- functions replace changeable output details with fixed strings.
+
+create function explain_filter(text) returns setof text
+language plpgsql as
+$$
+declare
+    ln text;
+begin
+    for ln in execute $1
+    loop
+        -- Replace any numeric word with just 'N'
+        ln := regexp_replace(ln, '-?\m\d+\M', 'N', 'g');
+        -- In sort output, the above won't match units-suffixed numbers
+        ln := regexp_replace(ln, '\m\d+kB', 'NkB', 'g');
+        -- Ignore text-mode buffers output because it varies depending
+        -- on the system state
+        CONTINUE WHEN (ln ~ ' +Buffers: .*');
+        -- Ignore text-mode "Planning:" line because whether it's output
+        -- varies depending on the system state
+        CONTINUE WHEN (ln = 'Planning:');
+        return next ln;
+    end loop;
+end;
+$$
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 13 SQL_COMMENT NO_KEYWORD
+14 16 SQL_COMMENT NO_KEYWORD
+17 89 SQL_COMMENT NO_KEYWORD
+90 158 SQL_COMMENT NO_KEYWORD
+159 210 SQL_COMMENT NO_KEYWORD
+211 213 SQL_COMMENT NO_KEYWORD
+215 285 SQL_COMMENT NO_KEYWORD
+286 352 SQL_COMMENT NO_KEYWORD
+353 419 SQL_COMMENT NO_KEYWORD
+421 427 CREATE RESERVED_KEYWORD
+428 436 FUNCTION UNRESERVED_KEYWORD
+437 451 IDENT NO_KEYWORD
+451 452 ASCII_40 NO_KEYWORD
+452 456 TEXT_P UNRESERVED_KEYWORD
+456 457 ASCII_41 NO_KEYWORD
+458 465 RETURNS UNRESERVED_KEYWORD
+466 471 SETOF COL_NAME_KEYWORD
+472 476 TEXT_P UNRESERVED_KEYWORD
+477 485 LANGUAGE UNRESERVED_KEYWORD
+486 493 IDENT NO_KEYWORD
+494 496 AS RESERVED_KEYWORD
+497 1153 SCONST NO_KEYWORD
+== 002
+-- To produce valid JSON output, replace numbers with "0" or "0.0" not "N"
+create function explain_filter_to_json(text) returns jsonb
+language plpgsql as
+$$
+declare
+    data text := '';
+    ln text;
+begin
+    for ln in execute $1
+    loop
+        -- Replace any numeric word with just '0'
+        ln := regexp_replace(ln, '\m\d+\M', '0', 'g');
+        data := data || ln;
+    end loop;
+    return data::jsonb;
+end;
+$$
+--
+0 74 SQL_COMMENT NO_KEYWORD
+75 81 CREATE RESERVED_KEYWORD
+82 90 FUNCTION UNRESERVED_KEYWORD
+91 113 IDENT NO_KEYWORD
+113 114 ASCII_40 NO_KEYWORD
+114 118 TEXT_P UNRESERVED_KEYWORD
+118 119 ASCII_41 NO_KEYWORD
+120 127 RETURNS UNRESERVED_KEYWORD
+128 133 IDENT NO_KEYWORD
+134 142 LANGUAGE UNRESERVED_KEYWORD
+143 150 IDENT NO_KEYWORD
+151 153 AS RESERVED_KEYWORD
+154 417 SCONST NO_KEYWORD
+== 003
+-- Disable JIT, or we'll get different output on machines where that's been
+-- forced on
+set jit = off
+--
+0 75 SQL_COMMENT NO_KEYWORD
+76 88 SQL_COMMENT NO_KEYWORD
+89 92 SET UNRESERVED_KEYWORD
+93 96 IDENT NO_KEYWORD
+97 98 ASCII_61 NO_KEYWORD
+99 102 OFF UNRESERVED_KEYWORD
+== 004
+-- Similarly, disable track_io_timing, to avoid output differences when
+-- enabled.
+set track_io_timing = off
+--
+0 71 SQL_COMMENT NO_KEYWORD
+72 83 SQL_COMMENT NO_KEYWORD
+84 87 SET UNRESERVED_KEYWORD
+88 103 IDENT NO_KEYWORD
+104 105 ASCII_61 NO_KEYWORD
+106 109 OFF UNRESERVED_KEYWORD
+== 005
+-- Simple cases
+
+select explain_filter('explain select * from int8_tbl i8')
+--
+0 15 SQL_COMMENT NO_KEYWORD
+17 23 SELECT RESERVED_KEYWORD
+24 38 IDENT NO_KEYWORD
+38 39 ASCII_40 NO_KEYWORD
+39 74 SCONST NO_KEYWORD
+74 75 ASCII_41 NO_KEYWORD
+== 006
+select explain_filter('explain (analyze) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 67 SCONST NO_KEYWORD
+67 68 ASCII_41 NO_KEYWORD
+== 007
+select explain_filter('explain (analyze, verbose) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 76 SCONST NO_KEYWORD
+76 77 ASCII_41 NO_KEYWORD
+== 008
+select explain_filter('explain (analyze, buffers, format text) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 89 SCONST NO_KEYWORD
+89 90 ASCII_41 NO_KEYWORD
+== 009
+select explain_filter('explain (analyze, buffers, format xml) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 88 SCONST NO_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+== 010
+select explain_filter('explain (analyze, serialize, buffers, format yaml) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 100 SCONST NO_KEYWORD
+100 101 ASCII_41 NO_KEYWORD
+== 011
+select explain_filter('explain (buffers, format text) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 80 SCONST NO_KEYWORD
+80 81 ASCII_41 NO_KEYWORD
+== 012
+select explain_filter('explain (buffers, format json) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 80 SCONST NO_KEYWORD
+80 81 ASCII_41 NO_KEYWORD
+== 013
+-- Check output including I/O timings.  These fields are conditional
+-- but always set in JSON format, so check them only in this case.
+set track_io_timing = on
+--
+0 68 SQL_COMMENT NO_KEYWORD
+69 135 SQL_COMMENT NO_KEYWORD
+136 139 SET UNRESERVED_KEYWORD
+140 155 IDENT NO_KEYWORD
+156 157 ASCII_61 NO_KEYWORD
+158 160 ON RESERVED_KEYWORD
+== 014
+select explain_filter('explain (analyze, buffers, format json) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 89 SCONST NO_KEYWORD
+89 90 ASCII_41 NO_KEYWORD
+== 015
+set track_io_timing = off
+--
+0 3 SET UNRESERVED_KEYWORD
+4 19 IDENT NO_KEYWORD
+20 21 ASCII_61 NO_KEYWORD
+22 25 OFF UNRESERVED_KEYWORD
+== 016
+-- SETTINGS option
+-- We have to ignore other settings that might be imposed by the environment,
+-- so printing the whole Settings field unfortunately won't do.
+
+begin
+--
+0 18 SQL_COMMENT NO_KEYWORD
+19 96 SQL_COMMENT NO_KEYWORD
+97 160 SQL_COMMENT NO_KEYWORD
+162 167 BEGIN_P UNRESERVED_KEYWORD
+== 017
+set local plan_cache_mode = force_generic_plan
+--
+0 3 SET UNRESERVED_KEYWORD
+4 9 LOCAL UNRESERVED_KEYWORD
+10 25 IDENT NO_KEYWORD
+26 27 ASCII_61 NO_KEYWORD
+28 46 IDENT NO_KEYWORD
+== 018
+select true as "OK"
+  from explain_filter('explain (settings) select * from int8_tbl i8') ln
+  where ln ~ '^ *Settings: .*plan_cache_mode = ''force_generic_plan'''
+--
+0 6 SELECT RESERVED_KEYWORD
+7 11 TRUE_P RESERVED_KEYWORD
+12 14 AS RESERVED_KEYWORD
+15 19 IDENT NO_KEYWORD
+22 26 FROM RESERVED_KEYWORD
+27 41 IDENT NO_KEYWORD
+41 42 ASCII_40 NO_KEYWORD
+42 88 SCONST NO_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+90 92 IDENT NO_KEYWORD
+95 100 WHERE RESERVED_KEYWORD
+101 103 IDENT NO_KEYWORD
+104 105 Op NO_KEYWORD
+106 163 SCONST NO_KEYWORD
+== 019
+select explain_filter_to_json('explain (settings, format json) select * from int8_tbl i8') #> '{0,Settings,plan_cache_mode}'
+--
+0 6 SELECT RESERVED_KEYWORD
+7 29 IDENT NO_KEYWORD
+29 30 ASCII_40 NO_KEYWORD
+30 89 SCONST NO_KEYWORD
+89 90 ASCII_41 NO_KEYWORD
+91 93 Op NO_KEYWORD
+94 124 SCONST NO_KEYWORD
+== 020
+rollback
+--
+0 8 ROLLBACK UNRESERVED_KEYWORD
+== 021
+-- GENERIC_PLAN option
+
+select explain_filter('explain (generic_plan) select unique1 from tenk1 where thousand = $1')
+--
+0 22 SQL_COMMENT NO_KEYWORD
+24 30 SELECT RESERVED_KEYWORD
+31 45 IDENT NO_KEYWORD
+45 46 ASCII_40 NO_KEYWORD
+46 116 SCONST NO_KEYWORD
+116 117 ASCII_41 NO_KEYWORD
+== 022
+-- should fail
+select explain_filter('explain (analyze, generic_plan) select unique1 from tenk1 where thousand = $1')
+--
+0 14 SQL_COMMENT NO_KEYWORD
+15 21 SELECT RESERVED_KEYWORD
+22 36 IDENT NO_KEYWORD
+36 37 ASCII_40 NO_KEYWORD
+37 116 SCONST NO_KEYWORD
+116 117 ASCII_41 NO_KEYWORD
+== 023
+-- MEMORY option
+select explain_filter('explain (memory) select * from int8_tbl i8')
+--
+0 16 SQL_COMMENT NO_KEYWORD
+17 23 SELECT RESERVED_KEYWORD
+24 38 IDENT NO_KEYWORD
+38 39 ASCII_40 NO_KEYWORD
+39 83 SCONST NO_KEYWORD
+83 84 ASCII_41 NO_KEYWORD
+== 024
+select explain_filter('explain (memory, analyze) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 75 SCONST NO_KEYWORD
+75 76 ASCII_41 NO_KEYWORD
+== 025
+select explain_filter('explain (memory, summary, format yaml) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 88 SCONST NO_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+== 026
+select explain_filter('explain (memory, analyze, format json) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 88 SCONST NO_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+== 027
+prepare int8_query as select * from int8_tbl i8
+--
+0 7 PREPARE UNRESERVED_KEYWORD
+8 18 IDENT NO_KEYWORD
+19 21 AS RESERVED_KEYWORD
+22 28 SELECT RESERVED_KEYWORD
+29 30 ASCII_42 NO_KEYWORD
+31 35 FROM RESERVED_KEYWORD
+36 44 IDENT NO_KEYWORD
+45 47 IDENT NO_KEYWORD
+== 028
+select explain_filter('explain (memory) execute int8_query')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 59 SCONST NO_KEYWORD
+59 60 ASCII_41 NO_KEYWORD
+== 029
+-- Test EXPLAIN (GENERIC_PLAN) with partition pruning
+-- partitions should be pruned at plan time, based on constants,
+-- but there should be no pruning based on parameter placeholders
+create table gen_part (
+  key1 integer not null,
+  key2 integer not null
+) partition by list (key1)
+--
+0 53 SQL_COMMENT NO_KEYWORD
+54 118 SQL_COMMENT NO_KEYWORD
+119 184 SQL_COMMENT NO_KEYWORD
+185 191 CREATE RESERVED_KEYWORD
+192 197 TABLE RESERVED_KEYWORD
+198 206 IDENT NO_KEYWORD
+207 208 ASCII_40 NO_KEYWORD
+211 215 IDENT NO_KEYWORD
+216 223 INTEGER COL_NAME_KEYWORD
+224 227 NOT RESERVED_KEYWORD
+228 232 NULL_P RESERVED_KEYWORD
+232 233 ASCII_44 NO_KEYWORD
+236 240 IDENT NO_KEYWORD
+241 248 INTEGER COL_NAME_KEYWORD
+249 252 NOT RESERVED_KEYWORD
+253 257 NULL_P RESERVED_KEYWORD
+258 259 ASCII_41 NO_KEYWORD
+260 269 PARTITION UNRESERVED_KEYWORD
+270 272 BY UNRESERVED_KEYWORD
+273 277 IDENT NO_KEYWORD
+278 279 ASCII_40 NO_KEYWORD
+279 283 IDENT NO_KEYWORD
+283 284 ASCII_41 NO_KEYWORD
+== 030
+create table gen_part_1
+  partition of gen_part for values in (1)
+  partition by range (key2)
+--
+0 6 CREATE RESERVED_KEYWORD
+7 12 TABLE RESERVED_KEYWORD
+13 23 IDENT NO_KEYWORD
+26 35 PARTITION UNRESERVED_KEYWORD
+36 38 OF UNRESERVED_KEYWORD
+39 47 IDENT NO_KEYWORD
+48 51 FOR RESERVED_KEYWORD
+52 58 VALUES COL_NAME_KEYWORD
+59 61 IN_P RESERVED_KEYWORD
+62 63 ASCII_40 NO_KEYWORD
+63 64 ICONST NO_KEYWORD
+64 65 ASCII_41 NO_KEYWORD
+68 77 PARTITION UNRESERVED_KEYWORD
+78 80 BY UNRESERVED_KEYWORD
+81 86 RANGE UNRESERVED_KEYWORD
+87 88 ASCII_40 NO_KEYWORD
+88 92 IDENT NO_KEYWORD
+92 93 ASCII_41 NO_KEYWORD
+== 031
+create table gen_part_1_1
+  partition of gen_part_1 for values from (1) to (2)
+--
+0 6 CREATE RESERVED_KEYWORD
+7 12 TABLE RESERVED_KEYWORD
+13 25 IDENT NO_KEYWORD
+28 37 PARTITION UNRESERVED_KEYWORD
+38 40 OF UNRESERVED_KEYWORD
+41 51 IDENT NO_KEYWORD
+52 55 FOR RESERVED_KEYWORD
+56 62 VALUES COL_NAME_KEYWORD
+63 67 FROM RESERVED_KEYWORD
+68 69 ASCII_40 NO_KEYWORD
+69 70 ICONST NO_KEYWORD
+70 71 ASCII_41 NO_KEYWORD
+72 74 TO RESERVED_KEYWORD
+75 76 ASCII_40 NO_KEYWORD
+76 77 ICONST NO_KEYWORD
+77 78 ASCII_41 NO_KEYWORD
+== 032
+create table gen_part_1_2
+  partition of gen_part_1 for values from (2) to (3)
+--
+0 6 CREATE RESERVED_KEYWORD
+7 12 TABLE RESERVED_KEYWORD
+13 25 IDENT NO_KEYWORD
+28 37 PARTITION UNRESERVED_KEYWORD
+38 40 OF UNRESERVED_KEYWORD
+41 51 IDENT NO_KEYWORD
+52 55 FOR RESERVED_KEYWORD
+56 62 VALUES COL_NAME_KEYWORD
+63 67 FROM RESERVED_KEYWORD
+68 69 ASCII_40 NO_KEYWORD
+69 70 ICONST NO_KEYWORD
+70 71 ASCII_41 NO_KEYWORD
+72 74 TO RESERVED_KEYWORD
+75 76 ASCII_40 NO_KEYWORD
+76 77 ICONST NO_KEYWORD
+77 78 ASCII_41 NO_KEYWORD
+== 033
+create table gen_part_2
+  partition of gen_part for values in (2)
+--
+0 6 CREATE RESERVED_KEYWORD
+7 12 TABLE RESERVED_KEYWORD
+13 23 IDENT NO_KEYWORD
+26 35 PARTITION UNRESERVED_KEYWORD
+36 38 OF UNRESERVED_KEYWORD
+39 47 IDENT NO_KEYWORD
+48 51 FOR RESERVED_KEYWORD
+52 58 VALUES COL_NAME_KEYWORD
+59 61 IN_P RESERVED_KEYWORD
+62 63 ASCII_40 NO_KEYWORD
+63 64 ICONST NO_KEYWORD
+64 65 ASCII_41 NO_KEYWORD
+== 034
+-- should scan gen_part_1_1 and gen_part_1_2, but not gen_part_2
+select explain_filter('explain (generic_plan) select key1, key2 from gen_part where key1 = 1 and key2 = $1')
+--
+0 64 SQL_COMMENT NO_KEYWORD
+65 71 SELECT RESERVED_KEYWORD
+72 86 IDENT NO_KEYWORD
+86 87 ASCII_40 NO_KEYWORD
+87 172 SCONST NO_KEYWORD
+172 173 ASCII_41 NO_KEYWORD
+== 035
+drop table gen_part
+--
+0 4 DROP UNRESERVED_KEYWORD
+5 10 TABLE RESERVED_KEYWORD
+11 19 IDENT NO_KEYWORD
+== 036
+|--
+-- Test production of per-worker data
+|--
+-- Unfortunately, because we don't know how many worker processes we'll
+-- actually get (maybe none at all), we can't examine the "Workers" output
+-- in any detail.  We can check that it parses correctly as JSON, and then
+-- remove it from the displayed results.
+
+begin
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 40 SQL_COMMENT NO_KEYWORD
+41 43 SQL_COMMENT NO_KEYWORD
+44 115 SQL_COMMENT NO_KEYWORD
+116 190 SQL_COMMENT NO_KEYWORD
+191 265 SQL_COMMENT NO_KEYWORD
+266 306 SQL_COMMENT NO_KEYWORD
+308 313 BEGIN_P UNRESERVED_KEYWORD
+== 037
+-- encourage use of parallel plans
+set parallel_setup_cost=0
+--
+0 34 SQL_COMMENT NO_KEYWORD
+35 38 SET UNRESERVED_KEYWORD
+39 58 IDENT NO_KEYWORD
+58 59 ASCII_61 NO_KEYWORD
+59 60 ICONST NO_KEYWORD
+== 038
+set parallel_tuple_cost=0
+--
+0 3 SET UNRESERVED_KEYWORD
+4 23 IDENT NO_KEYWORD
+23 24 ASCII_61 NO_KEYWORD
+24 25 ICONST NO_KEYWORD
+== 039
+set min_parallel_table_scan_size=0
+--
+0 3 SET UNRESERVED_KEYWORD
+4 32 IDENT NO_KEYWORD
+32 33 ASCII_61 NO_KEYWORD
+33 34 ICONST NO_KEYWORD
+== 040
+set max_parallel_workers_per_gather=4
+--
+0 3 SET UNRESERVED_KEYWORD
+4 35 IDENT NO_KEYWORD
+35 36 ASCII_61 NO_KEYWORD
+36 37 ICONST NO_KEYWORD
+== 041
+select jsonb_pretty(
+  explain_filter_to_json('explain (analyze, verbose, buffers, format json)
+                         select * from tenk1 order by tenthous')
+  -- remove "Workers" node of the Seq Scan plan node
+  #- '{0,Plan,Plans,0,Plans,0,Workers}'
+  -- remove "Workers" node of the Sort plan node
+  #- '{0,Plan,Plans,0,Workers}'
+  -- Also remove its sort-type fields, as those aren't 100% stable
+  #- '{0,Plan,Plans,0,Sort Method}'
+  #- '{0,Plan,Plans,0,Sort Space Type}'
+)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 19 IDENT NO_KEYWORD
+19 20 ASCII_40 NO_KEYWORD
+23 45 IDENT NO_KEYWORD
+45 46 ASCII_40 NO_KEYWORD
+46 159 SCONST NO_KEYWORD
+159 160 ASCII_41 NO_KEYWORD
+163 213 SQL_COMMENT NO_KEYWORD
+216 218 Op NO_KEYWORD
+219 253 SCONST NO_KEYWORD
+256 302 SQL_COMMENT NO_KEYWORD
+305 307 Op NO_KEYWORD
+308 334 SCONST NO_KEYWORD
+337 401 SQL_COMMENT NO_KEYWORD
+404 406 Op NO_KEYWORD
+407 437 SCONST NO_KEYWORD
+440 442 Op NO_KEYWORD
+443 477 SCONST NO_KEYWORD
+478 479 ASCII_41 NO_KEYWORD
+== 042
+rollback
+--
+0 8 ROLLBACK UNRESERVED_KEYWORD
+== 043
+-- Test display of temporary objects
+create temp table t1(f1 float8)
+--
+0 36 SQL_COMMENT NO_KEYWORD
+37 43 CREATE RESERVED_KEYWORD
+44 48 TEMP UNRESERVED_KEYWORD
+49 54 TABLE RESERVED_KEYWORD
+55 57 IDENT NO_KEYWORD
+57 58 ASCII_40 NO_KEYWORD
+58 60 IDENT NO_KEYWORD
+61 67 IDENT NO_KEYWORD
+67 68 ASCII_41 NO_KEYWORD
+== 044
+create function pg_temp.mysin(float8) returns float8 language plpgsql
+as 'begin return sin($1); end'
+--
+0 6 CREATE RESERVED_KEYWORD
+7 15 FUNCTION UNRESERVED_KEYWORD
+16 23 IDENT NO_KEYWORD
+23 24 ASCII_46 NO_KEYWORD
+24 29 IDENT NO_KEYWORD
+29 30 ASCII_40 NO_KEYWORD
+30 36 IDENT NO_KEYWORD
+36 37 ASCII_41 NO_KEYWORD
+38 45 RETURNS UNRESERVED_KEYWORD
+46 52 IDENT NO_KEYWORD
+53 61 LANGUAGE UNRESERVED_KEYWORD
+62 69 IDENT NO_KEYWORD
+70 72 AS RESERVED_KEYWORD
+73 100 SCONST NO_KEYWORD
+== 045
+select explain_filter('explain (verbose) select * from t1 where pg_temp.mysin(f1) < 0.5')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 88 SCONST NO_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+== 046
+-- Test compute_query_id
+set compute_query_id = on
+--
+0 24 SQL_COMMENT NO_KEYWORD
+25 28 SET UNRESERVED_KEYWORD
+29 45 IDENT NO_KEYWORD
+46 47 ASCII_61 NO_KEYWORD
+48 50 ON RESERVED_KEYWORD
+== 047
+select explain_filter('explain (verbose) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 67 SCONST NO_KEYWORD
+67 68 ASCII_41 NO_KEYWORD
+== 048
+-- Test SERIALIZE option
+select explain_filter('explain (analyze,serialize) select * from int8_tbl i8')
+--
+0 24 SQL_COMMENT NO_KEYWORD
+25 31 SELECT RESERVED_KEYWORD
+32 46 IDENT NO_KEYWORD
+46 47 ASCII_40 NO_KEYWORD
+47 102 SCONST NO_KEYWORD
+102 103 ASCII_41 NO_KEYWORD
+== 049
+select explain_filter('explain (analyze,serialize text,buffers,timing off) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 101 SCONST NO_KEYWORD
+101 102 ASCII_41 NO_KEYWORD
+== 050
+select explain_filter('explain (analyze,serialize binary,buffers,timing) select * from int8_tbl i8')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 99 SCONST NO_KEYWORD
+99 100 ASCII_41 NO_KEYWORD
+== 051
+-- this tests an edge case where we have no data to return
+select explain_filter('explain (analyze,serialize) create temp table explain_temp as select * from int8_tbl i8')
+--
+0 58 SQL_COMMENT NO_KEYWORD
+59 65 SELECT RESERVED_KEYWORD
+66 80 IDENT NO_KEYWORD
+80 81 ASCII_40 NO_KEYWORD
+81 170 SCONST NO_KEYWORD
+170 171 ASCII_41 NO_KEYWORD

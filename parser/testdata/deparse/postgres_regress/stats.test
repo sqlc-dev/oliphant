@@ -1,0 +1,2359 @@
+== 001
+|--
+-- Test cumulative stats system
+|--
+-- Must be run after tenk2 has been created (by create_table),
+-- populated (by create_misc) and indexed (by create_index).
+|--
+
+-- conditio sine qua non
+SHOW track_counts
+--
+SHOW track_counts
+== 002
+-- must be on
+
+-- ensure that both seqscan and indexscan plans are allowed
+SET enable_seqscan TO on
+--
+SET enable_seqscan TO ON
+== 003
+SET enable_indexscan TO on
+--
+SET enable_indexscan TO ON
+== 004
+-- for the moment, we don't want index-only scans here
+SET enable_indexonlyscan TO off
+--
+SET enable_indexonlyscan TO OFF
+== 005
+-- not enabled by default, but we want to test it...
+SET track_functions TO 'all'
+--
+SET track_functions TO "all"
+== 006
+-- record dboid for later use
+SELECT oid AS dboid from pg_database where datname = current_database()
+--
+SELECT oid AS dboid FROM pg_database WHERE datname = current_database()
+== 007
+-- save counters
+BEGIN
+--
+BEGIN
+== 008
+SET LOCAL stats_fetch_consistency = snapshot
+--
+SET LOCAL stats_fetch_consistency TO snapshot
+== 009
+CREATE TABLE prevstats AS
+SELECT t.seq_scan, t.seq_tup_read, t.idx_scan, t.idx_tup_fetch,
+       (b.heap_blks_read + b.heap_blks_hit) AS heap_blks,
+       (b.idx_blks_read + b.idx_blks_hit) AS idx_blks,
+       pg_stat_get_snapshot_timestamp() as snap_ts
+  FROM pg_catalog.pg_stat_user_tables AS t,
+       pg_catalog.pg_statio_user_tables AS b
+ WHERE t.relname='tenk2' AND b.relname='tenk2'
+--
+CREATE TABLE prevstats AS SELECT t.seq_scan, t.seq_tup_read, t.idx_scan, t.idx_tup_fetch, b.heap_blks_read + b.heap_blks_hit AS heap_blks, b.idx_blks_read + b.idx_blks_hit AS idx_blks, pg_stat_get_snapshot_timestamp() AS snap_ts FROM pg_catalog.pg_stat_user_tables t, pg_catalog.pg_statio_user_tables b WHERE t.relname = 'tenk2' AND b.relname = 'tenk2'
+== 010
+COMMIT
+--
+COMMIT
+== 011
+-- test effects of TRUNCATE on n_live_tup/n_dead_tup counters
+CREATE TABLE trunc_stats_test(id serial)
+--
+CREATE TABLE trunc_stats_test (id serial)
+== 012
+CREATE TABLE trunc_stats_test1(id serial, stuff text)
+--
+CREATE TABLE trunc_stats_test1 (id serial, stuff text)
+== 013
+CREATE TABLE trunc_stats_test2(id serial)
+--
+CREATE TABLE trunc_stats_test2 (id serial)
+== 014
+CREATE TABLE trunc_stats_test3(id serial, stuff text)
+--
+CREATE TABLE trunc_stats_test3 (id serial, stuff text)
+== 015
+CREATE TABLE trunc_stats_test4(id serial)
+--
+CREATE TABLE trunc_stats_test4 (id serial)
+== 016
+-- check that n_live_tup is reset to 0 after truncate
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test DEFAULT VALUES
+== 017
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test DEFAULT VALUES
+== 018
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test DEFAULT VALUES
+== 019
+TRUNCATE trunc_stats_test
+--
+TRUNCATE trunc_stats_test
+== 020
+-- test involving a truncate in a transaction; 4 ins but only 1 live
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+== 021
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+== 022
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+== 023
+UPDATE trunc_stats_test1 SET id = id + 10 WHERE id IN (1, 2)
+--
+UPDATE trunc_stats_test1 SET id = id + 10 WHERE id IN (1, 2)
+== 024
+DELETE FROM trunc_stats_test1 WHERE id = 3
+--
+DELETE FROM trunc_stats_test1 WHERE id = 3
+== 025
+BEGIN
+--
+BEGIN
+== 026
+UPDATE trunc_stats_test1 SET id = id + 100
+--
+UPDATE trunc_stats_test1 SET id = id + 100
+== 027
+TRUNCATE trunc_stats_test1
+--
+TRUNCATE trunc_stats_test1
+== 028
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+== 029
+COMMIT
+--
+COMMIT
+== 030
+-- use a savepoint: 1 insert, 1 live
+BEGIN
+--
+BEGIN
+== 031
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+== 032
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+== 033
+SAVEPOINT p1
+--
+SAVEPOINT p1
+== 034
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+== 035
+TRUNCATE trunc_stats_test2
+--
+TRUNCATE trunc_stats_test2
+== 036
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+== 037
+RELEASE SAVEPOINT p1
+--
+RELEASE p1
+== 038
+COMMIT
+--
+COMMIT
+== 039
+-- rollback a savepoint: this should count 4 inserts and have 2
+-- live tuples after commit (and 2 dead ones due to aborted subxact)
+BEGIN
+--
+BEGIN
+== 040
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+== 041
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+== 042
+SAVEPOINT p1
+--
+SAVEPOINT p1
+== 043
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+== 044
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+== 045
+TRUNCATE trunc_stats_test3
+--
+TRUNCATE trunc_stats_test3
+== 046
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+== 047
+ROLLBACK TO SAVEPOINT p1
+--
+ROLLBACK TO SAVEPOINT p1
+== 048
+COMMIT
+--
+COMMIT
+== 049
+-- rollback a truncate: this should count 2 inserts and produce 2 dead tuples
+BEGIN
+--
+BEGIN
+== 050
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+== 051
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+== 052
+TRUNCATE trunc_stats_test4
+--
+TRUNCATE trunc_stats_test4
+== 053
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+== 054
+ROLLBACK
+--
+ROLLBACK
+== 055
+-- do a seqscan
+SELECT count(*) FROM tenk2
+--
+SELECT count(*) FROM tenk2
+== 056
+-- do an indexscan
+-- make sure it is not a bitmap scan, which might skip fetching heap tuples
+SET enable_bitmapscan TO off
+--
+SET enable_bitmapscan TO OFF
+== 057
+SELECT count(*) FROM tenk2 WHERE unique1 = 1
+--
+SELECT count(*) FROM tenk2 WHERE unique1 = 1
+== 058
+RESET enable_bitmapscan
+--
+RESET enable_bitmapscan
+== 059
+-- ensure pending stats are flushed
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 060
+-- check effects
+BEGIN
+--
+BEGIN
+== 061
+SET LOCAL stats_fetch_consistency = snapshot
+--
+SET LOCAL stats_fetch_consistency TO snapshot
+== 062
+SELECT relname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup
+  FROM pg_stat_user_tables
+ WHERE relname like 'trunc_stats_test%' order by relname
+--
+SELECT relname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE relname LIKE 'trunc_stats_test%' ORDER BY relname
+== 063
+SELECT st.seq_scan >= pr.seq_scan + 1,
+       st.seq_tup_read >= pr.seq_tup_read + cl.reltuples,
+       st.idx_scan >= pr.idx_scan + 1,
+       st.idx_tup_fetch >= pr.idx_tup_fetch + 1
+  FROM pg_stat_user_tables AS st, pg_class AS cl, prevstats AS pr
+ WHERE st.relname='tenk2' AND cl.relname='tenk2'
+--
+SELECT st.seq_scan >= (pr.seq_scan + 1), st.seq_tup_read >= (pr.seq_tup_read + cl.reltuples), st.idx_scan >= (pr.idx_scan + 1), st.idx_tup_fetch >= (pr.idx_tup_fetch + 1) FROM pg_stat_user_tables st, pg_class cl, prevstats pr WHERE st.relname = 'tenk2' AND cl.relname = 'tenk2'
+== 064
+SELECT st.heap_blks_read + st.heap_blks_hit >= pr.heap_blks + cl.relpages,
+       st.idx_blks_read + st.idx_blks_hit >= pr.idx_blks + 1
+  FROM pg_statio_user_tables AS st, pg_class AS cl, prevstats AS pr
+ WHERE st.relname='tenk2' AND cl.relname='tenk2'
+--
+SELECT (st.heap_blks_read + st.heap_blks_hit) >= (pr.heap_blks + cl.relpages), (st.idx_blks_read + st.idx_blks_hit) >= (pr.idx_blks + 1) FROM pg_statio_user_tables st, pg_class cl, prevstats pr WHERE st.relname = 'tenk2' AND cl.relname = 'tenk2'
+== 065
+SELECT pr.snap_ts < pg_stat_get_snapshot_timestamp() as snapshot_newer
+FROM prevstats AS pr
+--
+SELECT pr.snap_ts < pg_stat_get_snapshot_timestamp() AS snapshot_newer FROM prevstats pr
+== 066
+COMMIT
+--
+COMMIT
+== 067
+----
+-- Basic tests for track_functions
+---
+CREATE FUNCTION stats_test_func1() RETURNS VOID LANGUAGE plpgsql AS $$BEGIN END;$$
+--
+CREATE FUNCTION stats_test_func1() RETURNS void LANGUAGE plpgsql AS $$BEGIN END;$$
+== 068
+SELECT 'stats_test_func1()'::regprocedure::oid AS stats_test_func1_oid
+--
+SELECT 'stats_test_func1()'::regprocedure::oid AS stats_test_func1_oid
+== 069
+CREATE FUNCTION stats_test_func2() RETURNS VOID LANGUAGE plpgsql AS $$BEGIN END;$$
+--
+CREATE FUNCTION stats_test_func2() RETURNS void LANGUAGE plpgsql AS $$BEGIN END;$$
+== 070
+SELECT 'stats_test_func2()'::regprocedure::oid AS stats_test_func2_oid
+--
+SELECT 'stats_test_func2()'::regprocedure::oid AS stats_test_func2_oid
+== 071
+-- test that stats are accumulated
+BEGIN
+--
+BEGIN
+== 072
+SET LOCAL stats_fetch_consistency = none
+--
+SET LOCAL stats_fetch_consistency TO "none"
+== 073
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 074
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 075
+SELECT stats_test_func1()
+--
+SELECT stats_test_func1()
+== 076
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 077
+SELECT stats_test_func1()
+--
+SELECT stats_test_func1()
+== 078
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 079
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 080
+COMMIT
+--
+COMMIT
+== 081
+-- Verify that function stats are not transactional
+
+-- rolled back savepoint in committing transaction
+BEGIN
+--
+BEGIN
+== 082
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 083
+SAVEPOINT foo
+--
+SAVEPOINT foo
+== 084
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 085
+ROLLBACK TO SAVEPOINT foo
+--
+ROLLBACK TO SAVEPOINT foo
+== 086
+SELECT pg_stat_get_xact_function_calls(:stats_test_func2_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 087
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 088
+COMMIT
+--
+COMMIT
+== 089
+-- rolled back transaction
+BEGIN
+--
+BEGIN
+== 090
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 091
+ROLLBACK
+--
+ROLLBACK
+== 092
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 093
+-- check collected stats
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 92
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 094
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func2_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 095
+-- check that a rolled back drop function stats leaves stats alive
+BEGIN
+--
+BEGIN
+== 096
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 097
+DROP FUNCTION stats_test_func1()
+--
+DROP FUNCTION stats_test_func1()
+== 098
+-- shouldn't be visible via view
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 100
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 099
+-- but still via oid access
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 100
+ROLLBACK
+--
+ROLLBACK
+== 101
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 102
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 103
+-- check that function dropped in main transaction leaves no stats behind
+BEGIN
+--
+BEGIN
+== 104
+DROP FUNCTION stats_test_func1()
+--
+DROP FUNCTION stats_test_func1()
+== 105
+COMMIT
+--
+COMMIT
+== 106
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 107
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 108
+-- check that function dropped in a subtransaction leaves no stats behind
+BEGIN
+--
+BEGIN
+== 109
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 110
+SAVEPOINT a
+--
+SAVEPOINT a
+== 111
+SELECT stats_test_func2()
+--
+SELECT stats_test_func2()
+== 112
+SAVEPOINT b
+--
+SAVEPOINT b
+== 113
+DROP FUNCTION stats_test_func2()
+--
+DROP FUNCTION stats_test_func2()
+== 114
+COMMIT
+--
+COMMIT
+== 115
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func2_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 116
+SELECT pg_stat_get_function_calls(:stats_test_func2_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 117
+-- Check that stats for relations are dropped. For that we need to access stats
+-- by oid after the DROP TABLE. Save oids.
+CREATE TABLE drop_stats_test()
+--
+CREATE TABLE drop_stats_test ()
+== 118
+INSERT INTO drop_stats_test DEFAULT VALUES
+--
+INSERT INTO drop_stats_test DEFAULT VALUES
+== 119
+SELECT 'drop_stats_test'::regclass::oid AS drop_stats_test_oid
+--
+SELECT 'drop_stats_test'::regclass::oid AS drop_stats_test_oid
+== 120
+CREATE TABLE drop_stats_test_xact()
+--
+CREATE TABLE drop_stats_test_xact ()
+== 121
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+== 122
+SELECT 'drop_stats_test_xact'::regclass::oid AS drop_stats_test_xact_oid
+--
+SELECT 'drop_stats_test_xact'::regclass::oid AS drop_stats_test_xact_oid
+== 123
+CREATE TABLE drop_stats_test_subxact()
+--
+CREATE TABLE drop_stats_test_subxact ()
+== 124
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+== 125
+SELECT 'drop_stats_test_subxact'::regclass::oid AS drop_stats_test_subxact_oid
+--
+SELECT 'drop_stats_test_subxact'::regclass::oid AS drop_stats_test_subxact_oid
+== 126
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 127
+SELECT pg_stat_get_live_tuples(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 128
+DROP TABLE drop_stats_test
+--
+DROP TABLE drop_stats_test
+== 129
+SELECT pg_stat_get_live_tuples(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 130
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 131
+-- check that rollback protects against having stats dropped and that local
+-- modifications don't pose a problem
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 146
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 132
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 133
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 134
+BEGIN
+--
+BEGIN
+== 135
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+== 136
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 137
+DROP TABLE drop_stats_test_xact
+--
+DROP TABLE drop_stats_test_xact
+== 138
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 139
+ROLLBACK
+--
+ROLLBACK
+== 140
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 141
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 142
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 143
+-- transactional drop
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 54
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 144
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 145
+BEGIN
+--
+BEGIN
+== 146
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+== 147
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 148
+DROP TABLE drop_stats_test_xact
+--
+DROP TABLE drop_stats_test_xact
+== 149
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 150
+COMMIT
+--
+COMMIT
+== 151
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 152
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 153
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 154
+-- savepoint rollback (2 levels)
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 155
+BEGIN
+--
+BEGIN
+== 156
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+== 157
+SAVEPOINT sp1
+--
+SAVEPOINT sp1
+== 158
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+== 159
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 160
+SAVEPOINT sp2
+--
+SAVEPOINT sp2
+== 161
+DROP TABLE drop_stats_test_subxact
+--
+DROP TABLE drop_stats_test_subxact
+== 162
+ROLLBACK TO SAVEPOINT sp2
+--
+ROLLBACK TO SAVEPOINT sp2
+== 163
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 164
+COMMIT
+--
+COMMIT
+== 165
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 166
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 167
+-- savepoint rolback (1 level)
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 168
+BEGIN
+--
+BEGIN
+== 169
+SAVEPOINT sp1
+--
+SAVEPOINT sp1
+== 170
+DROP TABLE drop_stats_test_subxact
+--
+DROP TABLE drop_stats_test_subxact
+== 171
+SAVEPOINT sp2
+--
+SAVEPOINT sp2
+== 172
+ROLLBACK TO SAVEPOINT sp1
+--
+ROLLBACK TO SAVEPOINT sp1
+== 173
+COMMIT
+--
+COMMIT
+== 174
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 175
+-- and now actually drop
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 57
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 176
+BEGIN
+--
+BEGIN
+== 177
+SAVEPOINT sp1
+--
+SAVEPOINT sp1
+== 178
+DROP TABLE drop_stats_test_subxact
+--
+DROP TABLE drop_stats_test_subxact
+== 179
+SAVEPOINT sp2
+--
+SAVEPOINT sp2
+== 180
+RELEASE SAVEPOINT sp1
+--
+RELEASE sp1
+== 181
+COMMIT
+--
+COMMIT
+== 182
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 183
+DROP TABLE trunc_stats_test, trunc_stats_test1, trunc_stats_test2, trunc_stats_test3, trunc_stats_test4
+--
+DROP TABLE trunc_stats_test, trunc_stats_test1, trunc_stats_test2, trunc_stats_test3, trunc_stats_test4
+== 184
+DROP TABLE prevstats
+--
+DROP TABLE prevstats
+== 185
+-----
+-- Test that last_seq_scan, last_idx_scan are correctly maintained
+|--
+-- Perform test using a temporary table. That way autovacuum etc won't
+-- interfere. To be able to check that timestamps increase, we sleep for 100ms
+-- between tests, assuming that there aren't systems with a coarser timestamp
+-- granularity.
+-----
+
+BEGIN
+--
+BEGIN
+== 186
+CREATE TEMPORARY TABLE test_last_scan(idx_col int primary key, noidx_col int)
+--
+CREATE TEMPORARY TABLE test_last_scan (idx_col int PRIMARY KEY, noidx_col int)
+== 187
+INSERT INTO test_last_scan(idx_col, noidx_col) VALUES(1, 1)
+--
+INSERT INTO test_last_scan (idx_col, noidx_col) VALUES (1, 1)
+== 188
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 189
+SELECT last_seq_scan, last_idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+SELECT last_seq_scan, last_idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+== 190
+COMMIT
+--
+COMMIT
+== 191
+SELECT pg_stat_reset_single_table_counters('test_last_scan'::regclass)
+--
+SELECT pg_stat_reset_single_table_counters('test_last_scan'::regclass)
+== 192
+SELECT seq_scan, idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+SELECT seq_scan, idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+== 193
+-- ensure we start out with exactly one index and sequential scan
+BEGIN
+--
+BEGIN
+== 194
+SET LOCAL enable_seqscan TO on
+--
+SET LOCAL enable_seqscan TO ON
+== 195
+SET LOCAL enable_indexscan TO on
+--
+SET LOCAL enable_indexscan TO ON
+== 196
+SET LOCAL enable_bitmapscan TO off
+--
+SET LOCAL enable_bitmapscan TO OFF
+== 197
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+== 198
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+== 199
+SET LOCAL enable_seqscan TO off
+--
+SET LOCAL enable_seqscan TO OFF
+== 200
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 201
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 202
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 203
+COMMIT
+--
+COMMIT
+== 204
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+== 205
+SELECT pg_sleep(0.1)
+--
+SELECT pg_sleep(0.1)
+== 206
+-- assume a minimum timestamp granularity of 100ms
+
+-- cause one sequential scan
+BEGIN
+--
+BEGIN
+== 207
+SET LOCAL enable_seqscan TO on
+--
+SET LOCAL enable_seqscan TO ON
+== 208
+SET LOCAL enable_indexscan TO off
+--
+SET LOCAL enable_indexscan TO OFF
+== 209
+SET LOCAL enable_bitmapscan TO off
+--
+SET LOCAL enable_bitmapscan TO OFF
+== 210
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+== 211
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+== 212
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 213
+COMMIT
+--
+COMMIT
+== 214
+-- check that just sequential scan stats were incremented
+SELECT seq_scan, :'test_last_seq' < last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' = last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 76
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 215
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+== 216
+SELECT pg_sleep(0.1)
+--
+SELECT pg_sleep(0.1)
+== 217
+-- cause one index scan
+BEGIN
+--
+BEGIN
+== 218
+SET LOCAL enable_seqscan TO off
+--
+SET LOCAL enable_seqscan TO OFF
+== 219
+SET LOCAL enable_indexscan TO on
+--
+SET LOCAL enable_indexscan TO ON
+== 220
+SET LOCAL enable_bitmapscan TO off
+--
+SET LOCAL enable_bitmapscan TO OFF
+== 221
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 222
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 223
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 224
+COMMIT
+--
+COMMIT
+== 225
+-- check that just index scan stats were incremented
+SELECT seq_scan, :'test_last_seq' = last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' < last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 71
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 226
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+== 227
+SELECT pg_sleep(0.1)
+--
+SELECT pg_sleep(0.1)
+== 228
+-- cause one bitmap index scan
+BEGIN
+--
+BEGIN
+== 229
+SET LOCAL enable_seqscan TO off
+--
+SET LOCAL enable_seqscan TO OFF
+== 230
+SET LOCAL enable_indexscan TO off
+--
+SET LOCAL enable_indexscan TO OFF
+== 231
+SET LOCAL enable_bitmapscan TO on
+--
+SET LOCAL enable_bitmapscan TO ON
+== 232
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 233
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+== 234
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 235
+COMMIT
+--
+COMMIT
+== 236
+-- check that just index scan stats were incremented
+SELECT seq_scan, :'test_last_seq' = last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' < last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 71
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 237
+-----
+-- Test reset of some stats for shared table
+-----
+
+-- This updates the comment of the database currently in use in
+-- pg_shdescription with a fake value, then sets it back to its
+-- original value.
+SELECT shobj_description(d.oid, 'pg_database') as description_before
+  FROM pg_database d WHERE datname = current_database()
+--
+SELECT shobj_description(d.oid, 'pg_database') AS description_before FROM pg_database d WHERE datname = current_database()
+== 238
+-- force some stats in pg_shdescription.
+BEGIN
+--
+BEGIN
+== 239
+SELECT current_database() as datname
+--
+SELECT current_database() AS datname
+== 240
+COMMENT ON DATABASE :"datname" IS 'This is a test comment'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 241
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 242
+COMMIT
+--
+COMMIT
+== 243
+-- check that the stats are reset.
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables
+  WHERE relid = 'pg_shdescription'::regclass
+--
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables WHERE relid = 'pg_shdescription'::regclass
+== 244
+SELECT pg_stat_reset_single_table_counters('pg_shdescription'::regclass)
+--
+SELECT pg_stat_reset_single_table_counters('pg_shdescription'::regclass)
+== 245
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables
+  WHERE relid = 'pg_shdescription'::regclass
+--
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables WHERE relid = 'pg_shdescription'::regclass
+== 246
+-- set back comment
+  COMMENT ON DATABASE :"datname" IS :'description_before'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 43
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 247
+COMMENT ON DATABASE :"datname" IS NULL
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 248
+-----
+-- Test that various stats views are being properly populated
+-----
+
+-- Test that sessions is incremented when a new session is started in pg_stat_database
+SELECT sessions AS db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+SELECT sessions AS db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database())
+== 249
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 250
+SELECT sessions > :db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 19
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 251
+-- Test pg_stat_checkpointer checkpointer-related stats, together with pg_stat_wal
+SELECT num_requested AS rqst_ckpts_before FROM pg_stat_checkpointer
+--
+SELECT num_requested AS rqst_ckpts_before FROM pg_stat_checkpointer
+== 252
+-- Test pg_stat_wal (and make a temp table so our temp schema exists)
+SELECT wal_bytes AS wal_bytes_before FROM pg_stat_wal
+--
+SELECT wal_bytes AS wal_bytes_before FROM pg_stat_wal
+== 253
+CREATE TEMP TABLE test_stats_temp AS SELECT 17
+--
+CREATE TEMPORARY TABLE test_stats_temp AS SELECT 17
+== 254
+DROP TABLE test_stats_temp
+--
+DROP TABLE test_stats_temp
+== 255
+-- Checkpoint twice: The checkpointer reports stats after reporting completion
+-- of the checkpoint. But after a second checkpoint we'll see at least the
+-- results of the first.
+CHECKPOINT
+--
+CHECKPOINT
+== 256
+CHECKPOINT
+--
+CHECKPOINT
+== 257
+SELECT num_requested > :rqst_ckpts_before FROM pg_stat_checkpointer
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 258
+SELECT wal_bytes > :wal_bytes_before FROM pg_stat_wal
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 20
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 259
+-- Test pg_stat_get_backend_idset() and some allied functions.
+-- In particular, verify that their notion of backend ID matches
+-- our temp schema index.
+SELECT (current_schemas(true))[1] = ('pg_temp_' || beid::text) AS match
+FROM pg_stat_get_backend_idset() beid
+WHERE pg_stat_get_backend_pid(beid) = pg_backend_pid()
+--
+SELECT (current_schemas(true))[1] = ('pg_temp_' || beid::text) AS match FROM pg_stat_get_backend_idset() beid WHERE pg_stat_get_backend_pid(beid) = pg_backend_pid()
+== 260
+-----
+-- Test that resetting stats works for reset timestamp
+-----
+
+-- Test that reset_slru with a specified SLRU works.
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+== 261
+SELECT stats_reset AS slru_notify_reset_ts FROM pg_stat_slru WHERE name = 'notify'
+--
+SELECT stats_reset AS slru_notify_reset_ts FROM pg_stat_slru WHERE name = 'notify'
+== 262
+SELECT pg_stat_reset_slru('commit_timestamp')
+--
+SELECT pg_stat_reset_slru('commit_timestamp')
+== 263
+SELECT stats_reset > :'slru_commit_ts_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 264
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+== 265
+-- Test that multiple SLRUs are reset when no specific SLRU provided to reset function
+SELECT pg_stat_reset_slru()
+--
+SELECT pg_stat_reset_slru()
+== 266
+SELECT stats_reset > :'slru_commit_ts_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 267
+SELECT stats_reset > :'slru_notify_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'notify'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 268
+-- Test that reset_shared with archiver specified as the stats type works
+SELECT stats_reset AS archiver_reset_ts FROM pg_stat_archiver
+--
+SELECT stats_reset AS archiver_reset_ts FROM pg_stat_archiver
+== 269
+SELECT pg_stat_reset_shared('archiver')
+--
+SELECT pg_stat_reset_shared('archiver')
+== 270
+SELECT stats_reset > :'archiver_reset_ts'::timestamptz FROM pg_stat_archiver
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 271
+-- Test that reset_shared with bgwriter specified as the stats type works
+SELECT stats_reset AS bgwriter_reset_ts FROM pg_stat_bgwriter
+--
+SELECT stats_reset AS bgwriter_reset_ts FROM pg_stat_bgwriter
+== 272
+SELECT pg_stat_reset_shared('bgwriter')
+--
+SELECT pg_stat_reset_shared('bgwriter')
+== 273
+SELECT stats_reset > :'bgwriter_reset_ts'::timestamptz FROM pg_stat_bgwriter
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 274
+-- Test that reset_shared with checkpointer specified as the stats type works
+SELECT stats_reset AS checkpointer_reset_ts FROM pg_stat_checkpointer
+--
+SELECT stats_reset AS checkpointer_reset_ts FROM pg_stat_checkpointer
+== 275
+SELECT pg_stat_reset_shared('checkpointer')
+--
+SELECT pg_stat_reset_shared('checkpointer')
+== 276
+SELECT stats_reset > :'checkpointer_reset_ts'::timestamptz FROM pg_stat_checkpointer
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 277
+-- Test that reset_shared with recovery_prefetch specified as the stats type works
+SELECT stats_reset AS recovery_prefetch_reset_ts FROM pg_stat_recovery_prefetch
+--
+SELECT stats_reset AS recovery_prefetch_reset_ts FROM pg_stat_recovery_prefetch
+== 278
+SELECT pg_stat_reset_shared('recovery_prefetch')
+--
+SELECT pg_stat_reset_shared('recovery_prefetch')
+== 279
+SELECT stats_reset > :'recovery_prefetch_reset_ts'::timestamptz FROM pg_stat_recovery_prefetch
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 280
+-- Test that reset_shared with slru specified as the stats type works
+SELECT max(stats_reset) AS slru_reset_ts FROM pg_stat_slru
+--
+SELECT max(stats_reset) AS slru_reset_ts FROM pg_stat_slru
+== 281
+SELECT pg_stat_reset_shared('slru')
+--
+SELECT pg_stat_reset_shared('slru')
+== 282
+SELECT max(stats_reset) > :'slru_reset_ts'::timestamptz FROM pg_stat_slru
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 27
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 283
+-- Test that reset_shared with wal specified as the stats type works
+SELECT stats_reset AS wal_reset_ts FROM pg_stat_wal
+--
+SELECT stats_reset AS wal_reset_ts FROM pg_stat_wal
+== 284
+SELECT pg_stat_reset_shared('wal')
+--
+SELECT pg_stat_reset_shared('wal')
+== 285
+SELECT stats_reset > :'wal_reset_ts'::timestamptz FROM pg_stat_wal
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 286
+-- Test error case for reset_shared with unknown stats type
+SELECT pg_stat_reset_shared('unknown')
+--
+SELECT pg_stat_reset_shared('unknown')
+== 287
+-- Test that reset works for pg_stat_database
+
+-- Since pg_stat_database stats_reset starts out as NULL, reset it once first so we have something to compare it to
+SELECT pg_stat_reset()
+--
+SELECT pg_stat_reset()
+== 288
+SELECT stats_reset AS db_reset_ts FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+SELECT stats_reset AS db_reset_ts FROM pg_stat_database WHERE datname = (SELECT current_database())
+== 289
+SELECT pg_stat_reset()
+--
+SELECT pg_stat_reset()
+== 290
+SELECT stats_reset > :'db_reset_ts'::timestamptz FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 291
+----
+-- pg_stat_get_snapshot_timestamp behavior
+----
+BEGIN
+--
+BEGIN
+== 292
+SET LOCAL stats_fetch_consistency = snapshot
+--
+SET LOCAL stats_fetch_consistency TO snapshot
+== 293
+-- no snapshot yet, return NULL
+SELECT pg_stat_get_snapshot_timestamp()
+--
+SELECT pg_stat_get_snapshot_timestamp()
+== 294
+-- any attempt at accessing stats will build snapshot
+SELECT pg_stat_get_function_calls(0)
+--
+SELECT pg_stat_get_function_calls(0)
+== 295
+SELECT pg_stat_get_snapshot_timestamp() >= NOW()
+--
+SELECT pg_stat_get_snapshot_timestamp() >= now()
+== 296
+-- shows NULL again after clearing
+SELECT pg_stat_clear_snapshot()
+--
+SELECT pg_stat_clear_snapshot()
+== 297
+SELECT pg_stat_get_snapshot_timestamp()
+--
+SELECT pg_stat_get_snapshot_timestamp()
+== 298
+COMMIT
+--
+COMMIT
+== 299
+----
+-- Changing stats_fetch_consistency in a transaction.
+----
+BEGIN
+--
+BEGIN
+== 300
+-- Stats filled under the cache mode
+SET LOCAL stats_fetch_consistency = cache
+--
+SET LOCAL stats_fetch_consistency TO cache
+== 301
+SELECT pg_stat_get_function_calls(0)
+--
+SELECT pg_stat_get_function_calls(0)
+== 302
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+== 303
+-- Success in accessing pre-existing snapshot data.
+SET LOCAL stats_fetch_consistency = snapshot
+--
+SET LOCAL stats_fetch_consistency TO snapshot
+== 304
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+== 305
+SELECT pg_stat_get_function_calls(0)
+--
+SELECT pg_stat_get_function_calls(0)
+== 306
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+== 307
+-- Snapshot cleared.
+SET LOCAL stats_fetch_consistency = none
+--
+SET LOCAL stats_fetch_consistency TO "none"
+== 308
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+== 309
+SELECT pg_stat_get_function_calls(0)
+--
+SELECT pg_stat_get_function_calls(0)
+== 310
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+== 311
+ROLLBACK
+--
+ROLLBACK
+== 312
+----
+-- pg_stat_have_stats behavior
+----
+-- fixed-numbered stats exist
+SELECT pg_stat_have_stats('bgwriter', 0, 0)
+--
+SELECT pg_stat_have_stats('bgwriter', 0, 0)
+== 313
+-- unknown stats kinds error out
+SELECT pg_stat_have_stats('zaphod', 0, 0)
+--
+SELECT pg_stat_have_stats('zaphod', 0, 0)
+== 314
+-- db stats have objoid 0
+SELECT pg_stat_have_stats('database', :dboid, 1)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 315
+SELECT pg_stat_have_stats('database', :dboid, 0)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 316
+-- pg_stat_have_stats returns true for committed index creation
+CREATE table stats_test_tab1 as select generate_series(1,10) a
+--
+CREATE TABLE stats_test_tab1 AS SELECT generate_series(1, 10) AS a
+== 317
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+CREATE INDEX stats_test_idx1 ON stats_test_tab1 USING btree (a)
+== 318
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+== 319
+SET enable_seqscan TO off
+--
+SET enable_seqscan TO OFF
+== 320
+select a from stats_test_tab1 where a = 3
+--
+SELECT a FROM stats_test_tab1 WHERE a = 3
+== 321
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 322
+-- pg_stat_have_stats returns false for dropped index with stats
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 104
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 323
+DROP index stats_test_idx1
+--
+DROP INDEX stats_test_idx1
+== 324
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 325
+-- pg_stat_have_stats returns false for rolled back index creation
+BEGIN
+--
+BEGIN
+== 326
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+CREATE INDEX stats_test_idx1 ON stats_test_tab1 USING btree (a)
+== 327
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+== 328
+select a from stats_test_tab1 where a = 3
+--
+SELECT a FROM stats_test_tab1 WHERE a = 3
+== 329
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 330
+ROLLBACK
+--
+ROLLBACK
+== 331
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 332
+-- pg_stat_have_stats returns true for reindex CONCURRENTLY
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+CREATE INDEX stats_test_idx1 ON stats_test_tab1 USING btree (a)
+== 333
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+== 334
+select a from stats_test_tab1 where a = 3
+--
+SELECT a FROM stats_test_tab1 WHERE a = 3
+== 335
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 336
+REINDEX index CONCURRENTLY stats_test_idx1
+--
+REINDEX (CONCURRENTLY) INDEX stats_test_idx1
+== 337
+-- false for previous oid
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 338
+-- true for new oid
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+== 339
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 340
+-- pg_stat_have_stats returns true for a rolled back drop index with stats
+BEGIN
+--
+BEGIN
+== 341
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 342
+DROP index stats_test_idx1
+--
+DROP INDEX stats_test_idx1
+== 343
+ROLLBACK
+--
+ROLLBACK
+== 344
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 345
+-- put enable_seqscan back to on
+SET enable_seqscan TO on
+--
+SET enable_seqscan TO ON
+== 346
+-- ensure that stats accessors handle NULL input correctly
+SELECT pg_stat_get_replication_slot(NULL)
+--
+SELECT pg_stat_get_replication_slot(NULL)
+== 347
+SELECT pg_stat_get_subscription_stats(NULL)
+--
+SELECT pg_stat_get_subscription_stats(NULL)
+== 348
+-- Test that the following operations are tracked in pg_stat_io:
+-- - reads of target blocks into shared buffers
+-- - writes of shared buffers to permanent storage
+-- - extends of relations using shared buffers
+-- - fsyncs done to ensure the durability of data dirtying shared buffers
+-- - shared buffer hits
+
+-- There is no test for blocks evicted from shared buffers, because we cannot
+-- be sure of the state of shared buffers at the point the test is run.
+
+-- Create a regular table and insert some data to generate IOCONTEXT_NORMAL
+-- extends.
+SELECT sum(extends) AS io_sum_shared_before_extends
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(extends) AS io_sum_shared_before_extends FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 349
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
+  FROM pg_stat_io
+  WHERE object = 'relation'
+--
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs FROM pg_stat_io WHERE object = 'relation'
+== 350
+CREATE TABLE test_io_shared(a int)
+--
+CREATE TABLE test_io_shared (a int)
+== 351
+INSERT INTO test_io_shared SELECT i FROM generate_series(1,100)i
+--
+INSERT INTO test_io_shared SELECT i FROM generate_series(1, 100) i
+== 352
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 353
+SELECT sum(extends) AS io_sum_shared_after_extends
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(extends) AS io_sum_shared_after_extends FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 354
+SELECT :io_sum_shared_after_extends > :io_sum_shared_before_extends
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 355
+-- After a checkpoint, there should be some additional IOCONTEXT_NORMAL writes
+-- and fsyncs.
+-- See comment above for rationale for two explicit CHECKPOINTs.
+CHECKPOINT
+--
+CHECKPOINT
+== 356
+CHECKPOINT
+--
+CHECKPOINT
+== 357
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
+  FROM pg_stat_io
+  WHERE object = 'relation'
+--
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs FROM pg_stat_io WHERE object = 'relation'
+== 358
+SELECT :io_sum_shared_after_writes > :io_sum_shared_before_writes
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 359
+SELECT current_setting('fsync') = 'off'
+  OR :io_sum_shared_after_fsyncs > :io_sum_shared_before_fsyncs
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 46
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 360
+-- Change the tablespace so that the table is rewritten directly, then SELECT
+-- from it to cause it to be read back into shared buffers.
+SELECT sum(reads) AS io_sum_shared_before_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(reads) AS io_sum_shared_before_reads FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 361
+-- Do this in a transaction to prevent spurious failures due to concurrent accesses to our newly
+-- rewritten table, e.g. by autovacuum.
+BEGIN
+--
+BEGIN
+== 362
+ALTER TABLE test_io_shared SET TABLESPACE regress_tblspace
+--
+ALTER TABLE test_io_shared SET TABLESPACE regress_tblspace
+== 363
+-- SELECT from the table so that the data is read into shared buffers and
+-- context 'normal', object 'relation' reads are counted.
+SELECT COUNT(*) FROM test_io_shared
+--
+SELECT count(*) FROM test_io_shared
+== 364
+COMMIT
+--
+COMMIT
+== 365
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 366
+SELECT sum(reads) AS io_sum_shared_after_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(reads) AS io_sum_shared_after_reads FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 367
+SELECT :io_sum_shared_after_reads > :io_sum_shared_before_reads
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 368
+SELECT sum(hits) AS io_sum_shared_before_hits
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(hits) AS io_sum_shared_before_hits FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 369
+-- Select from the table again to count hits.
+-- Ensure we generate hits by forcing a nested loop self-join with no
+-- materialize node. The outer side's buffer will stay pinned, preventing its
+-- eviction, while we loop through the inner side and generate hits.
+BEGIN
+--
+BEGIN
+== 370
+SET LOCAL enable_nestloop TO on
+--
+SET LOCAL enable_nestloop TO ON
+== 371
+SET LOCAL enable_mergejoin TO off
+--
+SET LOCAL enable_mergejoin TO OFF
+== 372
+SET LOCAL enable_hashjoin TO off
+--
+SET LOCAL enable_hashjoin TO OFF
+== 373
+SET LOCAL enable_material TO off
+--
+SET LOCAL enable_material TO OFF
+== 374
+-- ensure plan stays as we expect it to
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a)
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test_io_shared t1 JOIN test_io_shared t2 USING (a)
+== 375
+SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a)
+--
+SELECT count(*) FROM test_io_shared t1 JOIN test_io_shared t2 USING (a)
+== 376
+COMMIT
+--
+COMMIT
+== 377
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 378
+SELECT sum(hits) AS io_sum_shared_after_hits
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+SELECT sum(hits) AS io_sum_shared_after_hits FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+== 379
+SELECT :io_sum_shared_after_hits > :io_sum_shared_before_hits
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 380
+DROP TABLE test_io_shared
+--
+DROP TABLE test_io_shared
+== 381
+-- Test that the follow IOCONTEXT_LOCAL IOOps are tracked in pg_stat_io:
+-- - eviction of local buffers in order to reuse them
+-- - reads of temporary table blocks into local buffers
+-- - writes of local buffers to permanent storage
+-- - extends of temporary tables
+
+-- Set temp_buffers to its minimum so that we can trigger writes with fewer
+-- inserted tuples. Do so in a new session in case temporary tables have been
+-- accessed by previous tests in this session.
+SET temp_buffers TO 100
+--
+SET temp_buffers TO 100
+== 382
+CREATE TEMPORARY TABLE test_io_local(a int, b TEXT)
+--
+CREATE TEMPORARY TABLE test_io_local (a int, b text)
+== 383
+SELECT sum(extends) AS extends, sum(evictions) AS evictions, sum(writes) AS writes
+  FROM pg_stat_io
+  WHERE context = 'normal' AND object = 'temp relation'
+--
+SELECT sum(extends) AS extends, sum(evictions) AS evictions, sum(writes) AS writes FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+== 384
+-- Insert tuples into the temporary table, generating extends in the stats.
+-- Insert enough values that we need to reuse and write out dirty local
+-- buffers, generating evictions and writes.
+INSERT INTO test_io_local SELECT generate_series(1, 5000) as id, repeat('a', 200)
+--
+INSERT INTO test_io_local SELECT generate_series(1, 5000) AS id, repeat('a', 200)
+== 385
+-- Ensure the table is large enough to exceed our temp_buffers setting.
+SELECT pg_relation_size('test_io_local') / current_setting('block_size')::int8 > 100
+--
+SELECT (pg_relation_size('test_io_local') / current_setting('block_size')::int8) > 100
+== 386
+SELECT sum(reads) AS io_sum_local_before_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+--
+SELECT sum(reads) AS io_sum_local_before_reads FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+== 387
+-- Read in evicted buffers, generating reads.
+SELECT COUNT(*) FROM test_io_local
+--
+SELECT count(*) FROM test_io_local
+== 388
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 389
+SELECT sum(evictions) AS evictions,
+       sum(reads) AS reads,
+       sum(writes) AS writes,
+       sum(extends) AS extends
+  FROM pg_stat_io
+  WHERE context = 'normal' AND object = 'temp relation'
+--
+SELECT sum(evictions) AS evictions, sum(reads) AS reads, sum(writes) AS writes, sum(extends) AS extends FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+== 390
+SELECT :io_sum_local_after_evictions > :io_sum_local_before_evictions,
+       :io_sum_local_after_reads > :io_sum_local_before_reads,
+       :io_sum_local_after_writes > :io_sum_local_before_writes,
+       :io_sum_local_after_extends > :io_sum_local_before_extends
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 391
+-- Change the tablespaces so that the temporary table is rewritten to other
+-- local buffers, exercising a different codepath than standard local buffer
+-- writes.
+ALTER TABLE test_io_local SET TABLESPACE regress_tblspace
+--
+ALTER TABLE test_io_local SET TABLESPACE regress_tblspace
+== 392
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 393
+SELECT sum(writes) AS io_sum_local_new_tblspc_writes
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+--
+SELECT sum(writes) AS io_sum_local_new_tblspc_writes FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+== 394
+SELECT :io_sum_local_new_tblspc_writes > :io_sum_local_after_writes
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 395
+RESET temp_buffers
+--
+RESET temp_buffers
+== 396
+-- Test that reuse of strategy buffers and reads of blocks into these reused
+-- buffers while VACUUMing are tracked in pg_stat_io. If there is sufficient
+-- demand for shared buffers from concurrent queries, some buffers may be
+-- pinned by other backends before they can be reused. In such cases, the
+-- backend will evict a buffer from outside the ring and add it to the
+-- ring. This is considered an eviction and not a reuse.
+
+-- Set wal_skip_threshold smaller than the expected size of
+-- test_io_vac_strategy so that, even if wal_level is minimal, VACUUM FULL will
+-- fsync the newly rewritten test_io_vac_strategy instead of writing it to WAL.
+-- Writing it to WAL will result in the newly written relation pages being in
+-- shared buffers -- preventing us from testing BAS_VACUUM BufferAccessStrategy
+-- reads.
+SET wal_skip_threshold = '1 kB'
+--
+SET wal_skip_threshold TO "1 kB"
+== 397
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions
+  FROM pg_stat_io WHERE context = 'vacuum'
+--
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions FROM pg_stat_io WHERE context = 'vacuum'
+== 398
+CREATE TABLE test_io_vac_strategy(a int, b int) WITH (autovacuum_enabled = 'false')
+--
+CREATE TABLE test_io_vac_strategy (a int, b int) WITH (autovacuum_enabled=false)
+== 399
+INSERT INTO test_io_vac_strategy SELECT i, i from generate_series(1, 4500)i
+--
+INSERT INTO test_io_vac_strategy SELECT i, i FROM generate_series(1, 4500) i
+== 400
+-- Ensure that the next VACUUM will need to perform IO by rewriting the table
+-- first with VACUUM (FULL).
+VACUUM (FULL) test_io_vac_strategy
+--
+VACUUM (FULL) test_io_vac_strategy
+== 401
+-- Use the minimum BUFFER_USAGE_LIMIT to cause reuses or evictions with the
+-- smallest table possible.
+VACUUM (PARALLEL 0, BUFFER_USAGE_LIMIT 128) test_io_vac_strategy
+--
+VACUUM (PARALLEL 0, BUFFER_USAGE_LIMIT 128) test_io_vac_strategy
+== 402
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 403
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions
+  FROM pg_stat_io WHERE context = 'vacuum'
+--
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions FROM pg_stat_io WHERE context = 'vacuum'
+== 404
+SELECT :io_sum_vac_strategy_after_reads > :io_sum_vac_strategy_before_reads
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 405
+SELECT (:io_sum_vac_strategy_after_reuses + :io_sum_vac_strategy_after_evictions) >
+  (:io_sum_vac_strategy_before_reuses + :io_sum_vac_strategy_before_evictions)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 406
+RESET wal_skip_threshold
+--
+RESET wal_skip_threshold
+== 407
+-- Test that extends done by a CTAS, which uses a BAS_BULKWRITE
+-- BufferAccessStrategy, are tracked in pg_stat_io.
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_before
+  FROM pg_stat_io WHERE context = 'bulkwrite'
+--
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_before FROM pg_stat_io WHERE context = 'bulkwrite'
+== 408
+CREATE TABLE test_io_bulkwrite_strategy AS SELECT i FROM generate_series(1,100)i
+--
+CREATE TABLE test_io_bulkwrite_strategy AS SELECT i FROM generate_series(1, 100) i
+== 409
+SELECT pg_stat_force_next_flush()
+--
+SELECT pg_stat_force_next_flush()
+== 410
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_after
+  FROM pg_stat_io WHERE context = 'bulkwrite'
+--
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_after FROM pg_stat_io WHERE context = 'bulkwrite'
+== 411
+SELECT :io_sum_bulkwrite_strategy_extends_after > :io_sum_bulkwrite_strategy_extends_before
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 412
+-- Test IO stats reset
+SELECT pg_stat_have_stats('io', 0, 0)
+--
+SELECT pg_stat_have_stats('io', 0, 0)
+== 413
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(writebacks) + sum(hits) AS io_stats_pre_reset
+  FROM pg_stat_io
+--
+SELECT ((((((sum(evictions) + sum(reuses)) + sum(extends)) + sum(fsyncs)) + sum(reads)) + sum(writes)) + sum(writebacks)) + sum(hits) AS io_stats_pre_reset FROM pg_stat_io
+== 414
+SELECT pg_stat_reset_shared('io')
+--
+SELECT pg_stat_reset_shared('io')
+== 415
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(writebacks) + sum(hits) AS io_stats_post_reset
+  FROM pg_stat_io
+--
+SELECT ((((((sum(evictions) + sum(reuses)) + sum(extends)) + sum(fsyncs)) + sum(reads)) + sum(writes)) + sum(writebacks)) + sum(hits) AS io_stats_post_reset FROM pg_stat_io
+== 416
+SELECT :io_stats_post_reset < :io_stats_pre_reset
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 417
+-- test BRIN index doesn't block HOT update
+CREATE TABLE brin_hot (
+  id  integer PRIMARY KEY,
+  val integer NOT NULL
+) WITH (autovacuum_enabled = off, fillfactor = 70)
+--
+CREATE TABLE brin_hot (id int PRIMARY KEY, val int NOT NULL) WITH (autovacuum_enabled=off, fillfactor=70)
+== 418
+INSERT INTO brin_hot SELECT *, 0 FROM generate_series(1, 235)
+--
+INSERT INTO brin_hot SELECT *, 0 FROM generate_series(1, 235)
+== 419
+CREATE INDEX val_brin ON brin_hot using brin(val)
+--
+CREATE INDEX val_brin ON brin_hot USING brin (val)
+== 420
+CREATE FUNCTION wait_for_hot_stats() RETURNS void AS $$
+DECLARE
+  start_time timestamptz := clock_timestamp();
+  updated bool;
+BEGIN
+  -- we don't want to wait forever; loop will exit after 30 seconds
+  FOR i IN 1 .. 300 LOOP
+    SELECT (pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid) > 0) INTO updated;
+    EXIT WHEN updated;
+
+    -- wait a little
+    PERFORM pg_sleep_for('100 milliseconds');
+    -- reset stats snapshot so we can test again
+    PERFORM pg_stat_clear_snapshot();
+  END LOOP;
+  -- report time waited in postmaster log (where it won't change test output)
+  RAISE log 'wait_for_hot_stats delayed % seconds',
+    EXTRACT(epoch FROM clock_timestamp() - start_time);
+END
+$$ LANGUAGE plpgsql
+--
+CREATE FUNCTION wait_for_hot_stats() RETURNS void AS $$
+DECLARE
+  start_time timestamptz := clock_timestamp();
+  updated bool;
+BEGIN
+  -- we don't want to wait forever; loop will exit after 30 seconds
+  FOR i IN 1 .. 300 LOOP
+    SELECT (pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid) > 0) INTO updated;
+    EXIT WHEN updated;
+
+    -- wait a little
+    PERFORM pg_sleep_for('100 milliseconds');
+    -- reset stats snapshot so we can test again
+    PERFORM pg_stat_clear_snapshot();
+  END LOOP;
+  -- report time waited in postmaster log (where it won't change test output)
+  RAISE log 'wait_for_hot_stats delayed % seconds',
+    EXTRACT(epoch FROM clock_timestamp() - start_time);
+END
+$$ LANGUAGE plpgsql
+== 421
+UPDATE brin_hot SET val = -3 WHERE id = 42
+--
+UPDATE brin_hot SET val = -3 WHERE id = 42
+== 422
+-- We can't just call wait_for_hot_stats() at this point, because we only
+-- transmit stats when the session goes idle, and we probably didn't
+-- transmit the last couple of counts yet thanks to the rate-limiting logic
+-- in pgstat_report_stat().  But instead of waiting for the rate limiter's
+-- timeout to elapse, let's just start a new session.  The old one will
+-- then send its stats before dying.
+
+SELECT wait_for_hot_stats()
+--
+SELECT wait_for_hot_stats()
+== 423
+SELECT pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid)
+--
+SELECT pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid)
+== 424
+DROP TABLE brin_hot
+--
+DROP TABLE brin_hot
+== 425
+DROP FUNCTION wait_for_hot_stats()
+--
+DROP FUNCTION wait_for_hot_stats()
+== 426
+-- Test handling of index predicates - updating attributes in precicates
+-- should not block HOT when summarizing indexes are involved. We update
+-- a row that was not indexed due to the index predicate, and becomes
+-- indexable - the HOT-updated tuple is forwarded to the BRIN index.
+CREATE TABLE brin_hot_2 (a int, b int)
+--
+CREATE TABLE brin_hot_2 (a int, b int)
+== 427
+INSERT INTO brin_hot_2 VALUES (1, 100)
+--
+INSERT INTO brin_hot_2 VALUES (1, 100)
+== 428
+CREATE INDEX ON brin_hot_2 USING brin (b) WHERE a = 2
+--
+CREATE INDEX ON brin_hot_2 USING brin (b) WHERE a = 2
+== 429
+UPDATE brin_hot_2 SET a = 2
+--
+UPDATE brin_hot_2 SET a = 2
+== 430
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+== 431
+SELECT COUNT(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+SELECT count(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+== 432
+SET enable_seqscan = off
+--
+SET enable_seqscan TO OFF
+== 433
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+== 434
+SELECT COUNT(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+SELECT count(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+== 435
+DROP TABLE brin_hot_2
+--
+DROP TABLE brin_hot_2
+== 436
+-- Test that updates to indexed columns are still propagated to the
+-- BRIN column.
+-- https://postgr.es/m/05ebcb44-f383-86e3-4f31-0a97a55634cf@enterprisedb.com
+CREATE TABLE brin_hot_3 (a int, filler text) WITH (fillfactor = 10)
+--
+CREATE TABLE brin_hot_3 (a int, filler text) WITH (fillfactor=10)
+== 437
+INSERT INTO brin_hot_3 SELECT 1, repeat(' ', 500) FROM generate_series(1, 20)
+--
+INSERT INTO brin_hot_3 SELECT 1, repeat(' ', 500) FROM generate_series(1, 20)
+== 438
+CREATE INDEX ON brin_hot_3 USING brin (a) WITH (pages_per_range = 1)
+--
+CREATE INDEX ON brin_hot_3 USING brin (a) WITH (pages_per_range=1)
+== 439
+UPDATE brin_hot_3 SET a = 2
+--
+UPDATE brin_hot_3 SET a = 2
+== 440
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_3 WHERE a = 2
+--
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_3 WHERE a = 2
+== 441
+SELECT COUNT(*) FROM brin_hot_3 WHERE a = 2
+--
+SELECT count(*) FROM brin_hot_3 WHERE a = 2
+== 442
+DROP TABLE brin_hot_3
+--
+DROP TABLE brin_hot_3
+== 443
+SET enable_seqscan = on
+--
+SET enable_seqscan TO ON
+== 444
+-- Test that estimation of relation size works with tuples wider than the
+-- relation fillfactor. We create a table with wide inline attributes and
+-- low fillfactor, insert rows and then see how many rows EXPLAIN shows
+-- before running analyze. We disable autovacuum so that it does not
+-- interfere with the test.
+CREATE TABLE table_fillfactor (
+  n char(1000)
+) with (fillfactor=10, autovacuum_enabled=off)
+--
+CREATE TABLE table_fillfactor (n char(1000)) WITH (fillfactor=10, autovacuum_enabled=off)
+== 445
+INSERT INTO table_fillfactor
+SELECT 'x' FROM generate_series(1,1000)
+--
+INSERT INTO table_fillfactor SELECT 'x' FROM generate_series(1, 1000)
+== 446
+SELECT * FROM check_estimated_rows('SELECT * FROM table_fillfactor')
+--
+SELECT * FROM check_estimated_rows('SELECT * FROM table_fillfactor')
+== 447
+DROP TABLE table_fillfactor
+--
+DROP TABLE table_fillfactor

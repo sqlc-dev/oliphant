@@ -1,0 +1,626 @@
+== 001
+-- When there is a LIMIT clause, incremental sort is beneficial because
+-- it only has to sort some of the groups, and not the entire table.
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+limit 1
+--
+49989aec56950959
+== 002
+-- When work_mem is not enough to sort the entire table, incremental sort
+-- may be faster if individual groups still fit into work_mem.
+set work_mem to '2MB'
+--
+8a6e71e5b3e06483
+== 003
+explain (costs off)
+select * from (select * from tenk1 order by four) t order by four, ten
+--
+2c2293bdb27f8019
+== 004
+reset work_mem
+--
+bebed61737980ccb
+== 005
+create table t(a integer, b integer)
+--
+7f545676713f15bb
+== 006
+create or replace function explain_analyze_without_memory(query text)
+returns table (out_line text) language plpgsql
+as
+$$
+declare
+  line text;
+begin
+  for line in
+    execute 'explain (analyze, costs off, summary off, timing off) ' || query
+  loop
+    out_line := regexp_replace(line, '\d+kB', 'NNkB', 'g');
+    return next;
+  end loop;
+end;
+$$
+--
+bd411c3d17dc79b4
+== 007
+create or replace function explain_analyze_inc_sort_nodes(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  elements jsonb;
+  element jsonb;
+  matching_nodes jsonb := '[]'::jsonb;
+begin
+  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;
+  while jsonb_array_length(elements) > 0 loop
+    element := elements->0;
+    elements := elements - 0;
+    case jsonb_typeof(element)
+    when 'array' then
+      if jsonb_array_length(element) > 0 then
+        elements := elements || element;
+      end if;
+    when 'object' then
+      if element ? 'Plan' then
+        elements := elements || jsonb_build_array(element->'Plan');
+        element := element - 'Plan';
+      else
+        if element ? 'Plans' then
+          elements := elements || jsonb_build_array(element->'Plans');
+          element := element - 'Plans';
+        end if;
+        if (element->>'Node Type')::text = 'Incremental Sort' then
+          matching_nodes := matching_nodes || element;
+        end if;
+      end if;
+    end case;
+  end loop;
+  return matching_nodes;
+end;
+$$
+--
+986a411ea174f54d
+== 008
+create or replace function explain_analyze_inc_sort_nodes_without_memory(query text)
+returns jsonb language plpgsql
+as
+$$
+declare
+  nodes jsonb := '[]'::jsonb;
+  node jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        node := jsonb_set(node, array[group_key, space_key, 'Average Sort Space Used'], '"NN"', false);
+        node := jsonb_set(node, array[group_key, space_key, 'Peak Sort Space Used'], '"NN"', false);
+      end loop;
+    end loop;
+    nodes := nodes || node;
+  end loop;
+  return nodes;
+end;
+$$
+--
+4305c6e3307e5d0e
+== 009
+create or replace function explain_analyze_inc_sort_nodes_verify_invariants(query text)
+returns bool language plpgsql
+as
+$$
+declare
+  node jsonb;
+  group_stats jsonb;
+  group_key text;
+  space_key text;
+begin
+  for node in select * from jsonb_array_elements(explain_analyze_inc_sort_nodes(query)) t loop
+    for group_key in select unnest(array['Full-sort Groups', 'Pre-sorted Groups']::text[]) t loop
+      group_stats := node->group_key;
+      for space_key in select unnest(array['Sort Space Memory', 'Sort Space Disk']::text[]) t loop
+        if (group_stats->space_key->'Peak Sort Space Used')::bigint < (group_stats->space_key->'Peak Sort Space Used')::bigint then
+          raise exception '% has invalid max space < average space', group_key;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return true;
+end;
+$$
+--
+08f83f92b56d5b52
+== 010
+-- A single large group tested around each mode transition point.
+insert into t(a, b) select i/100 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+e8fb2df40563132c
+== 011
+analyze t
+--
+6194c7b88fa87ce9
+== 012
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+afb5598b9c288110
+== 013
+select * from (select * from t order by a) s order by a, b limit 31
+--
+4bc23ed2ed17a3fc
+== 014
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+afb5598b9c288110
+== 015
+select * from (select * from t order by a) s order by a, b limit 32
+--
+4bc23ed2ed17a3fc
+== 016
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+afb5598b9c288110
+== 017
+select * from (select * from t order by a) s order by a, b limit 33
+--
+4bc23ed2ed17a3fc
+== 018
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+afb5598b9c288110
+== 019
+select * from (select * from t order by a) s order by a, b limit 65
+--
+4bc23ed2ed17a3fc
+== 020
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+afb5598b9c288110
+== 021
+select * from (select * from t order by a) s order by a, b limit 66
+--
+4bc23ed2ed17a3fc
+== 022
+delete from t
+--
+2441c40e033aca72
+== 023
+-- An initial large group followed by a small group.
+insert into t(a, b) select i/50 + 1, i + 1 from generate_series(0, 999) n(i)
+--
+e8fb2df40563132c
+== 024
+analyze t
+--
+6194c7b88fa87ce9
+== 025
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 55
+--
+afb5598b9c288110
+== 026
+select * from (select * from t order by a) s order by a, b limit 55
+--
+4bc23ed2ed17a3fc
+== 027
+-- Test EXPLAIN ANALYZE with only a fullsort group.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 55')
+--
+65cb3ad90f3fbcca
+== 028
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 55'))
+--
+b30caa15901e3b14
+== 029
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 55')
+--
+953861b2352bba65
+== 030
+delete from t
+--
+2441c40e033aca72
+== 031
+-- An initial small group followed by a large group.
+insert into t(a, b) select (case when i < 5 then i else 9 end), i from generate_series(1, 1000) n(i)
+--
+764799c64f9d72b5
+== 032
+analyze t
+--
+6194c7b88fa87ce9
+== 033
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 70
+--
+afb5598b9c288110
+== 034
+select * from (select * from t order by a) s order by a, b limit 70
+--
+4bc23ed2ed17a3fc
+== 035
+-- Checks case where we hit a group boundary at the last tuple of a batch.
+-- Because the full sort state is bounded, we scan 64 tuples (the mode
+-- transition point) but only retain 5. Thus when we transition modes, all
+-- tuples in the full sort state have different prefix keys.
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 5
+--
+afb5598b9c288110
+== 036
+select * from (select * from t order by a) s order by a, b limit 5
+--
+4bc23ed2ed17a3fc
+== 037
+-- Test rescan.
+begin
+--
+b16b431979fc3e05
+== 038
+-- We force the planner to choose a plan with incremental sort on the right side
+-- of a nested loop join node. That way we trigger the rescan code path.
+set local enable_hashjoin = off
+--
+89fa505f68f0fdaa
+== 039
+set local enable_mergejoin = off
+--
+6bd99aa48d8a865b
+== 040
+set local enable_material = off
+--
+12ad1bb9184bc3e1
+== 041
+set local enable_sort = off
+--
+bfa6e018f7f1e8dc
+== 042
+explain (costs off) select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+cd665ff7b44a2d04
+== 043
+select * from t left join (select * from (select * from t order by a) v order by a, b) s on s.a = t.a where t.a in (1, 2)
+--
+5667420b1199590d
+== 044
+rollback
+--
+a46081a556fda027
+== 045
+-- Test EXPLAIN ANALYZE with both fullsort and presorted groups.
+select explain_analyze_without_memory('select * from (select * from t order by a) s order by a, b limit 70')
+--
+65cb3ad90f3fbcca
+== 046
+select jsonb_pretty(explain_analyze_inc_sort_nodes_without_memory('select * from (select * from t order by a) s order by a, b limit 70'))
+--
+b30caa15901e3b14
+== 047
+select explain_analyze_inc_sort_nodes_verify_invariants('select * from (select * from t order by a) s order by a, b limit 70')
+--
+953861b2352bba65
+== 048
+delete from t
+--
+2441c40e033aca72
+== 049
+-- Small groups of 10 tuples each tested around each mode transition point.
+insert into t(a, b) select i / 10, i from generate_series(1, 1000) n(i)
+--
+2f77df64a5652ae2
+== 050
+analyze t
+--
+6194c7b88fa87ce9
+== 051
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+afb5598b9c288110
+== 052
+select * from (select * from t order by a) s order by a, b limit 31
+--
+4bc23ed2ed17a3fc
+== 053
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+afb5598b9c288110
+== 054
+select * from (select * from t order by a) s order by a, b limit 32
+--
+4bc23ed2ed17a3fc
+== 055
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+afb5598b9c288110
+== 056
+select * from (select * from t order by a) s order by a, b limit 33
+--
+4bc23ed2ed17a3fc
+== 057
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+afb5598b9c288110
+== 058
+select * from (select * from t order by a) s order by a, b limit 65
+--
+4bc23ed2ed17a3fc
+== 059
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+afb5598b9c288110
+== 060
+select * from (select * from t order by a) s order by a, b limit 66
+--
+4bc23ed2ed17a3fc
+== 061
+delete from t
+--
+2441c40e033aca72
+== 062
+-- Small groups of only 1 tuple each tested around each mode transition point.
+insert into t(a, b) select i, i from generate_series(1, 1000) n(i)
+--
+1bd205251aa4cd79
+== 063
+analyze t
+--
+6194c7b88fa87ce9
+== 064
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 31
+--
+afb5598b9c288110
+== 065
+select * from (select * from t order by a) s order by a, b limit 31
+--
+4bc23ed2ed17a3fc
+== 066
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 32
+--
+afb5598b9c288110
+== 067
+select * from (select * from t order by a) s order by a, b limit 32
+--
+4bc23ed2ed17a3fc
+== 068
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 33
+--
+afb5598b9c288110
+== 069
+select * from (select * from t order by a) s order by a, b limit 33
+--
+4bc23ed2ed17a3fc
+== 070
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 65
+--
+afb5598b9c288110
+== 071
+select * from (select * from t order by a) s order by a, b limit 65
+--
+4bc23ed2ed17a3fc
+== 072
+explain (costs off) select * from (select * from t order by a) s order by a, b limit 66
+--
+afb5598b9c288110
+== 073
+select * from (select * from t order by a) s order by a, b limit 66
+--
+4bc23ed2ed17a3fc
+== 074
+delete from t
+--
+2441c40e033aca72
+== 075
+drop table t
+--
+02c6443d097a5792
+== 076
+-- Incremental sort vs. parallel queries
+set min_parallel_table_scan_size = '1kB'
+--
+91a2578235f79133
+== 077
+set min_parallel_index_scan_size = '1kB'
+--
+e9936b84d4c94a30
+== 078
+set parallel_setup_cost = 0
+--
+bdfd9b27ecb1a774
+== 079
+set parallel_tuple_cost = 0
+--
+f62405e932b2ca70
+== 080
+set max_parallel_workers_per_gather = 2
+--
+c21d759ba810645f
+== 081
+create table t (a int, b int, c int)
+--
+a3f0976c851026b9
+== 082
+insert into t select mod(i,10),mod(i,10),i from generate_series(1,10000) s(i)
+--
+bbf68ba71b3f2a79
+== 083
+create index on t (a)
+--
+759df7cf737eb1e2
+== 084
+analyze t
+--
+6194c7b88fa87ce9
+== 085
+set enable_incremental_sort = off
+--
+8c576b1e2ccb81c0
+== 086
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+6637818c0d7b813a
+== 087
+set enable_incremental_sort = on
+--
+8c576b1e2ccb81c0
+== 088
+explain (costs off) select a,b,sum(c) from t group by 1,2 order by 1,2,3 limit 1
+--
+6637818c0d7b813a
+== 089
+-- Incremental sort vs. set operations with varno 0
+set enable_hashagg to off
+--
+a83598b3841af185
+== 090
+explain (costs off) select * from t union select * from t order by 1,3
+--
+53c421f8eecc226d
+== 091
+-- Full sort, not just incremental sort can be pushed below a gather merge path
+-- by generate_useful_gather_paths.
+explain (costs off) select distinct a,b from t
+--
+0c89d1cfa7a0f49e
+== 092
+drop table t
+--
+02c6443d097a5792
+== 093
+-- Sort pushdown can't go below where expressions are part of the rel target.
+-- In particular this is interesting for volatile expressions which have to
+-- go above joins since otherwise we'll incorrectly use expression evaluations
+-- across multiple rows.
+set enable_hashagg=off
+--
+a83598b3841af185
+== 094
+set enable_seqscan=off
+--
+b6355b32597ef7db
+== 095
+set enable_incremental_sort = off
+--
+8c576b1e2ccb81c0
+== 096
+set parallel_tuple_cost=0
+--
+f62405e932b2ca70
+== 097
+set parallel_setup_cost=0
+--
+bdfd9b27ecb1a774
+== 098
+set min_parallel_table_scan_size = 0
+--
+91a2578235f79133
+== 099
+set min_parallel_index_scan_size = 0
+--
+e9936b84d4c94a30
+== 100
+-- Parallel sort below join.
+explain (costs off) select distinct sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+f5bffe5ac7c8c7cd
+== 101
+explain (costs off) select sub.unique1, stringu1
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+f3da276ba986a8b7
+== 102
+-- Parallel sort but with expression that can be safely generated at the base rel.
+explain (costs off) select distinct sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+0f2065d9b64e7ad9
+== 103
+explain (costs off) select sub.unique1, md5(stringu1)
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+00da45d90dde498c
+== 104
+-- Parallel sort with an aggregate that can be safely generated in parallel,
+-- but we can't sort by partial aggregate values.
+explain (costs off) select count(*)
+from tenk1 t1
+join tenk1 t2 on t1.unique1 = t2.unique2
+join tenk1 t3 on t2.unique1 = t3.unique1
+order by count(*)
+--
+ee8778a524157b88
+== 105
+-- Parallel sort but with expression (correlated subquery) that
+-- is prohibited in parallel plans.
+explain (costs off) select distinct
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+--
+8b420e025426a872
+== 106
+explain (costs off) select
+  unique1,
+  (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
+from tenk1 t, generate_series(1, 1000)
+order by 1, 2
+--
+8ba001e16e7261d5
+== 107
+-- Parallel sort but with expression not available until the upper rel.
+explain (costs off) select distinct sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+--
+f375c0acd90123af
+== 108
+explain (costs off) select sub.unique1, stringu1 || random()::text
+from tenk1, lateral (select tenk1.unique1 from generate_series(1, 1000)) as sub
+order by 1, 2
+--
+928014231ca2b527
+== 109
+reset enable_hashagg
+--
+b056ae859e494ea7
+== 110
+reset enable_seqscan
+--
+4dec036bbc151e13
+== 111
+reset enable_incremental_sort
+--
+c06a17116e525542
+== 112
+reset parallel_tuple_cost
+--
+c669a6b2c1770679
+== 113
+reset parallel_setup_cost
+--
+45802239c7135b18
+== 114
+reset min_parallel_table_scan_size
+--
+5182ee3580baeecb
+== 115
+reset min_parallel_index_scan_size
+--
+1ef464b89e37b72a
+== 116
+-- Ensure incremental sorts work for amcanorderbyop type indexes
+create table point_table (a point, b int)
+--
+de743df3ccf4124c
+== 117
+create index point_table_a_idx on point_table using gist(a)
+--
+96ad18af550ceb36
+== 118
+-- Ensure we get an incremental sort plan for both of the following queries
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b limit 1
+--
+cc9d6a0a2edc3b88
+== 119
+explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b desc limit 1
+--
+07d8a80efe6c44b1

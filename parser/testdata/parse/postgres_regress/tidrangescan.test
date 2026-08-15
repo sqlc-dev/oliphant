@@ -1,0 +1,214 @@
+== 001
+-- tests for tidrangescans
+
+SET enable_seqscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":50}}]}}}]}
+== 002
+CREATE TABLE tidrangescan(id integer, data text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":29},"is_local":true,"location":26}},{"ColumnDef":{"colname":"data","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":43},"is_local":true,"location":38}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 003
+-- empty table
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid < '(1, 0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":42}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":52}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":71}},"rexpr":{"A_Const":{"sval":{"sval":"(1, 0)"},"location":78}},"location":76}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":24}}]}}}]}
+== 004
+SELECT ctid FROM tidrangescan WHERE ctid < '(1, 0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(1, 0)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 005
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid > '(9, 0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(9, 0)"},"location":63}},"location":61}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 006
+SELECT ctid FROM tidrangescan WHERE ctid > '(9, 0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(9, 0)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 007
+-- insert enough tuples to fill at least two pages
+INSERT INTO tidrangescan SELECT i,repeat('x', 100) FROM generate_series(1,200) AS s(i)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":63},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":83}},"location":83}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"x"},"location":92}},{"A_Const":{"ival":{"ival":100},"location":97}}],"funcformat":"COERCE_EXPLICIT_CALL","location":85}},"location":85}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":123}},{"A_Const":{"ival":{"ival":200},"location":125}}],"funcformat":"COERCE_EXPLICIT_CALL","location":107}},{}]}}],"alias":{"aliasname":"s","colnames":[{"String":{"sval":"i"}}]}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 008
+-- remove all tuples after the 10th tuple on each page.  Trying to ensure
+-- we get the same layout with all CPU architectures and smaller than standard
+-- page sizes.
+DELETE FROM tidrangescan
+WHERE substring(ctid::text FROM ',(\d+)\)')::integer > 10 OR substring(ctid::text FROM '\((\d+),')::integer > 2
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":180},"whereClause":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"substring"}}],"args":[{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":209}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":215},"location":213}},{"A_Const":{"sval":{"sval":",(\\d+)\\)"},"location":225}}],"funcformat":"COERCE_SQL_SYNTAX","location":199}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":238},"location":236}},"rexpr":{"A_Const":{"ival":{"ival":10},"location":248}},"location":246}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"substring"}}],"args":[{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":264}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":270},"location":268}},{"A_Const":{"sval":{"sval":"\\((\\d+),"},"location":280}}],"funcformat":"COERCE_SQL_SYNTAX","location":254}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":293},"location":291}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":303}},"location":301}}],"location":251}}}}}]}
+== 009
+VACUUM tidrangescan
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":7}}}],"is_vacuumcmd":true}}}]}
+== 010
+-- range scans with upper bound
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":59}},"location":59}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":69}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":88}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":95}},"location":93}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":41}}]}}}]}
+== 011
+SELECT ctid FROM tidrangescan WHERE ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 012
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid <= '(1,5)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(1,5)"},"location":64}},"location":61}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 013
+SELECT ctid FROM tidrangescan WHERE ctid <= '(1,5)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(1,5)"},"location":44}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 014
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid < '(0,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(0,0)"},"location":63}},"location":61}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 015
+SELECT ctid FROM tidrangescan WHERE ctid < '(0,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(0,0)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 016
+-- range scans with lower bound
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid > '(2,8)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":59}},"location":59}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":69}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":88}},"rexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":95}},"location":93}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":41}}]}}}]}
+== 017
+SELECT ctid FROM tidrangescan WHERE ctid > '(2,8)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 018
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE '(2,8)' < ctid
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":56}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":66}},"location":64}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 019
+SELECT ctid FROM tidrangescan WHERE '(2,8)' < ctid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":36}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":46}},"location":44}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 020
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid >= '(2,8)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":64}},"location":61}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 021
+SELECT ctid FROM tidrangescan WHERE ctid >= '(2,8)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(2,8)"},"location":44}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid >= '(100,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(100,0)"},"location":64}},"location":61}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 023
+SELECT ctid FROM tidrangescan WHERE ctid >= '(100,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(100,0)"},"location":44}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 024
+-- range scans with both bounds
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE ctid > '(1,4)' AND '(1,7)' >= ctid
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":59}},"location":59}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":69}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":88}},"rexpr":{"A_Const":{"sval":{"sval":"(1,4)"},"location":95}},"location":93}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Const":{"sval":{"sval":"(1,7)"},"location":107}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":118}},"location":115}}],"location":103}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":41}}]}}}]}
+== 025
+SELECT ctid FROM tidrangescan WHERE ctid > '(1,4)' AND '(1,7)' >= ctid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(1,4)"},"location":43}},"location":41}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Const":{"sval":{"sval":"(1,7)"},"location":55}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":66}},"location":63}}],"location":51}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 026
+EXPLAIN (COSTS OFF)
+SELECT ctid FROM tidrangescan WHERE '(1,7)' >= ctid AND ctid > '(1,4)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":37}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Const":{"sval":{"sval":"(1,7)"},"location":56}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":67}},"location":64}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":76}},"rexpr":{"A_Const":{"sval":{"sval":"(1,4)"},"location":83}},"location":81}}],"location":72}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 027
+SELECT ctid FROM tidrangescan WHERE '(1,7)' >= ctid AND ctid > '(1,4)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Const":{"sval":{"sval":"(1,7)"},"location":36}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":47}},"location":44}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":56}},"rexpr":{"A_Const":{"sval":{"sval":"(1,4)"},"location":63}},"location":61}}],"location":52}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+-- extreme offsets
+SELECT ctid FROM tidrangescan WHERE ctid > '(0,65535)' AND ctid < '(1,0)' LIMIT 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":26}},"location":26}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":36}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":55}},"rexpr":{"A_Const":{"sval":{"sval":"(0,65535)"},"location":62}},"location":60}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":78}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":85}},"location":83}}],"location":74}},"limitCount":{"A_Const":{"ival":{"ival":1},"location":99}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 029
+SELECT ctid FROM tidrangescan WHERE ctid < '(0,0)' LIMIT 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(0,0)"},"location":43}},"location":41}},"limitCount":{"A_Const":{"ival":{"ival":1},"location":57}},"limitOption":"LIMIT_OPTION_COUNT","op":"SETOP_NONE"}}}]}
+== 030
+SELECT ctid FROM tidrangescan WHERE ctid > '(4294967295,65535)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(4294967295,65535)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 031
+SELECT ctid FROM tidrangescan WHERE ctid < '(0,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":36}},"rexpr":{"A_Const":{"sval":{"sval":"(0,0)"},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 032
+-- NULLs in the range cannot return tuples
+SELECT ctid FROM tidrangescan WHERE ctid >= (SELECT NULL::tid)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":50}},"location":50}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":60}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":79}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"TypeCast":{"arg":{"A_Const":{"isnull":true,"location":95}},"typeName":{"names":[{"String":{"sval":"tid"}}],"typemod":-1,"location":101},"location":99}},"location":95}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":87}},"location":84}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 033
+-- rescans
+EXPLAIN (COSTS OFF)
+SELECT t.ctid,t2.c FROM tidrangescan t,
+LATERAL (SELECT count(*) c FROM tidrangescan t2 WHERE t2.ctid <= t.ctid) t2
+WHERE t.ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":38}},"location":38}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"c"}}],"location":45}},"location":45}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","alias":{"aliasname":"t"},"location":55}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"c","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":87}},"location":87}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":103}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"ctid"}}],"location":125}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":136}},"location":133}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"t2"}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":153}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":162}},"location":160}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 034
+SELECT t.ctid,t2.c FROM tidrangescan t,
+LATERAL (SELECT count(*) c FROM tidrangescan t2 WHERE t2.ctid <= t.ctid) t2
+WHERE t.ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"c"}}],"location":14}},"location":14}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","alias":{"aliasname":"t"},"location":24}},{"RangeSubselect":{"lateral":true,"subquery":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"c","val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":56}},"location":56}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":72}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t2"}},{"String":{"sval":"ctid"}}],"location":94}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":105}},"location":102}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"alias":{"aliasname":"t2"}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"ctid"}}],"location":122}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":131}},"location":129}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 035
+-- cursors
+
+-- Ensure we get a TID Range scan without a Materialize node.
+EXPLAIN (COSTS OFF)
+DECLARE c SCROLL CURSOR FOR SELECT ctid FROM tidrangescan WHERE ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"DeclareCursorStmt":{"portalname":"c","options":258,"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":129}},"location":129}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":139}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":158}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":165}},"location":163}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":83}}]}}}]}
+== 036
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 037
+DECLARE c SCROLL CURSOR FOR SELECT ctid FROM tidrangescan WHERE ctid < '(1,0)'
+--
+{"version":170007,"stmts":[{"stmt":{"DeclareCursorStmt":{"portalname":"c","options":258,"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":35}},"location":35}}],"fromClause":[{"RangeVar":{"relname":"tidrangescan","inh":true,"relpersistence":"p","location":45}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"ctid"}}],"location":64}},"rexpr":{"A_Const":{"sval":{"sval":"(1,0)"},"location":71}},"location":69}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
+== 038
+FETCH NEXT c
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_FORWARD","howMany":1,"portalname":"c"}}}]}
+== 039
+FETCH NEXT c
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_FORWARD","howMany":1,"portalname":"c"}}}]}
+== 040
+FETCH PRIOR c
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_BACKWARD","howMany":1,"portalname":"c"}}}]}
+== 041
+FETCH FIRST c
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_ABSOLUTE","howMany":1,"portalname":"c"}}}]}
+== 042
+FETCH LAST c
+--
+{"version":170007,"stmts":[{"stmt":{"FetchStmt":{"direction":"FETCH_ABSOLUTE","howMany":-1,"portalname":"c"}}}]}
+== 043
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 044
+DROP TABLE tidrangescan
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"tidrangescan"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 045
+RESET enable_seqscan
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"enable_seqscan"}}}]}

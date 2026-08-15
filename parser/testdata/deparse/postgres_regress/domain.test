@@ -1,0 +1,1595 @@
+== 001
+|--
+-- Test domains.
+|--
+
+-- Test Comment / Drop
+create domain domaindroptest int4
+--
+CREATE DOMAIN domaindroptest AS int4
+== 002
+comment on domain domaindroptest is 'About to drop this..'
+--
+COMMENT ON DOMAIN domaindroptest IS 'About to drop this..'
+== 003
+create domain dependenttypetest domaindroptest
+--
+CREATE DOMAIN dependenttypetest AS domaindroptest
+== 004
+-- fail because of dependent type
+drop domain domaindroptest
+--
+DROP DOMAIN domaindroptest
+== 005
+drop domain domaindroptest cascade
+--
+DROP DOMAIN domaindroptest CASCADE
+== 006
+-- this should fail because already gone
+drop domain domaindroptest cascade
+--
+DROP DOMAIN domaindroptest CASCADE
+== 007
+-- Test domain input.
+
+-- Note: the point of checking both INSERT and COPY FROM is that INSERT
+-- exercises CoerceToDomain while COPY exercises domain_in.
+
+create domain domainvarchar varchar(5)
+--
+CREATE DOMAIN domainvarchar AS varchar(5)
+== 008
+create domain domainnumeric numeric(8,2)
+--
+CREATE DOMAIN domainnumeric AS numeric(8, 2)
+== 009
+create domain domainint4 int4
+--
+CREATE DOMAIN domainint4 AS int4
+== 010
+create domain domaintext text
+--
+CREATE DOMAIN domaintext AS text
+== 011
+-- Test explicit coercions --- these should succeed (and truncate)
+SELECT cast('123456' as domainvarchar)
+--
+SELECT '123456'::domainvarchar
+== 012
+SELECT cast('12345' as domainvarchar)
+--
+SELECT '12345'::domainvarchar
+== 013
+-- Test tables using domains
+create table basictest
+           ( testint4 domainint4
+           , testtext domaintext
+           , testvarchar domainvarchar
+           , testnumeric domainnumeric
+           )
+--
+CREATE TABLE basictest (testint4 domainint4, testtext domaintext, testvarchar domainvarchar, testnumeric domainnumeric)
+== 014
+INSERT INTO basictest values ('88', 'haha', 'short', '123.12')
+--
+INSERT INTO basictest VALUES ('88', 'haha', 'short', '123.12')
+== 015
+-- Good
+INSERT INTO basictest values ('88', 'haha', 'short text', '123.12')
+--
+INSERT INTO basictest VALUES ('88', 'haha', 'short text', '123.12')
+== 016
+-- Bad varchar
+INSERT INTO basictest values ('88', 'haha', 'short', '123.1212')
+--
+INSERT INTO basictest VALUES ('88', 'haha', 'short', '123.1212')
+== 017
+-- Truncate numeric
+
+-- Test copy
+COPY basictest (testvarchar) FROM stdin
+--
+COPY basictest(testvarchar) FROM STDIN
+== 018
+-- fail
+notsoshorttext
+
+COPY basictest (testvarchar) FROM stdin
+--
+ERROR: syntax error at or near "notsoshorttext"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 019
+select * from basictest
+--
+SELECT * FROM basictest
+== 020
+-- check that domains inherit operations from base types
+select testtext || testvarchar as concat, testnumeric + 42 as sum
+from basictest
+--
+SELECT testtext || testvarchar AS concat, testnumeric + 42 AS sum FROM basictest
+== 021
+-- check that union/case/coalesce type resolution handles domains properly
+select pg_typeof(coalesce(4::domainint4, 7))
+--
+SELECT pg_typeof(COALESCE(4::domainint4, 7))
+== 022
+select pg_typeof(coalesce(4::domainint4, 7::domainint4))
+--
+SELECT pg_typeof(COALESCE(4::domainint4, 7::domainint4))
+== 023
+drop table basictest
+--
+DROP TABLE basictest
+== 024
+drop domain domainvarchar restrict
+--
+DROP DOMAIN domainvarchar
+== 025
+drop domain domainnumeric restrict
+--
+DROP DOMAIN domainnumeric
+== 026
+drop domain domainint4 restrict
+--
+DROP DOMAIN domainint4
+== 027
+drop domain domaintext
+--
+DROP DOMAIN domaintext
+== 028
+-- Test non-error-throwing input
+
+create domain positiveint int4 check(value > 0)
+--
+CREATE DOMAIN positiveint AS int4 CHECK (value > 0)
+== 029
+create domain weirdfloat float8 check((1 / value) < 10)
+--
+CREATE DOMAIN weirdfloat AS float8 CHECK ((1 / value) < 10)
+== 030
+select pg_input_is_valid('1', 'positiveint')
+--
+SELECT pg_input_is_valid('1', 'positiveint')
+== 031
+select pg_input_is_valid('junk', 'positiveint')
+--
+SELECT pg_input_is_valid('junk', 'positiveint')
+== 032
+select pg_input_is_valid('-1', 'positiveint')
+--
+SELECT pg_input_is_valid('-1', 'positiveint')
+== 033
+select * from pg_input_error_info('junk', 'positiveint')
+--
+SELECT * FROM pg_input_error_info('junk', 'positiveint')
+== 034
+select * from pg_input_error_info('-1', 'positiveint')
+--
+SELECT * FROM pg_input_error_info('-1', 'positiveint')
+== 035
+select * from pg_input_error_info('junk', 'weirdfloat')
+--
+SELECT * FROM pg_input_error_info('junk', 'weirdfloat')
+== 036
+select * from pg_input_error_info('0.01', 'weirdfloat')
+--
+SELECT * FROM pg_input_error_info('0.01', 'weirdfloat')
+== 037
+-- We currently can't trap errors raised in the CHECK expression itself
+select * from pg_input_error_info('0', 'weirdfloat')
+--
+SELECT * FROM pg_input_error_info('0', 'weirdfloat')
+== 038
+drop domain positiveint
+--
+DROP DOMAIN positiveint
+== 039
+drop domain weirdfloat
+--
+DROP DOMAIN weirdfloat
+== 040
+-- Test domains over array types
+
+create domain domainint4arr int4[1]
+--
+CREATE DOMAIN domainint4arr AS int4[1]
+== 041
+create domain domainchar4arr varchar(4)[2][3]
+--
+CREATE DOMAIN domainchar4arr AS varchar(4)[2][3]
+== 042
+create table domarrtest
+           ( testint4arr domainint4arr
+           , testchar4arr domainchar4arr
+            )
+--
+CREATE TABLE domarrtest (testint4arr domainint4arr, testchar4arr domainchar4arr)
+== 043
+INSERT INTO domarrtest values ('{2,2}', '{{"a","b"},{"c","d"}}')
+--
+INSERT INTO domarrtest VALUES ('{2,2}', '{{"a","b"},{"c","d"}}')
+== 044
+INSERT INTO domarrtest values ('{{2,2},{2,2}}', '{{"a","b"}}')
+--
+INSERT INTO domarrtest VALUES ('{{2,2},{2,2}}', '{{"a","b"}}')
+== 045
+INSERT INTO domarrtest values ('{2,2}', '{{"a","b"},{"c","d"},{"e","f"}}')
+--
+INSERT INTO domarrtest VALUES ('{2,2}', '{{"a","b"},{"c","d"},{"e","f"}}')
+== 046
+INSERT INTO domarrtest values ('{2,2}', '{{"a"},{"c"}}')
+--
+INSERT INTO domarrtest VALUES ('{2,2}', '{{"a"},{"c"}}')
+== 047
+INSERT INTO domarrtest values (NULL, '{{"a","b","c"},{"d","e","f"}}')
+--
+INSERT INTO domarrtest VALUES (NULL, '{{"a","b","c"},{"d","e","f"}}')
+== 048
+INSERT INTO domarrtest values (NULL, '{{"toolong","b","c"},{"d","e","f"}}')
+--
+INSERT INTO domarrtest VALUES (NULL, '{{"toolong","b","c"},{"d","e","f"}}')
+== 049
+INSERT INTO domarrtest (testint4arr[1], testint4arr[3]) values (11,22)
+--
+INSERT INTO domarrtest (testint4arr[1], testint4arr[3]) VALUES (11, 22)
+== 050
+select * from domarrtest
+--
+SELECT * FROM domarrtest
+== 051
+select testint4arr[1], testchar4arr[2:2] from domarrtest
+--
+SELECT testint4arr[1], testchar4arr[2:2] FROM domarrtest
+== 052
+select array_dims(testint4arr), array_dims(testchar4arr) from domarrtest
+--
+SELECT array_dims(testint4arr), array_dims(testchar4arr) FROM domarrtest
+== 053
+COPY domarrtest FROM stdin
+--
+COPY domarrtest FROM STDIN
+== 054
+COPY domarrtest FROM stdin
+--
+COPY domarrtest FROM STDIN
+== 055
+-- fail
+{3,4}	{qwerty,w,e}
+
+select * from domarrtest
+--
+ERROR: syntax error at or near "{"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 056
+COPY nulltest FROM stdin
+--
+COPY nulltest FROM STDIN
+== 057
+--fail
+a	b	c	d	\N
+
+-- Last row is bad
+COPY nulltest FROM stdin
+--
+ERROR: syntax error at or near "a"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 058
+select * from nulltest
+--
+SELECT * FROM nulltest
+== 059
+-- Test out coerced (casted) constraints
+SELECT cast('1' as dnotnull)
+--
+SELECT '1'::dnotnull
+== 060
+SELECT cast(NULL as dnotnull)
+--
+SELECT NULL::dnotnull
+== 061
+-- fail
+SELECT cast(cast(NULL as dnull) as dnotnull)
+--
+SELECT NULL::dnull::dnotnull
+== 062
+-- fail
+SELECT cast(col4 as dnotnull) from nulltest
+--
+SELECT col4::dnotnull FROM nulltest
+== 063
+-- fail
+
+-- cleanup
+drop table nulltest
+--
+DROP TABLE nulltest
+== 064
+drop domain dnotnull restrict
+--
+DROP DOMAIN dnotnull
+== 065
+drop domain dnull restrict
+--
+DROP DOMAIN dnull
+== 066
+drop domain dcheck restrict
+--
+DROP DOMAIN dcheck
+== 067
+create domain ddef1 int4 DEFAULT 3
+--
+CREATE DOMAIN ddef1 AS int4 DEFAULT 3
+== 068
+create domain ddef2 oid DEFAULT '12'
+--
+CREATE DOMAIN ddef2 AS oid DEFAULT '12'
+== 069
+-- Type mixing, function returns int8
+create domain ddef3 text DEFAULT 5
+--
+CREATE DOMAIN ddef3 AS text DEFAULT 5
+== 070
+create sequence ddef4_seq
+--
+CREATE SEQUENCE ddef4_seq
+== 071
+create domain ddef4 int4 DEFAULT nextval('ddef4_seq')
+--
+CREATE DOMAIN ddef4 AS int4 DEFAULT nextval('ddef4_seq')
+== 072
+create domain ddef5 numeric(8,2) NOT NULL DEFAULT '12.12'
+--
+CREATE DOMAIN ddef5 AS numeric(8, 2) NOT NULL DEFAULT '12.12'
+== 073
+create table defaulttest
+            ( col1 ddef1
+            , col2 ddef2
+            , col3 ddef3
+            , col4 ddef4 PRIMARY KEY
+            , col5 ddef1 NOT NULL DEFAULT NULL
+            , col6 ddef2 DEFAULT '88'
+            , col7 ddef4 DEFAULT 8000
+            , col8 ddef5
+            )
+--
+CREATE TABLE defaulttest (col1 ddef1, col2 ddef2, col3 ddef3, col4 ddef4 PRIMARY KEY, col5 ddef1 NOT NULL DEFAULT NULL, col6 ddef2 DEFAULT '88', col7 ddef4 DEFAULT 8000, col8 ddef5)
+== 074
+insert into defaulttest(col4) values(0)
+--
+INSERT INTO defaulttest (col4) VALUES (0)
+== 075
+-- fails, col5 defaults to null
+alter table defaulttest alter column col5 drop default
+--
+ALTER TABLE defaulttest ALTER COLUMN col5 DROP DEFAULT
+== 076
+insert into defaulttest default values
+--
+INSERT INTO defaulttest DEFAULT VALUES
+== 077
+-- succeeds, inserts domain default
+-- We used to treat SET DEFAULT NULL as equivalent to DROP DEFAULT; wrong
+alter table defaulttest alter column col5 set default null
+--
+ALTER TABLE defaulttest ALTER COLUMN col5 SET DEFAULT NULL
+== 078
+insert into defaulttest(col4) values(0)
+--
+INSERT INTO defaulttest (col4) VALUES (0)
+== 079
+-- fails
+alter table defaulttest alter column col5 drop default
+--
+ALTER TABLE defaulttest ALTER COLUMN col5 DROP DEFAULT
+== 080
+insert into defaulttest default values
+--
+INSERT INTO defaulttest DEFAULT VALUES
+== 081
+insert into defaulttest default values
+--
+INSERT INTO defaulttest DEFAULT VALUES
+== 082
+-- Test defaults with copy
+COPY defaulttest(col5) FROM stdin
+--
+COPY defaulttest(col5) FROM STDIN
+== 083
+select * from defaulttest
+--
+SELECT * FROM defaulttest
+== 084
+drop table defaulttest cascade
+--
+DROP TABLE defaulttest CASCADE
+== 085
+-- Test ALTER DOMAIN .. NOT NULL
+create domain dnotnulltest integer
+--
+CREATE DOMAIN dnotnulltest AS int
+== 086
+create table domnotnull
+( col1 dnotnulltest
+, col2 dnotnulltest
+)
+--
+CREATE TABLE domnotnull (col1 dnotnulltest, col2 dnotnulltest)
+== 087
+insert into domnotnull default values
+--
+INSERT INTO domnotnull DEFAULT VALUES
+== 088
+alter domain dnotnulltest set not null
+--
+ALTER DOMAIN dnotnulltest SET NOT NULL
+== 089
+-- fails
+
+update domnotnull set col1 = 5
+--
+UPDATE domnotnull SET col1 = 5
+== 090
+alter domain dnotnulltest set not null
+--
+ALTER DOMAIN dnotnulltest SET NOT NULL
+== 091
+-- fails
+
+update domnotnull set col2 = 6
+--
+UPDATE domnotnull SET col2 = 6
+== 092
+alter domain dnotnulltest set not null
+--
+ALTER DOMAIN dnotnulltest SET NOT NULL
+== 093
+update domnotnull set col1 = null
+--
+UPDATE domnotnull SET col1 = NULL
+== 094
+-- fails
+
+alter domain dnotnulltest drop not null
+--
+ALTER DOMAIN dnotnulltest DROP NOT NULL
+== 095
+update domnotnull set col1 = null
+--
+UPDATE domnotnull SET col1 = NULL
+== 096
+update domnotnull set col1 = 5
+--
+UPDATE domnotnull SET col1 = 5
+== 097
+-- these constraints can also be added and removed by name
+alter domain dnotnulltest add constraint dnotnulltest_notnull not null
+--
+ALTER DOMAIN dnotnulltest ADD CONSTRAINT dnotnulltest_notnull NOT NULL
+== 098
+update domnotnull set col1 = null
+--
+UPDATE domnotnull SET col1 = NULL
+== 099
+-- fails
+select conname, pg_get_constraintdef(oid) from pg_constraint
+ where contypid = 'dnotnulltest'::regtype
+--
+SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE contypid = 'dnotnulltest'::regtype
+== 100
+alter domain dnotnulltest drop constraint dnotnulltest_notnull
+--
+ALTER DOMAIN dnotnulltest DROP CONSTRAINT dnotnulltest_notnull
+== 101
+update domnotnull set col1 = null
+--
+UPDATE domnotnull SET col1 = NULL
+== 102
+drop domain dnotnulltest cascade
+--
+DROP DOMAIN dnotnulltest CASCADE
+== 103
+-- Test ALTER DOMAIN .. DEFAULT ..
+create table domdeftest (col1 ddef1)
+--
+CREATE TABLE domdeftest (col1 ddef1)
+== 104
+insert into domdeftest default values
+--
+INSERT INTO domdeftest DEFAULT VALUES
+== 105
+select * from domdeftest
+--
+SELECT * FROM domdeftest
+== 106
+alter domain ddef1 set default '42'
+--
+ALTER DOMAIN ddef1 SET DEFAULT '42'
+== 107
+insert into domdeftest default values
+--
+INSERT INTO domdeftest DEFAULT VALUES
+== 108
+select * from domdeftest
+--
+SELECT * FROM domdeftest
+== 109
+alter domain ddef1 drop default
+--
+ALTER DOMAIN ddef1 DROP DEFAULT
+== 110
+insert into domdeftest default values
+--
+INSERT INTO domdeftest DEFAULT VALUES
+== 111
+select * from domdeftest
+--
+SELECT * FROM domdeftest
+== 112
+drop table domdeftest
+--
+DROP TABLE domdeftest
+== 113
+-- Test ALTER DOMAIN .. CONSTRAINT ..
+create domain con as integer
+--
+CREATE DOMAIN con AS int
+== 114
+create table domcontest (col1 con)
+--
+CREATE TABLE domcontest (col1 con)
+== 115
+insert into domcontest values (1)
+--
+INSERT INTO domcontest VALUES (1)
+== 116
+insert into domcontest values (2)
+--
+INSERT INTO domcontest VALUES (2)
+== 117
+alter domain con add constraint t check (VALUE < 1)
+--
+ALTER DOMAIN con ADD CONSTRAINT t CHECK (value < 1)
+== 118
+-- fails
+
+alter domain con add constraint t check (VALUE < 34)
+--
+ALTER DOMAIN con ADD CONSTRAINT t CHECK (value < 34)
+== 119
+alter domain con add check (VALUE > 0)
+--
+ALTER DOMAIN con ADD CHECK (value > 0)
+== 120
+insert into domcontest values (-5)
+--
+INSERT INTO domcontest VALUES (-5)
+== 121
+-- fails
+insert into domcontest values (42)
+--
+INSERT INTO domcontest VALUES (42)
+== 122
+-- fails
+insert into domcontest values (5)
+--
+INSERT INTO domcontest VALUES (5)
+== 123
+alter domain con drop constraint t
+--
+ALTER DOMAIN con DROP CONSTRAINT t
+== 124
+insert into domcontest values (-5)
+--
+INSERT INTO domcontest VALUES (-5)
+== 125
+--fails
+insert into domcontest values (42)
+--
+INSERT INTO domcontest VALUES (42)
+== 126
+alter domain con drop constraint nonexistent
+--
+ALTER DOMAIN con DROP CONSTRAINT nonexistent
+== 127
+alter domain con drop constraint if exists nonexistent
+--
+ALTER DOMAIN con DROP CONSTRAINT IF EXISTS nonexistent
+== 128
+-- not-null constraints
+create domain connotnull integer
+--
+CREATE DOMAIN connotnull AS int
+== 129
+create table domconnotnulltest
+( col1 connotnull
+, col2 connotnull
+)
+--
+CREATE TABLE domconnotnulltest (col1 connotnull, col2 connotnull)
+== 130
+insert into domconnotnulltest default values
+--
+INSERT INTO domconnotnulltest DEFAULT VALUES
+== 131
+alter domain connotnull add not null
+--
+ALTER DOMAIN connotnull ADD NOT NULL
+== 132
+-- fails
+
+update domconnotnulltest set col1 = 5
+--
+UPDATE domconnotnulltest SET col1 = 5
+== 133
+alter domain connotnull add not null
+--
+ALTER DOMAIN connotnull ADD NOT NULL
+== 134
+-- fails
+
+update domconnotnulltest set col2 = 6
+--
+UPDATE domconnotnulltest SET col2 = 6
+== 135
+alter domain connotnull add constraint constr1 not null
+--
+ALTER DOMAIN connotnull ADD CONSTRAINT constr1 NOT NULL
+== 136
+select count(*) from pg_constraint where contypid = 'connotnull'::regtype and contype = 'n'
+--
+SELECT count(*) FROM pg_constraint WHERE contypid = 'connotnull'::regtype AND contype = 'n'
+== 137
+alter domain connotnull add constraint constr1bis not null
+--
+ALTER DOMAIN connotnull ADD CONSTRAINT constr1bis NOT NULL
+== 138
+-- redundant
+select count(*) from pg_constraint where contypid = 'connotnull'::regtype and contype = 'n'
+--
+SELECT count(*) FROM pg_constraint WHERE contypid = 'connotnull'::regtype AND contype = 'n'
+== 139
+update domconnotnulltest set col1 = null
+--
+UPDATE domconnotnulltest SET col1 = NULL
+== 140
+-- fails
+
+alter domain connotnull drop constraint constr1
+--
+ALTER DOMAIN connotnull DROP CONSTRAINT constr1
+== 141
+update domconnotnulltest set col1 = null
+--
+UPDATE domconnotnulltest SET col1 = NULL
+== 142
+drop domain connotnull cascade
+--
+DROP DOMAIN connotnull CASCADE
+== 143
+drop table domconnotnulltest
+--
+DROP TABLE domconnotnulltest
+== 144
+-- Test ALTER DOMAIN .. CONSTRAINT .. NOT VALID
+create domain things AS INT
+--
+CREATE DOMAIN things AS int
+== 145
+CREATE TABLE thethings (stuff things)
+--
+CREATE TABLE thethings (stuff things)
+== 146
+INSERT INTO thethings (stuff) VALUES (55)
+--
+INSERT INTO thethings (stuff) VALUES (55)
+== 147
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (VALUE < 11)
+--
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (value < 11)
+== 148
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (VALUE < 11) NOT VALID
+--
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (value < 11) NOT VALID
+== 149
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+--
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+== 150
+UPDATE thethings SET stuff = 10
+--
+UPDATE thethings SET stuff = 10
+== 151
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+--
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+== 152
+-- Confirm ALTER DOMAIN with RULES.
+create table domtab (col1 integer)
+--
+CREATE TABLE domtab (col1 int)
+== 153
+create domain dom as integer
+--
+CREATE DOMAIN dom AS int
+== 154
+create view domview as select cast(col1 as dom) from domtab
+--
+CREATE VIEW domview AS SELECT col1::dom FROM domtab
+== 155
+insert into domtab (col1) values (null)
+--
+INSERT INTO domtab (col1) VALUES (NULL)
+== 156
+insert into domtab (col1) values (5)
+--
+INSERT INTO domtab (col1) VALUES (5)
+== 157
+select * from domview
+--
+SELECT * FROM domview
+== 158
+alter domain dom set not null
+--
+ALTER DOMAIN dom SET NOT NULL
+== 159
+select * from domview
+--
+SELECT * FROM domview
+== 160
+-- fail
+
+alter domain dom drop not null
+--
+ALTER DOMAIN dom DROP NOT NULL
+== 161
+select * from domview
+--
+SELECT * FROM domview
+== 162
+alter domain dom add constraint domchkgt6 check(value > 6)
+--
+ALTER DOMAIN dom ADD CONSTRAINT domchkgt6 CHECK (value > 6)
+== 163
+select * from domview
+--
+SELECT * FROM domview
+== 164
+--fail
+
+alter domain dom drop constraint domchkgt6 restrict
+--
+ALTER DOMAIN dom DROP CONSTRAINT domchkgt6
+== 165
+select * from domview
+--
+SELECT * FROM domview
+== 166
+-- cleanup
+drop domain ddef1 restrict
+--
+DROP DOMAIN ddef1
+== 167
+drop domain ddef2 restrict
+--
+DROP DOMAIN ddef2
+== 168
+drop domain ddef3 restrict
+--
+DROP DOMAIN ddef3
+== 169
+drop domain ddef4 restrict
+--
+DROP DOMAIN ddef4
+== 170
+drop domain ddef5 restrict
+--
+DROP DOMAIN ddef5
+== 171
+drop sequence ddef4_seq
+--
+DROP SEQUENCE ddef4_seq
+== 172
+-- Test domains over domains
+create domain vchar4 varchar(4)
+--
+CREATE DOMAIN vchar4 AS varchar(4)
+== 173
+create domain dinter vchar4 check (substring(VALUE, 1, 1) = 'x')
+--
+CREATE DOMAIN dinter AS vchar4 CHECK ("substring"(value, 1, 1) = 'x')
+== 174
+create domain dtop dinter check (substring(VALUE, 2, 1) = '1')
+--
+CREATE DOMAIN dtop AS dinter CHECK ("substring"(value, 2, 1) = '1')
+== 175
+select 'x123'::dtop
+--
+SELECT 'x123'::dtop
+== 176
+select 'x1234'::dtop
+--
+SELECT 'x1234'::dtop
+== 177
+-- explicit coercion should truncate
+select 'y1234'::dtop
+--
+SELECT 'y1234'::dtop
+== 178
+-- fail
+select 'y123'::dtop
+--
+SELECT 'y123'::dtop
+== 179
+-- fail
+select 'yz23'::dtop
+--
+SELECT 'yz23'::dtop
+== 180
+-- fail
+select 'xz23'::dtop
+--
+SELECT 'xz23'::dtop
+== 181
+-- fail
+
+create temp table dtest(f1 dtop)
+--
+CREATE TEMPORARY TABLE dtest (f1 dtop)
+== 182
+insert into dtest values('x123')
+--
+INSERT INTO dtest VALUES ('x123')
+== 183
+insert into dtest values('x1234')
+--
+INSERT INTO dtest VALUES ('x1234')
+== 184
+-- fail, implicit coercion
+insert into dtest values('y1234')
+--
+INSERT INTO dtest VALUES ('y1234')
+== 185
+-- fail, implicit coercion
+insert into dtest values('y123')
+--
+INSERT INTO dtest VALUES ('y123')
+== 186
+-- fail
+insert into dtest values('yz23')
+--
+INSERT INTO dtest VALUES ('yz23')
+== 187
+-- fail
+insert into dtest values('xz23')
+--
+INSERT INTO dtest VALUES ('xz23')
+== 188
+-- fail
+
+drop table dtest
+--
+DROP TABLE dtest
+== 189
+drop domain vchar4 cascade
+--
+DROP DOMAIN vchar4 CASCADE
+== 190
+-- Make sure that constraints of newly-added domain columns are
+-- enforced correctly, even if there's no default value for the new
+-- column. Per bug #1433
+create domain str_domain as text not null
+--
+CREATE DOMAIN str_domain AS text NOT NULL
+== 191
+create table domain_test (a int, b int)
+--
+CREATE TABLE domain_test (a int, b int)
+== 192
+insert into domain_test values (1, 2)
+--
+INSERT INTO domain_test VALUES (1, 2)
+== 193
+insert into domain_test values (1, 2)
+--
+INSERT INTO domain_test VALUES (1, 2)
+== 194
+-- should fail
+alter table domain_test add column c str_domain
+--
+ALTER TABLE domain_test ADD COLUMN c str_domain
+== 195
+create domain str_domain2 as text check (value <> 'foo') default 'foo'
+--
+CREATE DOMAIN str_domain2 AS text CHECK (value <> 'foo') DEFAULT 'foo'
+== 196
+-- should fail
+alter table domain_test add column d str_domain2
+--
+ALTER TABLE domain_test ADD COLUMN d str_domain2
+== 197
+-- Check that domain constraints on prepared statement parameters of
+-- unknown type are enforced correctly.
+create domain pos_int as int4 check (value > 0) not null
+--
+CREATE DOMAIN pos_int AS int4 CHECK (value > 0) NOT NULL
+== 198
+prepare s1 as select $1::pos_int = 10 as "is_ten"
+--
+PREPARE s1 AS SELECT $1::pos_int = 10 AS is_ten
+== 199
+execute s1(10)
+--
+EXECUTE s1(10)
+== 200
+execute s1(0)
+--
+EXECUTE s1(0)
+== 201
+-- should fail
+execute s1(NULL)
+--
+EXECUTE s1(NULL)
+== 202
+-- should fail
+
+-- Check that domain constraints on plpgsql function parameters, results,
+-- and local variables are enforced correctly.
+
+create function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int;
+begin
+    return p1;
+end$$ language plpgsql
+--
+CREATE FUNCTION doubledecrement(p1 pos_int) RETURNS pos_int AS $$
+declare v pos_int;
+begin
+    return p1;
+end$$ LANGUAGE plpgsql
+== 203
+select doubledecrement(3)
+--
+SELECT doubledecrement(3)
+== 204
+-- fail because of implicit null assignment
+
+create or replace function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int := 0;
+begin
+    return p1;
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION doubledecrement(p1 pos_int) RETURNS pos_int AS $$
+declare v pos_int := 0;
+begin
+    return p1;
+end$$ LANGUAGE plpgsql
+== 205
+select doubledecrement(3)
+--
+SELECT doubledecrement(3)
+== 206
+-- fail at initialization assignment
+
+create or replace function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int := 1;
+begin
+    v := p1 - 1;
+    return v - 1;
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION doubledecrement(p1 pos_int) RETURNS pos_int AS $$
+declare v pos_int := 1;
+begin
+    v := p1 - 1;
+    return v - 1;
+end$$ LANGUAGE plpgsql
+== 207
+select doubledecrement(null)
+--
+SELECT doubledecrement(NULL)
+== 208
+-- fail before call
+select doubledecrement(0)
+--
+SELECT doubledecrement(0)
+== 209
+-- fail before call
+select doubledecrement(1)
+--
+SELECT doubledecrement(1)
+== 210
+-- fail at assignment to v
+select doubledecrement(2)
+--
+SELECT doubledecrement(2)
+== 211
+-- fail at return
+select doubledecrement(3)
+--
+SELECT doubledecrement(3)
+== 212
+-- good
+
+-- Check that ALTER DOMAIN tests columns of derived types
+
+create domain posint as int4
+--
+CREATE DOMAIN posint AS int4
+== 213
+-- Currently, this doesn't work for composite types, but verify it complains
+create type ddtest1 as (f1 posint)
+--
+CREATE TYPE ddtest1 AS (f1 posint)
+== 214
+create table ddtest2(f1 ddtest1)
+--
+CREATE TABLE ddtest2 (f1 ddtest1)
+== 215
+insert into ddtest2 values(row(-1))
+--
+INSERT INTO ddtest2 VALUES (ROW(-1))
+== 216
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 217
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 218
+-- Likewise for domains within arrays of composite
+create table ddtest2(f1 ddtest1[])
+--
+CREATE TABLE ddtest2 (f1 ddtest1[])
+== 219
+insert into ddtest2 values('{(-1)}')
+--
+INSERT INTO ddtest2 VALUES ('{(-1)}')
+== 220
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 221
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 222
+-- Likewise for domains within domains over composite
+create domain ddtest1d as ddtest1
+--
+CREATE DOMAIN ddtest1d AS ddtest1
+== 223
+create table ddtest2(f1 ddtest1d)
+--
+CREATE TABLE ddtest2 (f1 ddtest1d)
+== 224
+insert into ddtest2 values('(-1)')
+--
+INSERT INTO ddtest2 VALUES ('(-1)')
+== 225
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 226
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 227
+drop domain ddtest1d
+--
+DROP DOMAIN ddtest1d
+== 228
+-- Likewise for domains within domains over array of composite
+create domain ddtest1d as ddtest1[]
+--
+CREATE DOMAIN ddtest1d AS ddtest1[]
+== 229
+create table ddtest2(f1 ddtest1d)
+--
+CREATE TABLE ddtest2 (f1 ddtest1d)
+== 230
+insert into ddtest2 values('{(-1)}')
+--
+INSERT INTO ddtest2 VALUES ('{(-1)}')
+== 231
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 232
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 233
+drop domain ddtest1d
+--
+DROP DOMAIN ddtest1d
+== 234
+-- Doesn't work for ranges, either
+create type rposint as range (subtype = posint)
+--
+CREATE TYPE rposint AS RANGE (subtype = posint)
+== 235
+create table ddtest2(f1 rposint)
+--
+CREATE TABLE ddtest2 (f1 rposint)
+== 236
+insert into ddtest2 values('(-1,3]')
+--
+INSERT INTO ddtest2 VALUES ('(-1,3]')
+== 237
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 238
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 239
+drop type rposint
+--
+DROP TYPE rposint
+== 240
+alter domain posint add constraint c1 check(value >= 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c1 CHECK (value >= 0)
+== 241
+create domain posint2 as posint check (value % 2 = 0)
+--
+CREATE DOMAIN posint2 AS posint CHECK ((value % 2) = 0)
+== 242
+create table ddtest2(f1 posint2)
+--
+CREATE TABLE ddtest2 (f1 posint2)
+== 243
+insert into ddtest2 values(11)
+--
+INSERT INTO ddtest2 VALUES (11)
+== 244
+-- fail
+insert into ddtest2 values(-2)
+--
+INSERT INTO ddtest2 VALUES (-2)
+== 245
+-- fail
+insert into ddtest2 values(2)
+--
+INSERT INTO ddtest2 VALUES (2)
+== 246
+alter domain posint add constraint c2 check(value >= 10)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c2 CHECK (value >= 10)
+== 247
+-- fail
+alter domain posint add constraint c2 check(value > 0)
+--
+ALTER DOMAIN posint ADD CONSTRAINT c2 CHECK (value > 0)
+== 248
+-- OK
+
+drop table ddtest2
+--
+DROP TABLE ddtest2
+== 249
+drop type ddtest1
+--
+DROP TYPE ddtest1
+== 250
+drop domain posint cascade
+--
+DROP DOMAIN posint CASCADE
+== 251
+|--
+-- Check enforcement of domain-related typmod in plpgsql (bug #5717)
+|--
+
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x numeric(4,2)[1];
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION array_elem_check(numeric) RETURNS numeric AS $$
+declare
+  x numeric(4,2)[1];
+begin
+  x[1] := $1;
+  return x[1];
+end$$ LANGUAGE plpgsql
+== 252
+select array_elem_check(121.00)
+--
+SELECT array_elem_check(121.00)
+== 253
+select array_elem_check(1.23456)
+--
+SELECT array_elem_check(1.23456)
+== 254
+create domain mynums as numeric(4,2)[1]
+--
+CREATE DOMAIN mynums AS numeric(4, 2)[1]
+== 255
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x mynums;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION array_elem_check(numeric) RETURNS numeric AS $$
+declare
+  x mynums;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ LANGUAGE plpgsql
+== 256
+select array_elem_check(121.00)
+--
+SELECT array_elem_check(121.00)
+== 257
+select array_elem_check(1.23456)
+--
+SELECT array_elem_check(1.23456)
+== 258
+create domain mynums2 as mynums
+--
+CREATE DOMAIN mynums2 AS mynums
+== 259
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x mynums2;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION array_elem_check(numeric) RETURNS numeric AS $$
+declare
+  x mynums2;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ LANGUAGE plpgsql
+== 260
+select array_elem_check(121.00)
+--
+SELECT array_elem_check(121.00)
+== 261
+select array_elem_check(1.23456)
+--
+SELECT array_elem_check(1.23456)
+== 262
+drop function array_elem_check(numeric)
+--
+DROP FUNCTION array_elem_check(numeric)
+== 263
+|--
+-- Check enforcement of array-level domain constraints
+|--
+
+create domain orderedpair as int[2] check (value[1] < value[2])
+--
+CREATE DOMAIN orderedpair AS int[2] CHECK (value[1] < value[2])
+== 264
+select array[1,2]::orderedpair
+--
+SELECT ARRAY[1, 2]::orderedpair
+== 265
+select array[2,1]::orderedpair
+--
+SELECT ARRAY[2, 1]::orderedpair
+== 266
+-- fail
+
+create temp table op (f1 orderedpair)
+--
+CREATE TEMPORARY TABLE op (f1 orderedpair)
+== 267
+insert into op values (array[1,2])
+--
+INSERT INTO op VALUES (ARRAY[1, 2])
+== 268
+insert into op values (array[2,1])
+--
+INSERT INTO op VALUES (ARRAY[2, 1])
+== 269
+-- fail
+
+update op set f1[2] = 3
+--
+UPDATE op SET f1[2] = 3
+== 270
+update op set f1[2] = 0
+--
+UPDATE op SET f1[2] = 0
+== 271
+-- fail
+select * from op
+--
+SELECT * FROM op
+== 272
+create or replace function array_elem_check(int) returns int as $$
+declare
+  x orderedpair := '{1,2}';
+begin
+  x[2] := $1;
+  return x[2];
+end$$ language plpgsql
+--
+CREATE OR REPLACE FUNCTION array_elem_check(int) RETURNS int AS $$
+declare
+  x orderedpair := '{1,2}';
+begin
+  x[2] := $1;
+  return x[2];
+end$$ LANGUAGE plpgsql
+== 273
+select array_elem_check(3)
+--
+SELECT array_elem_check(3)
+== 274
+select array_elem_check(-1)
+--
+SELECT array_elem_check(-1)
+== 275
+drop function array_elem_check(int)
+--
+DROP FUNCTION array_elem_check(int)
+== 276
+|--
+-- Check enforcement of changing constraints in plpgsql
+|--
+
+create domain di as int
+--
+CREATE DOMAIN di AS int
+== 277
+create function dom_check(int) returns di as $$
+declare d di;
+begin
+  d := $1::di;
+  return d;
+end
+$$ language plpgsql immutable
+--
+CREATE FUNCTION dom_check(int) RETURNS di AS $$
+declare d di;
+begin
+  d := $1::di;
+  return d;
+end
+$$ LANGUAGE plpgsql IMMUTABLE
+== 278
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 279
+alter domain di add constraint pos check (value > 0)
+--
+ALTER DOMAIN di ADD CONSTRAINT pos CHECK (value > 0)
+== 280
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 281
+-- fail
+
+alter domain di drop constraint pos
+--
+ALTER DOMAIN di DROP CONSTRAINT pos
+== 282
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 283
+-- implicit cast during assignment is a separate code path, test that too
+
+create or replace function dom_check(int) returns di as $$
+declare d di;
+begin
+  d := $1;
+  return d;
+end
+$$ language plpgsql immutable
+--
+CREATE OR REPLACE FUNCTION dom_check(int) RETURNS di AS $$
+declare d di;
+begin
+  d := $1;
+  return d;
+end
+$$ LANGUAGE plpgsql IMMUTABLE
+== 284
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 285
+alter domain di add constraint pos check (value > 0)
+--
+ALTER DOMAIN di ADD CONSTRAINT pos CHECK (value > 0)
+== 286
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 287
+-- fail
+
+alter domain di drop constraint pos
+--
+ALTER DOMAIN di DROP CONSTRAINT pos
+== 288
+select dom_check(0)
+--
+SELECT dom_check(0)
+== 289
+drop function dom_check(int)
+--
+DROP FUNCTION dom_check(int)
+== 290
+drop domain di
+--
+DROP DOMAIN di
+== 291
+|--
+-- Check use of a (non-inline-able) SQL function in a domain constraint;
+-- this has caused issues in the past
+|--
+
+create function sql_is_distinct_from(anyelement, anyelement)
+returns boolean language sql
+as 'select $1 is distinct from $2 limit 1'
+--
+CREATE FUNCTION sql_is_distinct_from(anyelement, anyelement) RETURNS boolean LANGUAGE sql AS $$select $1 is distinct from $2 limit 1$$
+== 292
+create domain inotnull int
+  check (sql_is_distinct_from(value, null))
+--
+CREATE DOMAIN inotnull AS int CHECK (sql_is_distinct_from(value, NULL))
+== 293
+select 1::inotnull
+--
+SELECT 1::inotnull
+== 294
+select null::inotnull
+--
+SELECT NULL::inotnull
+== 295
+create table dom_table (x inotnull)
+--
+CREATE TABLE dom_table (x inotnull)
+== 296
+insert into dom_table values ('1')
+--
+INSERT INTO dom_table VALUES ('1')
+== 297
+insert into dom_table values (1)
+--
+INSERT INTO dom_table VALUES (1)
+== 298
+insert into dom_table values (null)
+--
+INSERT INTO dom_table VALUES (NULL)
+== 299
+drop table dom_table
+--
+DROP TABLE dom_table
+== 300
+drop domain inotnull
+--
+DROP DOMAIN inotnull
+== 301
+drop function sql_is_distinct_from(anyelement, anyelement)
+--
+DROP FUNCTION sql_is_distinct_from(anyelement, anyelement)
+== 302
+|--
+-- Renaming
+|--
+
+create domain testdomain1 as int
+--
+CREATE DOMAIN testdomain1 AS int
+== 303
+alter domain testdomain1 rename to testdomain2
+--
+ALTER DOMAIN testdomain1 RENAME TO testdomain2
+== 304
+alter type testdomain2 rename to testdomain3
+--
+ALTER TYPE testdomain2 RENAME TO testdomain3
+== 305
+-- alter type also works
+drop domain testdomain3
+--
+DROP DOMAIN testdomain3
+== 306
+|--
+-- Renaming domain constraints
+|--
+
+create domain testdomain1 as int constraint unsigned check (value > 0)
+--
+CREATE DOMAIN testdomain1 AS int CONSTRAINT unsigned CHECK (value > 0)
+== 307
+alter domain testdomain1 rename constraint unsigned to unsigned_foo
+--
+ALTER DOMAIN testdomain1 RENAME CONSTRAINT unsigned TO unsigned_foo
+== 308
+alter domain testdomain1 drop constraint unsigned_foo
+--
+ALTER DOMAIN testdomain1 DROP CONSTRAINT unsigned_foo
+== 309
+drop domain testdomain1
+--
+DROP DOMAIN testdomain1
+== 310
+|--
+-- Get the base type of a domain
+|--
+create domain mytext as text
+--
+CREATE DOMAIN mytext AS text
+== 311
+create domain mytext_child_1 as mytext
+--
+CREATE DOMAIN mytext_child_1 AS mytext
+== 312
+select pg_basetype('mytext'::regtype)
+--
+SELECT pg_basetype('mytext'::regtype)
+== 313
+select pg_basetype('mytext_child_1'::regtype)
+--
+SELECT pg_basetype('mytext_child_1'::regtype)
+== 314
+select pg_basetype(1)
+--
+SELECT pg_basetype(1)
+== 315
+-- expect NULL not error
+
+drop domain mytext cascade
+--
+DROP DOMAIN mytext CASCADE
+== 316
+|--
+-- Information schema
+|--
+
+SELECT * FROM information_schema.column_domain_usage
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY domain_name
+--
+SELECT * FROM information_schema.column_domain_usage WHERE domain_name IN ('con', 'dom', 'pos_int', 'things') ORDER BY domain_name
+== 317
+SELECT * FROM information_schema.domain_constraints
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY constraint_name
+--
+SELECT * FROM information_schema.domain_constraints WHERE domain_name IN ('con', 'dom', 'pos_int', 'things') ORDER BY constraint_name
+== 318
+SELECT * FROM information_schema.domains
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY domain_name
+--
+SELECT * FROM information_schema.domains WHERE domain_name IN ('con', 'dom', 'pos_int', 'things') ORDER BY domain_name
+== 319
+SELECT * FROM information_schema.check_constraints
+  WHERE (constraint_schema, constraint_name)
+        IN (SELECT constraint_schema, constraint_name
+            FROM information_schema.domain_constraints
+            WHERE domain_name IN ('con', 'dom', 'pos_int', 'things'))
+  ORDER BY constraint_name
+--
+SELECT * FROM information_schema.check_constraints WHERE (constraint_schema, constraint_name) IN (SELECT constraint_schema, constraint_name FROM information_schema.domain_constraints WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')) ORDER BY constraint_name

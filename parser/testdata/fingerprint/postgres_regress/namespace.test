@@ -1,0 +1,215 @@
+== 001
+|--
+-- Regression tests for schemas (namespaces)
+|--
+
+-- set the whitespace-only search_path to test that the
+-- GUC list syntax is preserved during a schema creation
+SELECT pg_catalog.set_config('search_path', ' ', false)
+--
+61f69c00d1e1fe3e
+== 002
+CREATE SCHEMA test_ns_schema_1
+       CREATE UNIQUE INDEX abc_a_idx ON abc (a)
+
+       CREATE VIEW abc_view AS
+              SELECT a+1 AS a, b+1 AS b FROM abc
+
+       CREATE TABLE abc (
+              a serial,
+              b int UNIQUE
+       )
+--
+367e03715cf7ed11
+== 003
+-- verify that the correct search_path restored on abort
+SET search_path to public
+--
+972eb2e22f47f95c
+== 004
+BEGIN
+--
+b16b431979fc3e05
+== 005
+SET search_path to public, test_ns_schema_1
+--
+972eb2e22f47f95c
+== 006
+CREATE SCHEMA test_ns_schema_2
+       CREATE VIEW abc_view AS SELECT c FROM abc
+--
+9e078b38a96bdb12
+== 007
+COMMIT
+--
+7bbcde9cfab6c79c
+== 008
+SHOW search_path
+--
+62443ca219d2a4bc
+== 009
+-- verify that the correct search_path preserved
+-- after creating the schema and on commit
+BEGIN
+--
+b16b431979fc3e05
+== 010
+SET search_path to public, test_ns_schema_1
+--
+972eb2e22f47f95c
+== 011
+CREATE SCHEMA test_ns_schema_2
+       CREATE VIEW abc_view AS SELECT a FROM abc
+--
+deccc921d43b2940
+== 012
+SHOW search_path
+--
+62443ca219d2a4bc
+== 013
+COMMIT
+--
+7bbcde9cfab6c79c
+== 014
+SHOW search_path
+--
+62443ca219d2a4bc
+== 015
+DROP SCHEMA test_ns_schema_2 CASCADE
+--
+fac6beeacdf066ee
+== 016
+-- verify that the objects were created
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+--
+677ae1389cadea34
+== 017
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+729f735b33156aa6
+== 018
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+729f735b33156aa6
+== 019
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+729f735b33156aa6
+== 020
+SELECT * FROM test_ns_schema_1.abc
+--
+9312462d62c35d3b
+== 021
+SELECT * FROM test_ns_schema_1.abc_view
+--
+6cb74ea9f9b7507e
+== 022
+ALTER SCHEMA test_ns_schema_1 RENAME TO test_ns_schema_renamed
+--
+d51c65ee6109faa5
+== 023
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+--
+677ae1389cadea34
+== 024
+-- test IF NOT EXISTS cases
+CREATE SCHEMA test_ns_schema_renamed
+--
+517fb320176e41e0
+== 025
+-- fail, already exists
+CREATE SCHEMA IF NOT EXISTS test_ns_schema_renamed
+--
+b467b09204d4b3de
+== 026
+-- ok with notice
+CREATE SCHEMA IF NOT EXISTS test_ns_schema_renamed -- fail, disallowed
+       CREATE TABLE abc (
+              a serial,
+              b int UNIQUE
+       )
+--
+ERROR: CREATE SCHEMA IF NOT EXISTS cannot include schema elements
+CURSORPOS: 97
+FILENAME: gram.y
+FUNCNAME: base_yyparse
+== 027
+DROP SCHEMA test_ns_schema_renamed CASCADE
+--
+8a26f2c6d44ba08f
+== 028
+-- verify that the objects were dropped
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_renamed')
+--
+677ae1389cadea34
+== 029
+|--
+-- Verify that search_path is set to a safe value during maintenance
+-- commands.
+|--
+
+CREATE SCHEMA test_maint_search_path
+--
+bce02ceef4cab97a
+== 030
+SET search_path = test_maint_search_path
+--
+972eb2e22f47f95c
+== 031
+CREATE FUNCTION fn(INT) RETURNS INT IMMUTABLE LANGUAGE plpgsql AS $$
+  BEGIN
+    RAISE NOTICE 'current search_path: %', current_setting('search_path');
+    RETURN $1;
+  END;
+$$
+--
+465969a9f51833b2
+== 032
+CREATE TABLE test_maint(i INT)
+--
+435d66e89cf85829
+== 033
+INSERT INTO test_maint VALUES (1), (2)
+--
+88f441e909547b5d
+== 034
+CREATE MATERIALIZED VIEW test_maint_mv AS SELECT fn(i) FROM test_maint
+--
+14436810860e1692
+== 035
+-- the following commands should see search_path as pg_catalog, pg_temp
+
+CREATE INDEX test_maint_idx ON test_maint_search_path.test_maint (fn(i))
+--
+8c425a726568be1f
+== 036
+REINDEX TABLE test_maint_search_path.test_maint
+--
+86e381cd6c26b415
+== 037
+ANALYZE test_maint_search_path.test_maint
+--
+e5b8cbf7f49747f9
+== 038
+VACUUM FULL test_maint_search_path.test_maint
+--
+d31df34c240f7237
+== 039
+CLUSTER test_maint_search_path.test_maint USING test_maint_idx
+--
+0072af156159da1a
+== 040
+REFRESH MATERIALIZED VIEW test_maint_search_path.test_maint_mv
+--
+2bc6e43ada06cf04
+== 041
+RESET search_path
+--
+e97698aade82a29f
+== 042
+DROP SCHEMA test_maint_search_path CASCADE
+--
+cf18e125d79063de

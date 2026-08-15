@@ -1,0 +1,402 @@
+== 001
+|--
+-- SELECT_DISTINCT
+|--
+
+|--
+-- awk '{print $3;}' onek.data | sort -n | uniq
+|--
+SELECT DISTINCT two FROM onek ORDER BY 1
+--
+d3e2062f263375f2
+== 002
+|--
+-- awk '{print $5;}' onek.data | sort -n | uniq
+|--
+SELECT DISTINCT ten FROM onek ORDER BY 1
+--
+b5f330fafcb1a315
+== 003
+|--
+-- awk '{print $16;}' onek.data | sort -d | uniq
+|--
+SELECT DISTINCT string4 FROM onek ORDER BY 1
+--
+8c3941da06f927b5
+== 004
+|--
+-- awk '{print $3,$16,$5;}' onek.data | sort -d | uniq |
+-- sort +0n -1 +1d -2 +2n -3
+|--
+SELECT DISTINCT two, string4, ten
+   FROM onek
+   ORDER BY two using <, string4 using <, ten using <
+--
+2932fa31f0829438
+== 005
+|--
+-- awk '{print $2;}' person.data |
+-- awk '{if(NF!=1){print $2;}else{print;}}' - emp.data |
+-- awk '{if(NF!=1){print $2;}else{print;}}' - student.data |
+-- awk 'BEGIN{FS="      ";}{if(NF!=1){print $5;}else{print;}}' - stud_emp.data |
+-- sort -n -r | uniq
+|--
+SELECT DISTINCT p.age FROM person* p ORDER BY age using >
+--
+1cc373bcdc5a579c
+== 006
+|--
+-- Check mentioning same column more than once
+|--
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT count(*) FROM
+  (SELECT DISTINCT two, four, two FROM tenk1) ss
+--
+8dac2fc1f2abfc91
+== 007
+SELECT count(*) FROM
+  (SELECT DISTINCT two, four, two FROM tenk1) ss
+--
+84449ea58f8bec0f
+== 008
+|--
+-- Compare results between plans using sorting and plans using hash
+-- aggregation. Force spilling in both cases by setting work_mem low.
+|--
+
+SET work_mem='64kB'
+--
+8a6e71e5b3e06483
+== 009
+-- Produce results with sorting.
+
+SET enable_hashagg=FALSE
+--
+a83598b3841af185
+== 010
+SET jit_above_cost=0
+--
+0e330e7816b408f4
+== 011
+EXPLAIN (costs off)
+SELECT DISTINCT g%1000 FROM generate_series(0,9999) g
+--
+85c954cc2ba72e0c
+== 012
+CREATE TABLE distinct_group_1 AS
+SELECT DISTINCT g%1000 FROM generate_series(0,9999) g
+--
+ab355585a44837fe
+== 013
+SET jit_above_cost TO DEFAULT
+--
+8f1a3a3f24f8e575
+== 014
+CREATE TABLE distinct_group_2 AS
+SELECT DISTINCT (g%1000)::text FROM generate_series(0,9999) g
+--
+78b90666dd0a9396
+== 015
+SET enable_seqscan = 0
+--
+b6355b32597ef7db
+== 016
+-- Check to see we get an incremental sort plan
+EXPLAIN (costs off)
+SELECT DISTINCT hundred, two FROM tenk1
+--
+ad7f1c007a790585
+== 017
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 018
+SET enable_hashagg=TRUE
+--
+a83598b3841af185
+== 019
+-- Produce results with hash aggregation.
+
+SET enable_sort=FALSE
+--
+dbc5616b4af60b97
+== 020
+SET jit_above_cost=0
+--
+0e330e7816b408f4
+== 021
+EXPLAIN (costs off)
+SELECT DISTINCT g%1000 FROM generate_series(0,9999) g
+--
+85c954cc2ba72e0c
+== 022
+CREATE TABLE distinct_hash_1 AS
+SELECT DISTINCT g%1000 FROM generate_series(0,9999) g
+--
+c8667155be6b2cc9
+== 023
+SET jit_above_cost TO DEFAULT
+--
+8f1a3a3f24f8e575
+== 024
+CREATE TABLE distinct_hash_2 AS
+SELECT DISTINCT (g%1000)::text FROM generate_series(0,9999) g
+--
+f8162522d737e008
+== 025
+SET enable_sort=TRUE
+--
+dbc5616b4af60b97
+== 026
+SET work_mem TO DEFAULT
+--
+42da79a4b621d97f
+== 027
+-- Compare results
+
+(SELECT * FROM distinct_hash_1 EXCEPT SELECT * FROM distinct_group_1)
+  UNION ALL
+(SELECT * FROM distinct_group_1 EXCEPT SELECT * FROM distinct_hash_1)
+--
+5c6ee45a79ea0ed5
+== 028
+(SELECT * FROM distinct_hash_1 EXCEPT SELECT * FROM distinct_group_1)
+  UNION ALL
+(SELECT * FROM distinct_group_1 EXCEPT SELECT * FROM distinct_hash_1)
+--
+5c6ee45a79ea0ed5
+== 029
+DROP TABLE distinct_hash_1
+--
+08fea315f091d376
+== 030
+DROP TABLE distinct_hash_2
+--
+efeabb44c48ba9a2
+== 031
+DROP TABLE distinct_group_1
+--
+3e8cc8d6c4b22a48
+== 032
+DROP TABLE distinct_group_2
+--
+97dea08d0f445b2a
+== 033
+-- Test parallel DISTINCT
+SET parallel_tuple_cost=0
+--
+f62405e932b2ca70
+== 034
+SET parallel_setup_cost=0
+--
+bdfd9b27ecb1a774
+== 035
+SET min_parallel_table_scan_size=0
+--
+91a2578235f79133
+== 036
+SET max_parallel_workers_per_gather=2
+--
+c21d759ba810645f
+== 037
+-- Ensure we get a parallel plan
+EXPLAIN (costs off)
+SELECT DISTINCT four FROM tenk1
+--
+bd99887471f034fb
+== 038
+-- Ensure the parallel plan produces the correct results
+SELECT DISTINCT four FROM tenk1
+--
+8d66fbd543767518
+== 039
+CREATE OR REPLACE FUNCTION distinct_func(a INT) RETURNS INT AS $$
+  BEGIN
+    RETURN a;
+  END;
+$$ LANGUAGE plpgsql PARALLEL UNSAFE
+--
+5549c3abf294aca9
+== 040
+-- Ensure we don't do parallel distinct with a parallel unsafe function
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT distinct_func(1) FROM tenk1
+--
+de7bd996a6a38abe
+== 041
+-- make the function parallel safe
+CREATE OR REPLACE FUNCTION distinct_func(a INT) RETURNS INT AS $$
+  BEGIN
+    RETURN a;
+  END;
+$$ LANGUAGE plpgsql PARALLEL SAFE
+--
+5549c3abf294aca9
+== 042
+-- Ensure we do parallel distinct now that the function is parallel safe
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT distinct_func(1) FROM tenk1
+--
+de7bd996a6a38abe
+== 043
+RESET max_parallel_workers_per_gather
+--
+be4431a58b98cb8c
+== 044
+RESET min_parallel_table_scan_size
+--
+5182ee3580baeecb
+== 045
+RESET parallel_setup_cost
+--
+45802239c7135b18
+== 046
+RESET parallel_tuple_cost
+--
+c669a6b2c1770679
+== 047
+|--
+-- Test the planner's ability to use a LIMIT 1 instead of a Unique node when
+-- all of the distinct_pathkeys have been marked as redundant
+|--
+
+-- Ensure we get a plan with a Limit 1
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE four = 0
+--
+0d0221254505412c
+== 048
+-- Ensure the above gives us the correct result
+SELECT DISTINCT four FROM tenk1 WHERE four = 0
+--
+5786807caea1f11d
+== 049
+-- Ensure we get a plan with a Limit 1
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE four = 0 AND two <> 0
+--
+d42f9e9a24d15a91
+== 050
+-- Ensure no rows are returned
+SELECT DISTINCT four FROM tenk1 WHERE four = 0 AND two <> 0
+--
+09e3ac25082fc85d
+== 051
+-- Ensure we get a plan with a Limit 1 when the SELECT list contains constants
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT four,1,2,3 FROM tenk1 WHERE four = 0
+--
+fac662f3f97b6c2c
+== 052
+-- Ensure we only get 1 row
+SELECT DISTINCT four,1,2,3 FROM tenk1 WHERE four = 0
+--
+663f8d7199ecd351
+== 053
+SET parallel_setup_cost=0
+--
+bdfd9b27ecb1a774
+== 054
+SET min_parallel_table_scan_size=0
+--
+91a2578235f79133
+== 055
+SET max_parallel_workers_per_gather=2
+--
+c21d759ba810645f
+== 056
+-- Ensure we get a plan with a Limit 1 in both partial distinct and final
+-- distinct
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE four = 10
+--
+0d0221254505412c
+== 057
+RESET max_parallel_workers_per_gather
+--
+be4431a58b98cb8c
+== 058
+RESET min_parallel_table_scan_size
+--
+5182ee3580baeecb
+== 059
+RESET parallel_setup_cost
+--
+45802239c7135b18
+== 060
+|--
+-- Also, some tests of IS DISTINCT FROM, which doesn't quite deserve its
+-- very own regression file.
+|--
+
+CREATE TEMP TABLE disttable (f1 integer)
+--
+cecd718310a73ba0
+== 061
+INSERT INTO DISTTABLE VALUES(1)
+--
+9af6a7d63a591e83
+== 062
+INSERT INTO DISTTABLE VALUES(2)
+--
+9af6a7d63a591e83
+== 063
+INSERT INTO DISTTABLE VALUES(3)
+--
+9af6a7d63a591e83
+== 064
+INSERT INTO DISTTABLE VALUES(NULL)
+--
+9af6a7d63a591e83
+== 065
+-- basic cases
+SELECT f1, f1 IS DISTINCT FROM 2 as "not 2" FROM disttable
+--
+950b3744b13286b3
+== 066
+SELECT f1, f1 IS DISTINCT FROM NULL as "not null" FROM disttable
+--
+950b3744b13286b3
+== 067
+SELECT f1, f1 IS DISTINCT FROM f1 as "false" FROM disttable
+--
+d93004c7da4e0dee
+== 068
+SELECT f1, f1 IS DISTINCT FROM f1+1 as "not null" FROM disttable
+--
+fe1221a2b660ddbb
+== 069
+-- check that optimizer constant-folds it properly
+SELECT 1 IS DISTINCT FROM 2 as "yes"
+--
+ce8eb8198047a9f1
+== 070
+SELECT 2 IS DISTINCT FROM 2 as "no"
+--
+ce8eb8198047a9f1
+== 071
+SELECT 2 IS DISTINCT FROM null as "yes"
+--
+ce8eb8198047a9f1
+== 072
+SELECT null IS DISTINCT FROM null as "no"
+--
+ce8eb8198047a9f1
+== 073
+-- negated form
+SELECT 1 IS NOT DISTINCT FROM 2 as "no"
+--
+9afbdf054ebfe1fc
+== 074
+SELECT 2 IS NOT DISTINCT FROM 2 as "yes"
+--
+9afbdf054ebfe1fc
+== 075
+SELECT 2 IS NOT DISTINCT FROM null as "no"
+--
+9afbdf054ebfe1fc
+== 076
+SELECT null IS NOT DISTINCT FROM null as "yes"
+--
+9afbdf054ebfe1fc

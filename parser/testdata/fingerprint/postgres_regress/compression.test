@@ -1,0 +1,378 @@
+== 001
+-- ensure we get stable results regardless of installation's default
+SET default_toast_compression = 'pglz'
+--
+0cc565902eb36128
+== 002
+-- test creating table with compression method
+CREATE TABLE cmdata(f1 text COMPRESSION pglz)
+--
+8a254043117125d9
+== 003
+CREATE INDEX idx ON cmdata(f1)
+--
+bbe652b928cdbca3
+== 004
+INSERT INTO cmdata VALUES(repeat('1234567890', 1000))
+--
+2a8cdc36f62ec984
+== 005
+CREATE TABLE cmdata1(f1 TEXT COMPRESSION lz4)
+--
+3d8cf8d7763508a1
+== 006
+INSERT INTO cmdata1 VALUES(repeat('1234567890', 1004))
+--
+497b1287122cb261
+== 007
+-- verify stored compression method in the data
+SELECT pg_column_compression(f1) FROM cmdata
+--
+497c364a62880f82
+== 008
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+02664834bc407b9a
+== 009
+-- decompress data slice
+SELECT SUBSTR(f1, 200, 5) FROM cmdata
+--
+10334ba438ce98e2
+== 010
+SELECT SUBSTR(f1, 2000, 50) FROM cmdata1
+--
+b3253ed0fc2cb2e6
+== 011
+-- copy with table creation
+SELECT * INTO cmmove1 FROM cmdata
+--
+76005a5daea9ad20
+== 012
+SELECT pg_column_compression(f1) FROM cmmove1
+--
+ca0523ca8624d85a
+== 013
+-- copy to existing table
+CREATE TABLE cmmove3(f1 text COMPRESSION pglz)
+--
+bc3142892928b79e
+== 014
+INSERT INTO cmmove3 SELECT * FROM cmdata
+--
+c682ee8be3651bdc
+== 015
+INSERT INTO cmmove3 SELECT * FROM cmdata1
+--
+22480f11d9989f5c
+== 016
+SELECT pg_column_compression(f1) FROM cmmove3
+--
+23096d14a19ca6f7
+== 017
+-- test LIKE INCLUDING COMPRESSION
+CREATE TABLE cmdata2 (LIKE cmdata1 INCLUDING COMPRESSION)
+--
+612e5ce6a34255b8
+== 018
+DROP TABLE cmdata2
+--
+2db514cd59d16f46
+== 019
+-- try setting compression for incompressible data type
+CREATE TABLE cmdata2 (f1 int COMPRESSION pglz)
+--
+dd591143f92a3a31
+== 020
+-- update using datum from different table
+CREATE TABLE cmmove2(f1 text COMPRESSION pglz)
+--
+6c5d8014c29c62ab
+== 021
+INSERT INTO cmmove2 VALUES (repeat('1234567890', 1004))
+--
+197abe60101ce50c
+== 022
+SELECT pg_column_compression(f1) FROM cmmove2
+--
+6267ad5a2ba3cd85
+== 023
+UPDATE cmmove2 SET f1 = cmdata1.f1 FROM cmdata1
+--
+662ad466befa5a7a
+== 024
+SELECT pg_column_compression(f1) FROM cmmove2
+--
+6267ad5a2ba3cd85
+== 025
+-- test externally stored compressed data
+CREATE OR REPLACE FUNCTION large_val() RETURNS TEXT LANGUAGE SQL AS
+'select array_agg(fipshash(g::text))::text from generate_series(1, 256) g'
+--
+85d1e85c94343a32
+== 026
+CREATE TABLE cmdata2 (f1 text COMPRESSION pglz)
+--
+37e99bb938743c57
+== 027
+INSERT INTO cmdata2 SELECT large_val() || repeat('a', 4000)
+--
+bac340196581f1b3
+== 028
+SELECT pg_column_compression(f1) FROM cmdata2
+--
+07564e931b3de9cf
+== 029
+INSERT INTO cmdata1 SELECT large_val() || repeat('a', 4000)
+--
+98777256de89cb93
+== 030
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+02664834bc407b9a
+== 031
+SELECT SUBSTR(f1, 200, 5) FROM cmdata1
+--
+b3253ed0fc2cb2e6
+== 032
+SELECT SUBSTR(f1, 200, 5) FROM cmdata2
+--
+8cc3981df0a3c8ab
+== 033
+DROP TABLE cmdata2
+--
+2db514cd59d16f46
+== 034
+--test column type update varlena/non-varlena
+CREATE TABLE cmdata2 (f1 int)
+--
+bcfeaff1ae08a25c
+== 035
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE varchar
+--
+5d4b74cb665467d9
+== 036
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE int USING f1::integer
+--
+3594a048827b598a
+== 037
+--changing column storage should not impact the compression method
+--but the data should not be compressed
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE varchar
+--
+5d4b74cb665467d9
+== 038
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET COMPRESSION pglz
+--
+9dd5a4fdae1e9165
+== 039
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET STORAGE plain
+--
+4f57477e6701e722
+== 040
+INSERT INTO cmdata2 VALUES (repeat('123456789', 800))
+--
+65bdcc3449fc8ce9
+== 041
+SELECT pg_column_compression(f1) FROM cmdata2
+--
+07564e931b3de9cf
+== 042
+-- test compression with materialized view
+CREATE MATERIALIZED VIEW compressmv(x) AS SELECT * FROM cmdata1
+--
+563b0c7cd8c4d06d
+== 043
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+02664834bc407b9a
+== 044
+SELECT pg_column_compression(x) FROM compressmv
+--
+0cdaa9de01b8982c
+== 045
+-- test compression with partition
+CREATE TABLE cmpart(f1 text COMPRESSION lz4) PARTITION BY HASH(f1)
+--
+78add827b9deb09c
+== 046
+CREATE TABLE cmpart1 PARTITION OF cmpart FOR VALUES WITH (MODULUS 2, REMAINDER 0)
+--
+4c9c6485c95cc486
+== 047
+CREATE TABLE cmpart2(f1 text COMPRESSION pglz)
+--
+45490d2757612a23
+== 048
+ALTER TABLE cmpart ATTACH PARTITION cmpart2 FOR VALUES WITH (MODULUS 2, REMAINDER 1)
+--
+9c7d41025a423896
+== 049
+INSERT INTO cmpart VALUES (repeat('123456789', 1004))
+--
+51d0f8348d65a28c
+== 050
+INSERT INTO cmpart VALUES (repeat('123456789', 4004))
+--
+51d0f8348d65a28c
+== 051
+SELECT pg_column_compression(f1) FROM cmpart1
+--
+9ad99c3b1bae7c8f
+== 052
+SELECT pg_column_compression(f1) FROM cmpart2
+--
+c27647fc2f27d1b6
+== 053
+-- test compression with inheritance
+CREATE TABLE cminh() INHERITS(cmdata, cmdata1)
+--
+9fcb640724e34b66
+== 054
+-- error
+CREATE TABLE cminh(f1 TEXT COMPRESSION lz4) INHERITS(cmdata)
+--
+4e82725a5ffb5651
+== 055
+-- error
+CREATE TABLE cmdata3(f1 text)
+--
+1f378e32faaf6679
+== 056
+CREATE TABLE cminh() INHERITS (cmdata, cmdata3)
+--
+d694e3e468b46f99
+== 057
+-- test default_toast_compression GUC
+SET default_toast_compression = ''
+--
+0cc565902eb36128
+== 058
+SET default_toast_compression = 'I do not exist compression'
+--
+0cc565902eb36128
+== 059
+SET default_toast_compression = 'lz4'
+--
+0cc565902eb36128
+== 060
+SET default_toast_compression = 'pglz'
+--
+0cc565902eb36128
+== 061
+-- test alter compression method
+ALTER TABLE cmdata ALTER COLUMN f1 SET COMPRESSION lz4
+--
+0d0dd00b38821957
+== 062
+INSERT INTO cmdata VALUES (repeat('123456789', 4004))
+--
+2a8cdc36f62ec984
+== 063
+SELECT pg_column_compression(f1) FROM cmdata
+--
+497c364a62880f82
+== 064
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET COMPRESSION default
+--
+17dcac49cb7bf971
+== 065
+-- test alter compression method for materialized views
+ALTER MATERIALIZED VIEW compressmv ALTER COLUMN x SET COMPRESSION lz4
+--
+7342030b8ffb1a74
+== 066
+-- test alter compression method for partitioned tables
+ALTER TABLE cmpart1 ALTER COLUMN f1 SET COMPRESSION pglz
+--
+5b17551b1e1ca991
+== 067
+ALTER TABLE cmpart2 ALTER COLUMN f1 SET COMPRESSION lz4
+--
+0e469c691e25d372
+== 068
+-- new data should be compressed with the current compression method
+INSERT INTO cmpart VALUES (repeat('123456789', 1004))
+--
+51d0f8348d65a28c
+== 069
+INSERT INTO cmpart VALUES (repeat('123456789', 4004))
+--
+51d0f8348d65a28c
+== 070
+SELECT pg_column_compression(f1) FROM cmpart1
+--
+9ad99c3b1bae7c8f
+== 071
+SELECT pg_column_compression(f1) FROM cmpart2
+--
+c27647fc2f27d1b6
+== 072
+-- VACUUM FULL does not recompress
+SELECT pg_column_compression(f1) FROM cmdata
+--
+497c364a62880f82
+== 073
+VACUUM FULL cmdata
+--
+7a31ad6112ede2b2
+== 074
+SELECT pg_column_compression(f1) FROM cmdata
+--
+497c364a62880f82
+== 075
+-- test expression index
+DROP TABLE cmdata2
+--
+2db514cd59d16f46
+== 076
+CREATE TABLE cmdata2 (f1 TEXT COMPRESSION pglz, f2 TEXT COMPRESSION lz4)
+--
+05b1cab80c273684
+== 077
+CREATE UNIQUE INDEX idx1 ON cmdata2 ((f1 || f2))
+--
+cff2681782761a15
+== 078
+INSERT INTO cmdata2 VALUES((SELECT array_agg(fipshash(g::TEXT))::TEXT FROM
+generate_series(1, 50) g), VERSION())
+--
+071ea7a9bcf8f58a
+== 079
+-- check data is ok
+SELECT length(f1) FROM cmdata
+--
+5ec39db51ac90482
+== 080
+SELECT length(f1) FROM cmdata1
+--
+78f0355fd28b3791
+== 081
+SELECT length(f1) FROM cmmove1
+--
+66a00bfc6acee79c
+== 082
+SELECT length(f1) FROM cmmove2
+--
+0b355575fabb58d6
+== 083
+SELECT length(f1) FROM cmmove3
+--
+29676c2bda3216c8
+== 084
+CREATE TABLE badcompresstbl (a text COMPRESSION I_Do_Not_Exist_Compression)
+--
+f65cc572900ea114
+== 085
+-- fails
+CREATE TABLE badcompresstbl (a text)
+--
+bdcc23c468610b33
+== 086
+ALTER TABLE badcompresstbl ALTER a SET COMPRESSION I_Do_Not_Exist_Compression
+--
+746c1b634d150c71
+== 087
+-- fails
+DROP TABLE badcompresstbl
+--
+a60ba7d024e6a145

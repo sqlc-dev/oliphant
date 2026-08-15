@@ -1,0 +1,546 @@
+== 001
+|--
+-- create user defined conversion
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION test_enc_setup() RETURNS void
+    AS :'regresslib', 'test_enc_setup'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 171
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+SELECT FROM test_enc_setup()
+--
+72581778b5f43e51
+== 003
+CREATE FUNCTION test_enc_conversion(bytea, name, name, bool, validlen OUT int, result OUT bytea)
+    AS :'regresslib', 'test_enc_conversion'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 105
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+CREATE USER regress_conversion_user WITH NOCREATEDB NOCREATEROLE
+--
+8be94d59fe37c61b
+== 005
+SET SESSION AUTHORIZATION regress_conversion_user
+--
+532a0ea53df105d9
+== 006
+CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+9dad1510a402ec28
+== 007
+|--
+-- cannot make same name conversion in same schema
+|--
+CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+9dad1510a402ec28
+== 008
+|--
+-- create default conversion with qualified name
+|--
+CREATE DEFAULT CONVERSION public.mydef FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+d103cd0efa8b9a53
+== 009
+|--
+-- cannot make default conversion with same schema/for_encoding/to_encoding
+|--
+CREATE DEFAULT CONVERSION public.mydef2 FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+f195230f417435b8
+== 010
+-- test comments
+COMMENT ON CONVERSION myconv_bad IS 'foo'
+--
+b8d9670647cefdde
+== 011
+COMMENT ON CONVERSION myconv IS 'bar'
+--
+1a14d6447133446c
+== 012
+COMMENT ON CONVERSION myconv IS NULL
+--
+f05eb0d6ee40d3b9
+== 013
+|--
+-- drop user defined conversion
+|--
+DROP CONVERSION myconv
+--
+710226d70e96a5b3
+== 014
+DROP CONVERSION mydef
+--
+a98e937bc1cac972
+== 015
+|--
+-- Note: the built-in conversions are exercised in opr_sanity.sql,
+-- so there's no need to do that here.
+|--
+|--
+-- return to the superuser
+|--
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 016
+DROP USER regress_conversion_user
+--
+2f832d1ca63262bb
+== 017
+|--
+-- Test built-in conversion functions.
+|--
+
+-- Helper function to test a conversion. Uses the test_enc_conversion function
+-- that was created in the create_function_0 test.
+create or replace function test_conv(
+  input IN bytea,
+  src_encoding IN text,
+  dst_encoding IN text,
+
+  result OUT bytea,
+  errorat OUT bytea,
+  error OUT text)
+language plpgsql as
+$$
+declare
+  validlen int;
+begin
+  -- First try to perform the conversion with noError = false. If that errors out,
+  -- capture the error message, and try again with noError = true. The second call
+  -- should succeed and return the position of the error, return that too.
+  begin
+    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, false);
+    errorat = NULL;
+    error := NULL;
+  exception when others then
+    error := sqlerrm;
+    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, true);
+    errorat = substr(input, validlen + 1);
+  end;
+  return;
+end;
+$$
+--
+f7445f86a2b21ac0
+== 018
+|--
+-- UTF-8
+|--
+-- The description column must be unique.
+CREATE TABLE utf8_verification_inputs (inbytes bytea, description text PRIMARY KEY)
+--
+2523c1ac51fbc469
+== 019
+insert into utf8_verification_inputs  values
+  ('\x66006f',	'NUL byte'),
+  ('\xaf',		'bare continuation'),
+  ('\xc5',		'missing second byte in 2-byte char'),
+  ('\xc080',	'smallest 2-byte overlong'),
+  ('\xc1bf',	'largest 2-byte overlong'),
+  ('\xc280',	'next 2-byte after overlongs'),
+  ('\xdfbf',	'largest 2-byte'),
+  ('\xe9af',	'missing third byte in 3-byte char'),
+  ('\xe08080',	'smallest 3-byte overlong'),
+  ('\xe09fbf',	'largest 3-byte overlong'),
+  ('\xe0a080',	'next 3-byte after overlong'),
+  ('\xed9fbf',	'last before surrogates'),
+  ('\xeda080',	'smallest surrogate'),
+  ('\xedbfbf',	'largest surrogate'),
+  ('\xee8080',	'next after surrogates'),
+  ('\xefbfbf',	'largest 3-byte'),
+  ('\xf1afbf',	'missing fourth byte in 4-byte char'),
+  ('\xf0808080',	'smallest 4-byte overlong'),
+  ('\xf08fbfbf',	'largest 4-byte overlong'),
+  ('\xf0908080',	'next 4-byte after overlong'),
+  ('\xf48fbfbf',	'largest 4-byte'),
+  ('\xf4908080',	'smallest too large'),
+  ('\xfa9a9a8a8a',	'5-byte')
+--
+f6e03119124d9475
+== 020
+-- Test UTF-8 verification slow path
+select description, (test_conv(inbytes, 'utf8', 'utf8')).* from utf8_verification_inputs
+--
+cb3b0a745f4c83cc
+== 021
+-- Test UTF-8 verification with ASCII padding appended to provide
+-- coverage for algorithms that work on multiple bytes at a time.
+-- The error message for a sequence starting with a 4-byte lead
+-- will contain all 4 bytes if they are present, so various
+-- expressions below add 3 ASCII bytes to the end to ensure
+-- consistent error messages.
+-- The number 64 below needs to be at least the value of STRIDE_LENGTH in wchar.c.
+
+-- Test multibyte verification in fast path
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(inbytes || repeat('.', 64)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+ce41892166698977
+== 022
+-- Test ASCII verification in fast path where incomplete
+-- UTF-8 sequences fall at the end of the preceding chunk.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64 - length(inbytes))::bytea || inbytes || repeat('.', 64)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+bf10649decba0587
+== 023
+-- Test cases where UTF-8 sequences within short text
+-- come after the fast path returns.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64)::bytea || inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+205fbbd306b94c60
+== 024
+-- Test cases where incomplete UTF-8 sequences fall at the
+-- end of the part checked by the fast path.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64 - length(inbytes))::bytea || inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+bf10649decba0587
+== 025
+CREATE TABLE utf8_inputs (inbytes bytea, description text)
+--
+abf44bd2f448cbbe
+== 026
+insert into utf8_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\xc3a4c3b6',	'valid, extra latin chars'),
+  ('\xd184d0bed0be',	'valid, cyrillic'),
+  ('\x666f6fe8b1a1',	'valid, kanji/Chinese'),
+  ('\xe382abe3829a',	'valid, two chars that combine to one in EUC_JIS_2004'),
+  ('\xe382ab',		'only first half of combined char in EUC_JIS_2004'),
+  ('\xe382abe382',	'incomplete combination when converted EUC_JIS_2004'),
+  ('\xecbd94eb81bceba6ac', 'valid, Hangul, Korean'),
+  ('\x666f6fefa8aa',	'valid, needs mapping function to convert to GB18030'),
+  ('\x66e8b1ff6f6f',	'invalid byte sequence'),
+  ('\x66006f',		'invalid, NUL byte'),
+  ('\x666f6fe8b100',	'invalid, NUL byte'),
+  ('\x666f6fe8b1',	'incomplete character at end')
+--
+fd6b6509760455df
+== 027
+-- Test UTF-8 verification
+select description, (test_conv(inbytes, 'utf8', 'utf8')).* from utf8_inputs
+--
+c58d24ab107e4f71
+== 028
+-- Test conversions from UTF-8
+select description, inbytes, (test_conv(inbytes, 'utf8', 'euc_jis_2004')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 029
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin1')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 030
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin2')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 031
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin5')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 032
+select description, inbytes, (test_conv(inbytes, 'utf8', 'koi8r')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 033
+select description, inbytes, (test_conv(inbytes, 'utf8', 'gb18030')).* from utf8_inputs
+--
+07a34b2a6fba0e9d
+== 034
+|--
+-- EUC_JIS_2004
+|--
+CREATE TABLE euc_jis_2004_inputs (inbytes bytea, description text)
+--
+3d65be315fc00459
+== 035
+insert into euc_jis_2004_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fbedd',	'valid'),
+  ('\xa5f7',		'valid, translates to two UTF-8 chars '),
+  ('\xbeddbe',		'incomplete char '),
+  ('\x666f6f00bedd',	'invalid, NUL byte'),
+  ('\x666f6fbe00dd',	'invalid, NUL byte'),
+  ('\x666f6fbedd00',	'invalid, NUL byte'),
+  ('\xbe04',		'invalid byte sequence')
+--
+1d9020658aa41ad5
+== 036
+-- Test EUC_JIS_2004 verification
+select description, inbytes, (test_conv(inbytes, 'euc_jis_2004', 'euc_jis_2004')).* from euc_jis_2004_inputs
+--
+ca311d7a8aa31006
+== 037
+-- Test conversions from EUC_JIS_2004
+select description, inbytes, (test_conv(inbytes, 'euc_jis_2004', 'utf8')).* from euc_jis_2004_inputs
+--
+ca311d7a8aa31006
+== 038
+|--
+-- SHIFT-JIS-2004
+|--
+CREATE TABLE shiftjis2004_inputs (inbytes bytea, description text)
+--
+f354437b4379e2b3
+== 039
+insert into shiftjis2004_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6f8fdb',	'valid'),
+  ('\x666f6f81c0',	'valid, no translation to UTF-8'),
+  ('\x666f6f82f5',	'valid, translates to two UTF-8 chars '),
+  ('\x666f6f8fdb8f',	'incomplete char '),
+  ('\x666f6f820a',	'incomplete char, followed by newline '),
+  ('\x666f6f008fdb',	'invalid, NUL byte'),
+  ('\x666f6f8f00db',	'invalid, NUL byte'),
+  ('\x666f6f8fdb00',	'invalid, NUL byte')
+--
+cc4391e9941c63e3
+== 040
+-- Test SHIFT-JIS-2004 verification
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'shiftjis2004')).* from shiftjis2004_inputs
+--
+c1b22b662a0b6adb
+== 041
+-- Test conversions from SHIFT-JIS-2004
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'utf8')).* from shiftjis2004_inputs
+--
+c1b22b662a0b6adb
+== 042
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'euc_jis_2004')).* from shiftjis2004_inputs
+--
+c1b22b662a0b6adb
+== 043
+|--
+-- GB18030
+|--
+CREATE TABLE gb18030_inputs (inbytes bytea, description text)
+--
+1330a5a96fdbea51
+== 044
+insert into gb18030_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fcff3',	'valid'),
+  ('\x666f6f8431a530',	'valid, no translation to UTF-8'),
+  ('\x666f6f84309c38',	'valid, translates to UTF-8 by mapping function'),
+  ('\x666f6f84309c',	'incomplete char '),
+  ('\x666f6f84309c0a',	'incomplete char, followed by newline '),
+  ('\x666f6f84',		'incomplete char at end'),
+  ('\x666f6f84309c3800', 'invalid, NUL byte'),
+  ('\x666f6f84309c0038', 'invalid, NUL byte')
+--
+f16ab0c74b17baa1
+== 045
+-- Test GB18030 verification.  Round-trip through text so the backing of the
+-- bytea values is palloc, not shared_buffers.  This lets Valgrind detect
+-- reads past the end.
+select description, inbytes, (test_conv(inbytes::text::bytea, 'gb18030', 'gb18030')).* from gb18030_inputs
+--
+893940b8e74804ef
+== 046
+-- Test conversions from GB18030
+select description, inbytes, (test_conv(inbytes, 'gb18030', 'utf8')).* from gb18030_inputs
+--
+72a711f5fd412728
+== 047
+|--
+-- ISO-8859-5
+|--
+CREATE TABLE iso8859_5_inputs (inbytes bytea, description text)
+--
+081e4f2916a58772
+== 048
+insert into iso8859_5_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\xe4dede',		'valid'),
+  ('\x00',		'invalid, NUL byte'),
+  ('\xe400dede',	'invalid, NUL byte'),
+  ('\xe4dede00',	'invalid, NUL byte')
+--
+dc451702da81a533
+== 049
+-- Test ISO-8859-5 verification
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'iso8859-5')).* from iso8859_5_inputs
+--
+d7b81cc4b2af6ae6
+== 050
+-- Test conversions from ISO-8859-5
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'utf8')).* from iso8859_5_inputs
+--
+d7b81cc4b2af6ae6
+== 051
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'koi8r')).* from iso8859_5_inputs
+--
+d7b81cc4b2af6ae6
+== 052
+select description, inbytes, (test_conv(inbytes, 'iso8859_5', 'mule_internal')).* from iso8859_5_inputs
+--
+d7b81cc4b2af6ae6
+== 053
+|--
+-- Big5
+|--
+CREATE TABLE big5_inputs (inbytes bytea, description text)
+--
+07472def3c9ef2f5
+== 054
+insert into big5_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fb648',	'valid'),
+  ('\x666f6fa27f',	'valid, no translation to UTF-8'),
+  ('\x666f6fb60048',	'invalid, NUL byte'),
+  ('\x666f6fb64800',	'invalid, NUL byte')
+--
+eb12893b087d85dc
+== 055
+-- Test Big5 verification
+select description, inbytes, (test_conv(inbytes, 'big5', 'big5')).* from big5_inputs
+--
+6823b62e6e9d6e9e
+== 056
+-- Test conversions from Big5
+select description, inbytes, (test_conv(inbytes, 'big5', 'utf8')).* from big5_inputs
+--
+6823b62e6e9d6e9e
+== 057
+select description, inbytes, (test_conv(inbytes, 'big5', 'mule_internal')).* from big5_inputs
+--
+6823b62e6e9d6e9e
+== 058
+|--
+-- MULE_INTERNAL
+|--
+CREATE TABLE mic_inputs (inbytes bytea, description text)
+--
+ff4a6edd73d5c55a
+== 059
+insert into mic_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x8bc68bcf8bcf',	'valid (in KOI8R)'),
+  ('\x8bc68bcf8b',	'invalid,incomplete char'),
+  ('\x92bedd',		'valid (in SHIFT_JIS)'),
+  ('\x92be',		'invalid, incomplete char)'),
+  ('\x666f6f95a3c1',	'valid (in Big5)'),
+  ('\x666f6f95a3',	'invalid, incomplete char'),
+  ('\x9200bedd',	'invalid, NUL byte'),
+  ('\x92bedd00',	'invalid, NUL byte'),
+  ('\x8b00c68bcf8bcf',	'invalid, NUL byte')
+--
+bdc3c3a3fd975487
+== 060
+-- Test MULE_INTERNAL verification
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'mule_internal')).* from mic_inputs
+--
+d57c5843273acd90
+== 061
+-- Test conversions from MULE_INTERNAL
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'koi8r')).* from mic_inputs
+--
+d57c5843273acd90
+== 062
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'iso8859-5')).* from mic_inputs
+--
+d57c5843273acd90
+== 063
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'sjis')).* from mic_inputs
+--
+d57c5843273acd90
+== 064
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'big5')).* from mic_inputs
+--
+d57c5843273acd90
+== 065
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'euc_jp')).* from mic_inputs
+--
+d57c5843273acd90

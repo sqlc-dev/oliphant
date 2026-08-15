@@ -1,0 +1,334 @@
+== 001
+|--
+-- Test GIN indexes.
+|--
+-- There are other tests to test different GIN opclasses. This is for testing
+-- GIN itself.
+
+-- Create and populate a test table with a GIN index.
+create table gin_test_tbl(i int4[]) with (autovacuum_enabled = off)
+--
+bb9f9cdec6c97bf4
+== 002
+create index gin_test_idx on gin_test_tbl using gin (i)
+  with (fastupdate = on, gin_pending_list_limit = 4096)
+--
+79421bf1ad28b804
+== 003
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 20000) g
+--
+cf3561b9161b8252
+== 004
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+cf3561b9161b8252
+== 005
+select gin_clean_pending_list('gin_test_idx')>10 as many
+--
+47ddbe7f7e2435e1
+== 006
+-- flush the fastupdate buffers
+
+insert into gin_test_tbl select array[3, 1, g] from generate_series(1, 1000) g
+--
+cf3561b9161b8252
+== 007
+vacuum gin_test_tbl
+--
+9b753f3440a7ca2d
+== 008
+-- flush the fastupdate buffers
+
+select gin_clean_pending_list('gin_test_idx')
+--
+6a5774df9d63e1c0
+== 009
+-- nothing to flush
+
+-- Test vacuuming
+delete from gin_test_tbl where i @> array[2]
+--
+5bb99ee2d7612beb
+== 010
+vacuum gin_test_tbl
+--
+9b753f3440a7ca2d
+== 011
+-- Disable fastupdate, and do more insertions. With fastupdate enabled, most
+-- insertions (by flushing the list pages) cause page splits. Without
+-- fastupdate, we get more churn in the GIN data leaf pages, and exercise the
+-- recompression codepaths.
+alter index gin_test_idx set (fastupdate = off)
+--
+22a4bfe6de3cf336
+== 012
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 1000) g
+--
+cf3561b9161b8252
+== 013
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+cf3561b9161b8252
+== 014
+delete from gin_test_tbl where i @> array[2]
+--
+5bb99ee2d7612beb
+== 015
+vacuum gin_test_tbl
+--
+9b753f3440a7ca2d
+== 016
+-- Test for "rare && frequent" searches
+explain (costs off)
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+b4b239bdd515262e
+== 017
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+5ea8cdcb70eb3a4a
+== 018
+-- Very weak test for gin_fuzzy_search_limit
+set gin_fuzzy_search_limit = 1000
+--
+a262544b95211db9
+== 019
+explain (costs off)
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+9314bfcc9caa74cf
+== 020
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+6742b21511e29446
+== 021
+reset gin_fuzzy_search_limit
+--
+94509ee6ea78210d
+== 022
+-- Test optimization of empty queries
+create temp table t_gin_test_tbl(i int4[], j int4[])
+--
+2edf9843baccab92
+== 023
+create index on t_gin_test_tbl using gin (i, j)
+--
+4d65ca81f8757286
+== 024
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   null),
+  ('{1,2}', null),
+  (null,    '{}'),
+  (null,    '{10}'),
+  ('{1,2}', '{10}'),
+  ('{2}',   '{10}'),
+  ('{1,3}', '{}'),
+  ('{1,1}', '{10}')
+--
+fb104fb2729c2056
+== 025
+set enable_seqscan = off
+--
+b6355b32597ef7db
+== 026
+explain (costs off)
+select * from t_gin_test_tbl where array[0] <@ i
+--
+0e6338c4b158c4ca
+== 027
+select * from t_gin_test_tbl where array[0] <@ i
+--
+6970e805dc584c3a
+== 028
+select * from t_gin_test_tbl where array[0] <@ i and '{}'::int4[] <@ j
+--
+9949e0dd7e643bbd
+== 029
+explain (costs off)
+select * from t_gin_test_tbl where i @> '{}'
+--
+7c2218e43d021c1c
+== 030
+select * from t_gin_test_tbl where i @> '{}'
+--
+e910aa99dd7d0bfc
+== 031
+create function explain_query_json(query_sql text)
+returns table (explain_line json)
+language plpgsql as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute 'EXPLAIN (ANALYZE, FORMAT json) ' || query_sql;
+end;
+$$
+--
+857dce62baf89abe
+== 032
+create function execute_text_query_index(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute query_sql;
+end;
+$$
+--
+e7cc677c3241f61e
+== 033
+create function execute_text_query_heap(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = on;
+  set enable_bitmapscan = off;
+  return query execute query_sql;
+end;
+$$
+--
+99a0c69bcd573ac3
+== 034
+-- check number of rows returned by index and removed by recheck
+select
+  query,
+  js->0->'Plan'->'Plans'->0->'Actual Rows' as "return by index",
+  js->0->'Plan'->'Rows Removed by Index Recheck' as "removed by recheck",
+  (res_index = res_heap) as "match"
+from
+  (values
+    ($$ i @> '{}' $$),
+    ($$ j @> '{}' $$),
+    ($$ i @> '{}' and j @> '{}' $$),
+    ($$ i @> '{1}' $$),
+    ($$ i @> '{1}' and j @> '{}' $$),
+    ($$ i @> '{1}' and i @> '{}' and j @> '{}' $$),
+    ($$ j @> '{10}' $$),
+    ($$ j @> '{10}' and i @> '{}' $$),
+    ($$ j @> '{10}' and j @> '{}' and i @> '{}' $$),
+    ($$ i @> '{1}' and j @> '{10}' $$)
+  ) q(query),
+  lateral explain_query_json($$select * from t_gin_test_tbl where $$ || query) js,
+  lateral execute_text_query_index($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_index,
+  lateral execute_text_query_heap($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_heap
+--
+55a0b6daca2b211a
+== 035
+reset enable_seqscan
+--
+4dec036bbc151e13
+== 036
+reset enable_bitmapscan
+--
+e4cb3f6b223046e8
+== 037
+-- re-purpose t_gin_test_tbl to test scans involving posting trees
+insert into t_gin_test_tbl select array[1, g, g/10], array[2, g, g/10]
+  from generate_series(1, 20000) g
+--
+176354a44e46923e
+== 038
+select gin_clean_pending_list('t_gin_test_tbl_i_j_idx') is not null
+--
+d504b015792e7bd2
+== 039
+analyze t_gin_test_tbl
+--
+b6d95330b87d0d3c
+== 040
+set enable_seqscan = off
+--
+b6355b32597ef7db
+== 041
+set enable_bitmapscan = on
+--
+aa90c60f48f4fef4
+== 042
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+3284d163cbbfaec9
+== 043
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+9cb5e34739706d61
+== 044
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+3284d163cbbfaec9
+== 045
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+9cb5e34739706d61
+== 046
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+6c28ae4ff9929430
+== 047
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+1b539720b4f61540
+== 048
+-- test vacuuming of posting trees
+delete from t_gin_test_tbl where j @> array[2]
+--
+26543bb32c979342
+== 049
+vacuum t_gin_test_tbl
+--
+d49b19a902a0feee
+== 050
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+9cb5e34739706d61
+== 051
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+9cb5e34739706d61
+== 052
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+1b539720b4f61540
+== 053
+reset enable_seqscan
+--
+4dec036bbc151e13
+== 054
+reset enable_bitmapscan
+--
+e4cb3f6b223046e8
+== 055
+drop table t_gin_test_tbl
+--
+609cdff5c6dd4695
+== 056
+-- test an unlogged table, mostly to get coverage of ginbuildempty
+create unlogged table t_gin_test_tbl(i int4[], j int4[])
+--
+d81e9024a5f44d86
+== 057
+create index on t_gin_test_tbl using gin (i, j)
+--
+4d65ca81f8757286
+== 058
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   '{2,3}')
+--
+fb104fb2729c2056
+== 059
+drop table t_gin_test_tbl
+--
+609cdff5c6dd4695
