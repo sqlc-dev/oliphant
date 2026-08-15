@@ -704,7 +704,6 @@ func TestParsePlPgSQL(t *testing.T) {
 }
 
 func TestScan(t *testing.T) {
-	skipUnlessImplemented(t)
 	smokeTest := func(input string) {
 		_, err := pg_query.Scan(input)
 		if err != nil {

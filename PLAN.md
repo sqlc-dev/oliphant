@@ -373,10 +373,13 @@ gate; the corpus harness exists before the first line of the lexer.
    as `todo`. **Gate:** goldens reproducible byte-for-byte across two
    regeneration runs — met, and re-verified weekly by the `regenerate` CI
    workflow. See "As-built notes" below for measured counts and deferrals.
-3. **Lexer.** `scan.l` port + `base_yylex` filter layer; `Scan`,
-   `SplitWithScanner`, `HashXXH3_64` (+ `internal/xxh3`) ship. **Gate:**
-   token streams byte-identical to the oracle across the entire corpus,
-   including scanner error messages and cursor positions.
+3. **Lexer.** ✅ *Landed 2026-08-15.* `scan.l` port + `base_yylex` filter
+   layer; `Scan`, `SplitWithScanner`, `HashXXH3_64` (+ `internal/xxh3`)
+   ship. **Gate:** token streams byte-identical to the oracle across the
+   entire corpus, including scanner error messages and cursor positions —
+   met: all 43,373 scan cases and all 8 split_scanner cases pass; xxh3 is
+   verified against 126 oracle-generated vectors covering every length
+   class and seed path. See "As-built notes (milestone 3)".
 4. **Expressions + SELECT.** `a_expr`/`b_expr`/`c_expr` precedence machinery,
    constants and typecasts, `func_expr` (including `json_*`, `xml*`,
    aggregate `FILTER`/`WITHIN GROUP`, window functions), `SELECT` end-to-end:
@@ -447,6 +450,34 @@ Measured at the pin, where the plan's estimates differ:
   engine classification in the sqlc repo; import it alongside milestone 4),
   **`plpgsql_regress/`** (milestone 11), and **summary** golden extraction
   (milestone 10). The stretch tarball tier remains stretch.
+
+### As-built notes (milestone 3)
+
+- The scanner (`internal/lexer`) is pull-based (`Scanner.Next`), one token
+  per call like `core_yylex`; `Scan`/`SplitWithScanner` drain it eagerly,
+  but milestone 4's parser must pull lazily so grammar errors can win over
+  scanner errors that lie further right, as they do under bison.
+- Flex's longest-match/rule-order discipline is reproduced structurally
+  except for the numeric-literal rules, whose fourteen overlapping patterns
+  (`decinteger` … `real_junk`, including flex backtracking inside the
+  `*_junk` rules) are resolved by computing every candidate match length
+  and picking the winner (`internal/lexer/numbers.go`).
+- Two pinned-oracle behaviors worth knowing: token End offsets come from
+  the patch-03 `yyllocend` for multi-rule tokens
+  (`pg_query_scan.c` uses it for SCONST/USCONST/BCONST/XCONST/IDENT/
+  UIDENT/C_COMMENT and `yylloc + yyleng` for the rest — with the eager
+  scanner both reduce to "position after the token"), and a comment
+  *between* a `base_yylex` merge pair blocks the merge (the lookahead is a
+  raw `core_yylex` call, so pg_query_go v6.2.2 rejects
+  `SELECT 1 WHERE 1 NOT /* c */ IN (2)` where vanilla PostgreSQL does not;
+  the filter reproduces this, pinned by a unit test).
+- Scanner error cursor positions are character-based
+  (`pg_mbstrlen_with_len` semantics, per-lead-byte stride, not rune
+  count); the "at or near" text runs from the error location to the end of
+  the current match (flex's hold-char NUL), or to end of input in `<<EOF>>`
+  rules.
+- `internal/xxh3` implements only `XXH3_64bits_withSeed` (scalar paths),
+  the sole entry point the API needs.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 

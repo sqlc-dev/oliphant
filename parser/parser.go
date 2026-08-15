@@ -7,7 +7,32 @@
 // swap.
 package parser
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/sqlc-dev/oliphant/ast"
+	"github.com/sqlc-dev/oliphant/internal/lexer"
+	"github.com/sqlc-dev/oliphant/internal/xxh3"
+)
+
+// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 17.7, libpg_query
+// 17-6.2.2), reported in ScanResult.Version and ParseResult.Version.
+const pgVersionNum = 170007
+
+// scanErr converts a lexer error into the public Error, mirroring
+// pg_query_scan.c's PG_CATCH block (Lineno is a C source line number
+// upstream and deliberately not reproduced).
+func scanErr(e *lexer.Error) *Error {
+	return &Error{
+		Message:   e.Message,
+		Filename:  e.Filename,
+		Funcname:  e.Funcname,
+		Cursorpos: e.Cursorpos,
+	}
+}
 
 // Error mirrors pg_query_go's parser.Error field-for-field.
 type Error struct {
@@ -34,8 +59,28 @@ func ParseToJSON(input string) (result string, err error) {
 	return "", errNotImplemented("ParseToJSON")
 }
 
+// ScanToProtobuf lexes the input with the core scanner exactly as
+// pg_query_scan.c does: raw core_yylex tokens (comments included, no
+// base_yylex filtering), start/end byte offsets, and the keyword kind.
 func ScanToProtobuf(input string) (result []byte, err error) {
-	return nil, errNotImplemented("ScanToProtobuf")
+	s := lexer.New(input)
+	scan := &ast.ScanResult{Version: pgVersionNum}
+	for {
+		tok, lerr := s.Next()
+		if lerr != nil {
+			return nil, scanErr(lerr)
+		}
+		if tok.Kind == 0 {
+			break
+		}
+		scan.Tokens = append(scan.Tokens, &ast.ScanToken{
+			Start:       tok.Start,
+			End:         tok.End,
+			Token:       tok.Kind,
+			KeywordKind: tok.KeywordKind,
+		})
+	}
+	return proto.Marshal(scan)
 }
 
 func ParseToProtobuf(input string) ([]byte, error) {
@@ -58,8 +103,43 @@ func NormalizeUtility(input string) (result string, err error) {
 	return "", errNotImplemented("NormalizeUtility")
 }
 
+// SplitWithScanner is pg_query_split.c's pg_query_split_with_scanner: a
+// lexer-level statement splitter. A statement ends at a top-level ";" (or
+// EOF) and is only emitted if it contained at least one keyword.
 func SplitWithScanner(input string, trimSpace bool) (result []string, err error) {
-	return nil, errNotImplemented("SplitWithScanner")
+	s := lexer.New(input)
+	keywordBeforeTerminator := false
+	openParens := 0
+	stmtStart := 0
+	for {
+		tok, lerr := s.Next()
+		if lerr != nil {
+			return nil, scanErr(lerr)
+		}
+		kind := tok.Kind
+		switch {
+		case tok.KeywordKind != ast.KeywordKind_NO_KEYWORD:
+			keywordBeforeTerminator = true
+		case kind == '(':
+			openParens++
+		case kind == ')':
+			openParens--
+		case keywordBeforeTerminator && openParens == 0 && (kind == ';' || kind == 0):
+			stmt := input[stmtStart:tok.Start]
+			if trimSpace {
+				stmt = strings.TrimSpace(stmt)
+			}
+			result = append(result, stmt)
+			stmtStart = int(tok.Start) + 1
+			keywordBeforeTerminator = false
+		case openParens == 0 && kind == ';':
+			// Advance the statement start past an empty statement.
+			stmtStart = int(tok.Start) + 1
+		}
+		if kind == 0 {
+			return result, nil
+		}
+	}
 }
 
 func SplitWithParser(input string, trimSpace bool) (result []string, err error) {
@@ -75,10 +155,9 @@ func FingerprintToHexStr(input string) (result string, err error) {
 }
 
 // HashXXH3_64 runs the XXH3 hash function (64-bit variant) on the given
-// bytes, with the specified seed. Ships with the lexer milestone
-// (internal/xxh3).
+// bytes, with the specified seed.
 func HashXXH3_64(input []byte, seed uint64) (result uint64) {
-	panic("oliphant: HashXXH3_64 is not implemented yet")
+	return xxh3.Hash64Seed(input, seed)
 }
 
 func IsUtilityStmt(input string) (result []bool, err error) {
