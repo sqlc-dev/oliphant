@@ -84,7 +84,7 @@ The siblings expose `parser.Parse(ctx, io.Reader) ([]ast.Stmt, error)`.
 oliphant instead reproduces pg_query_go's root package verbatim:
 
 ```go
-package pg_query // module github.com/sqlc-dev/oliphant
+package oliphant // module github.com/sqlc-dev/oliphant
 
 func Parse(input string) (*ParseResult, error)
 func ParseToJSON(input string) (string, error)
@@ -116,8 +116,9 @@ type Error struct {
 }
 ```
 
-The root package is named `pg_query` (Go package names need not match the
-module path), so migration is exactly one line:
+The root package is named `oliphant`; consumers alias it at the import site,
+which is what pg_query_go users already do, so migration is exactly one line
+and no call site changes:
 
 ```diff
 -import pg_query "github.com/pganalyze/pg_query_go/v6"
@@ -149,8 +150,9 @@ be an import cycle). So:
 - The root package exposes generated **type and const aliases**
   (`type ParseResult = ast.ParseResult`, one line per exported type/enum
   value) so `pg_query.SelectStmt`, `pg_query.JoinType_JOIN_INNER`, etc. all
-  resolve exactly as they do in pg_query_go. The alias file is emitted by
-  `cmd/generate` — never hand-maintained.
+  resolve exactly as they do in pg_query_go (with the import aliased to
+  `pg_query`). The alias file is emitted by `cmd/generate` — never
+  hand-maintained.
 
 The grammar actions build these protobuf structs **directly**. libpg_query's
 whole outfuncs/readfuncs layer (C parse nodes → protobuf) exists because the
@@ -315,7 +317,7 @@ oliphant/
 ├── LICENSE.LIBPG_QUERY       # BSD-3 (pganalyze; ported glue/deparser/fingerprint logic)
 ├── PLAN.md                   # this file
 ├── CLAUDE.md                 # dev loop: next-test → implement → -check-parse
-├── pg_query.go               # public API (package pg_query) — mirrors pg_query_go
+├── oliphant.go               # public API (package oliphant) — mirrors pg_query_go
 ├── makefuncs.go              # ported verbatim from pg_query_go
 ├── aliases.go                # generated type/const aliases into ast/
 ├── ast/
@@ -360,7 +362,7 @@ gate; the corpus harness exists before the first line of the lexer.
 1. **Scaffolding + codegen.** Module, licenses, CI; vendor `srcdata/`,
    `pg_query.proto`, reference grammar files at the pin; `cmd/generate`
    producing `ast/pg_query.pb.go`, root aliases, keyword tables;
-   `pg_query.go` API stubs returning not-implemented; `makefuncs.go` and the
+   `oliphant.go` API stubs returning not-implemented; `makefuncs.go` and the
    `parser.Error` type ported. **Gate:** pg_query_go's `parse_test.go`
    expected-tree literals compile unchanged against oliphant's types.
 2. **Corpus + oracle.** `oracle/` module wrapping pg_query_go v6.2.2;
