@@ -359,17 +359,20 @@ oliphant/
 Ordered so that every milestone lands with its own oracle-backed acceptance
 gate; the corpus harness exists before the first line of the lexer.
 
-1. **Scaffolding + codegen.** Module, licenses, CI; vendor `srcdata/`,
-   `pg_query.proto`, reference grammar files at the pin; `cmd/generate`
-   producing `ast/pg_query.pb.go`, root aliases, keyword tables;
-   `oliphant.go` API stubs returning not-implemented; `makefuncs.go` and the
-   `parser.Error` type ported. **Gate:** pg_query_go's `parse_test.go`
-   expected-tree literals compile unchanged against oliphant's types.
-2. **Corpus + oracle.** `oracle/` module wrapping pg_query_go v6.2.2;
-   `cmd/regenerate` extracting all corpus tiers into `.test` goldens
-   (trees, errors, scan tokens, normalize, fingerprint, deparse);
-   `internal/testfile` reader; harness running everything as `todo`.
-   **Gate:** goldens reproducible byte-for-byte across two regeneration runs.
+1. **Scaffolding + codegen.** ✅ *Landed 2026-08-15.* Module, licenses, CI;
+   vendor `srcdata/`, `pg_query.proto`, reference grammar files at the pin;
+   `cmd/generate` producing `ast/pg_query.pb.go`, root aliases, keyword
+   tables; `oliphant.go` API stubs returning not-implemented; `makefuncs.go`
+   and the `parser.Error` type ported. **Gate:** pg_query_go's
+   `parse_test.go` expected-tree literals compile unchanged against
+   oliphant's types — met (`parse_test.go`, import swap only).
+2. **Corpus + oracle.** ✅ *Landed 2026-08-15.* `oracle/` module wrapping
+   pg_query_go v6.2.2; `cmd/regenerate` extracting the corpus tiers into
+   `.test` goldens (trees, errors, scan tokens, normalize, fingerprint,
+   deparse, splits); `internal/testfile` reader; harness running everything
+   as `todo`. **Gate:** goldens reproducible byte-for-byte across two
+   regeneration runs — met, and re-verified weekly by the `regenerate` CI
+   workflow. See "As-built notes" below for measured counts and deferrals.
 3. **Lexer.** `scan.l` port + `base_yylex` filter layer; `Scan`,
    `SplitWithScanner`, `HashXXH3_64` (+ `internal/xxh3`) ship. **Gate:**
    token streams byte-identical to the oracle across the entire corpus,
@@ -416,6 +419,34 @@ gate; the corpus harness exists before the first line of the lexer.
     import path in `convert.go` et al.; drop `wasilibs/go-pgquery`,
     `tetratelabs/wazero`, and the cgo requirement; sqlc's endtoend suite is
     the acceptance gate. Windows and `CGO_ENABLED=0` become first-class.
+
+### As-built notes (milestones 1–2)
+
+Measured at the pin, where the plan's estimates differ:
+
+- The corpus as regenerated: **1,525 `.test` files / 217,229 cases (~80 MB)**
+  across eight suites (`parse`, `scan`, `normalize`, `normalize_utility`,
+  `fingerprint`, `deparse`, `split_scanner`, `split_parser`).
+- `postgres_regress/` has **224** files at `17-6.2.2` (not 233); `kwlist.h`
+  yields **491** keywords (not 494); the proto has **273** messages and
+  **71** enums (not 276/73). The inline tables carry 36 parse, 12 scan,
+  25 normalize, 25 normalize_utility, 78 fingerprint, 418 deparse, and
+  8 split inputs; `deparse-depesz/` is 150 `.psql` files under `*.d/`
+  subdirectories.
+- The `.test` format needed one addition over the family convention: input
+  or expectation lines that collide with the `== ` / `--` markers are
+  escaped with a leading `|` (SQL comment banners of exactly `--` are
+  everywhere in the regress files). `internal/testfile` round-trips this
+  bijectively.
+- `cmd/regenerate` preserves passing status across runs: a case identical in
+  name, input, and expectation to one that had graduated out of `todo` stays
+  passing, so a pin advance puts exactly the diff back on the todo list.
+- `cmd/generate -proto` requires `protoc` + `protoc-gen-go` on PATH; the
+  pure-Go `-aliases`/`-keywords` modes are what CI verifies.
+- Deferred, deliberately: the **sqlc endtoend tier** (needs per-directory
+  engine classification in the sqlc repo; import it alongside milestone 4),
+  **`plpgsql_regress/`** (milestone 11), and **summary** golden extraction
+  (milestone 10). The stretch tarball tier remains stretch.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 
