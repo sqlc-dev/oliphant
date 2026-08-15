@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # The whole point: no cgo, anywhere, ever.
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l . | grep -v '^internal/reference/' | grep -v '\.pb\.go$')"
+      - run: go vet ./...
+      - run: go build ./...
+      - name: go test -race
+        env:
+          CGO_ENABLED: "1" # -race requires cgo in the toolchain, not in our code
+        run: go test -race ./...
+      - name: go test (pure)
+        run: go test ./...
+
+  generate-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: cmd/generate output is committed and current
+        run: |
+          go run ./cmd/generate -aliases -keywords
+          git diff --exit-code

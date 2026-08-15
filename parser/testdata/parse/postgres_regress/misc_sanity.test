@@ -1,0 +1,81 @@
+== 001
+|--
+-- MISC_SANITY
+-- Sanity checks for common errors in making system tables that don't fit
+-- comfortably into either opr_sanity or type_sanity.
+|--
+-- Every test failure in this file should be closely inspected.
+-- The description of the failing test should be read carefully before
+-- adjusting the expected output.  In most cases, the queries should
+-- not find *any* matching entries.
+|--
+-- NB: run this test early, because some later tests create bogus entries.
+
+
+-- **************** pg_depend ****************
+
+-- Look for illegal values in pg_depend fields.
+
+SELECT *
+FROM pg_depend as d1
+WHERE refclassid = 0 OR refobjid = 0 OR
+      classid = 0 OR objid = 0 OR
+      deptype NOT IN ('a', 'e', 'i', 'n', 'x', 'P', 'S')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":573}},"location":573}}],"fromClause":[{"RangeVar":{"relname":"pg_depend","inh":true,"relpersistence":"p","alias":{"aliasname":"d1"},"location":580}}],"whereClause":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"refclassid"}}],"location":602}},"rexpr":{"A_Const":{"ival":{},"location":615}},"location":613}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"refobjid"}}],"location":620}},"rexpr":{"A_Const":{"ival":{},"location":631}},"location":629}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"classid"}}],"location":642}},"rexpr":{"A_Const":{"ival":{},"location":652}},"location":650}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"objid"}}],"location":657}},"rexpr":{"A_Const":{"ival":{},"location":665}},"location":663}},{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"deptype"}}],"location":676}},"rexpr":{"List":{"items":[{"A_Const":{"sval":{"sval":"a"},"location":692}},{"A_Const":{"sval":{"sval":"e"},"location":697}},{"A_Const":{"sval":{"sval":"i"},"location":702}},{"A_Const":{"sval":{"sval":"n"},"location":707}},{"A_Const":{"sval":{"sval":"x"},"location":712}},{"A_Const":{"sval":{"sval":"P"},"location":717}},{"A_Const":{"sval":{"sval":"S"},"location":722}}]}},"location":684}}],"location":617}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 002
+-- **************** pg_shdepend ****************
+
+-- Look for illegal values in pg_shdepend fields.
+
+SELECT *
+FROM pg_shdepend as d1
+WHERE refclassid = 0 OR refobjid = 0 OR
+      classid = 0 OR objid = 0 OR
+      deptype NOT IN ('a', 'i', 'o', 'r', 't')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":108}},"location":108}}],"fromClause":[{"RangeVar":{"relname":"pg_shdepend","inh":true,"relpersistence":"p","alias":{"aliasname":"d1"},"location":115}}],"whereClause":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"refclassid"}}],"location":139}},"rexpr":{"A_Const":{"ival":{},"location":152}},"location":150}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"refobjid"}}],"location":157}},"rexpr":{"A_Const":{"ival":{},"location":168}},"location":166}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"classid"}}],"location":179}},"rexpr":{"A_Const":{"ival":{},"location":189}},"location":187}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"objid"}}],"location":194}},"rexpr":{"A_Const":{"ival":{},"location":202}},"location":200}},{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"deptype"}}],"location":213}},"rexpr":{"List":{"items":[{"A_Const":{"sval":{"sval":"a"},"location":229}},{"A_Const":{"sval":{"sval":"i"},"location":234}},{"A_Const":{"sval":{"sval":"o"},"location":239}},{"A_Const":{"sval":{"sval":"r"},"location":244}},{"A_Const":{"sval":{"sval":"t"},"location":249}}]}},"location":221}}],"location":154}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 003
+-- **************** pg_class ****************
+
+-- Look for system tables with varlena columns but no toast table. All
+-- system tables with toastable columns should have toast tables, with
+-- the following exceptions:
+-- 1. pg_class, pg_attribute, and pg_index, due to fear of recursive
+-- dependencies as toast tables depend on them.
+-- 2. pg_largeobject and pg_largeobject_metadata.  Large object catalogs
+-- and toast tables are mutually exclusive and large object data is handled
+-- as user data by pg_upgrade, which would cause failures.
+
+SELECT relname, attname, atttypid::regtype
+FROM pg_class c JOIN pg_attribute a ON c.oid = attrelid
+WHERE c.oid < 16384 AND
+      reltoastrelid = 0 AND
+      relkind = 'r' AND
+      attstorage != 'p'
+ORDER BY 1, 2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":551}},"location":551}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"attname"}}],"location":560}},"location":560}},{"ResTarget":{"val":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"atttypid"}}],"location":569}},"typeName":{"names":[{"String":{"sval":"regtype"}}],"typemod":-1,"location":579},"location":577}},"location":569}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","alias":{"aliasname":"c"},"location":592}},"rarg":{"RangeVar":{"relname":"pg_attribute","inh":true,"relpersistence":"p","alias":{"aliasname":"a"},"location":608}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"c"}},{"String":{"sval":"oid"}}],"location":626}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"attrelid"}}],"location":634}},"location":632}}}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"c"}},{"String":{"sval":"oid"}}],"location":649}},"rexpr":{"A_Const":{"ival":{"ival":16384},"location":657}},"location":655}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"reltoastrelid"}}],"location":673}},"rexpr":{"A_Const":{"ival":{},"location":689}},"location":687}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relkind"}}],"location":701}},"rexpr":{"A_Const":{"sval":{"sval":"r"},"location":711}},"location":709}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c\u003e"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"attstorage"}}],"location":725}},"rexpr":{"A_Const":{"sval":{"sval":"p"},"location":739}},"location":736}}],"location":663}},"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":752}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}},{"SortBy":{"node":{"A_Const":{"ival":{"ival":2},"location":755}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 004
+-- system catalogs without primary keys
+|--
+-- Current exceptions:
+-- * pg_depend, pg_shdepend don't have a unique key
+SELECT relname
+FROM pg_class
+WHERE relnamespace = 'pg_catalog'::regnamespace AND relkind = 'r'
+      AND pg_class.oid NOT IN (SELECT indrelid FROM pg_index WHERE indisprimary)
+ORDER BY 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":125}},"location":125}}],"fromClause":[{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","location":138}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relnamespace"}}],"location":153}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"pg_catalog"},"location":168}},"typeName":{"names":[{"String":{"sval":"regnamespace"}}],"typemod":-1,"location":182},"location":180}},"location":166}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relkind"}}],"location":199}},"rexpr":{"A_Const":{"sval":{"sval":"r"},"location":209}},"location":207}},{"BoolExpr":{"boolop":"NOT_EXPR","args":[{"SubLink":{"subLinkType":"ANY_SUBLINK","testexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pg_class"}},{"String":{"sval":"oid"}}],"location":223}},"subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"indrelid"}}],"location":251}},"location":251}}],"fromClause":[{"RangeVar":{"relname":"pg_index","inh":true,"relpersistence":"p","location":265}}],"whereClause":{"ColumnRef":{"fields":[{"String":{"sval":"indisprimary"}}],"location":280}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":236}}],"location":236}}],"location":195}},"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":303}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 005
+-- system catalog unique indexes not wrapped in a constraint
+-- (There should be none.)
+SELECT relname
+FROM pg_class c JOIN pg_index i ON c.oid = i.indexrelid
+WHERE relnamespace = 'pg_catalog'::regnamespace AND relkind = 'i'
+      AND i.indisunique
+      AND c.oid NOT IN (SELECT conindid FROM pg_constraint)
+ORDER BY 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":95}},"location":95}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","alias":{"aliasname":"c"},"location":108}},"rarg":{"RangeVar":{"relname":"pg_index","inh":true,"relpersistence":"p","alias":{"aliasname":"i"},"location":124}},"quals":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"c"}},{"String":{"sval":"oid"}}],"location":138}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"i"}},{"String":{"sval":"indexrelid"}}],"location":146}},"location":144}}}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relnamespace"}}],"location":165}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"pg_catalog"},"location":180}},"typeName":{"names":[{"String":{"sval":"regnamespace"}}],"typemod":-1,"location":194},"location":192}},"location":178}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relkind"}}],"location":211}},"rexpr":{"A_Const":{"sval":{"sval":"i"},"location":221}},"location":219}},{"ColumnRef":{"fields":[{"String":{"sval":"i"}},{"String":{"sval":"indisunique"}}],"location":235}},{"BoolExpr":{"boolop":"NOT_EXPR","args":[{"SubLink":{"subLinkType":"ANY_SUBLINK","testexpr":{"ColumnRef":{"fields":[{"String":{"sval":"c"}},{"String":{"sval":"oid"}}],"location":259}},"subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"conindid"}}],"location":280}},"location":280}}],"fromClause":[{"RangeVar":{"relname":"pg_constraint","inh":true,"relpersistence":"p","location":294}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":265}}],"location":265}}],"location":207}},"sortClause":[{"SortBy":{"node":{"A_Const":{"ival":{"ival":1},"location":318}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}

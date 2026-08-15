@@ -1,0 +1,74 @@
+== 001
+-- Test maintenance commands that visit every eligible relation.  Run as a
+-- non-superuser, to skip other users' tables.
+
+CREATE ROLE regress_maintain
+--
+{"version":170007,"stmts":[{"stmt":{"CreateRoleStmt":{"stmt_type":"ROLESTMT_ROLE","role":"regress_maintain"}}}]}
+== 002
+SET ROLE regress_maintain
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"role","args":[{"A_Const":{"sval":{"sval":"regress_maintain"},"location":9}}]}}}]}
+== 003
+-- Test database-wide ANALYZE ("use_own_xacts" mode) setting relhassubclass=f
+-- for non-partitioning inheritance, w/ ON COMMIT DELETE ROWS building an
+-- empty index.
+CREATE TEMP TABLE past_inh_db_other ()
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"past_inh_db_other","inh":true,"relpersistence":"t","location":186},"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 004
+-- need 2 tables for "use_own_xacts"
+CREATE TEMP TABLE past_inh_db_parent () ON COMMIT DELETE ROWS
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"past_inh_db_parent","inh":true,"relpersistence":"t","location":55},"oncommit":"ONCOMMIT_DELETE_ROWS"}}}]}
+== 005
+CREATE TEMP TABLE past_inh_db_child () INHERITS (past_inh_db_parent)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"past_inh_db_child","inh":true,"relpersistence":"t","location":18},"inhRelations":[{"RangeVar":{"relname":"past_inh_db_parent","inh":true,"relpersistence":"p","location":49}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 006
+CREATE INDEX ON past_inh_db_parent ((1))
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"relation":{"relname":"past_inh_db_parent","inh":true,"relpersistence":"p","location":16},"accessMethod":"btree","indexParams":[{"IndexElem":{"expr":{"A_Const":{"ival":{"ival":1},"location":37}},"ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 007
+ANALYZE past_inh_db_parent
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"rels":[{"VacuumRelation":{"relation":{"relname":"past_inh_db_parent","inh":true,"relpersistence":"p","location":8}}}]}}}]}
+== 008
+SELECT reltuples, relhassubclass
+  FROM pg_class WHERE oid = 'past_inh_db_parent'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"reltuples"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relhassubclass"}}],"location":18}},"location":18}}],"fromClause":[{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","location":40}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"oid"}}],"location":55}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"past_inh_db_parent"},"location":61}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":83},"location":81}},"location":59}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 009
+DROP TABLE past_inh_db_child
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"past_inh_db_child"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 010
+SET client_min_messages = error
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"client_min_messages","args":[{"A_Const":{"sval":{"sval":"error"},"location":26}}]}}}]}
+== 011
+-- hide WARNINGs for other users' tables
+ANALYZE
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{}}}]}
+== 012
+RESET client_min_messages
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"client_min_messages"}}}]}
+== 013
+SELECT reltuples, relhassubclass
+  FROM pg_class WHERE oid = 'past_inh_db_parent'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"reltuples"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relhassubclass"}}],"location":18}},"location":18}}],"fromClause":[{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","location":40}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"oid"}}],"location":55}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"past_inh_db_parent"},"location":61}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":83},"location":81}},"location":59}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 014
+DROP TABLE past_inh_db_parent, past_inh_db_other
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"past_inh_db_parent"}}]}},{"List":{"items":[{"String":{"sval":"past_inh_db_other"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 015
+RESET ROLE
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"role"}}}]}
+== 016
+DROP ROLE regress_maintain
+--
+{"version":170007,"stmts":[{"stmt":{"DropRoleStmt":{"roles":[{"RoleSpec":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_maintain","location":10}}]}}}]}

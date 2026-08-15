@@ -1,0 +1,2340 @@
+== 001
+|--
+-- Test cumulative stats system
+|--
+-- Must be run after tenk2 has been created (by create_table),
+-- populated (by create_misc) and indexed (by create_index).
+|--
+
+-- conditio sine qua non
+SHOW track_counts
+--
+{"version":170007,"stmts":[{"stmt":{"VariableShowStmt":{"name":"track_counts"}}}]}
+== 002
+-- must be on
+
+-- ensure that both seqscan and indexscan plans are allowed
+SET enable_seqscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":97}}]}}}]}
+== 003
+SET enable_indexscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":24}}]}}}]}
+== 004
+-- for the moment, we don't want index-only scans here
+SET enable_indexonlyscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexonlyscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":83}}]}}}]}
+== 005
+-- not enabled by default, but we want to test it...
+SET track_functions TO 'all'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"track_functions","args":[{"A_Const":{"sval":{"sval":"all"},"location":76}}]}}}]}
+== 006
+-- record dboid for later use
+SELECT oid AS dboid from pg_database where datname = current_database()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"dboid","val":{"ColumnRef":{"fields":[{"String":{"sval":"oid"}}],"location":37}},"location":37}}],"fromClause":[{"RangeVar":{"relname":"pg_database","inh":true,"relpersistence":"p","location":55}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"datname"}}],"location":73}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"current_database"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":83}},"location":81}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 007
+-- save counters
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 008
+SET LOCAL stats_fetch_consistency = snapshot
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"snapshot"},"location":36}}],"is_local":true}}}]}
+== 009
+CREATE TABLE prevstats AS
+SELECT t.seq_scan, t.seq_tup_read, t.idx_scan, t.idx_tup_fetch,
+       (b.heap_blks_read + b.heap_blks_hit) AS heap_blks,
+       (b.idx_blks_read + b.idx_blks_hit) AS idx_blks,
+       pg_stat_get_snapshot_timestamp() as snap_ts
+  FROM pg_catalog.pg_stat_user_tables AS t,
+       pg_catalog.pg_statio_user_tables AS b
+ WHERE t.relname='tenk2' AND b.relname='tenk2'
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"seq_scan"}}],"location":33}},"location":33}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"seq_tup_read"}}],"location":45}},"location":45}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"idx_scan"}}],"location":61}},"location":61}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"idx_tup_fetch"}}],"location":73}},"location":73}},{"ResTarget":{"name":"heap_blks","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"heap_blks_read"}}],"location":98}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"heap_blks_hit"}}],"location":117}},"location":115}},"location":97}},{"ResTarget":{"name":"idx_blks","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"idx_blks_read"}}],"location":156}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"idx_blks_hit"}}],"location":174}},"location":172}},"location":155}},{"ResTarget":{"name":"snap_ts","val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":210}},"location":210}}],"fromClause":[{"RangeVar":{"schemaname":"pg_catalog","relname":"pg_stat_user_tables","inh":true,"relpersistence":"p","alias":{"aliasname":"t"},"location":261}},{"RangeVar":{"schemaname":"pg_catalog","relname":"pg_statio_user_tables","inh":true,"relpersistence":"p","alias":{"aliasname":"b"},"location":305}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"t"}},{"String":{"sval":"relname"}}],"location":350}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":360}},"location":359}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"relname"}}],"location":372}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":382}},"location":381}}],"location":368}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"prevstats","inh":true,"relpersistence":"p","location":13},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 010
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 011
+-- test effects of TRUNCATE on n_live_tup/n_dead_tup counters
+CREATE TABLE trunc_stats_test(id serial)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"trunc_stats_test","inh":true,"relpersistence":"p","location":75},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":95},"is_local":true,"location":92}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 012
+CREATE TABLE trunc_stats_test1(id serial, stuff text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":34},"is_local":true,"location":31}},{"ColumnDef":{"colname":"stuff","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":48},"is_local":true,"location":42}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 013
+CREATE TABLE trunc_stats_test2(id serial)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":34},"is_local":true,"location":31}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 014
+CREATE TABLE trunc_stats_test3(id serial, stuff text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":34},"is_local":true,"location":31}},{"ColumnDef":{"colname":"stuff","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":48},"is_local":true,"location":42}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 015
+CREATE TABLE trunc_stats_test4(id serial)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"trunc_stats_test4","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":34},"is_local":true,"location":31}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 016
+-- check that n_live_tup is reset to 0 after truncate
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test","inh":true,"relpersistence":"p","location":66},"override":"OVERRIDING_NOT_SET"}}}]}
+== 017
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 018
+INSERT INTO trunc_stats_test DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 019
+TRUNCATE trunc_stats_test
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"trunc_stats_test","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 020
+-- test involving a truncate in a transaction; 4 ins but only 1 live
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":81},"override":"OVERRIDING_NOT_SET"}}}]}
+== 021
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 022
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 023
+UPDATE trunc_stats_test1 SET id = id + 10 WHERE id IN (1, 2)
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"id","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":34}},"rexpr":{"A_Const":{"ival":{"ival":10},"location":39}},"location":37}},"location":29}}],"whereClause":{"A_Expr":{"kind":"AEXPR_IN","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":48}},"rexpr":{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{"ival":2},"location":58}}]}},"location":51}}}}}]}
+== 024
+DELETE FROM trunc_stats_test1 WHERE id = 3
+--
+{"version":170007,"stmts":[{"stmt":{"DeleteStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":12},"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":36}},"rexpr":{"A_Const":{"ival":{"ival":3},"location":41}},"location":39}}}}}]}
+== 025
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 026
+UPDATE trunc_stats_test1 SET id = id + 100
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"id","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":34}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":39}},"location":37}},"location":29}}]}}}]}
+== 027
+TRUNCATE trunc_stats_test1
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 028
+INSERT INTO trunc_stats_test1 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test1","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 029
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 030
+-- use a savepoint: 1 insert, 1 live
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 031
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 032
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 033
+SAVEPOINT p1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"p1","location":10}}}]}
+== 034
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 035
+TRUNCATE trunc_stats_test2
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 036
+INSERT INTO trunc_stats_test2 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test2","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 037
+RELEASE SAVEPOINT p1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_RELEASE","savepoint_name":"p1","location":18}}}]}
+== 038
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 039
+-- rollback a savepoint: this should count 4 inserts and have 2
+-- live tuples after commit (and 2 dead ones due to aborted subxact)
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 040
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 041
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 042
+SAVEPOINT p1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"p1","location":10}}}]}
+== 043
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 044
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 045
+TRUNCATE trunc_stats_test3
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 046
+INSERT INTO trunc_stats_test3 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test3","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 047
+ROLLBACK TO SAVEPOINT p1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"p1","location":22}}}]}
+== 048
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 049
+-- rollback a truncate: this should count 2 inserts and produce 2 dead tuples
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 050
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test4","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 051
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test4","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 052
+TRUNCATE trunc_stats_test4
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"trunc_stats_test4","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 053
+INSERT INTO trunc_stats_test4 DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"trunc_stats_test4","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 054
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 055
+-- do a seqscan
+SELECT count(*) FROM tenk2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":23}},"location":23}}],"fromClause":[{"RangeVar":{"relname":"tenk2","inh":true,"relpersistence":"p","location":37}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 056
+-- do an indexscan
+-- make sure it is not a bitmap scan, which might skip fetching heap tuples
+SET enable_bitmapscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_bitmapscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":120}}]}}}]}
+== 057
+SELECT count(*) FROM tenk2 WHERE unique1 = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"tenk2","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"unique1"}}],"location":33}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":43}},"location":41}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 058
+RESET enable_bitmapscan
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"enable_bitmapscan"}}}]}
+== 059
+-- ensure pending stats are flushed
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":43}},"location":43}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 060
+-- check effects
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 061
+SET LOCAL stats_fetch_consistency = snapshot
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"snapshot"},"location":36}}],"is_local":true}}}]}
+== 062
+SELECT relname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup
+  FROM pg_stat_user_tables
+ WHERE relname like 'trunc_stats_test%' order by relname
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_ins"}}],"location":16}},"location":16}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_upd"}}],"location":27}},"location":27}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_del"}}],"location":38}},"location":38}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n_live_tup"}}],"location":49}},"location":49}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n_dead_tup"}}],"location":61}},"location":61}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_user_tables","inh":true,"relpersistence":"p","location":79}}],"whereClause":{"A_Expr":{"kind":"AEXPR_LIKE","name":[{"String":{"sval":"~~"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":106}},"rexpr":{"A_Const":{"sval":{"sval":"trunc_stats_test%"},"location":119}},"location":114}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"relname"}}],"location":148}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 063
+SELECT st.seq_scan >= pr.seq_scan + 1,
+       st.seq_tup_read >= pr.seq_tup_read + cl.reltuples,
+       st.idx_scan >= pr.idx_scan + 1,
+       st.idx_tup_fetch >= pr.idx_tup_fetch + 1
+  FROM pg_stat_user_tables AS st, pg_class AS cl, prevstats AS pr
+ WHERE st.relname='tenk2' AND cl.relname='tenk2'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"seq_scan"}}],"location":7}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"seq_scan"}}],"location":22}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":36}},"location":34}},"location":19}},"location":7}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"seq_tup_read"}}],"location":46}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"seq_tup_read"}}],"location":65}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"cl"}},{"String":{"sval":"reltuples"}}],"location":83}},"location":81}},"location":62}},"location":46}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"idx_scan"}}],"location":104}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"idx_scan"}}],"location":119}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":133}},"location":131}},"location":116}},"location":104}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"idx_tup_fetch"}}],"location":143}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"idx_tup_fetch"}}],"location":163}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":182}},"location":180}},"location":160}},"location":143}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_user_tables","inh":true,"relpersistence":"p","alias":{"aliasname":"st"},"location":191}},{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","alias":{"aliasname":"cl"},"location":218}},{"RangeVar":{"relname":"prevstats","inh":true,"relpersistence":"p","alias":{"aliasname":"pr"},"location":234}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"relname"}}],"location":257}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":268}},"location":267}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"cl"}},{"String":{"sval":"relname"}}],"location":280}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":291}},"location":290}}],"location":276}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 064
+SELECT st.heap_blks_read + st.heap_blks_hit >= pr.heap_blks + cl.relpages,
+       st.idx_blks_read + st.idx_blks_hit >= pr.idx_blks + 1
+  FROM pg_statio_user_tables AS st, pg_class AS cl, prevstats AS pr
+ WHERE st.relname='tenk2' AND cl.relname='tenk2'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"heap_blks_read"}}],"location":7}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"heap_blks_hit"}}],"location":27}},"location":25}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"heap_blks"}}],"location":47}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"cl"}},{"String":{"sval":"relpages"}}],"location":62}},"location":60}},"location":44}},"location":7}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"idx_blks_read"}}],"location":82}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"idx_blks_hit"}}],"location":101}},"location":99}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"idx_blks"}}],"location":120}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":134}},"location":132}},"location":117}},"location":82}}],"fromClause":[{"RangeVar":{"relname":"pg_statio_user_tables","inh":true,"relpersistence":"p","alias":{"aliasname":"st"},"location":143}},{"RangeVar":{"relname":"pg_class","inh":true,"relpersistence":"p","alias":{"aliasname":"cl"},"location":172}},{"RangeVar":{"relname":"prevstats","inh":true,"relpersistence":"p","alias":{"aliasname":"pr"},"location":188}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"st"}},{"String":{"sval":"relname"}}],"location":211}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":222}},"location":221}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"cl"}},{"String":{"sval":"relname"}}],"location":234}},"rexpr":{"A_Const":{"sval":{"sval":"tenk2"},"location":245}},"location":244}}],"location":230}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 065
+SELECT pr.snap_ts < pg_stat_get_snapshot_timestamp() as snapshot_newer
+FROM prevstats AS pr
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_newer","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003c"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"pr"}},{"String":{"sval":"snap_ts"}}],"location":7}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":20}},"location":18}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"prevstats","inh":true,"relpersistence":"p","alias":{"aliasname":"pr"},"location":76}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 066
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 067
+----
+-- Basic tests for track_functions
+---
+CREATE FUNCTION stats_test_func1() RETURNS VOID LANGUAGE plpgsql AS $$BEGIN END;$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"stats_test_func1"}}],"returnType":{"names":[{"String":{"sval":"void"}}],"typemod":-1,"location":87},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":92}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"BEGIN END;"}}]}},"defaction":"DEFELEM_UNSPEC","location":109}}]}}}]}
+== 068
+SELECT 'stats_test_func1()'::regprocedure::oid AS stats_test_func1_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_func1_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_func1()"},"location":7}},"typeName":{"names":[{"String":{"sval":"regprocedure"}}],"typemod":-1,"location":29},"location":27}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":43},"location":41}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 069
+CREATE FUNCTION stats_test_func2() RETURNS VOID LANGUAGE plpgsql AS $$BEGIN END;$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"returnType":{"names":[{"String":{"sval":"void"}}],"typemod":-1,"location":43},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":48}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"BEGIN END;"}}]}},"defaction":"DEFELEM_UNSPEC","location":65}}]}}}]}
+== 070
+SELECT 'stats_test_func2()'::regprocedure::oid AS stats_test_func2_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_func2_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_func2()"},"location":7}},"typeName":{"names":[{"String":{"sval":"regprocedure"}}],"typemod":-1,"location":29},"location":27}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":43},"location":41}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 071
+-- test that stats are accumulated
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 072
+SET LOCAL stats_fetch_consistency = none
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"none"},"location":36}}],"is_local":true}}}]}
+== 073
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 074
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 075
+SELECT stats_test_func1()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func1"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 076
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 077
+SELECT stats_test_func1()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func1"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 078
+SELECT pg_stat_get_xact_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 079
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 080
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 081
+-- Verify that function stats are not transactional
+
+-- rolled back savepoint in committing transaction
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 082
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 083
+SAVEPOINT foo
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"foo","location":10}}}]}
+== 084
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 085
+ROLLBACK TO SAVEPOINT foo
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"foo","location":22}}}]}
+== 086
+SELECT pg_stat_get_xact_function_calls(:stats_test_func2_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 40
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 087
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 088
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 089
+-- rolled back transaction
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 090
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 091
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 092
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 093
+-- check collected stats
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 92
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 094
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func2_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 095
+-- check that a rolled back drop function stats leaves stats alive
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 096
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 097
+DROP FUNCTION stats_test_func1()
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"stats_test_func1"}}]}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}
+== 098
+-- shouldn't be visible via view
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 100
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 099
+-- but still via oid access
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 100
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 101
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 102
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 103
+-- check that function dropped in main transaction leaves no stats behind
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 104
+DROP FUNCTION stats_test_func1()
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"stats_test_func1"}}]}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}
+== 105
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 106
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func1_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 107
+SELECT pg_stat_get_function_calls(:stats_test_func1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 108
+-- check that function dropped in a subtransaction leaves no stats behind
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 109
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 110
+SAVEPOINT a
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"a","location":10}}}]}
+== 111
+SELECT stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"stats_test_func2"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 112
+SAVEPOINT b
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"b","location":10}}}]}
+== 113
+DROP FUNCTION stats_test_func2()
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"stats_test_func2"}}]}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}
+== 114
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 115
+SELECT funcname, calls FROM pg_stat_user_functions WHERE funcid = :stats_test_func2_oid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 67
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 116
+SELECT pg_stat_get_function_calls(:stats_test_func2_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 35
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 117
+-- Check that stats for relations are dropped. For that we need to access stats
+-- by oid after the DROP TABLE. Save oids.
+CREATE TABLE drop_stats_test()
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"drop_stats_test","inh":true,"relpersistence":"p","location":136},"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 118
+INSERT INTO drop_stats_test DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 119
+SELECT 'drop_stats_test'::regclass::oid AS drop_stats_test_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"drop_stats_test_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"drop_stats_test"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":26},"location":24}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":36},"location":34}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 120
+CREATE TABLE drop_stats_test_xact()
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"drop_stats_test_xact","inh":true,"relpersistence":"p","location":13},"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 121
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_xact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 122
+SELECT 'drop_stats_test_xact'::regclass::oid AS drop_stats_test_xact_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"drop_stats_test_xact_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"drop_stats_test_xact"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":31},"location":29}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":41},"location":39}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 123
+CREATE TABLE drop_stats_test_subxact()
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"drop_stats_test_subxact","inh":true,"relpersistence":"p","location":13},"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 124
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_subxact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 125
+SELECT 'drop_stats_test_subxact'::regclass::oid AS drop_stats_test_subxact_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"drop_stats_test_subxact_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"drop_stats_test_subxact"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":34},"location":32}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":44},"location":42}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 126
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 127
+SELECT pg_stat_get_live_tuples(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 128
+DROP TABLE drop_stats_test
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 129
+SELECT pg_stat_get_live_tuples(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 130
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 131
+-- check that rollback protects against having stats dropped and that local
+-- modifications don't pose a problem
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 146
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 132
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 133
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 134
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 135
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_xact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 136
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 137
+DROP TABLE drop_stats_test_xact
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test_xact"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 138
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 139
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 140
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 141
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 142
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 143
+-- transactional drop
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 54
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 144
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 145
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 146
+INSERT INTO drop_stats_test_xact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_xact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 147
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 148
+DROP TABLE drop_stats_test_xact
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test_xact"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 149
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 150
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 151
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 152
+SELECT pg_stat_get_live_tuples(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 153
+SELECT pg_stat_get_tuples_inserted(:drop_stats_test_xact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 36
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 154
+-- savepoint rollback (2 levels)
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 155
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 156
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_subxact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 157
+SAVEPOINT sp1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp1","location":10}}}]}
+== 158
+INSERT INTO drop_stats_test_subxact DEFAULT VALUES
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"drop_stats_test_subxact","inh":true,"relpersistence":"p","location":12},"override":"OVERRIDING_NOT_SET"}}}]}
+== 159
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 160
+SAVEPOINT sp2
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp2","location":10}}}]}
+== 161
+DROP TABLE drop_stats_test_subxact
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test_subxact"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 162
+ROLLBACK TO SAVEPOINT sp2
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"sp2","location":22}}}]}
+== 163
+SELECT pg_stat_get_xact_tuples_inserted(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 164
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 165
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 166
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 167
+-- savepoint rolback (1 level)
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 168
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 169
+SAVEPOINT sp1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp1","location":10}}}]}
+== 170
+DROP TABLE drop_stats_test_subxact
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test_subxact"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 171
+SAVEPOINT sp2
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp2","location":10}}}]}
+== 172
+ROLLBACK TO SAVEPOINT sp1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK_TO","savepoint_name":"sp1","location":22}}}]}
+== 173
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 174
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 175
+-- and now actually drop
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 57
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 176
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 177
+SAVEPOINT sp1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp1","location":10}}}]}
+== 178
+DROP TABLE drop_stats_test_subxact
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"drop_stats_test_subxact"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 179
+SAVEPOINT sp2
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_SAVEPOINT","savepoint_name":"sp2","location":10}}}]}
+== 180
+RELEASE SAVEPOINT sp1
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_RELEASE","savepoint_name":"sp1","location":18}}}]}
+== 181
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 182
+SELECT pg_stat_get_live_tuples(:drop_stats_test_subxact_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 183
+DROP TABLE trunc_stats_test, trunc_stats_test1, trunc_stats_test2, trunc_stats_test3, trunc_stats_test4
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"trunc_stats_test"}}]}},{"List":{"items":[{"String":{"sval":"trunc_stats_test1"}}]}},{"List":{"items":[{"String":{"sval":"trunc_stats_test2"}}]}},{"List":{"items":[{"String":{"sval":"trunc_stats_test3"}}]}},{"List":{"items":[{"String":{"sval":"trunc_stats_test4"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 184
+DROP TABLE prevstats
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"prevstats"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 185
+-----
+-- Test that last_seq_scan, last_idx_scan are correctly maintained
+|--
+-- Perform test using a temporary table. That way autovacuum etc won't
+-- interfere. To be able to check that timestamps increase, we sleep for 100ms
+-- between tests, assuming that there aren't systems with a coarser timestamp
+-- granularity.
+-----
+
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 186
+CREATE TEMPORARY TABLE test_last_scan(idx_col int primary key, noidx_col int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"test_last_scan","inh":true,"relpersistence":"t","location":23},"tableElts":[{"ColumnDef":{"colname":"idx_col","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":46},"is_local":true,"constraints":[{"Constraint":{"contype":"CONSTR_PRIMARY","location":50}}],"location":38}},{"ColumnDef":{"colname":"noidx_col","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":73},"is_local":true,"location":63}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 187
+INSERT INTO test_last_scan(idx_col, noidx_col) VALUES(1, 1)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":12},"cols":[{"ResTarget":{"name":"idx_col","location":27}},{"ResTarget":{"name":"noidx_col","location":36}}],"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":54}},{"A_Const":{"ival":{"ival":1},"location":57}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 188
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 189
+SELECT last_seq_scan, last_idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"last_seq_scan"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"last_idx_scan"}}],"location":22}},"location":22}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":66}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":74}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":92},"location":90}},"location":72}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 190
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 191
+SELECT pg_stat_reset_single_table_counters('test_last_scan'::regclass)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_single_table_counters"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":43}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":61},"location":59}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 192
+SELECT seq_scan, idx_scan FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"seq_scan"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"idx_scan"}}],"location":17}},"location":17}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":31}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":56}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":64}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":82},"location":80}},"location":62}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 193
+-- ensure we start out with exactly one index and sequential scan
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 194
+SET LOCAL enable_seqscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":28}}],"is_local":true}}}]}
+== 195
+SET LOCAL enable_indexscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":30}}],"is_local":true}}}]}
+== 196
+SET LOCAL enable_bitmapscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_bitmapscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":31}}],"is_local":true}}}]}
+== 197
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"noidx_col"}}],"location":62}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":74}},"location":72}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 198
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"noidx_col"}}],"location":42}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":54}},"location":52}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 199
+SET LOCAL enable_seqscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":28}}],"is_local":true}}}]}
+== 200
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":62}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":72}},"location":70}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 201
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":42}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":52}},"location":50}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 202
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 203
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 204
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test_last_seq","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_seq_scan"}}],"location":53}},"location":53}},{"ResTarget":{"name":"test_last_idx","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_idx_scan"}}],"location":85}},"location":85}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":121}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":146}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":154}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":172},"location":170}},"location":152}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 205
+SELECT pg_sleep(0.1)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_sleep"}}],"args":[{"A_Const":{"fval":{"fval":"0.1"},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 206
+-- assume a minimum timestamp granularity of 100ms
+
+-- cause one sequential scan
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 207
+SET LOCAL enable_seqscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":28}}],"is_local":true}}}]}
+== 208
+SET LOCAL enable_indexscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":30}}],"is_local":true}}}]}
+== 209
+SET LOCAL enable_bitmapscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_bitmapscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":31}}],"is_local":true}}}]}
+== 210
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"noidx_col"}}],"location":62}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":74}},"location":72}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 211
+SELECT count(*) FROM test_last_scan WHERE noidx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"noidx_col"}}],"location":42}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":54}},"location":52}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 212
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 213
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 214
+-- check that just sequential scan stats were incremented
+SELECT seq_scan, :'test_last_seq' < last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' = last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 76
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 215
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test_last_seq","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_seq_scan"}}],"location":53}},"location":53}},{"ResTarget":{"name":"test_last_idx","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_idx_scan"}}],"location":85}},"location":85}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":121}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":146}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":154}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":172},"location":170}},"location":152}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 216
+SELECT pg_sleep(0.1)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_sleep"}}],"args":[{"A_Const":{"fval":{"fval":"0.1"},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 217
+-- cause one index scan
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 218
+SET LOCAL enable_seqscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":28}}],"is_local":true}}}]}
+== 219
+SET LOCAL enable_indexscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":30}}],"is_local":true}}}]}
+== 220
+SET LOCAL enable_bitmapscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_bitmapscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":31}}],"is_local":true}}}]}
+== 221
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":62}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":72}},"location":70}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 222
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":42}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":52}},"location":50}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 223
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 224
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 225
+-- check that just index scan stats were incremented
+SELECT seq_scan, :'test_last_seq' = last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' < last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 71
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 226
+-- fetch timestamps from before the next test
+SELECT last_seq_scan AS test_last_seq, last_idx_scan AS test_last_idx
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test_last_seq","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_seq_scan"}}],"location":53}},"location":53}},{"ResTarget":{"name":"test_last_idx","val":{"ColumnRef":{"fields":[{"String":{"sval":"last_idx_scan"}}],"location":85}},"location":85}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":121}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":146}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"test_last_scan"},"location":154}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":172},"location":170}},"location":152}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 227
+SELECT pg_sleep(0.1)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_sleep"}}],"args":[{"A_Const":{"fval":{"fval":"0.1"},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 228
+-- cause one bitmap index scan
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 229
+SET LOCAL enable_seqscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":28}}],"is_local":true}}}]}
+== 230
+SET LOCAL enable_indexscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":30}}],"is_local":true}}}]}
+== 231
+SET LOCAL enable_bitmapscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_bitmapscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":31}}],"is_local":true}}}]}
+== 232
+EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":62}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":72}},"location":70}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 233
+SELECT count(*) FROM test_last_scan WHERE idx_col = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test_last_scan","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"idx_col"}}],"location":42}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":52}},"location":50}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 234
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 235
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 236
+-- check that just index scan stats were incremented
+SELECT seq_scan, :'test_last_seq' = last_seq_scan AS seq_ok, idx_scan, :'test_last_idx' < last_idx_scan AS idx_ok
+FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 71
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 237
+-----
+-- Test reset of some stats for shared table
+-----
+
+-- This updates the comment of the database currently in use in
+-- pg_shdescription with a fake value, then sets it back to its
+-- original value.
+SELECT shobj_description(d.oid, 'pg_database') as description_before
+  FROM pg_database d WHERE datname = current_database()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"description_before","val":{"FuncCall":{"funcname":[{"String":{"sval":"shobj_description"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"d"}},{"String":{"sval":"oid"}}],"location":230}},{"A_Const":{"sval":{"sval":"pg_database"},"location":237}}],"funcformat":"COERCE_EXPLICIT_CALL","location":212}},"location":212}}],"fromClause":[{"RangeVar":{"relname":"pg_database","inh":true,"relpersistence":"p","alias":{"aliasname":"d"},"location":281}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"datname"}}],"location":301}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"current_database"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":311}},"location":309}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 238
+-- force some stats in pg_shdescription.
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 239
+SELECT current_database() as datname
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"datname","val":{"FuncCall":{"funcname":[{"String":{"sval":"current_database"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 240
+COMMENT ON DATABASE :"datname" IS 'This is a test comment'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 241
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 242
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 243
+-- check that the stats are reset.
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables
+  WHERE relid = 'pg_shdescription'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"has_data","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_ins"}}],"location":43}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_upd"}}],"location":55}},"location":53}},"rexpr":{"A_Const":{"ival":{},"location":68}},"location":66}},"location":42}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":87}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":114}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"pg_shdescription"},"location":122}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":142},"location":140}},"location":120}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 244
+SELECT pg_stat_reset_single_table_counters('pg_shdescription'::regclass)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_single_table_counters"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"pg_shdescription"},"location":43}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":63},"location":61}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 245
+SELECT (n_tup_ins + n_tup_upd) > 0 AS has_data FROM pg_stat_all_tables
+  WHERE relid = 'pg_shdescription'::regclass
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"has_data","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_ins"}}],"location":8}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n_tup_upd"}}],"location":20}},"location":18}},"rexpr":{"A_Const":{"ival":{},"location":33}},"location":31}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_all_tables","inh":true,"relpersistence":"p","location":52}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"relid"}}],"location":79}},"rexpr":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"pg_shdescription"},"location":87}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":107},"location":105}},"location":85}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 246
+-- set back comment
+  COMMENT ON DATABASE :"datname" IS :'description_before'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 43
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 247
+COMMENT ON DATABASE :"datname" IS NULL
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 248
+-----
+-- Test that various stats views are being properly populated
+-----
+
+-- Test that sessions is incremented when a new session is started in pg_stat_database
+SELECT sessions AS db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"db_stat_sessions","val":{"ColumnRef":{"fields":[{"String":{"sval":"sessions"}}],"location":169}},"location":169}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_database","inh":true,"relpersistence":"p","location":203}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"datname"}}],"location":226}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"current_database"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":244}},"location":244}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":236}},"location":234}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 249
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 250
+SELECT sessions > :db_stat_sessions FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 19
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 251
+-- Test pg_stat_checkpointer checkpointer-related stats, together with pg_stat_wal
+SELECT num_requested AS rqst_ckpts_before FROM pg_stat_checkpointer
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"rqst_ckpts_before","val":{"ColumnRef":{"fields":[{"String":{"sval":"num_requested"}}],"location":90}},"location":90}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_checkpointer","inh":true,"relpersistence":"p","location":130}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 252
+-- Test pg_stat_wal (and make a temp table so our temp schema exists)
+SELECT wal_bytes AS wal_bytes_before FROM pg_stat_wal
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"wal_bytes_before","val":{"ColumnRef":{"fields":[{"String":{"sval":"wal_bytes"}}],"location":77}},"location":77}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_wal","inh":true,"relpersistence":"p","location":112}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 253
+CREATE TEMP TABLE test_stats_temp AS SELECT 17
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":17},"location":44}},"location":44}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"test_stats_temp","inh":true,"relpersistence":"t","location":18},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 254
+DROP TABLE test_stats_temp
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"test_stats_temp"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 255
+-- Checkpoint twice: The checkpointer reports stats after reporting completion
+-- of the checkpoint. But after a second checkpoint we'll see at least the
+-- results of the first.
+CHECKPOINT
+--
+{"version":170007,"stmts":[{"stmt":{"CheckPointStmt":{}}}]}
+== 256
+CHECKPOINT
+--
+{"version":170007,"stmts":[{"stmt":{"CheckPointStmt":{}}}]}
+== 257
+SELECT num_requested > :rqst_ckpts_before FROM pg_stat_checkpointer
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 258
+SELECT wal_bytes > :wal_bytes_before FROM pg_stat_wal
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 20
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 259
+-- Test pg_stat_get_backend_idset() and some allied functions.
+-- In particular, verify that their notion of backend ID matches
+-- our temp schema index.
+SELECT (current_schemas(true))[1] = ('pg_temp_' || beid::text) AS match
+FROM pg_stat_get_backend_idset() beid
+WHERE pg_stat_get_backend_pid(beid) = pg_backend_pid()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"match","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"current_schemas"}}],"args":[{"A_Const":{"boolval":{"boolval":true},"location":178}}],"funcformat":"COERCE_EXPLICIT_CALL","location":162}},"indirection":[{"A_Indices":{"uidx":{"A_Const":{"ival":{"ival":1},"location":185}}}}]}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"A_Const":{"sval":{"sval":"pg_temp_"},"location":191}},"rexpr":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"beid"}}],"location":205}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":211},"location":209}},"location":202}},"location":188}},"location":161}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_backend_idset"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":231}},{}]}}],"alias":{"aliasname":"beid"}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_backend_pid"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"beid"}}],"location":294}}],"funcformat":"COERCE_EXPLICIT_CALL","location":270}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_backend_pid"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":302}},"location":300}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 260
+-----
+-- Test that resetting stats works for reset timestamp
+-----
+
+-- Test that reset_slru with a specified SLRU works.
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"slru_commit_ts_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":128}},"location":128}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_slru","inh":true,"relpersistence":"p","location":172}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"name"}}],"location":191}},"rexpr":{"A_Const":{"sval":{"sval":"commit_timestamp"},"location":198}},"location":196}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 261
+SELECT stats_reset AS slru_notify_reset_ts FROM pg_stat_slru WHERE name = 'notify'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"slru_notify_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_slru","inh":true,"relpersistence":"p","location":48}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"name"}}],"location":67}},"rexpr":{"A_Const":{"sval":{"sval":"notify"},"location":74}},"location":72}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 262
+SELECT pg_stat_reset_slru('commit_timestamp')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_slru"}}],"args":[{"A_Const":{"sval":{"sval":"commit_timestamp"},"location":26}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 263
+SELECT stats_reset > :'slru_commit_ts_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 264
+SELECT stats_reset AS slru_commit_ts_reset_ts FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"slru_commit_ts_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_slru","inh":true,"relpersistence":"p","location":51}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"name"}}],"location":70}},"rexpr":{"A_Const":{"sval":{"sval":"commit_timestamp"},"location":77}},"location":75}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 265
+-- Test that multiple SLRUs are reset when no specific SLRU provided to reset function
+SELECT pg_stat_reset_slru()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_slru"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":94}},"location":94}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 266
+SELECT stats_reset > :'slru_commit_ts_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'commit_timestamp'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 267
+SELECT stats_reset > :'slru_notify_reset_ts'::timestamptz FROM pg_stat_slru WHERE name = 'notify'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 268
+-- Test that reset_shared with archiver specified as the stats type works
+SELECT stats_reset AS archiver_reset_ts FROM pg_stat_archiver
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"archiver_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":81}},"location":81}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_archiver","inh":true,"relpersistence":"p","location":119}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 269
+SELECT pg_stat_reset_shared('archiver')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"archiver"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 270
+SELECT stats_reset > :'archiver_reset_ts'::timestamptz FROM pg_stat_archiver
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 271
+-- Test that reset_shared with bgwriter specified as the stats type works
+SELECT stats_reset AS bgwriter_reset_ts FROM pg_stat_bgwriter
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"bgwriter_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":81}},"location":81}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_bgwriter","inh":true,"relpersistence":"p","location":119}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 272
+SELECT pg_stat_reset_shared('bgwriter')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"bgwriter"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 273
+SELECT stats_reset > :'bgwriter_reset_ts'::timestamptz FROM pg_stat_bgwriter
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 274
+-- Test that reset_shared with checkpointer specified as the stats type works
+SELECT stats_reset AS checkpointer_reset_ts FROM pg_stat_checkpointer
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"checkpointer_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":85}},"location":85}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_checkpointer","inh":true,"relpersistence":"p","location":127}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 275
+SELECT pg_stat_reset_shared('checkpointer')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"checkpointer"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 276
+SELECT stats_reset > :'checkpointer_reset_ts'::timestamptz FROM pg_stat_checkpointer
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 277
+-- Test that reset_shared with recovery_prefetch specified as the stats type works
+SELECT stats_reset AS recovery_prefetch_reset_ts FROM pg_stat_recovery_prefetch
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"recovery_prefetch_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":90}},"location":90}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_recovery_prefetch","inh":true,"relpersistence":"p","location":137}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 278
+SELECT pg_stat_reset_shared('recovery_prefetch')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"recovery_prefetch"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 279
+SELECT stats_reset > :'recovery_prefetch_reset_ts'::timestamptz FROM pg_stat_recovery_prefetch
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 280
+-- Test that reset_shared with slru specified as the stats type works
+SELECT max(stats_reset) AS slru_reset_ts FROM pg_stat_slru
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"slru_reset_ts","val":{"FuncCall":{"funcname":[{"String":{"sval":"max"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":81}}],"funcformat":"COERCE_EXPLICIT_CALL","location":77}},"location":77}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_slru","inh":true,"relpersistence":"p","location":116}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 281
+SELECT pg_stat_reset_shared('slru')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"slru"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 282
+SELECT max(stats_reset) > :'slru_reset_ts'::timestamptz FROM pg_stat_slru
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 27
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 283
+-- Test that reset_shared with wal specified as the stats type works
+SELECT stats_reset AS wal_reset_ts FROM pg_stat_wal
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"wal_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":76}},"location":76}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_wal","inh":true,"relpersistence":"p","location":109}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 284
+SELECT pg_stat_reset_shared('wal')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"wal"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 285
+SELECT stats_reset > :'wal_reset_ts'::timestamptz FROM pg_stat_wal
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 286
+-- Test error case for reset_shared with unknown stats type
+SELECT pg_stat_reset_shared('unknown')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"unknown"},"location":88}}],"funcformat":"COERCE_EXPLICIT_CALL","location":67}},"location":67}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 287
+-- Test that reset works for pg_stat_database
+
+-- Since pg_stat_database stats_reset starts out as NULL, reset it once first so we have something to compare it to
+SELECT pg_stat_reset()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":170}},"location":170}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 288
+SELECT stats_reset AS db_reset_ts FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"db_reset_ts","val":{"ColumnRef":{"fields":[{"String":{"sval":"stats_reset"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_database","inh":true,"relpersistence":"p","location":39}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"datname"}}],"location":62}},"rexpr":{"SubLink":{"subLinkType":"EXPR_SUBLINK","subselect":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"current_database"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":80}},"location":80}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":72}},"location":70}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 289
+SELECT pg_stat_reset()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 290
+SELECT stats_reset > :'db_reset_ts'::timestamptz FROM pg_stat_database WHERE datname = (SELECT current_database())
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 22
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 291
+----
+-- pg_stat_get_snapshot_timestamp behavior
+----
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 292
+SET LOCAL stats_fetch_consistency = snapshot
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"snapshot"},"location":36}}],"is_local":true}}}]}
+== 293
+-- no snapshot yet, return NULL
+SELECT pg_stat_get_snapshot_timestamp()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},"location":39}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 294
+-- any attempt at accessing stats will build snapshot
+SELECT pg_stat_get_function_calls(0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_function_calls"}}],"args":[{"A_Const":{"ival":{},"location":88}}],"funcformat":"COERCE_EXPLICIT_CALL","location":61}},"location":61}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 295
+SELECT pg_stat_get_snapshot_timestamp() >= NOW()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e="}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"now"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":43}},"location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 296
+-- shows NULL again after clearing
+SELECT pg_stat_clear_snapshot()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_clear_snapshot"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":42}},"location":42}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 297
+SELECT pg_stat_get_snapshot_timestamp()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 298
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 299
+----
+-- Changing stats_fetch_consistency in a transaction.
+----
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 300
+-- Stats filled under the cache mode
+SET LOCAL stats_fetch_consistency = cache
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"cache"},"location":73}}],"is_local":true}}}]}
+== 301
+SELECT pg_stat_get_function_calls(0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_function_calls"}}],"args":[{"A_Const":{"ival":{},"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 302
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_ok","val":{"NullTest":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"nulltesttype":"IS_NOT_NULL","location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 303
+-- Success in accessing pre-existing snapshot data.
+SET LOCAL stats_fetch_consistency = snapshot
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"snapshot"},"location":88}}],"is_local":true}}}]}
+== 304
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_ok","val":{"NullTest":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"nulltesttype":"IS_NOT_NULL","location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 305
+SELECT pg_stat_get_function_calls(0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_function_calls"}}],"args":[{"A_Const":{"ival":{},"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 306
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_ok","val":{"NullTest":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"nulltesttype":"IS_NOT_NULL","location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 307
+-- Snapshot cleared.
+SET LOCAL stats_fetch_consistency = none
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"stats_fetch_consistency","args":[{"A_Const":{"sval":{"sval":"none"},"location":57}}],"is_local":true}}}]}
+== 308
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_ok","val":{"NullTest":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"nulltesttype":"IS_NOT_NULL","location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 309
+SELECT pg_stat_get_function_calls(0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_function_calls"}}],"args":[{"A_Const":{"ival":{},"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 310
+SELECT pg_stat_get_snapshot_timestamp() IS NOT NULL AS snapshot_ok
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"snapshot_ok","val":{"NullTest":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_snapshot_timestamp"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"nulltesttype":"IS_NOT_NULL","location":40}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 311
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 312
+----
+-- pg_stat_have_stats behavior
+----
+-- fixed-numbered stats exist
+SELECT pg_stat_have_stats('bgwriter', 0, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_have_stats"}}],"args":[{"A_Const":{"sval":{"sval":"bgwriter"},"location":97}},{"A_Const":{"ival":{},"location":109}},{"A_Const":{"ival":{},"location":112}}],"funcformat":"COERCE_EXPLICIT_CALL","location":78}},"location":78}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 313
+-- unknown stats kinds error out
+SELECT pg_stat_have_stats('zaphod', 0, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_have_stats"}}],"args":[{"A_Const":{"sval":{"sval":"zaphod"},"location":59}},{"A_Const":{"ival":{},"location":69}},{"A_Const":{"ival":{},"location":72}}],"funcformat":"COERCE_EXPLICIT_CALL","location":40}},"location":40}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 314
+-- db stats have objoid 0
+SELECT pg_stat_have_stats('database', :dboid, 1)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 315
+SELECT pg_stat_have_stats('database', :dboid, 0)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 316
+-- pg_stat_have_stats returns true for committed index creation
+CREATE table stats_test_tab1 as select generate_series(1,10) a
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":119}},{"A_Const":{"ival":{"ival":10},"location":121}}],"funcformat":"COERCE_EXPLICIT_CALL","location":103}},"location":103}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":77},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 317
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"stats_test_idx1","relation":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":32},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 318
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_idx1_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_idx1"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":26},"location":24}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":36},"location":34}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 319
+SET enable_seqscan TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":22}}]}}}]}
+== 320
+select a from stats_test_tab1 where a = 3
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":14}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":36}},"rexpr":{"A_Const":{"ival":{"ival":3},"location":40}},"location":38}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 321
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 322
+-- pg_stat_have_stats returns false for dropped index with stats
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 104
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 323
+DROP index stats_test_idx1
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"stats_test_idx1"}}]}}],"removeType":"OBJECT_INDEX","behavior":"DROP_RESTRICT"}}}]}
+== 324
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 325
+-- pg_stat_have_stats returns false for rolled back index creation
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 326
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"stats_test_idx1","relation":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":32},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 327
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_idx1_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_idx1"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":26},"location":24}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":36},"location":34}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 328
+select a from stats_test_tab1 where a = 3
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":14}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":36}},"rexpr":{"A_Const":{"ival":{"ival":3},"location":40}},"location":38}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 329
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 330
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 331
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 332
+-- pg_stat_have_stats returns true for reindex CONCURRENTLY
+CREATE index stats_test_idx1 on stats_test_tab1(a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"stats_test_idx1","relation":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":92},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 333
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_idx1_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_idx1"},"location":7}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":26},"location":24}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":36},"location":34}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 334
+select a from stats_test_tab1 where a = 3
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"stats_test_tab1","inh":true,"relpersistence":"p","location":14}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":36}},"rexpr":{"A_Const":{"ival":{"ival":3},"location":40}},"location":38}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 335
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 336
+REINDEX index CONCURRENTLY stats_test_idx1
+--
+{"version":170007,"stmts":[{"stmt":{"ReindexStmt":{"kind":"REINDEX_OBJECT_INDEX","relation":{"relname":"stats_test_idx1","inh":true,"relpersistence":"p","location":27},"params":[{"DefElem":{"defname":"concurrently","defaction":"DEFELEM_UNSPEC","location":14}}]}}}]}
+== 337
+-- false for previous oid
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 338
+-- true for new oid
+SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"stats_test_idx1_oid","val":{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"stats_test_idx1"},"location":27}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":46},"location":44}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":56},"location":54}},"location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 339
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 340
+-- pg_stat_have_stats returns true for a rolled back drop index with stats
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 341
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 342
+DROP index stats_test_idx1
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"stats_test_idx1"}}]}}],"removeType":"OBJECT_INDEX","behavior":"DROP_RESTRICT"}}}]}
+== 343
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 344
+SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 39
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 345
+-- put enable_seqscan back to on
+SET enable_seqscan TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":55}}]}}}]}
+== 346
+-- ensure that stats accessors handle NULL input correctly
+SELECT pg_stat_get_replication_slot(NULL)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_replication_slot"}}],"args":[{"A_Const":{"isnull":true,"location":95}}],"funcformat":"COERCE_EXPLICIT_CALL","location":66}},"location":66}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 347
+SELECT pg_stat_get_subscription_stats(NULL)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_subscription_stats"}}],"args":[{"A_Const":{"isnull":true,"location":38}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 348
+-- Test that the following operations are tracked in pg_stat_io:
+-- - reads of target blocks into shared buffers
+-- - writes of shared buffers to permanent storage
+-- - extends of relations using shared buffers
+-- - fsyncs done to ensure the durability of data dirtying shared buffers
+-- - shared buffer hits
+
+-- There is no test for blocks evicted from shared buffers, because we cannot
+-- be sure of the state of shared buffers at the point the test is run.
+
+-- Create a regular table and insert some data to generate IOCONTEXT_NORMAL
+-- extends.
+SELECT sum(extends) AS io_sum_shared_before_extends
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_before_extends","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":560}}],"funcformat":"COERCE_EXPLICIT_CALL","location":556}},"location":556}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":608}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":625}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":635}},"location":633}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":648}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":657}},"location":655}}],"location":644}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 349
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
+  FROM pg_stat_io
+  WHERE object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"writes","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"fsyncs","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fsyncs"}}],"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":59}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":78}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":87}},"location":85}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 350
+CREATE TABLE test_io_shared(a int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"test_io_shared","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":30},"is_local":true,"location":28}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 351
+INSERT INTO test_io_shared SELECT i FROM generate_series(1,100)i
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"test_io_shared","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":34}},"location":34}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":57}},{"A_Const":{"ival":{"ival":100},"location":59}}],"funcformat":"COERCE_EXPLICIT_CALL","location":41}},{}]}}],"alias":{"aliasname":"i"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 352
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 353
+SELECT sum(extends) AS io_sum_shared_after_extends
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_after_extends","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":58}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":75}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":85}},"location":83}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":98}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":107}},"location":105}}],"location":94}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 354
+SELECT :io_sum_shared_after_extends > :io_sum_shared_before_extends
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 355
+-- After a checkpoint, there should be some additional IOCONTEXT_NORMAL writes
+-- and fsyncs.
+-- See comment above for rationale for two explicit CHECKPOINTs.
+CHECKPOINT
+--
+{"version":170007,"stmts":[{"stmt":{"CheckPointStmt":{}}}]}
+== 356
+CHECKPOINT
+--
+{"version":170007,"stmts":[{"stmt":{"CheckPointStmt":{}}}]}
+== 357
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
+  FROM pg_stat_io
+  WHERE object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"writes","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"fsyncs","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fsyncs"}}],"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":59}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":78}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":87}},"location":85}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 358
+SELECT :io_sum_shared_after_writes > :io_sum_shared_before_writes
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 359
+SELECT current_setting('fsync') = 'off'
+  OR :io_sum_shared_after_fsyncs > :io_sum_shared_before_fsyncs
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 46
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 360
+-- Change the tablespace so that the table is rewritten directly, then SELECT
+-- from it to cause it to be read back into shared buffers.
+SELECT sum(reads) AS io_sum_shared_before_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_before_reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":149}}],"funcformat":"COERCE_EXPLICIT_CALL","location":145}},"location":145}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":193}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":210}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":220}},"location":218}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":233}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":242}},"location":240}}],"location":229}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 361
+-- Do this in a transaction to prevent spurious failures due to concurrent accesses to our newly
+-- rewritten table, e.g. by autovacuum.
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 362
+ALTER TABLE test_io_shared SET TABLESPACE regress_tblspace
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"test_io_shared","inh":true,"relpersistence":"p","location":12},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetTableSpace","name":"regress_tblspace","behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 363
+-- SELECT from the table so that the data is read into shared buffers and
+-- context 'normal', object 'relation' reads are counted.
+SELECT COUNT(*) FROM test_io_shared
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":139}},"location":139}}],"fromClause":[{"RangeVar":{"relname":"test_io_shared","inh":true,"relpersistence":"p","location":153}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 364
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 365
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 366
+SELECT sum(reads) AS io_sum_shared_after_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_after_reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":54}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":71}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":81}},"location":79}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":94}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":103}},"location":101}}],"location":90}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 367
+SELECT :io_sum_shared_after_reads > :io_sum_shared_before_reads
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 368
+SELECT sum(hits) AS io_sum_shared_before_hits
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_before_hits","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"hits"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":53}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":70}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":80}},"location":78}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":93}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":102}},"location":100}}],"location":89}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 369
+-- Select from the table again to count hits.
+-- Ensure we generate hits by forcing a nested loop self-join with no
+-- materialize node. The outer side's buffer will stay pinned, preventing its
+-- eviction, while we loop through the inner side and generate hits.
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 370
+SET LOCAL enable_nestloop TO on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_nestloop","args":[{"A_Const":{"sval":{"sval":"on"},"location":29}}],"is_local":true}}}]}
+== 371
+SET LOCAL enable_mergejoin TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_mergejoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":30}}],"is_local":true}}}]}
+== 372
+SET LOCAL enable_hashjoin TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_hashjoin","args":[{"A_Const":{"sval":{"sval":"off"},"location":29}}],"is_local":true}}}]}
+== 373
+SET LOCAL enable_material TO off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_material","args":[{"A_Const":{"sval":{"sval":"off"},"location":29}}],"is_local":true}}}]}
+== 374
+-- ensure plan stays as we expect it to
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a)
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":67}},"location":67}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_io_shared","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":81}},"rarg":{"RangeVar":{"relname":"test_io_shared","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":110}},"usingClause":[{"String":{"sval":"a"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":49}}]}}}]}
+== 375
+SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_io_shared","inh":true,"relpersistence":"p","alias":{"aliasname":"t1"},"location":21}},"rarg":{"RangeVar":{"relname":"test_io_shared","inh":true,"relpersistence":"p","alias":{"aliasname":"t2"},"location":50}},"usingClause":[{"String":{"sval":"a"}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 376
+COMMIT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 377
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 378
+SELECT sum(hits) AS io_sum_shared_after_hits
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_shared_after_hits","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"hits"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":52}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":69}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":79}},"location":77}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":92}},"rexpr":{"A_Const":{"sval":{"sval":"relation"},"location":101}},"location":99}}],"location":88}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 379
+SELECT :io_sum_shared_after_hits > :io_sum_shared_before_hits
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 380
+DROP TABLE test_io_shared
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"test_io_shared"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 381
+-- Test that the follow IOCONTEXT_LOCAL IOOps are tracked in pg_stat_io:
+-- - eviction of local buffers in order to reuse them
+-- - reads of temporary table blocks into local buffers
+-- - writes of local buffers to permanent storage
+-- - extends of temporary tables
+
+-- Set temp_buffers to its minimum so that we can trigger writes with fewer
+-- inserted tuples. Do so in a new session in case temporary tables have been
+-- accessed by previous tests in this session.
+SET temp_buffers TO 100
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"temp_buffers","args":[{"A_Const":{"ival":{"ival":100},"location":488}}]}}}]}
+== 382
+CREATE TEMPORARY TABLE test_io_local(a int, b TEXT)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"test_io_local","inh":true,"relpersistence":"t","location":23},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":39},"is_local":true,"location":37}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":46},"is_local":true,"location":44}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 383
+SELECT sum(extends) AS extends, sum(evictions) AS evictions, sum(writes) AS writes
+  FROM pg_stat_io
+  WHERE context = 'normal' AND object = 'temp relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"extends","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"evictions","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":36}}],"funcformat":"COERCE_EXPLICIT_CALL","location":32}},"location":32}},{"ResTarget":{"name":"writes","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":65}}],"funcformat":"COERCE_EXPLICIT_CALL","location":61}},"location":61}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":90}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":109}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":119}},"location":117}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":132}},"rexpr":{"A_Const":{"sval":{"sval":"temp relation"},"location":141}},"location":139}}],"location":128}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 384
+-- Insert tuples into the temporary table, generating extends in the stats.
+-- Insert enough values that we need to reuse and write out dirty local
+-- buffers, generating evictions and writes.
+INSERT INTO test_io_local SELECT generate_series(1, 5000) as id, repeat('a', 200)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"test_io_local","inh":true,"relpersistence":"p","location":205},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"id","val":{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":242}},{"A_Const":{"ival":{"ival":5000},"location":245}}],"funcformat":"COERCE_EXPLICIT_CALL","location":226}},"location":226}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"a"},"location":265}},{"A_Const":{"ival":{"ival":200},"location":270}}],"funcformat":"COERCE_EXPLICIT_CALL","location":258}},"location":258}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 385
+-- Ensure the table is large enough to exceed our temp_buffers setting.
+SELECT pg_relation_size('test_io_local') / current_setting('block_size')::int8 > 100
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"\u003e"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"/"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"pg_relation_size"}}],"args":[{"A_Const":{"sval":{"sval":"test_io_local"},"location":96}}],"funcformat":"COERCE_EXPLICIT_CALL","location":79}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"current_setting"}}],"args":[{"A_Const":{"sval":{"sval":"block_size"},"location":131}}],"funcformat":"COERCE_EXPLICIT_CALL","location":115}},"typeName":{"names":[{"String":{"sval":"int8"}}],"typemod":-1,"location":146},"location":144}},"location":113}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":153}},"location":151}},"location":79}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 386
+SELECT sum(reads) AS io_sum_local_before_reads
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_local_before_reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":54}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":71}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":81}},"location":79}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":94}},"rexpr":{"A_Const":{"sval":{"sval":"temp relation"},"location":103}},"location":101}}],"location":90}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 387
+-- Read in evicted buffers, generating reads.
+SELECT COUNT(*) FROM test_io_local
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":53}},"location":53}}],"fromClause":[{"RangeVar":{"relname":"test_io_local","inh":true,"relpersistence":"p","location":67}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 388
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 389
+SELECT sum(evictions) AS evictions,
+       sum(reads) AS reads,
+       sum(writes) AS writes,
+       sum(extends) AS extends
+  FROM pg_stat_io
+  WHERE context = 'normal' AND object = 'temp relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"evictions","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":47}}],"funcformat":"COERCE_EXPLICIT_CALL","location":43}},"location":43}},{"ResTarget":{"name":"writes","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":75}}],"funcformat":"COERCE_EXPLICIT_CALL","location":71}},"location":71}},{"ResTarget":{"name":"extends","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":105}}],"funcformat":"COERCE_EXPLICIT_CALL","location":101}},"location":101}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":132}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":151}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":161}},"location":159}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":174}},"rexpr":{"A_Const":{"sval":{"sval":"temp relation"},"location":183}},"location":181}}],"location":170}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 390
+SELECT :io_sum_local_after_evictions > :io_sum_local_before_evictions,
+       :io_sum_local_after_reads > :io_sum_local_before_reads,
+       :io_sum_local_after_writes > :io_sum_local_before_writes,
+       :io_sum_local_after_extends > :io_sum_local_before_extends
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 391
+-- Change the tablespaces so that the temporary table is rewritten to other
+-- local buffers, exercising a different codepath than standard local buffer
+-- writes.
+ALTER TABLE test_io_local SET TABLESPACE regress_tblspace
+--
+{"version":170007,"stmts":[{"stmt":{"AlterTableStmt":{"relation":{"relname":"test_io_local","inh":true,"relpersistence":"p","location":176},"cmds":[{"AlterTableCmd":{"subtype":"AT_SetTableSpace","name":"regress_tblspace","behavior":"DROP_RESTRICT"}}],"objtype":"OBJECT_TABLE"}}}]}
+== 392
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 393
+SELECT sum(writes) AS io_sum_local_new_tblspc_writes
+  FROM pg_stat_io WHERE context = 'normal' AND object = 'temp relation'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_local_new_tblspc_writes","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":60}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":77}},"rexpr":{"A_Const":{"sval":{"sval":"normal"},"location":87}},"location":85}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"object"}}],"location":100}},"rexpr":{"A_Const":{"sval":{"sval":"temp relation"},"location":109}},"location":107}}],"location":96}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 394
+SELECT :io_sum_local_new_tblspc_writes > :io_sum_local_after_writes
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 395
+RESET temp_buffers
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"temp_buffers"}}}]}
+== 396
+-- Test that reuse of strategy buffers and reads of blocks into these reused
+-- buffers while VACUUMing are tracked in pg_stat_io. If there is sufficient
+-- demand for shared buffers from concurrent queries, some buffers may be
+-- pinned by other backends before they can be reused. In such cases, the
+-- backend will evict a buffer from outside the ring and add it to the
+-- ring. This is considered an eviction and not a reuse.
+
+-- Set wal_skip_threshold smaller than the expected size of
+-- test_io_vac_strategy so that, even if wal_level is minimal, VACUUM FULL will
+-- fsync the newly rewritten test_io_vac_strategy instead of writing it to WAL.
+-- Writing it to WAL will result in the newly written relation pages being in
+-- shared buffers -- preventing us from testing BAS_VACUUM BufferAccessStrategy
+-- reads.
+SET wal_skip_threshold = '1 kB'
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"wal_skip_threshold","args":[{"A_Const":{"sval":{"sval":"1 kB"},"location":844}}]}}}]}
+== 397
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions
+  FROM pg_stat_io WHERE context = 'vacuum'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"reuses","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reuses"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}},{"ResTarget":{"name":"evictions","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":55}}],"funcformat":"COERCE_EXPLICIT_CALL","location":51}},"location":51}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":86}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":103}},"rexpr":{"A_Const":{"sval":{"sval":"vacuum"},"location":113}},"location":111}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 398
+CREATE TABLE test_io_vac_strategy(a int, b int) WITH (autovacuum_enabled = 'false')
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"test_io_vac_strategy","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":36},"is_local":true,"location":34}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":43},"is_local":true,"location":41}}],"options":[{"DefElem":{"defname":"autovacuum_enabled","arg":{"String":{"sval":"false"}},"defaction":"DEFELEM_UNSPEC","location":54}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 399
+INSERT INTO test_io_vac_strategy SELECT i, i from generate_series(1, 4500)i
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"test_io_vac_strategy","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":40}},"location":40}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":43}},"location":43}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":66}},{"A_Const":{"ival":{"ival":4500},"location":69}}],"funcformat":"COERCE_EXPLICIT_CALL","location":50}},{}]}}],"alias":{"aliasname":"i"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 400
+-- Ensure that the next VACUUM will need to perform IO by rewriting the table
+-- first with VACUUM (FULL).
+VACUUM (FULL) test_io_vac_strategy
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"options":[{"DefElem":{"defname":"full","defaction":"DEFELEM_UNSPEC","location":115}}],"rels":[{"VacuumRelation":{"relation":{"relname":"test_io_vac_strategy","inh":true,"relpersistence":"p","location":121}}}],"is_vacuumcmd":true}}}]}
+== 401
+-- Use the minimum BUFFER_USAGE_LIMIT to cause reuses or evictions with the
+-- smallest table possible.
+VACUUM (PARALLEL 0, BUFFER_USAGE_LIMIT 128) test_io_vac_strategy
+--
+{"version":170007,"stmts":[{"stmt":{"VacuumStmt":{"options":[{"DefElem":{"defname":"parallel","arg":{"Integer":{}},"defaction":"DEFELEM_UNSPEC","location":112}},{"DefElem":{"defname":"buffer_usage_limit","arg":{"Integer":{"ival":128}},"defaction":"DEFELEM_UNSPEC","location":124}}],"rels":[{"VacuumRelation":{"relation":{"relname":"test_io_vac_strategy","inh":true,"relpersistence":"p","location":148}}}],"is_vacuumcmd":true}}}]}
+== 402
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 403
+SELECT sum(reuses) AS reuses, sum(reads) AS reads, sum(evictions) AS evictions
+  FROM pg_stat_io WHERE context = 'vacuum'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"reuses","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reuses"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}},{"ResTarget":{"name":"reads","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}},{"ResTarget":{"name":"evictions","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":55}}],"funcformat":"COERCE_EXPLICIT_CALL","location":51}},"location":51}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":86}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":103}},"rexpr":{"A_Const":{"sval":{"sval":"vacuum"},"location":113}},"location":111}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 404
+SELECT :io_sum_vac_strategy_after_reads > :io_sum_vac_strategy_before_reads
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 405
+SELECT (:io_sum_vac_strategy_after_reuses + :io_sum_vac_strategy_after_evictions) >
+  (:io_sum_vac_strategy_before_reuses + :io_sum_vac_strategy_before_evictions)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 406
+RESET wal_skip_threshold
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"wal_skip_threshold"}}}]}
+== 407
+-- Test that extends done by a CTAS, which uses a BAS_BULKWRITE
+-- BufferAccessStrategy, are tracked in pg_stat_io.
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_before
+  FROM pg_stat_io WHERE context = 'bulkwrite'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_bulkwrite_strategy_extends_before","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":127}}],"funcformat":"COERCE_EXPLICIT_CALL","location":123}},"location":123}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":187}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":204}},"rexpr":{"A_Const":{"sval":{"sval":"bulkwrite"},"location":214}},"location":212}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 408
+CREATE TABLE test_io_bulkwrite_strategy AS SELECT i FROM generate_series(1,100)i
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"i"}}],"location":50}},"location":50}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":73}},{"A_Const":{"ival":{"ival":100},"location":75}}],"funcformat":"COERCE_EXPLICIT_CALL","location":57}},{}]}}],"alias":{"aliasname":"i"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"test_io_bulkwrite_strategy","inh":true,"relpersistence":"p","location":13},"onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_TABLE"}}}]}
+== 409
+SELECT pg_stat_force_next_flush()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_force_next_flush"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 410
+SELECT sum(extends) AS io_sum_bulkwrite_strategy_extends_after
+  FROM pg_stat_io WHERE context = 'bulkwrite'
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_sum_bulkwrite_strategy_extends_after","val":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":70}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"context"}}],"location":87}},"rexpr":{"A_Const":{"sval":{"sval":"bulkwrite"},"location":97}},"location":95}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 411
+SELECT :io_sum_bulkwrite_strategy_extends_after > :io_sum_bulkwrite_strategy_extends_before
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 412
+-- Test IO stats reset
+SELECT pg_stat_have_stats('io', 0, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_have_stats"}}],"args":[{"A_Const":{"sval":{"sval":"io"},"location":49}},{"A_Const":{"ival":{},"location":55}},{"A_Const":{"ival":{},"location":58}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 413
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(writebacks) + sum(hits) AS io_stats_pre_reset
+  FROM pg_stat_io
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_stats_pre_reset","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reuses"}}],"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":24}},"location":22}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":42}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},"location":36}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fsyncs"}}],"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":53}},"location":51}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":71}}],"funcformat":"COERCE_EXPLICIT_CALL","location":67}},"location":65}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":84}}],"funcformat":"COERCE_EXPLICIT_CALL","location":80}},"location":78}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writebacks"}}],"location":98}}],"funcformat":"COERCE_EXPLICIT_CALL","location":94}},"location":92}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"hits"}}],"location":116}}],"funcformat":"COERCE_EXPLICIT_CALL","location":112}},"location":110}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":151}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 414
+SELECT pg_stat_reset_shared('io')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_reset_shared"}}],"args":[{"A_Const":{"sval":{"sval":"io"},"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 415
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(writebacks) + sum(hits) AS io_stats_post_reset
+  FROM pg_stat_io
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"io_stats_post_reset","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"+"}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"evictions"}}],"location":11}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reuses"}}],"location":28}}],"funcformat":"COERCE_EXPLICIT_CALL","location":24}},"location":22}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"extends"}}],"location":42}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},"location":36}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fsyncs"}}],"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":53}},"location":51}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"reads"}}],"location":71}}],"funcformat":"COERCE_EXPLICIT_CALL","location":67}},"location":65}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writes"}}],"location":84}}],"funcformat":"COERCE_EXPLICIT_CALL","location":80}},"location":78}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"writebacks"}}],"location":98}}],"funcformat":"COERCE_EXPLICIT_CALL","location":94}},"location":92}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"sum"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"hits"}}],"location":116}}],"funcformat":"COERCE_EXPLICIT_CALL","location":112}},"location":110}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"pg_stat_io","inh":true,"relpersistence":"p","location":152}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 416
+SELECT :io_stats_post_reset < :io_stats_pre_reset
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 417
+-- test BRIN index doesn't block HOT update
+CREATE TABLE brin_hot (
+  id  integer PRIMARY KEY,
+  val integer NOT NULL
+) WITH (autovacuum_enabled = off, fillfactor = 70)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"brin_hot","inh":true,"relpersistence":"p","location":57},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":74},"is_local":true,"constraints":[{"Constraint":{"contype":"CONSTR_PRIMARY","location":82}}],"location":70}},{"ColumnDef":{"colname":"val","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":101},"is_local":true,"constraints":[{"Constraint":{"contype":"CONSTR_NOTNULL","location":109}}],"location":97}}],"options":[{"DefElem":{"defname":"autovacuum_enabled","arg":{"TypeName":{"names":[{"String":{"sval":"off"}}],"typemod":-1,"location":147}},"defaction":"DEFELEM_UNSPEC","location":126}},{"DefElem":{"defname":"fillfactor","arg":{"Integer":{"ival":70}},"defaction":"DEFELEM_UNSPEC","location":152}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 418
+INSERT INTO brin_hot SELECT *, 0 FROM generate_series(1, 235)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"brin_hot","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":28}},"location":28}},{"ResTarget":{"val":{"A_Const":{"ival":{},"location":31}},"location":31}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":54}},{"A_Const":{"ival":{"ival":235},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":38}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 419
+CREATE INDEX val_brin ON brin_hot using brin(val)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"val_brin","relation":{"relname":"brin_hot","inh":true,"relpersistence":"p","location":25},"accessMethod":"brin","indexParams":[{"IndexElem":{"name":"val","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 420
+CREATE FUNCTION wait_for_hot_stats() RETURNS void AS $$
+DECLARE
+  start_time timestamptz := clock_timestamp();
+  updated bool;
+BEGIN
+  -- we don't want to wait forever; loop will exit after 30 seconds
+  FOR i IN 1 .. 300 LOOP
+    SELECT (pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid) > 0) INTO updated;
+    EXIT WHEN updated;
+
+    -- wait a little
+    PERFORM pg_sleep_for('100 milliseconds');
+    -- reset stats snapshot so we can test again
+    PERFORM pg_stat_clear_snapshot();
+  END LOOP;
+  -- report time waited in postmaster log (where it won't change test output)
+  RAISE log 'wait_for_hot_stats delayed % seconds',
+    EXTRACT(epoch FROM clock_timestamp() - start_time);
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"wait_for_hot_stats"}}],"returnType":{"names":[{"String":{"sval":"void"}}],"typemod":-1,"location":45},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n  start_time timestamptz := clock_timestamp();\n  updated bool;\nBEGIN\n  -- we don't want to wait forever; loop will exit after 30 seconds\n  FOR i IN 1 .. 300 LOOP\n    SELECT (pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid) \u003e 0) INTO updated;\n    EXIT WHEN updated;\n\n    -- wait a little\n    PERFORM pg_sleep_for('100 milliseconds');\n    -- reset stats snapshot so we can test again\n    PERFORM pg_stat_clear_snapshot();\n  END LOOP;\n  -- report time waited in postmaster log (where it won't change test output)\n  RAISE log 'wait_for_hot_stats delayed % seconds',\n    EXTRACT(epoch FROM clock_timestamp() - start_time);\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":50}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":698}}]}}}]}
+== 421
+UPDATE brin_hot SET val = -3 WHERE id = 42
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"brin_hot","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"val","val":{"A_Const":{"ival":{"ival":-3},"location":26}},"location":20}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"id"}}],"location":35}},"rexpr":{"A_Const":{"ival":{"ival":42},"location":40}},"location":38}}}}}]}
+== 422
+-- We can't just call wait_for_hot_stats() at this point, because we only
+-- transmit stats when the session goes idle, and we probably didn't
+-- transmit the last couple of counts yet thanks to the rate-limiting logic
+-- in pgstat_report_stat().  But instead of waiting for the rate limiter's
+-- timeout to elapse, let's just start a new session.  The old one will
+-- then send its stats before dying.
+
+SELECT wait_for_hot_stats()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"wait_for_hot_stats"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":411}},"location":411}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 423
+SELECT pg_stat_get_tuples_hot_updated('brin_hot'::regclass::oid)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"pg_stat_get_tuples_hot_updated"}}],"args":[{"TypeCast":{"arg":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"brin_hot"},"location":38}},"typeName":{"names":[{"String":{"sval":"regclass"}}],"typemod":-1,"location":50},"location":48}},"typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":60},"location":58}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 424
+DROP TABLE brin_hot
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"brin_hot"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 425
+DROP FUNCTION wait_for_hot_stats()
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"wait_for_hot_stats"}}]}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}
+== 426
+-- Test handling of index predicates - updating attributes in precicates
+-- should not block HOT when summarizing indexes are involved. We update
+-- a row that was not indexed due to the index predicate, and becomes
+-- indexable - the HOT-updated tuple is forwarded to the BRIN index.
+CREATE TABLE brin_hot_2 (a int, b int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":298},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":312},"is_local":true,"location":310}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":319},"is_local":true,"location":317}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 427
+INSERT INTO brin_hot_2 VALUES (1, 100)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":31}},{"A_Const":{"ival":{"ival":100},"location":34}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 428
+CREATE INDEX ON brin_hot_2 USING brin (b) WHERE a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"relation":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":16},"accessMethod":"brin","indexParams":[{"IndexElem":{"name":"b","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":48}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":52}},"location":50}}}}}]}
+== 429
+UPDATE brin_hot_2 SET a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"a","val":{"A_Const":{"ival":{"ival":2},"location":26}},"location":22}}]}}}]}
+== 430
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":34}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":51}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":55}},"location":53}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":61}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":65}},"location":63}}],"location":57}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 431
+SELECT COUNT(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":38}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":42}},"location":40}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":48}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":52}},"location":50}}],"location":44}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 432
+SET enable_seqscan = off
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"off"},"location":21}}]}}}]}
+== 433
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":34}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":51}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":55}},"location":53}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":61}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":65}},"location":63}}],"location":57}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 434
+SELECT COUNT(*) FROM brin_hot_2 WHERE a = 2 AND b = 100
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_2","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":38}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":42}},"location":40}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":48}},"rexpr":{"A_Const":{"ival":{"ival":100},"location":52}},"location":50}}],"location":44}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 435
+DROP TABLE brin_hot_2
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"brin_hot_2"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 436
+-- Test that updates to indexed columns are still propagated to the
+-- BRIN column.
+-- https://postgr.es/m/05ebcb44-f383-86e3-4f31-0a97a55634cf@enterprisedb.com
+CREATE TABLE brin_hot_3 (a int, filler text) WITH (fillfactor = 10)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":174},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":188},"is_local":true,"location":186}},{"ColumnDef":{"colname":"filler","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":200},"is_local":true,"location":193}}],"options":[{"DefElem":{"defname":"fillfactor","arg":{"Integer":{"ival":10}},"defaction":"DEFELEM_UNSPEC","location":212}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 437
+INSERT INTO brin_hot_3 SELECT 1, repeat(' ', 500) FROM generate_series(1, 20)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":30}},"location":30}},{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":" "},"location":40}},{"A_Const":{"ival":{"ival":500},"location":45}}],"funcformat":"COERCE_EXPLICIT_CALL","location":33}},"location":33}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":71}},{"A_Const":{"ival":{"ival":20},"location":74}}],"funcformat":"COERCE_EXPLICIT_CALL","location":55}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 438
+CREATE INDEX ON brin_hot_3 USING brin (a) WITH (pages_per_range = 1)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"relation":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":16},"accessMethod":"brin","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}],"options":[{"DefElem":{"defname":"pages_per_range","arg":{"Integer":{"ival":1}},"defaction":"DEFELEM_UNSPEC","location":48}}]}}}]}
+== 439
+UPDATE brin_hot_3 SET a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"a","val":{"A_Const":{"ival":{"ival":2},"location":26}},"location":22}}]}}}]}
+== 440
+EXPLAIN (COSTS OFF) SELECT * FROM brin_hot_3 WHERE a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":34}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":51}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":55}},"location":53}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"options":[{"DefElem":{"defname":"costs","arg":{"String":{"sval":"off"}},"defaction":"DEFELEM_UNSPEC","location":9}}]}}}]}
+== 441
+SELECT COUNT(*) FROM brin_hot_3 WHERE a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"brin_hot_3","inh":true,"relpersistence":"p","location":21}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":38}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":42}},"location":40}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 442
+DROP TABLE brin_hot_3
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"brin_hot_3"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 443
+SET enable_seqscan = on
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"on"},"location":21}}]}}}]}
+== 444
+-- Test that estimation of relation size works with tuples wider than the
+-- relation fillfactor. We create a table with wide inline attributes and
+-- low fillfactor, insert rows and then see how many rows EXPLAIN shows
+-- before running analyze. We disable autovacuum so that it does not
+-- interfere with the test.
+CREATE TABLE table_fillfactor (
+  n char(1000)
+) with (fillfactor=10, autovacuum_enabled=off)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"table_fillfactor","inh":true,"relpersistence":"p","location":330},"tableElts":[{"ColumnDef":{"colname":"n","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bpchar"}}],"typmods":[{"A_Const":{"ival":{"ival":1000},"location":358}}],"typemod":-1,"location":353},"is_local":true,"location":351}}],"options":[{"DefElem":{"defname":"fillfactor","arg":{"Integer":{"ival":10}},"defaction":"DEFELEM_UNSPEC","location":372}},{"DefElem":{"defname":"autovacuum_enabled","arg":{"TypeName":{"names":[{"String":{"sval":"off"}}],"typemod":-1,"location":406}},"defaction":"DEFELEM_UNSPEC","location":387}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 445
+INSERT INTO table_fillfactor
+SELECT 'x' FROM generate_series(1,1000)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"table_fillfactor","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"x"},"location":36}},"location":36}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":61}},{"A_Const":{"ival":{"ival":1000},"location":63}}],"funcformat":"COERCE_EXPLICIT_CALL","location":45}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 446
+SELECT * FROM check_estimated_rows('SELECT * FROM table_fillfactor')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"check_estimated_rows"}}],"args":[{"A_Const":{"sval":{"sval":"SELECT * FROM table_fillfactor"},"location":35}}],"funcformat":"COERCE_EXPLICIT_CALL","location":14}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 447
+DROP TABLE table_fillfactor
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"table_fillfactor"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}

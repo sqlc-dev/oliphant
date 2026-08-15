@@ -1,0 +1,546 @@
+== 001
+|--
+-- create user defined conversion
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION test_enc_setup() RETURNS void
+    AS :'regresslib', 'test_enc_setup'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 171
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+SELECT FROM test_enc_setup()
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"test_enc_setup"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":12}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 003
+CREATE FUNCTION test_enc_conversion(bytea, name, name, bool, validlen OUT int, result OUT bytea)
+    AS :'regresslib', 'test_enc_conversion'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 105
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+CREATE USER regress_conversion_user WITH NOCREATEDB NOCREATEROLE
+--
+{"version":170007,"stmts":[{"stmt":{"CreateRoleStmt":{"stmt_type":"ROLESTMT_USER","role":"regress_conversion_user","options":[{"DefElem":{"defname":"createdb","arg":{"Boolean":{"boolval":false}},"defaction":"DEFELEM_UNSPEC","location":41}},{"DefElem":{"defname":"createrole","arg":{"Boolean":{"boolval":false}},"defaction":"DEFELEM_UNSPEC","location":52}}]}}}]}
+== 005
+SET SESSION AUTHORIZATION regress_conversion_user
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"session_authorization","args":[{"A_Const":{"sval":{"sval":"regress_conversion_user"},"location":26}}]}}}]}
+== 006
+CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"CreateConversionStmt":{"conversion_name":[{"String":{"sval":"myconv"}}],"for_encoding_name":"LATIN1","to_encoding_name":"UTF8","func_name":[{"String":{"sval":"iso8859_1_to_utf8"}}]}}}]}
+== 007
+|--
+-- cannot make same name conversion in same schema
+|--
+CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"CreateConversionStmt":{"conversion_name":[{"String":{"sval":"myconv"}}],"for_encoding_name":"LATIN1","to_encoding_name":"UTF8","func_name":[{"String":{"sval":"iso8859_1_to_utf8"}}]}}}]}
+== 008
+|--
+-- create default conversion with qualified name
+|--
+CREATE DEFAULT CONVERSION public.mydef FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"CreateConversionStmt":{"conversion_name":[{"String":{"sval":"public"}},{"String":{"sval":"mydef"}}],"for_encoding_name":"LATIN1","to_encoding_name":"UTF8","func_name":[{"String":{"sval":"iso8859_1_to_utf8"}}],"def":true}}}]}
+== 009
+|--
+-- cannot make default conversion with same schema/for_encoding/to_encoding
+|--
+CREATE DEFAULT CONVERSION public.mydef2 FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
+--
+{"version":170007,"stmts":[{"stmt":{"CreateConversionStmt":{"conversion_name":[{"String":{"sval":"public"}},{"String":{"sval":"mydef2"}}],"for_encoding_name":"LATIN1","to_encoding_name":"UTF8","func_name":[{"String":{"sval":"iso8859_1_to_utf8"}}],"def":true}}}]}
+== 010
+-- test comments
+COMMENT ON CONVERSION myconv_bad IS 'foo'
+--
+{"version":170007,"stmts":[{"stmt":{"CommentStmt":{"objtype":"OBJECT_CONVERSION","object":{"List":{"items":[{"String":{"sval":"myconv_bad"}}]}},"comment":"foo"}}}]}
+== 011
+COMMENT ON CONVERSION myconv IS 'bar'
+--
+{"version":170007,"stmts":[{"stmt":{"CommentStmt":{"objtype":"OBJECT_CONVERSION","object":{"List":{"items":[{"String":{"sval":"myconv"}}]}},"comment":"bar"}}}]}
+== 012
+COMMENT ON CONVERSION myconv IS NULL
+--
+{"version":170007,"stmts":[{"stmt":{"CommentStmt":{"objtype":"OBJECT_CONVERSION","object":{"List":{"items":[{"String":{"sval":"myconv"}}]}}}}}]}
+== 013
+|--
+-- drop user defined conversion
+|--
+DROP CONVERSION myconv
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"myconv"}}]}}],"removeType":"OBJECT_CONVERSION","behavior":"DROP_RESTRICT"}}}]}
+== 014
+DROP CONVERSION mydef
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"mydef"}}]}}],"removeType":"OBJECT_CONVERSION","behavior":"DROP_RESTRICT"}}}]}
+== 015
+|--
+-- Note: the built-in conversions are exercised in opr_sanity.sql,
+-- so there's no need to do that here.
+|--
+|--
+-- return to the superuser
+|--
+RESET SESSION AUTHORIZATION
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"session_authorization"}}}]}
+== 016
+DROP USER regress_conversion_user
+--
+{"version":170007,"stmts":[{"stmt":{"DropRoleStmt":{"roles":[{"RoleSpec":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_conversion_user","location":10}}]}}}]}
+== 017
+|--
+-- Test built-in conversion functions.
+|--
+
+-- Helper function to test a conversion. Uses the test_enc_conversion function
+-- that was created in the create_function_0 test.
+create or replace function test_conv(
+  input IN bytea,
+  src_encoding IN text,
+  dst_encoding IN text,
+
+  result OUT bytea,
+  errorat OUT bytea,
+  error OUT text)
+language plpgsql as
+$$
+declare
+  validlen int;
+begin
+  -- First try to perform the conversion with noError = false. If that errors out,
+  -- capture the error message, and try again with noError = true. The second call
+  -- should succeed and return the position of the error, return that too.
+  begin
+    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, false);
+    errorat = NULL;
+    error := NULL;
+  exception when others then
+    error := sqlerrm;
+    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, true);
+    errorat = substr(input, validlen + 1);
+  end;
+  return;
+end;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"replace":true,"funcname":[{"String":{"sval":"test_conv"}}],"parameters":[{"FunctionParameter":{"name":"input","argType":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":225},"mode":"FUNC_PARAM_IN"}},{"FunctionParameter":{"name":"src_encoding","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":250},"mode":"FUNC_PARAM_IN"}},{"FunctionParameter":{"name":"dst_encoding","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":274},"mode":"FUNC_PARAM_IN"}},{"FunctionParameter":{"name":"result","argType":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":294},"mode":"FUNC_PARAM_OUT"}},{"FunctionParameter":{"name":"errorat","argType":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":315},"mode":"FUNC_PARAM_OUT"}},{"FunctionParameter":{"name":"error","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":334},"mode":"FUNC_PARAM_OUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":340}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\ndeclare\n  validlen int;\nbegin\n  -- First try to perform the conversion with noError = false. If that errors out,\n  -- capture the error message, and try again with noError = true. The second call\n  -- should succeed and return the position of the error, return that too.\n  begin\n    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, false);\n    errorat = NULL;\n    error := NULL;\n  exception when others then\n    error := sqlerrm;\n    select * into validlen, result from test_enc_conversion(input, src_encoding, dst_encoding, true);\n    errorat = substr(input, validlen + 1);\n  end;\n  return;\nend;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":357}}]}}}]}
+== 018
+|--
+-- UTF-8
+|--
+-- The description column must be unique.
+CREATE TABLE utf8_verification_inputs (inbytes bytea, description text PRIMARY KEY)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":70},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":104},"is_local":true,"location":96}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":123},"is_local":true,"constraints":[{"Constraint":{"contype":"CONSTR_PRIMARY","location":128}}],"location":111}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 019
+insert into utf8_verification_inputs  values
+  ('\x66006f',	'NUL byte'),
+  ('\xaf',		'bare continuation'),
+  ('\xc5',		'missing second byte in 2-byte char'),
+  ('\xc080',	'smallest 2-byte overlong'),
+  ('\xc1bf',	'largest 2-byte overlong'),
+  ('\xc280',	'next 2-byte after overlongs'),
+  ('\xdfbf',	'largest 2-byte'),
+  ('\xe9af',	'missing third byte in 3-byte char'),
+  ('\xe08080',	'smallest 3-byte overlong'),
+  ('\xe09fbf',	'largest 3-byte overlong'),
+  ('\xe0a080',	'next 3-byte after overlong'),
+  ('\xed9fbf',	'last before surrogates'),
+  ('\xeda080',	'smallest surrogate'),
+  ('\xedbfbf',	'largest surrogate'),
+  ('\xee8080',	'next after surrogates'),
+  ('\xefbfbf',	'largest 3-byte'),
+  ('\xf1afbf',	'missing fourth byte in 4-byte char'),
+  ('\xf0808080',	'smallest 4-byte overlong'),
+  ('\xf08fbfbf',	'largest 4-byte overlong'),
+  ('\xf0908080',	'next 4-byte after overlong'),
+  ('\xf48fbfbf',	'largest 4-byte'),
+  ('\xf4908080',	'smallest too large'),
+  ('\xfa9a9a8a8a',	'5-byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x66006f"},"location":48}},{"A_Const":{"sval":{"sval":"NUL byte"},"location":60}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xaf"},"location":76}},{"A_Const":{"sval":{"sval":"bare continuation"},"location":85}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xc5"},"location":110}},{"A_Const":{"sval":{"sval":"missing second byte in 2-byte char"},"location":119}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xc080"},"location":161}},{"A_Const":{"sval":{"sval":"smallest 2-byte overlong"},"location":171}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xc1bf"},"location":203}},{"A_Const":{"sval":{"sval":"largest 2-byte overlong"},"location":213}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xc280"},"location":244}},{"A_Const":{"sval":{"sval":"next 2-byte after overlongs"},"location":254}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xdfbf"},"location":289}},{"A_Const":{"sval":{"sval":"largest 2-byte"},"location":299}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe9af"},"location":321}},{"A_Const":{"sval":{"sval":"missing third byte in 3-byte char"},"location":331}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe08080"},"location":372}},{"A_Const":{"sval":{"sval":"smallest 3-byte overlong"},"location":384}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe09fbf"},"location":416}},{"A_Const":{"sval":{"sval":"largest 3-byte overlong"},"location":428}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe0a080"},"location":459}},{"A_Const":{"sval":{"sval":"next 3-byte after overlong"},"location":471}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xed9fbf"},"location":505}},{"A_Const":{"sval":{"sval":"last before surrogates"},"location":517}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xeda080"},"location":547}},{"A_Const":{"sval":{"sval":"smallest surrogate"},"location":559}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xedbfbf"},"location":585}},{"A_Const":{"sval":{"sval":"largest surrogate"},"location":597}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xee8080"},"location":622}},{"A_Const":{"sval":{"sval":"next after surrogates"},"location":634}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xefbfbf"},"location":663}},{"A_Const":{"sval":{"sval":"largest 3-byte"},"location":675}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf1afbf"},"location":697}},{"A_Const":{"sval":{"sval":"missing fourth byte in 4-byte char"},"location":709}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf0808080"},"location":751}},{"A_Const":{"sval":{"sval":"smallest 4-byte overlong"},"location":765}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf08fbfbf"},"location":797}},{"A_Const":{"sval":{"sval":"largest 4-byte overlong"},"location":811}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf0908080"},"location":842}},{"A_Const":{"sval":{"sval":"next 4-byte after overlong"},"location":856}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf48fbfbf"},"location":890}},{"A_Const":{"sval":{"sval":"largest 4-byte"},"location":904}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xf4908080"},"location":926}},{"A_Const":{"sval":{"sval":"smallest too large"},"location":940}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xfa9a9a8a8a"},"location":966}},{"A_Const":{"sval":{"sval":"5-byte"},"location":982}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 020
+-- Test UTF-8 verification slow path
+select description, (test_conv(inbytes, 'utf8', 'utf8')).* from utf8_verification_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":44}},"location":44}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":68}},{"A_Const":{"sval":{"sval":"utf8"},"location":77}},{"A_Const":{"sval":{"sval":"utf8"},"location":85}}],"funcformat":"COERCE_EXPLICIT_CALL","location":58}},"indirection":[{"A_Star":{}}]}},"location":57}}],"fromClause":[{"RangeVar":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":101}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 021
+-- Test UTF-8 verification with ASCII padding appended to provide
+-- coverage for algorithms that work on multiple bytes at a time.
+-- The error message for a sequence starting with a 4-byte lead
+-- will contain all 4 bytes if they are present, so various
+-- expressions below add 3 ASCII bytes to the end to ensure
+-- consistent error messages.
+-- The number 64 below needs to be at least the value of STRIDE_LENGTH in wchar.c.
+
+-- Test multibyte verification in fast path
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(inbytes || repeat('.', 64)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":786}},"location":786}},{"ResTarget":{"name":"orig_error","val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":801}},"location":801}},{"ResTarget":{"name":"error_after_padding","val":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":826}},"location":826}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_padded","inh":true,"relpersistence":"p","alias":{"aliasname":"p"},"location":862}},"rarg":{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","alias":{"aliasname":"b"},"location":881}},"usingClause":[{"String":{"sval":"description"}}]}}],"whereClause":{"A_Expr":{"kind":"AEXPR_DISTINCT","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":920}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":945}},"location":928}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":962}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","withClause":{"ctes":[{"CommonTableExpr":{"ctename":"test_bytes","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":508}},"location":508}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":521}},"location":521}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":549}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":567}},{"A_Const":{"ival":{"ival":3},"location":572}}],"funcformat":"COERCE_EXPLICIT_CALL","location":560}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":576},"location":574}},"location":557}},{"A_Const":{"sval":{"sval":"utf8"},"location":583}},{"A_Const":{"sval":{"sval":"utf8"},"location":591}}],"funcformat":"COERCE_EXPLICIT_CALL","location":539}},"indirection":[{"String":{"sval":"error"}}]}},"location":538}}],"fromClause":[{"RangeVar":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":613}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":479}},{"CommonTableExpr":{"ctename":"test_padded","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":671}},"location":671}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":699}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":717}},{"A_Const":{"ival":{"ival":64},"location":722}}],"funcformat":"COERCE_EXPLICIT_CALL","location":710}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":727},"location":725}},"location":707}},{"A_Const":{"sval":{"sval":"utf8"},"location":734}},{"A_Const":{"sval":{"sval":"utf8"},"location":742}}],"funcformat":"COERCE_EXPLICIT_CALL","location":689}},"indirection":[{"String":{"sval":"error"}}]}},"location":688}}],"fromClause":[{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","location":764}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":641}}],"location":474},"op":"SETOP_NONE"}}}]}
+== 022
+-- Test ASCII verification in fast path where incomplete
+-- UTF-8 sequences fall at the end of the preceding chunk.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64 - length(inbytes))::bytea || inbytes || repeat('.', 64)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":472}},"location":472}},{"ResTarget":{"name":"orig_error","val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":487}},"location":487}},{"ResTarget":{"name":"error_after_padding","val":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":512}},"location":512}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_padded","inh":true,"relpersistence":"p","alias":{"aliasname":"p"},"location":548}},"rarg":{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","alias":{"aliasname":"b"},"location":567}},"usingClause":[{"String":{"sval":"description"}}]}}],"whereClause":{"A_Expr":{"kind":"AEXPR_DISTINCT","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":606}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":631}},"location":614}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":648}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","withClause":{"ctes":[{"CommonTableExpr":{"ctename":"test_bytes","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":150}},"location":150}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":163}},"location":163}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":191}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":209}},{"A_Const":{"ival":{"ival":3},"location":214}}],"funcformat":"COERCE_EXPLICIT_CALL","location":202}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":218},"location":216}},"location":199}},{"A_Const":{"sval":{"sval":"utf8"},"location":225}},{"A_Const":{"sval":{"sval":"utf8"},"location":233}}],"funcformat":"COERCE_EXPLICIT_CALL","location":181}},"indirection":[{"String":{"sval":"error"}}]}},"location":180}}],"fromClause":[{"RangeVar":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":255}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":121}},{"CommonTableExpr":{"ctename":"test_padded","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":313}},"location":313}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":348}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":64},"location":353}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"length"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":365}}],"funcformat":"COERCE_EXPLICIT_CALL","location":358}},"location":356}}],"funcformat":"COERCE_EXPLICIT_CALL","location":341}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":376},"location":374}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":385}},"location":382}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":403}},{"A_Const":{"ival":{"ival":64},"location":408}}],"funcformat":"COERCE_EXPLICIT_CALL","location":396}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":413},"location":411}},"location":393}},{"A_Const":{"sval":{"sval":"utf8"},"location":420}},{"A_Const":{"sval":{"sval":"utf8"},"location":428}}],"funcformat":"COERCE_EXPLICIT_CALL","location":331}},"indirection":[{"String":{"sval":"error"}}]}},"location":330}}],"fromClause":[{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","location":450}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":283}}],"location":116},"op":"SETOP_NONE"}}}]}
+== 023
+-- Test cases where UTF-8 sequences within short text
+-- come after the fast path returns.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64)::bytea || inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":428}},"location":428}},{"ResTarget":{"name":"orig_error","val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":443}},"location":443}},{"ResTarget":{"name":"error_after_padding","val":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":468}},"location":468}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_padded","inh":true,"relpersistence":"p","alias":{"aliasname":"p"},"location":504}},"rarg":{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","alias":{"aliasname":"b"},"location":523}},"usingClause":[{"String":{"sval":"description"}}]}}],"whereClause":{"A_Expr":{"kind":"AEXPR_DISTINCT","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":562}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":587}},"location":570}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":604}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","withClause":{"ctes":[{"CommonTableExpr":{"ctename":"test_bytes","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":125}},"location":125}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":138}},"location":138}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":166}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":184}},{"A_Const":{"ival":{"ival":3},"location":189}}],"funcformat":"COERCE_EXPLICIT_CALL","location":177}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":193},"location":191}},"location":174}},{"A_Const":{"sval":{"sval":"utf8"},"location":200}},{"A_Const":{"sval":{"sval":"utf8"},"location":208}}],"funcformat":"COERCE_EXPLICIT_CALL","location":156}},"indirection":[{"String":{"sval":"error"}}]}},"location":155}}],"fromClause":[{"RangeVar":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":230}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":96}},{"CommonTableExpr":{"ctename":"test_padded","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":288}},"location":288}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":323}},{"A_Const":{"ival":{"ival":64},"location":328}}],"funcformat":"COERCE_EXPLICIT_CALL","location":316}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":333},"location":331}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":342}},"location":339}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":360}},{"A_Const":{"ival":{"ival":3},"location":365}}],"funcformat":"COERCE_EXPLICIT_CALL","location":353}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":369},"location":367}},"location":350}},{"A_Const":{"sval":{"sval":"utf8"},"location":376}},{"A_Const":{"sval":{"sval":"utf8"},"location":384}}],"funcformat":"COERCE_EXPLICIT_CALL","location":306}},"indirection":[{"String":{"sval":"error"}}]}},"location":305}}],"fromClause":[{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","location":406}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":258}}],"location":91},"op":"SETOP_NONE"}}}]}
+== 024
+-- Test cases where incomplete UTF-8 sequences fall at the
+-- end of the part checked by the fast path.
+with test_bytes as (
+  select
+    inbytes,
+    description,
+    (test_conv(inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from utf8_verification_inputs
+), test_padded as (
+  select
+    description,
+    (test_conv(repeat('.', 64 - length(inbytes))::bytea || inbytes || repeat('.', 3)::bytea, 'utf8', 'utf8')).error
+  from test_bytes
+)
+select
+  description,
+  b.error as orig_error,
+  p.error as error_after_padding
+from test_padded p
+join test_bytes b
+using (description)
+where p.error is distinct from b.error
+order by description
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":459}},"location":459}},{"ResTarget":{"name":"orig_error","val":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":474}},"location":474}},{"ResTarget":{"name":"error_after_padding","val":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":499}},"location":499}}],"fromClause":[{"JoinExpr":{"jointype":"JOIN_INNER","larg":{"RangeVar":{"relname":"test_padded","inh":true,"relpersistence":"p","alias":{"aliasname":"p"},"location":535}},"rarg":{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","alias":{"aliasname":"b"},"location":554}},"usingClause":[{"String":{"sval":"description"}}]}}],"whereClause":{"A_Expr":{"kind":"AEXPR_DISTINCT","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"p"}},{"String":{"sval":"error"}}],"location":593}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}},{"String":{"sval":"error"}}],"location":618}},"location":601}},"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":635}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","withClause":{"ctes":[{"CommonTableExpr":{"ctename":"test_bytes","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":138}},"location":138}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":151}},"location":151}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":179}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":197}},{"A_Const":{"ival":{"ival":3},"location":202}}],"funcformat":"COERCE_EXPLICIT_CALL","location":190}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":206},"location":204}},"location":187}},{"A_Const":{"sval":{"sval":"utf8"},"location":213}},{"A_Const":{"sval":{"sval":"utf8"},"location":221}}],"funcformat":"COERCE_EXPLICIT_CALL","location":169}},"indirection":[{"String":{"sval":"error"}}]}},"location":168}}],"fromClause":[{"RangeVar":{"relname":"utf8_verification_inputs","inh":true,"relpersistence":"p","location":243}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":109}},{"CommonTableExpr":{"ctename":"test_padded","ctematerialized":"CTEMaterializeDefault","ctequery":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":301}},"location":301}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"||"}}],"lexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":336}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":64},"location":341}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"length"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":353}}],"funcformat":"COERCE_EXPLICIT_CALL","location":346}},"location":344}}],"funcformat":"COERCE_EXPLICIT_CALL","location":329}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":364},"location":362}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":373}},"location":370}},"rexpr":{"TypeCast":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"."},"location":391}},{"A_Const":{"ival":{"ival":3},"location":396}}],"funcformat":"COERCE_EXPLICIT_CALL","location":384}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":400},"location":398}},"location":381}},{"A_Const":{"sval":{"sval":"utf8"},"location":407}},{"A_Const":{"sval":{"sval":"utf8"},"location":415}}],"funcformat":"COERCE_EXPLICIT_CALL","location":319}},"indirection":[{"String":{"sval":"error"}}]}},"location":318}}],"fromClause":[{"RangeVar":{"relname":"test_bytes","inh":true,"relpersistence":"p","location":437}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"location":271}}],"location":104},"op":"SETOP_NONE"}}}]}
+== 025
+CREATE TABLE utf8_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":34},"is_local":true,"location":26}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":53},"is_local":true,"location":41}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 026
+insert into utf8_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\xc3a4c3b6',	'valid, extra latin chars'),
+  ('\xd184d0bed0be',	'valid, cyrillic'),
+  ('\x666f6fe8b1a1',	'valid, kanji/Chinese'),
+  ('\xe382abe3829a',	'valid, two chars that combine to one in EUC_JIS_2004'),
+  ('\xe382ab',		'only first half of combined char in EUC_JIS_2004'),
+  ('\xe382abe382',	'incomplete combination when converted EUC_JIS_2004'),
+  ('\xecbd94eb81bceba6ac', 'valid, Hangul, Korean'),
+  ('\x666f6fefa8aa',	'valid, needs mapping function to convert to GB18030'),
+  ('\x66e8b1ff6f6f',	'invalid byte sequence'),
+  ('\x66006f',		'invalid, NUL byte'),
+  ('\x666f6fe8b100',	'invalid, NUL byte'),
+  ('\x666f6fe8b1',	'incomplete character at end')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":35}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":48}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xc3a4c3b6"},"location":73}},{"A_Const":{"sval":{"sval":"valid, extra latin chars"},"location":87}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xd184d0bed0be"},"location":119}},{"A_Const":{"sval":{"sval":"valid, cyrillic"},"location":137}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fe8b1a1"},"location":160}},{"A_Const":{"sval":{"sval":"valid, kanji/Chinese"},"location":178}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe382abe3829a"},"location":206}},{"A_Const":{"sval":{"sval":"valid, two chars that combine to one in EUC_JIS_2004"},"location":224}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe382ab"},"location":284}},{"A_Const":{"sval":{"sval":"only first half of combined char in EUC_JIS_2004"},"location":297}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe382abe382"},"location":353}},{"A_Const":{"sval":{"sval":"incomplete combination when converted EUC_JIS_2004"},"location":369}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xecbd94eb81bceba6ac"},"location":427}},{"A_Const":{"sval":{"sval":"valid, Hangul, Korean"},"location":451}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fefa8aa"},"location":480}},{"A_Const":{"sval":{"sval":"valid, needs mapping function to convert to GB18030"},"location":498}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x66e8b1ff6f6f"},"location":557}},{"A_Const":{"sval":{"sval":"invalid byte sequence"},"location":575}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x66006f"},"location":604}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":617}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fe8b100"},"location":642}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":660}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fe8b1"},"location":685}},{"A_Const":{"sval":{"sval":"incomplete character at end"},"location":701}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 027
+-- Test UTF-8 verification
+select description, (test_conv(inbytes, 'utf8', 'utf8')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":34}},"location":34}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":58}},{"A_Const":{"sval":{"sval":"utf8"},"location":67}},{"A_Const":{"sval":{"sval":"utf8"},"location":75}}],"funcformat":"COERCE_EXPLICIT_CALL","location":48}},"indirection":[{"A_Star":{}}]}},"location":47}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":91}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 028
+-- Test conversions from UTF-8
+select description, inbytes, (test_conv(inbytes, 'utf8', 'euc_jis_2004')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":38}},"location":38}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":51}},"location":51}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":71}},{"A_Const":{"sval":{"sval":"utf8"},"location":80}},{"A_Const":{"sval":{"sval":"euc_jis_2004"},"location":88}}],"funcformat":"COERCE_EXPLICIT_CALL","location":61}},"indirection":[{"A_Star":{}}]}},"location":60}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":112}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 029
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin1')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"utf8"},"location":49}},{"A_Const":{"sval":{"sval":"latin1"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":75}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin2')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"utf8"},"location":49}},{"A_Const":{"sval":{"sval":"latin2"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":75}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 031
+select description, inbytes, (test_conv(inbytes, 'utf8', 'latin5')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"utf8"},"location":49}},{"A_Const":{"sval":{"sval":"latin5"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":75}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 032
+select description, inbytes, (test_conv(inbytes, 'utf8', 'koi8r')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"utf8"},"location":49}},{"A_Const":{"sval":{"sval":"koi8r"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":74}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 033
+select description, inbytes, (test_conv(inbytes, 'utf8', 'gb18030')).* from utf8_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"utf8"},"location":49}},{"A_Const":{"sval":{"sval":"gb18030"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"utf8_inputs","inh":true,"relpersistence":"p","location":76}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 034
+|--
+-- EUC_JIS_2004
+|--
+CREATE TABLE euc_jis_2004_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"euc_jis_2004_inputs","inh":true,"relpersistence":"p","location":35},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":64},"is_local":true,"location":56}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":83},"is_local":true,"location":71}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 035
+insert into euc_jis_2004_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fbedd',	'valid'),
+  ('\xa5f7',		'valid, translates to two UTF-8 chars '),
+  ('\xbeddbe',		'incomplete char '),
+  ('\x666f6f00bedd',	'invalid, NUL byte'),
+  ('\x666f6fbe00dd',	'invalid, NUL byte'),
+  ('\x666f6fbedd00',	'invalid, NUL byte'),
+  ('\xbe04',		'invalid byte sequence')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"euc_jis_2004_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":43}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":56}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fbedd"},"location":81}},{"A_Const":{"sval":{"sval":"valid"},"location":97}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xa5f7"},"location":110}},{"A_Const":{"sval":{"sval":"valid, translates to two UTF-8 chars "},"location":121}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xbeddbe"},"location":166}},{"A_Const":{"sval":{"sval":"incomplete char "},"location":179}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f00bedd"},"location":203}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":221}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fbe00dd"},"location":246}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":264}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fbedd00"},"location":289}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":307}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xbe04"},"location":332}},{"A_Const":{"sval":{"sval":"invalid byte sequence"},"location":343}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 036
+-- Test EUC_JIS_2004 verification
+select description, inbytes, (test_conv(inbytes, 'euc_jis_2004', 'euc_jis_2004')).* from euc_jis_2004_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":41}},"location":41}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":54}},"location":54}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":74}},{"A_Const":{"sval":{"sval":"euc_jis_2004"},"location":83}},{"A_Const":{"sval":{"sval":"euc_jis_2004"},"location":99}}],"funcformat":"COERCE_EXPLICIT_CALL","location":64}},"indirection":[{"A_Star":{}}]}},"location":63}}],"fromClause":[{"RangeVar":{"relname":"euc_jis_2004_inputs","inh":true,"relpersistence":"p","location":123}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 037
+-- Test conversions from EUC_JIS_2004
+select description, inbytes, (test_conv(inbytes, 'euc_jis_2004', 'utf8')).* from euc_jis_2004_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":45}},"location":45}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":58}},"location":58}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":78}},{"A_Const":{"sval":{"sval":"euc_jis_2004"},"location":87}},{"A_Const":{"sval":{"sval":"utf8"},"location":103}}],"funcformat":"COERCE_EXPLICIT_CALL","location":68}},"indirection":[{"A_Star":{}}]}},"location":67}}],"fromClause":[{"RangeVar":{"relname":"euc_jis_2004_inputs","inh":true,"relpersistence":"p","location":119}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 038
+|--
+-- SHIFT-JIS-2004
+|--
+CREATE TABLE shiftjis2004_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"shiftjis2004_inputs","inh":true,"relpersistence":"p","location":37},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":66},"is_local":true,"location":58}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":85},"is_local":true,"location":73}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 039
+insert into shiftjis2004_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6f8fdb',	'valid'),
+  ('\x666f6f81c0',	'valid, no translation to UTF-8'),
+  ('\x666f6f82f5',	'valid, translates to two UTF-8 chars '),
+  ('\x666f6f8fdb8f',	'incomplete char '),
+  ('\x666f6f820a',	'incomplete char, followed by newline '),
+  ('\x666f6f008fdb',	'invalid, NUL byte'),
+  ('\x666f6f8f00db',	'invalid, NUL byte'),
+  ('\x666f6f8fdb00',	'invalid, NUL byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"shiftjis2004_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":43}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":56}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f8fdb"},"location":81}},{"A_Const":{"sval":{"sval":"valid"},"location":97}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f81c0"},"location":110}},{"A_Const":{"sval":{"sval":"valid, no translation to UTF-8"},"location":126}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f82f5"},"location":164}},{"A_Const":{"sval":{"sval":"valid, translates to two UTF-8 chars "},"location":180}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f8fdb8f"},"location":225}},{"A_Const":{"sval":{"sval":"incomplete char "},"location":243}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f820a"},"location":267}},{"A_Const":{"sval":{"sval":"incomplete char, followed by newline "},"location":283}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f008fdb"},"location":328}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":346}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f8f00db"},"location":371}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":389}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f8fdb00"},"location":414}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":432}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 040
+-- Test SHIFT-JIS-2004 verification
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'shiftjis2004')).* from shiftjis2004_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":43}},"location":43}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":56}},"location":56}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":76}},{"A_Const":{"sval":{"sval":"shiftjis2004"},"location":85}},{"A_Const":{"sval":{"sval":"shiftjis2004"},"location":101}}],"funcformat":"COERCE_EXPLICIT_CALL","location":66}},"indirection":[{"A_Star":{}}]}},"location":65}}],"fromClause":[{"RangeVar":{"relname":"shiftjis2004_inputs","inh":true,"relpersistence":"p","location":125}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 041
+-- Test conversions from SHIFT-JIS-2004
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'utf8')).* from shiftjis2004_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":47}},"location":47}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":60}},"location":60}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":80}},{"A_Const":{"sval":{"sval":"shiftjis2004"},"location":89}},{"A_Const":{"sval":{"sval":"utf8"},"location":105}}],"funcformat":"COERCE_EXPLICIT_CALL","location":70}},"indirection":[{"A_Star":{}}]}},"location":69}}],"fromClause":[{"RangeVar":{"relname":"shiftjis2004_inputs","inh":true,"relpersistence":"p","location":121}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 042
+select description, inbytes, (test_conv(inbytes, 'shiftjis2004', 'euc_jis_2004')).* from shiftjis2004_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"shiftjis2004"},"location":49}},{"A_Const":{"sval":{"sval":"euc_jis_2004"},"location":65}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"shiftjis2004_inputs","inh":true,"relpersistence":"p","location":89}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 043
+|--
+-- GB18030
+|--
+CREATE TABLE gb18030_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"gb18030_inputs","inh":true,"relpersistence":"p","location":30},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":54},"is_local":true,"location":46}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":73},"is_local":true,"location":61}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 044
+insert into gb18030_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fcff3',	'valid'),
+  ('\x666f6f8431a530',	'valid, no translation to UTF-8'),
+  ('\x666f6f84309c38',	'valid, translates to UTF-8 by mapping function'),
+  ('\x666f6f84309c',	'incomplete char '),
+  ('\x666f6f84309c0a',	'incomplete char, followed by newline '),
+  ('\x666f6f84',		'incomplete char at end'),
+  ('\x666f6f84309c3800', 'invalid, NUL byte'),
+  ('\x666f6f84309c0038', 'invalid, NUL byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"gb18030_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":38}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":51}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fcff3"},"location":76}},{"A_Const":{"sval":{"sval":"valid"},"location":92}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f8431a530"},"location":105}},{"A_Const":{"sval":{"sval":"valid, no translation to UTF-8"},"location":125}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84309c38"},"location":163}},{"A_Const":{"sval":{"sval":"valid, translates to UTF-8 by mapping function"},"location":183}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84309c"},"location":237}},{"A_Const":{"sval":{"sval":"incomplete char "},"location":255}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84309c0a"},"location":279}},{"A_Const":{"sval":{"sval":"incomplete char, followed by newline "},"location":299}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84"},"location":344}},{"A_Const":{"sval":{"sval":"incomplete char at end"},"location":359}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84309c3800"},"location":389}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":411}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f84309c0038"},"location":436}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":458}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 045
+-- Test GB18030 verification.  Round-trip through text so the backing of the
+-- bytea values is palloc, not shared_buffers.  This lets Valgrind detect
+-- reads past the end.
+select description, inbytes, (test_conv(inbytes::text::bytea, 'gb18030', 'gb18030')).* from gb18030_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":181}},"location":181}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":194}},"location":194}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"TypeCast":{"arg":{"TypeCast":{"arg":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":214}},"typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":223},"location":221}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":229},"location":227}},{"A_Const":{"sval":{"sval":"gb18030"},"location":236}},{"A_Const":{"sval":{"sval":"gb18030"},"location":247}}],"funcformat":"COERCE_EXPLICIT_CALL","location":204}},"indirection":[{"A_Star":{}}]}},"location":203}}],"fromClause":[{"RangeVar":{"relname":"gb18030_inputs","inh":true,"relpersistence":"p","location":266}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 046
+-- Test conversions from GB18030
+select description, inbytes, (test_conv(inbytes, 'gb18030', 'utf8')).* from gb18030_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":40}},"location":40}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":53}},"location":53}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":73}},{"A_Const":{"sval":{"sval":"gb18030"},"location":82}},{"A_Const":{"sval":{"sval":"utf8"},"location":93}}],"funcformat":"COERCE_EXPLICIT_CALL","location":63}},"indirection":[{"A_Star":{}}]}},"location":62}}],"fromClause":[{"RangeVar":{"relname":"gb18030_inputs","inh":true,"relpersistence":"p","location":109}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 047
+|--
+-- ISO-8859-5
+|--
+CREATE TABLE iso8859_5_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":33},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":59},"is_local":true,"location":51}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":78},"is_local":true,"location":66}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 048
+insert into iso8859_5_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\xe4dede',		'valid'),
+  ('\x00',		'invalid, NUL byte'),
+  ('\xe400dede',	'invalid, NUL byte'),
+  ('\xe4dede00',	'invalid, NUL byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":40}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":53}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe4dede"},"location":78}},{"A_Const":{"sval":{"sval":"valid"},"location":91}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x00"},"location":104}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":113}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe400dede"},"location":138}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":152}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\xe4dede00"},"location":177}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":191}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 049
+-- Test ISO-8859-5 verification
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'iso8859-5')).* from iso8859_5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":39}},"location":39}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":52}},"location":52}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":72}},{"A_Const":{"sval":{"sval":"iso8859-5"},"location":81}},{"A_Const":{"sval":{"sval":"iso8859-5"},"location":94}}],"funcformat":"COERCE_EXPLICIT_CALL","location":62}},"indirection":[{"A_Star":{}}]}},"location":61}}],"fromClause":[{"RangeVar":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":115}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 050
+-- Test conversions from ISO-8859-5
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'utf8')).* from iso8859_5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":43}},"location":43}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":56}},"location":56}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":76}},{"A_Const":{"sval":{"sval":"iso8859-5"},"location":85}},{"A_Const":{"sval":{"sval":"utf8"},"location":98}}],"funcformat":"COERCE_EXPLICIT_CALL","location":66}},"indirection":[{"A_Star":{}}]}},"location":65}}],"fromClause":[{"RangeVar":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":114}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 051
+select description, inbytes, (test_conv(inbytes, 'iso8859-5', 'koi8r')).* from iso8859_5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"iso8859-5"},"location":49}},{"A_Const":{"sval":{"sval":"koi8r"},"location":62}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":79}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 052
+select description, inbytes, (test_conv(inbytes, 'iso8859_5', 'mule_internal')).* from iso8859_5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"iso8859_5"},"location":49}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":62}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"iso8859_5_inputs","inh":true,"relpersistence":"p","location":87}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 053
+|--
+-- Big5
+|--
+CREATE TABLE big5_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"big5_inputs","inh":true,"relpersistence":"p","location":27},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":48},"is_local":true,"location":40}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":67},"is_local":true,"location":55}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 054
+insert into big5_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x666f6fb648',	'valid'),
+  ('\x666f6fa27f',	'valid, no translation to UTF-8'),
+  ('\x666f6fb60048',	'invalid, NUL byte'),
+  ('\x666f6fb64800',	'invalid, NUL byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"big5_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":35}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":48}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fb648"},"location":73}},{"A_Const":{"sval":{"sval":"valid"},"location":89}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fa27f"},"location":102}},{"A_Const":{"sval":{"sval":"valid, no translation to UTF-8"},"location":118}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fb60048"},"location":156}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":174}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6fb64800"},"location":199}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":217}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 055
+-- Test Big5 verification
+select description, inbytes, (test_conv(inbytes, 'big5', 'big5')).* from big5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":33}},"location":33}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":46}},"location":46}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":66}},{"A_Const":{"sval":{"sval":"big5"},"location":75}},{"A_Const":{"sval":{"sval":"big5"},"location":83}}],"funcformat":"COERCE_EXPLICIT_CALL","location":56}},"indirection":[{"A_Star":{}}]}},"location":55}}],"fromClause":[{"RangeVar":{"relname":"big5_inputs","inh":true,"relpersistence":"p","location":99}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 056
+-- Test conversions from Big5
+select description, inbytes, (test_conv(inbytes, 'big5', 'utf8')).* from big5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":37}},"location":37}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":50}},"location":50}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":70}},{"A_Const":{"sval":{"sval":"big5"},"location":79}},{"A_Const":{"sval":{"sval":"utf8"},"location":87}}],"funcformat":"COERCE_EXPLICIT_CALL","location":60}},"indirection":[{"A_Star":{}}]}},"location":59}}],"fromClause":[{"RangeVar":{"relname":"big5_inputs","inh":true,"relpersistence":"p","location":103}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 057
+select description, inbytes, (test_conv(inbytes, 'big5', 'mule_internal')).* from big5_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"big5"},"location":49}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"big5_inputs","inh":true,"relpersistence":"p","location":82}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 058
+|--
+-- MULE_INTERNAL
+|--
+CREATE TABLE mic_inputs (inbytes bytea, description text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":36},"tableElts":[{"ColumnDef":{"colname":"inbytes","typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":56},"is_local":true,"location":48}},{"ColumnDef":{"colname":"description","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":75},"is_local":true,"location":63}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 059
+insert into mic_inputs  values
+  ('\x666f6f',		'valid, pure ASCII'),
+  ('\x8bc68bcf8bcf',	'valid (in KOI8R)'),
+  ('\x8bc68bcf8b',	'invalid,incomplete char'),
+  ('\x92bedd',		'valid (in SHIFT_JIS)'),
+  ('\x92be',		'invalid, incomplete char)'),
+  ('\x666f6f95a3c1',	'valid (in Big5)'),
+  ('\x666f6f95a3',	'invalid, incomplete char'),
+  ('\x9200bedd',	'invalid, NUL byte'),
+  ('\x92bedd00',	'invalid, NUL byte'),
+  ('\x8b00c68bcf8bcf',	'invalid, NUL byte')
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f"},"location":34}},{"A_Const":{"sval":{"sval":"valid, pure ASCII"},"location":47}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x8bc68bcf8bcf"},"location":72}},{"A_Const":{"sval":{"sval":"valid (in KOI8R)"},"location":90}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x8bc68bcf8b"},"location":114}},{"A_Const":{"sval":{"sval":"invalid,incomplete char"},"location":130}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x92bedd"},"location":161}},{"A_Const":{"sval":{"sval":"valid (in SHIFT_JIS)"},"location":174}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x92be"},"location":202}},{"A_Const":{"sval":{"sval":"invalid, incomplete char)"},"location":213}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f95a3c1"},"location":246}},{"A_Const":{"sval":{"sval":"valid (in Big5)"},"location":264}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x666f6f95a3"},"location":287}},{"A_Const":{"sval":{"sval":"invalid, incomplete char"},"location":303}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x9200bedd"},"location":335}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":349}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x92bedd00"},"location":374}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":388}}]}},{"List":{"items":[{"A_Const":{"sval":{"sval":"\\x8b00c68bcf8bcf"},"location":413}},{"A_Const":{"sval":{"sval":"invalid, NUL byte"},"location":433}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 060
+-- Test MULE_INTERNAL verification
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'mule_internal')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":42}},"location":42}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":55}},"location":55}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":75}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":84}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":101}}],"funcformat":"COERCE_EXPLICIT_CALL","location":65}},"indirection":[{"A_Star":{}}]}},"location":64}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":126}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 061
+-- Test conversions from MULE_INTERNAL
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'koi8r')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":46}},"location":46}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":59}},"location":59}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":79}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":88}},{"A_Const":{"sval":{"sval":"koi8r"},"location":105}}],"funcformat":"COERCE_EXPLICIT_CALL","location":69}},"indirection":[{"A_Star":{}}]}},"location":68}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":122}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 062
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'iso8859-5')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":49}},{"A_Const":{"sval":{"sval":"iso8859-5"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":87}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 063
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'sjis')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":49}},{"A_Const":{"sval":{"sval":"sjis"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":82}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 064
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'big5')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":49}},{"A_Const":{"sval":{"sval":"big5"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":82}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 065
+select description, inbytes, (test_conv(inbytes, 'mule_internal', 'euc_jp')).* from mic_inputs
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"description"}}],"location":7}},"location":7}},{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":20}},"location":20}},{"ResTarget":{"val":{"A_Indirection":{"arg":{"FuncCall":{"funcname":[{"String":{"sval":"test_conv"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"inbytes"}}],"location":40}},{"A_Const":{"sval":{"sval":"mule_internal"},"location":49}},{"A_Const":{"sval":{"sval":"euc_jp"},"location":66}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"indirection":[{"A_Star":{}}]}},"location":29}}],"fromClause":[{"RangeVar":{"relname":"mic_inputs","inh":true,"relpersistence":"p","location":84}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}

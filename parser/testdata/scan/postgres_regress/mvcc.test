@@ -1,0 +1,150 @@
+== 001
+|--
+-- Verify that index scans encountering dead rows produced by an
+-- aborted subtransaction of the current transaction can utilize the
+-- kill_prior_tuple optimization
+|--
+-- NB: The table size is currently *not* expected to stay the same, we
+-- don't have logic to trigger opportunistic pruning in cases like
+-- this.
+BEGIN
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 67 SQL_COMMENT NO_KEYWORD
+68 136 SQL_COMMENT NO_KEYWORD
+137 169 SQL_COMMENT NO_KEYWORD
+170 172 SQL_COMMENT NO_KEYWORD
+173 243 SQL_COMMENT NO_KEYWORD
+244 310 SQL_COMMENT NO_KEYWORD
+311 319 SQL_COMMENT NO_KEYWORD
+320 325 BEGIN_P UNRESERVED_KEYWORD
+== 002
+SET LOCAL enable_seqscan = false
+--
+0 3 SET UNRESERVED_KEYWORD
+4 9 LOCAL UNRESERVED_KEYWORD
+10 24 IDENT NO_KEYWORD
+25 26 ASCII_61 NO_KEYWORD
+27 32 FALSE_P RESERVED_KEYWORD
+== 003
+SET LOCAL enable_indexonlyscan = false
+--
+0 3 SET UNRESERVED_KEYWORD
+4 9 LOCAL UNRESERVED_KEYWORD
+10 30 IDENT NO_KEYWORD
+31 32 ASCII_61 NO_KEYWORD
+33 38 FALSE_P RESERVED_KEYWORD
+== 004
+SET LOCAL enable_bitmapscan = false
+--
+0 3 SET UNRESERVED_KEYWORD
+4 9 LOCAL UNRESERVED_KEYWORD
+10 27 IDENT NO_KEYWORD
+28 29 ASCII_61 NO_KEYWORD
+30 35 FALSE_P RESERVED_KEYWORD
+== 005
+-- Can't easily use a unique index, since dead tuples can be found
+-- independent of the kill_prior_tuples optimization.
+CREATE TABLE clean_aborted_self(key int, data text)
+--
+0 66 SQL_COMMENT NO_KEYWORD
+67 120 SQL_COMMENT NO_KEYWORD
+121 127 CREATE RESERVED_KEYWORD
+128 133 TABLE RESERVED_KEYWORD
+134 152 IDENT NO_KEYWORD
+152 153 ASCII_40 NO_KEYWORD
+153 156 KEY UNRESERVED_KEYWORD
+157 160 INT_P COL_NAME_KEYWORD
+160 161 ASCII_44 NO_KEYWORD
+162 166 DATA_P UNRESERVED_KEYWORD
+167 171 TEXT_P UNRESERVED_KEYWORD
+171 172 ASCII_41 NO_KEYWORD
+== 006
+CREATE INDEX clean_aborted_self_key ON clean_aborted_self(key)
+--
+0 6 CREATE RESERVED_KEYWORD
+7 12 INDEX UNRESERVED_KEYWORD
+13 35 IDENT NO_KEYWORD
+36 38 ON RESERVED_KEYWORD
+39 57 IDENT NO_KEYWORD
+57 58 ASCII_40 NO_KEYWORD
+58 61 KEY UNRESERVED_KEYWORD
+61 62 ASCII_41 NO_KEYWORD
+== 007
+INSERT INTO clean_aborted_self (key, data) VALUES (-1, 'just to allocate metapage')
+--
+0 6 INSERT UNRESERVED_KEYWORD
+7 11 INTO RESERVED_KEYWORD
+12 30 IDENT NO_KEYWORD
+31 32 ASCII_40 NO_KEYWORD
+32 35 KEY UNRESERVED_KEYWORD
+35 36 ASCII_44 NO_KEYWORD
+37 41 DATA_P UNRESERVED_KEYWORD
+41 42 ASCII_41 NO_KEYWORD
+43 49 VALUES COL_NAME_KEYWORD
+50 51 ASCII_40 NO_KEYWORD
+51 52 ASCII_45 NO_KEYWORD
+52 53 ICONST NO_KEYWORD
+53 54 ASCII_44 NO_KEYWORD
+55 82 SCONST NO_KEYWORD
+82 83 ASCII_41 NO_KEYWORD
+== 008
+-- save index size from before the changes, for comparison
+SELECT pg_relation_size('clean_aborted_self_key') AS clean_aborted_self_key_before
+--
+0 58 SQL_COMMENT NO_KEYWORD
+59 65 SELECT RESERVED_KEYWORD
+66 82 IDENT NO_KEYWORD
+82 83 ASCII_40 NO_KEYWORD
+83 107 SCONST NO_KEYWORD
+107 108 ASCII_41 NO_KEYWORD
+109 111 AS RESERVED_KEYWORD
+112 141 IDENT NO_KEYWORD
+== 009
+DO $$
+BEGIN
+    -- iterate often enough to see index growth even on larger-than-default page sizes
+    FOR i IN 1..100 LOOP
+        BEGIN
+	    -- perform index scan over all the inserted keys to get them to be seen as dead
+            IF EXISTS(SELECT * FROM clean_aborted_self WHERE key > 0 AND key < 100) THEN
+	        RAISE data_corrupted USING MESSAGE = 'these rows should not exist';
+            END IF;
+            INSERT INTO clean_aborted_self SELECT g.i, 'rolling back in a sec' FROM generate_series(1, 100) g(i);
+	    -- just some error that's not normally thrown
+	    RAISE reading_sql_data_not_permitted USING MESSAGE = 'round and round again';
+	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
+    END LOOP;
+END;$$
+--
+0 2 DO RESERVED_KEYWORD
+3 734 SCONST NO_KEYWORD
+== 010
+-- show sizes only if they differ
+SELECT :clean_aborted_self_key_before AS size_before, pg_relation_size('clean_aborted_self_key') size_after
+WHERE :clean_aborted_self_key_before != pg_relation_size('clean_aborted_self_key')
+--
+0 33 SQL_COMMENT NO_KEYWORD
+34 40 SELECT RESERVED_KEYWORD
+41 42 ASCII_58 NO_KEYWORD
+42 71 IDENT NO_KEYWORD
+72 74 AS RESERVED_KEYWORD
+75 86 IDENT NO_KEYWORD
+86 87 ASCII_44 NO_KEYWORD
+88 104 IDENT NO_KEYWORD
+104 105 ASCII_40 NO_KEYWORD
+105 129 SCONST NO_KEYWORD
+129 130 ASCII_41 NO_KEYWORD
+131 141 IDENT NO_KEYWORD
+142 147 WHERE RESERVED_KEYWORD
+148 149 ASCII_58 NO_KEYWORD
+149 178 IDENT NO_KEYWORD
+179 181 NOT_EQUALS NO_KEYWORD
+182 198 IDENT NO_KEYWORD
+198 199 ASCII_40 NO_KEYWORD
+199 223 SCONST NO_KEYWORD
+223 224 ASCII_41 NO_KEYWORD
+== 011
+ROLLBACK
+--
+0 8 ROLLBACK UNRESERVED_KEYWORD

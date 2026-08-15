@@ -1,0 +1,995 @@
+== 001
+|--
+-- Tests for psql features that aren't closely connected to any
+-- specific server features
+|--
+
+-- \set
+
+-- fail: invalid name
+-- fail: invalid value for special variable
+-- check handling of built-in boolean variable
+
+-- ;
+
+SELECT 1 as one, 2 as two
+--
+50fde20626009aba
+== 002
+SELECT 3 as three, 4 as four \gx
+
+-- \gx should work in FETCH_COUNT mode too
+
+SELECT 1 as one, 2 as two
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 30
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 003
+SELECT 3 as three, 4 as four \gx
+
+
+-- ;
+
+SELECT 1 as one, 2 as two \g (format=csv csv_fieldsep='\t')
+SELECT 1 as one, 2 as two \gx (title='foo bar')
+
+-- \bind (extended query protocol)
+
+SELECT 1 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 30
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+SELECT $1 \bind 'foo'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 11
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 005
+SELECT $1, $2 \bind 'foo' 'bar'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 006
+-- errors
+-- parse error
+SELECT foo \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 37
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 007
+-- tcop error
+SELECT 1 \
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+SELECT 2 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 10
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
+-- bind error
+SELECT $1, $2 \bind 'foo'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 29
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 010
+-- ;
+
+select 10 as test01, 20 as test02, 'Hello' as test03
+--
+50fde20626009aba
+== 011
+-- should fail: bad variable name
+select 10 as "bad name"
+
+select 97 as "EOF", 'ok' as _foo
+--
+ERROR: syntax error at or near "select"
+CURSORPOS: 60
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 012
+-- multiple backslash commands in one line
+select 1 as x, 2 as y
+--
+50fde20626009aba
+== 013
+select 3 as x, 4 as y
+--
+50fde20626009aba
+== 014
+select 5 as x, 6 as y
+--
+50fde20626009aba
+== 015
+select 7 as x, 8 as y
+--
+50fde20626009aba
+== 016
+-- NULL should unset the variable
+select 1 as var1, NULL as var2, 3 as var3
+--
+50fde20626009aba
+== 017
+-- ;
+select 10 as test01, 20 as test02 from generate_series(1,3)
+--
+a714124ef0dc95d9
+== 018
+select 10 as test01, 20 as test02 from generate_series(1,0)
+--
+a714124ef0dc95d9
+== 019
+-- ;
+select a from generate_series(1, 10) as a where a = 11
+--
+c994e3f55dddc879
+== 020
+-- ;
+
+select 1 as x, 2 as y
+--
+50fde20626009aba
+== 021
+select 3 as x, 4 as y
+--
+50fde20626009aba
+== 022
+select 10 as test01, 20 as test02 from generate_series(1,3)
+--
+a714124ef0dc95d9
+== 023
+select 10 as test01, 20 as test02 from generate_series(1,0)
+--
+a714124ef0dc95d9
+== 024
+-- ;
+
+SELECT
+    NULL AS zero,
+    1 AS one,
+    2.0 AS two,
+    'three' AS three,
+    $1 AS four,
+    sin($2) as five,
+    'foo'::varchar(4) as six,
+    CURRENT_DATE AS now
+
+-- should work with tuple-returning utilities, such as EXECUTE
+PREPARE test AS SELECT 1 AS first, 2 AS second
+--
+ERROR: syntax error at or near "PREPARE"
+CURSORPOS: 239
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 025
+EXECUTE test
+--
+44ef1d2beabd53e8
+== 026
+EXPLAIN EXECUTE test
+--
+9e3cdf8d3f67c2e6
+== 027
+-- should fail cleanly - syntax error
+SELECT 1 +
+--
+ERROR: syntax error at end of input
+CURSORPOS: 49
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 028
+-- check behavior with empty results
+SELECT
+--
+c4a415ece0b3cef5
+== 029
+CREATE TABLE bububu(a int)
+--
+1fb88652dd36b94f
+== 030
+-- subject command should not have executed
+TABLE bububu
+--
+bbb47b132104fb42
+== 031
+-- fail
+
+-- query buffer should remain unchanged
+SELECT 1 AS x, 'Hello', 2 AS y, true AS "dirty\name"
+
+-- all on one line
+SELECT 3 AS x, 'Hello', 4 AS y, true AS "dirty\name"
+--
+ERROR: syntax error at or near "SELECT"
+CURSORPOS: 123
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 032
+-- test for server bug #17983 with empty statement in aborted transaction
+set search_path = default
+--
+471d80087d54895e
+== 033
+begin
+--
+b16b431979fc3e05
+== 034
+rollback
+--
+a46081a556fda027
+== 035
+-- ;
+
+create temporary table gexec_test(a int, b text, c date, d float)
+--
+dc0d21d6502a624e
+== 036
+select format('create index on gexec_test(%I)', attname)
+from pg_attribute
+where attrelid = 'gexec_test'::regclass and attnum > 0
+order by attnum
+
+-- ;
+-- (though the fetch limit applies to the executed queries not the meta query)
+
+select 'select 1 as ones', 'select x.y, x.y*2 as double from generate_series(1,4) as x(y)'
+union all
+select 'drop table gexec_test', NULL
+union all
+select 'drop table gexec_test', 'select ''2000-01-01''::date as party_over'
+
+
+-- \setenv, \getenv
+
+-- ensure MYVAR isn't set
+-- in which case, reading it doesn't change the target
+-- now set it
+
+-- show all pset options
+
+-- test multi-line headers, wrapping, and newline indicators
+-- in aligned, unaligned, and wrapped formats
+prepare q as select array_to_string(array_agg(repeat('x',2*n)),E'\n') as "ab
+
+c", array_to_string(array_agg(repeat('y',20-2*n)),E'\n') as "a
+bc" from generate_series(1,10) as n(n) group by n>1 order by n>1
+--
+ERROR: syntax error at or near "select"
+CURSORPOS: 233
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 037
+execute q
+--
+44ef1d2beabd53e8
+== 038
+execute q
+--
+44ef1d2beabd53e8
+== 039
+execute q
+--
+44ef1d2beabd53e8
+== 040
+execute q
+--
+44ef1d2beabd53e8
+== 041
+execute q
+--
+44ef1d2beabd53e8
+== 042
+execute q
+--
+44ef1d2beabd53e8
+== 043
+execute q
+--
+44ef1d2beabd53e8
+== 044
+execute q
+--
+44ef1d2beabd53e8
+== 045
+execute q
+--
+44ef1d2beabd53e8
+== 046
+execute q
+--
+44ef1d2beabd53e8
+== 047
+execute q
+--
+44ef1d2beabd53e8
+== 048
+execute q
+--
+44ef1d2beabd53e8
+== 049
+execute q
+--
+44ef1d2beabd53e8
+== 050
+execute q
+--
+44ef1d2beabd53e8
+== 051
+execute q
+--
+44ef1d2beabd53e8
+== 052
+execute q
+--
+44ef1d2beabd53e8
+== 053
+execute q
+--
+44ef1d2beabd53e8
+== 054
+execute q
+--
+44ef1d2beabd53e8
+== 055
+execute q
+--
+44ef1d2beabd53e8
+== 056
+execute q
+--
+44ef1d2beabd53e8
+== 057
+execute q
+--
+44ef1d2beabd53e8
+== 058
+execute q
+--
+44ef1d2beabd53e8
+== 059
+execute q
+--
+44ef1d2beabd53e8
+== 060
+execute q
+--
+44ef1d2beabd53e8
+== 061
+execute q
+--
+44ef1d2beabd53e8
+== 062
+execute q
+--
+44ef1d2beabd53e8
+== 063
+execute q
+--
+44ef1d2beabd53e8
+== 064
+execute q
+--
+44ef1d2beabd53e8
+== 065
+execute q
+--
+44ef1d2beabd53e8
+== 066
+execute q
+--
+44ef1d2beabd53e8
+== 067
+execute q
+--
+44ef1d2beabd53e8
+== 068
+execute q
+--
+44ef1d2beabd53e8
+== 069
+execute q
+--
+44ef1d2beabd53e8
+== 070
+execute q
+--
+44ef1d2beabd53e8
+== 071
+execute q
+--
+44ef1d2beabd53e8
+== 072
+execute q
+--
+44ef1d2beabd53e8
+== 073
+deallocate q
+--
+d8a65a814fbc5f95
+== 074
+-- test single-line header and data
+prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
+--
+97c1e4230b2c945f
+== 075
+execute q
+--
+44ef1d2beabd53e8
+== 076
+execute q
+--
+44ef1d2beabd53e8
+== 077
+execute q
+--
+44ef1d2beabd53e8
+== 078
+execute q
+--
+44ef1d2beabd53e8
+== 079
+execute q
+--
+44ef1d2beabd53e8
+== 080
+execute q
+--
+44ef1d2beabd53e8
+== 081
+execute q
+--
+44ef1d2beabd53e8
+== 082
+execute q
+--
+44ef1d2beabd53e8
+== 083
+execute q
+--
+44ef1d2beabd53e8
+== 084
+execute q
+--
+44ef1d2beabd53e8
+== 085
+execute q
+--
+44ef1d2beabd53e8
+== 086
+execute q
+--
+44ef1d2beabd53e8
+== 087
+execute q
+--
+44ef1d2beabd53e8
+== 088
+execute q
+--
+44ef1d2beabd53e8
+== 089
+execute q
+--
+44ef1d2beabd53e8
+== 090
+execute q
+--
+44ef1d2beabd53e8
+== 091
+execute q
+--
+44ef1d2beabd53e8
+== 092
+execute q
+--
+44ef1d2beabd53e8
+== 093
+execute q
+--
+44ef1d2beabd53e8
+== 094
+execute q
+--
+44ef1d2beabd53e8
+== 095
+execute q
+--
+44ef1d2beabd53e8
+== 096
+execute q
+--
+44ef1d2beabd53e8
+== 097
+execute q
+--
+44ef1d2beabd53e8
+== 098
+execute q
+--
+44ef1d2beabd53e8
+== 099
+execute q
+--
+44ef1d2beabd53e8
+== 100
+execute q
+--
+44ef1d2beabd53e8
+== 101
+execute q
+--
+44ef1d2beabd53e8
+== 102
+execute q
+--
+44ef1d2beabd53e8
+== 103
+execute q
+--
+44ef1d2beabd53e8
+== 104
+execute q
+--
+44ef1d2beabd53e8
+== 105
+execute q
+--
+44ef1d2beabd53e8
+== 106
+execute q
+--
+44ef1d2beabd53e8
+== 107
+execute q
+--
+44ef1d2beabd53e8
+== 108
+execute q
+--
+44ef1d2beabd53e8
+== 109
+execute q
+--
+44ef1d2beabd53e8
+== 110
+execute q
+--
+44ef1d2beabd53e8
+== 111
+execute q
+--
+44ef1d2beabd53e8
+== 112
+execute q
+--
+44ef1d2beabd53e8
+== 113
+execute q
+--
+44ef1d2beabd53e8
+== 114
+execute q
+--
+44ef1d2beabd53e8
+== 115
+execute q
+--
+44ef1d2beabd53e8
+== 116
+execute q
+--
+44ef1d2beabd53e8
+== 117
+execute q
+--
+44ef1d2beabd53e8
+== 118
+execute q
+--
+44ef1d2beabd53e8
+== 119
+execute q
+--
+44ef1d2beabd53e8
+== 120
+deallocate q
+--
+d8a65a814fbc5f95
+== 121
+-- support table for output-format tests (useful to create a footer)
+
+create table psql_serial_tab (id serial)
+--
+8d1a713057e542f8
+== 122
+-- test header/footer/tuples_only behavior in aligned/unaligned/wrapped cases
+
+
+-- empty table is a special case for this format
+select 1 where false
+--
+50fde20626009aba
+== 123
+-- check conditional am display
+
+CREATE SCHEMA tableam_display
+--
+ab32ab90bd2f10f7
+== 124
+CREATE ROLE regress_display_role
+--
+6ad7bb4d3c9ae8f8
+== 125
+ALTER SCHEMA tableam_display OWNER TO regress_display_role
+--
+1cf8819204254dbf
+== 126
+SET search_path TO tableam_display
+--
+972eb2e22f47f95c
+== 127
+CREATE ACCESS METHOD heap_psql TYPE TABLE HANDLER heap_tableam_handler
+--
+a6d98c3640fa45d0
+== 128
+SET ROLE TO regress_display_role
+--
+56facc463e2de425
+== 129
+-- Use only relations with a physical size of zero.
+CREATE TABLE tbl_heap_psql(f1 int, f2 char(100)) using heap_psql
+--
+34f819e7746b0ee8
+== 130
+CREATE TABLE tbl_heap(f1 int, f2 char(100)) using heap
+--
+b42f4b231ffd37f0
+== 131
+CREATE VIEW view_heap_psql AS SELECT f1 from tbl_heap_psql
+--
+d177ebb06709b0e5
+== 132
+CREATE MATERIALIZED VIEW mat_view_heap_psql USING heap_psql AS SELECT f1 from tbl_heap_psql
+--
+f61400cb6d87cd33
+== 133
+-- AM is displayed for tables, indexes and materialized views.
+-- But not for views and sequences.
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 134
+RESET search_path
+--
+e97698aade82a29f
+== 135
+DROP SCHEMA tableam_display CASCADE
+--
+12d621bd0583e041
+== 136
+DROP ACCESS METHOD heap_psql
+--
+642fb8c5391e4ba6
+== 137
+DROP ROLE regress_display_role
+--
+74ebb566d381cae1
+== 138
+-- test numericlocale (as best we can without control of psql's locale)
+
+
+select n, -n as m, n * 111 as x, '1e90'::float8 as f
+from generate_series(0,3) n
+--
+f968f9158c4fa607
+== 139
+-- test asciidoc output format
+
+
+
+prepare q as
+  select 'some|text' as "a|title", '        ' as "empty ", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 140
+execute q
+--
+44ef1d2beabd53e8
+== 141
+execute q
+--
+44ef1d2beabd53e8
+== 142
+execute q
+--
+44ef1d2beabd53e8
+== 143
+execute q
+--
+44ef1d2beabd53e8
+== 144
+execute q
+--
+44ef1d2beabd53e8
+== 145
+execute q
+--
+44ef1d2beabd53e8
+== 146
+deallocate q
+--
+d8a65a814fbc5f95
+== 147
+-- test csv output format
+
+
+
+prepare q as
+  select 'some"text' as "a""title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 148
+execute q
+--
+44ef1d2beabd53e8
+== 149
+execute q
+--
+44ef1d2beabd53e8
+== 150
+deallocate q
+--
+d8a65a814fbc5f95
+== 151
+-- special cases
+select 'comma,comma' as comma, 'semi;semi' as semi
+--
+50fde20626009aba
+== 152
+select 'comma,comma' as comma, 'semi;semi' as semi
+--
+50fde20626009aba
+== 153
+select '\.' as data
+--
+50fde20626009aba
+== 154
+select '\' as d1, '' as d2
+--
+50fde20626009aba
+== 155
+-- illegal csv separators
+
+
+-- test html output format
+
+
+
+prepare q as
+  select 'some"text' as "a&title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 156
+execute q
+--
+44ef1d2beabd53e8
+== 157
+execute q
+--
+44ef1d2beabd53e8
+== 158
+execute q
+--
+44ef1d2beabd53e8
+== 159
+execute q
+--
+44ef1d2beabd53e8
+== 160
+execute q
+--
+44ef1d2beabd53e8
+== 161
+execute q
+--
+44ef1d2beabd53e8
+== 162
+deallocate q
+--
+d8a65a814fbc5f95
+== 163
+-- test latex output format
+
+
+
+prepare q as
+  select 'some\more_text' as "a$title", E'  #<foo>%&^~|\n{bar}' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 164
+execute q
+--
+44ef1d2beabd53e8
+== 165
+execute q
+--
+44ef1d2beabd53e8
+== 166
+execute q
+--
+44ef1d2beabd53e8
+== 167
+execute q
+--
+44ef1d2beabd53e8
+== 168
+execute q
+--
+44ef1d2beabd53e8
+== 169
+execute q
+--
+44ef1d2beabd53e8
+== 170
+execute q
+--
+44ef1d2beabd53e8
+== 171
+execute q
+--
+44ef1d2beabd53e8
+== 172
+deallocate q
+--
+d8a65a814fbc5f95
+== 173
+-- test latex-longtable output format
+
+
+
+prepare q as
+  select 'some\more_text' as "a$title", E'  #<foo>%&^~|\n{bar}' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 174
+execute q
+--
+44ef1d2beabd53e8
+== 175
+execute q
+--
+44ef1d2beabd53e8
+== 176
+execute q
+--
+44ef1d2beabd53e8
+== 177
+execute q
+--
+44ef1d2beabd53e8
+== 178
+execute q
+--
+44ef1d2beabd53e8
+== 179
+execute q
+--
+44ef1d2beabd53e8
+== 180
+execute q
+--
+44ef1d2beabd53e8
+== 181
+execute q
+--
+44ef1d2beabd53e8
+== 182
+execute q
+--
+44ef1d2beabd53e8
+== 183
+execute q
+--
+44ef1d2beabd53e8
+== 184
+deallocate q
+--
+d8a65a814fbc5f95
+== 185
+-- test troff-ms output format
+
+
+
+prepare q as
+  select 'some\text' as "a\title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+0bb56dc44a9e8a99
+== 186
+execute q
+--
+44ef1d2beabd53e8
+== 187
+execute q
+--
+44ef1d2beabd53e8
+== 188
+execute q
+--
+44ef1d2beabd53e8
+== 189
+execute q
+--
+44ef1d2beabd53e8
+== 190
+execute q
+--
+44ef1d2beabd53e8
+== 191
+execute q
+--
+44ef1d2beabd53e8
+== 192
+deallocate q
+--
+d8a65a814fbc5f95
+== 193
+-- check ambiguous format requests
+
+
+-- clean up after output format tests
+
+drop table psql_serial_tab
+--
+9dc8edf04a3a8eee
+== 194
+-- \echo and allied features
+
+
+
+
+
+-- tests for \if ... \endif
+
+  select 'okay'
+--
+50fde20626009aba
+== 195
+select 'still okay'
+--
+50fde20626009aba
+== 196
+not okay
+--
+ERROR: syntax error at or near "not"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror

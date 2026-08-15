@@ -1,0 +1,457 @@
+== 001
+|--
+-- CREATE_AGGREGATE
+|--
+
+-- all functions CREATEd
+CREATE AGGREGATE newavg (
+   sfunc = int4_avg_accum, basetype = int4, stype = _int8,
+   finalfunc = int8_avg,
+   initcond1 = '{0,0}'
+)
+--
+CREATE AGGREGATE newavg (sfunc = int4_avg_accum, basetype = int4, stype = _int8, finalfunc = int8_avg, initcond1 = '{0,0}')
+== 002
+-- test comments
+COMMENT ON AGGREGATE newavg_wrong (int4) IS 'an agg comment'
+--
+COMMENT ON AGGREGATE newavg_wrong(int4) IS 'an agg comment'
+== 003
+COMMENT ON AGGREGATE newavg (int4) IS 'an agg comment'
+--
+COMMENT ON AGGREGATE newavg(int4) IS 'an agg comment'
+== 004
+COMMENT ON AGGREGATE newavg (int4) IS NULL
+--
+COMMENT ON AGGREGATE newavg(int4) IS NULL
+== 005
+-- without finalfunc; test obsolete spellings 'sfunc1' etc
+CREATE AGGREGATE newsum (
+   sfunc1 = int4pl, basetype = int4, stype1 = int4,
+   initcond1 = '0'
+)
+--
+CREATE AGGREGATE newsum (sfunc1 = int4pl, basetype = int4, stype1 = int4, initcond1 = '0')
+== 006
+-- zero-argument aggregate
+CREATE AGGREGATE newcnt (*) (
+   sfunc = int8inc, stype = int8,
+   initcond = '0', parallel = safe
+)
+--
+CREATE AGGREGATE newcnt (*) (sfunc = int8inc, stype = int8, initcond = '0', parallel = safe)
+== 007
+-- old-style spelling of same (except without parallel-safe; that's too new)
+CREATE AGGREGATE oldcnt (
+   sfunc = int8inc, basetype = 'ANY', stype = int8,
+   initcond = '0'
+)
+--
+CREATE AGGREGATE oldcnt (sfunc = int8inc, basetype = 'ANY', stype = int8, initcond = '0')
+== 008
+-- aggregate that only cares about null/nonnull input
+CREATE AGGREGATE newcnt ("any") (
+   sfunc = int8inc_any, stype = int8,
+   initcond = '0'
+)
+--
+CREATE AGGREGATE newcnt ("any") (sfunc = int8inc_any, stype = int8, initcond = '0')
+== 009
+COMMENT ON AGGREGATE nosuchagg (*) IS 'should fail'
+--
+COMMENT ON AGGREGATE nosuchagg(*) IS 'should fail'
+== 010
+COMMENT ON AGGREGATE newcnt (*) IS 'an agg(*) comment'
+--
+COMMENT ON AGGREGATE newcnt(*) IS 'an agg(*) comment'
+== 011
+COMMENT ON AGGREGATE newcnt ("any") IS 'an agg(any) comment'
+--
+COMMENT ON AGGREGATE newcnt("any") IS 'an agg(any) comment'
+== 012
+-- multi-argument aggregate
+create function sum3(int8,int8,int8) returns int8 as
+'select $1 + $2 + $3' language sql strict immutable
+--
+CREATE FUNCTION sum3(int8, int8, int8) RETURNS int8 AS $$select $1 + $2 + $3$$ LANGUAGE sql RETURNS NULL ON NULL INPUT IMMUTABLE
+== 013
+create aggregate sum2(int8,int8) (
+   sfunc = sum3, stype = int8,
+   initcond = '0'
+)
+--
+CREATE AGGREGATE sum2 (int8, int8) (sfunc = sum3, stype = int8, initcond = '0')
+== 014
+-- multi-argument aggregates sensitive to distinct/order, strict/nonstrict
+create type aggtype as (a integer, b integer, c text)
+--
+CREATE TYPE aggtype AS (a int, b int, c text)
+== 015
+create function aggf_trans(aggtype[],integer,integer,text) returns aggtype[]
+as 'select array_append($1,ROW($2,$3,$4)::aggtype)'
+language sql strict immutable
+--
+CREATE FUNCTION aggf_trans(aggtype[], int, int, text) RETURNS aggtype[] AS $$select array_append($1,ROW($2,$3,$4)::aggtype)$$ LANGUAGE sql RETURNS NULL ON NULL INPUT IMMUTABLE
+== 016
+create function aggfns_trans(aggtype[],integer,integer,text) returns aggtype[]
+as 'select array_append($1,ROW($2,$3,$4)::aggtype)'
+language sql immutable
+--
+CREATE FUNCTION aggfns_trans(aggtype[], int, int, text) RETURNS aggtype[] AS $$select array_append($1,ROW($2,$3,$4)::aggtype)$$ LANGUAGE sql IMMUTABLE
+== 017
+create aggregate aggfstr(integer,integer,text) (
+   sfunc = aggf_trans, stype = aggtype[],
+   initcond = '{}'
+)
+--
+CREATE AGGREGATE aggfstr (int, int, text) (sfunc = aggf_trans, stype = aggtype[], initcond = '{}')
+== 018
+create aggregate aggfns(integer,integer,text) (
+   sfunc = aggfns_trans, stype = aggtype[], sspace = 10000,
+   initcond = '{}'
+)
+--
+CREATE AGGREGATE aggfns (int, int, text) (sfunc = aggfns_trans, stype = aggtype[], sspace = 10000, initcond = '{}')
+== 019
+-- check error cases that would require run-time type coercion
+create function least_accum(int8, int8) returns int8 language sql as
+  'select least($1, $2)'
+--
+CREATE FUNCTION least_accum(int8, int8) RETURNS int8 LANGUAGE sql AS $$select least($1, $2)$$
+== 020
+create aggregate least_agg(int4) (
+  stype = int8, sfunc = least_accum
+)
+--
+CREATE AGGREGATE least_agg (int4) (stype = int8, sfunc = least_accum)
+== 021
+-- fails
+
+drop function least_accum(int8, int8)
+--
+DROP FUNCTION least_accum(int8, int8)
+== 022
+create function least_accum(anycompatible, anycompatible)
+returns anycompatible language sql as
+  'select least($1, $2)'
+--
+CREATE FUNCTION least_accum(anycompatible, anycompatible) RETURNS anycompatible LANGUAGE sql AS $$select least($1, $2)$$
+== 023
+create aggregate least_agg(int4) (
+  stype = int8, sfunc = least_accum
+)
+--
+CREATE AGGREGATE least_agg (int4) (stype = int8, sfunc = least_accum)
+== 024
+-- fails
+
+create aggregate least_agg(int8) (
+  stype = int8, sfunc = least_accum
+)
+--
+CREATE AGGREGATE least_agg (int8) (stype = int8, sfunc = least_accum)
+== 025
+drop function least_accum(anycompatible, anycompatible) cascade
+--
+DROP FUNCTION least_accum(anycompatible, anycompatible) CASCADE
+== 026
+-- variadic aggregates
+create function least_accum(anyelement, variadic anyarray)
+returns anyelement language sql as
+  'select least($1, min($2[i])) from generate_subscripts($2,1) g(i)'
+--
+CREATE FUNCTION least_accum(anyelement, VARIADIC anyarray) RETURNS anyelement LANGUAGE sql AS $$select least($1, min($2[i])) from generate_subscripts($2,1) g(i)$$
+== 027
+create aggregate least_agg(variadic items anyarray) (
+  stype = anyelement, sfunc = least_accum
+)
+--
+CREATE AGGREGATE least_agg (VARIADIC items anyarray) (stype = anyelement, sfunc = least_accum)
+== 028
+create function cleast_accum(anycompatible, variadic anycompatiblearray)
+returns anycompatible language sql as
+  'select least($1, min($2[i])) from generate_subscripts($2,1) g(i)'
+--
+CREATE FUNCTION cleast_accum(anycompatible, VARIADIC anycompatiblearray) RETURNS anycompatible LANGUAGE sql AS $$select least($1, min($2[i])) from generate_subscripts($2,1) g(i)$$
+== 029
+create aggregate cleast_agg(variadic items anycompatiblearray) (
+  stype = anycompatible, sfunc = cleast_accum
+)
+--
+CREATE AGGREGATE cleast_agg (VARIADIC items anycompatiblearray) (stype = anycompatible, sfunc = cleast_accum)
+== 030
+-- test ordered-set aggs using built-in support functions
+create aggregate my_percentile_disc(float8 ORDER BY anyelement) (
+  stype = internal,
+  sfunc = ordered_set_transition,
+  finalfunc = percentile_disc_final,
+  finalfunc_extra = true,
+  finalfunc_modify = read_write
+)
+--
+CREATE AGGREGATE my_percentile_disc (float8 ORDER BY anyelement) (stype = internal, sfunc = ordered_set_transition, finalfunc = percentile_disc_final, finalfunc_extra = true, finalfunc_modify = read_write)
+== 031
+create aggregate my_rank(VARIADIC "any" ORDER BY VARIADIC "any") (
+  stype = internal,
+  sfunc = ordered_set_transition_multi,
+  finalfunc = rank_final,
+  finalfunc_extra = true,
+  hypothetical
+)
+--
+CREATE AGGREGATE my_rank (VARIADIC "any" ORDER BY VARIADIC "any") (stype = internal, sfunc = ordered_set_transition_multi, finalfunc = rank_final, finalfunc_extra = true, hypothetical)
+== 032
+alter aggregate my_percentile_disc(float8 ORDER BY anyelement)
+  rename to test_percentile_disc
+--
+ALTER AGGREGATE my_percentile_disc(float8, anyelement) RENAME TO test_percentile_disc
+== 033
+alter aggregate my_rank(VARIADIC "any" ORDER BY VARIADIC "any")
+  rename to test_rank
+--
+ALTER AGGREGATE my_rank(VARIADIC "any") RENAME TO test_rank
+== 034
+-- moving-aggregate options
+
+CREATE AGGREGATE sumdouble (float8)
+(
+    stype = float8,
+    sfunc = float8pl,
+    mstype = float8,
+    msfunc = float8pl,
+    minvfunc = float8mi
+)
+--
+CREATE AGGREGATE sumdouble (float8) (stype = float8, sfunc = float8pl, mstype = float8, msfunc = float8pl, minvfunc = float8mi)
+== 035
+-- aggregate combine and serialization functions
+
+-- can't specify just one of serialfunc and deserialfunc
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	serialfunc = numeric_avg_serialize
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, serialfunc = numeric_avg_serialize)
+== 036
+-- serialfunc must have correct parameters
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	serialfunc = numeric_avg_deserialize,
+	deserialfunc = numeric_avg_deserialize
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, serialfunc = numeric_avg_deserialize, deserialfunc = numeric_avg_deserialize)
+== 037
+-- deserialfunc must have correct parameters
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	serialfunc = numeric_avg_serialize,
+	deserialfunc = numeric_avg_serialize
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, serialfunc = numeric_avg_serialize, deserialfunc = numeric_avg_serialize)
+== 038
+-- ensure combine function parameters are checked
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	serialfunc = numeric_avg_serialize,
+	deserialfunc = numeric_avg_deserialize,
+	combinefunc = int4larger
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, serialfunc = numeric_avg_serialize, deserialfunc = numeric_avg_deserialize, combinefunc = int4larger)
+== 039
+-- ensure create aggregate works.
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	finalfunc = numeric_avg,
+	serialfunc = numeric_avg_serialize,
+	deserialfunc = numeric_avg_deserialize,
+	combinefunc = numeric_avg_combine,
+	finalfunc_modify = shareable  -- just to test a non-default setting
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, finalfunc = numeric_avg, serialfunc = numeric_avg_serialize, deserialfunc = numeric_avg_deserialize, combinefunc = numeric_avg_combine, finalfunc_modify = shareable)
+== 040
+-- Ensure all these functions made it into the catalog
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype,
+       aggserialfn, aggdeserialfn, aggfinalmodify
+FROM pg_aggregate
+WHERE aggfnoid = 'myavg'::REGPROC
+--
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype, aggserialfn, aggdeserialfn, aggfinalmodify FROM pg_aggregate WHERE aggfnoid = 'myavg'::regproc
+== 041
+DROP AGGREGATE myavg (numeric)
+--
+DROP AGGREGATE myavg(numeric)
+== 042
+-- create or replace aggregate
+CREATE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	finalfunc = numeric_avg
+)
+--
+CREATE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, finalfunc = numeric_avg)
+== 043
+CREATE OR REPLACE AGGREGATE myavg (numeric)
+(
+	stype = internal,
+	sfunc = numeric_avg_accum,
+	finalfunc = numeric_avg,
+	serialfunc = numeric_avg_serialize,
+	deserialfunc = numeric_avg_deserialize,
+	combinefunc = numeric_avg_combine,
+	finalfunc_modify = shareable  -- just to test a non-default setting
+)
+--
+CREATE OR REPLACE AGGREGATE myavg (numeric) (stype = internal, sfunc = numeric_avg_accum, finalfunc = numeric_avg, serialfunc = numeric_avg_serialize, deserialfunc = numeric_avg_deserialize, combinefunc = numeric_avg_combine, finalfunc_modify = shareable)
+== 044
+-- Ensure all these functions made it into the catalog again
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype,
+       aggserialfn, aggdeserialfn, aggfinalmodify
+FROM pg_aggregate
+WHERE aggfnoid = 'myavg'::REGPROC
+--
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype, aggserialfn, aggdeserialfn, aggfinalmodify FROM pg_aggregate WHERE aggfnoid = 'myavg'::regproc
+== 045
+-- can change stype:
+CREATE OR REPLACE AGGREGATE myavg (numeric)
+(
+	stype = numeric,
+	sfunc = numeric_add
+)
+--
+CREATE OR REPLACE AGGREGATE myavg (numeric) (stype = numeric, sfunc = numeric_add)
+== 046
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype,
+       aggserialfn, aggdeserialfn, aggfinalmodify
+FROM pg_aggregate
+WHERE aggfnoid = 'myavg'::REGPROC
+--
+SELECT aggfnoid, aggtransfn, aggcombinefn, aggtranstype::regtype, aggserialfn, aggdeserialfn, aggfinalmodify FROM pg_aggregate WHERE aggfnoid = 'myavg'::regproc
+== 047
+-- can't change return type:
+CREATE OR REPLACE AGGREGATE myavg (numeric)
+(
+	stype = numeric,
+	sfunc = numeric_add,
+	finalfunc = numeric_out
+)
+--
+CREATE OR REPLACE AGGREGATE myavg (numeric) (stype = numeric, sfunc = numeric_add, finalfunc = numeric_out)
+== 048
+-- can't change to a different kind:
+CREATE OR REPLACE AGGREGATE myavg (order by numeric)
+(
+	stype = numeric,
+	sfunc = numeric_add
+)
+--
+CREATE OR REPLACE AGGREGATE myavg (ORDER BY numeric) (stype = numeric, sfunc = numeric_add)
+== 049
+-- can't change plain function to aggregate:
+create function sum4(int8,int8,int8,int8) returns int8 as
+'select $1 + $2 + $3 + $4' language sql strict immutable
+--
+CREATE FUNCTION sum4(int8, int8, int8, int8) RETURNS int8 AS $$select $1 + $2 + $3 + $4$$ LANGUAGE sql RETURNS NULL ON NULL INPUT IMMUTABLE
+== 050
+CREATE OR REPLACE AGGREGATE sum3 (int8,int8,int8)
+(
+	stype = int8,
+	sfunc = sum4
+)
+--
+CREATE OR REPLACE AGGREGATE sum3 (int8, int8, int8) (stype = int8, sfunc = sum4)
+== 051
+drop function sum4(int8,int8,int8,int8)
+--
+DROP FUNCTION sum4(int8, int8, int8, int8)
+== 052
+DROP AGGREGATE myavg (numeric)
+--
+DROP AGGREGATE myavg(numeric)
+== 053
+-- invalid: bad parallel-safety marking
+CREATE AGGREGATE mysum (int)
+(
+	stype = int,
+	sfunc = int4pl,
+	parallel = pear
+)
+--
+CREATE AGGREGATE mysum (int) (stype = int, sfunc = int4pl, parallel = pear)
+== 054
+-- invalid: nonstrict inverse with strict forward function
+
+CREATE FUNCTION float8mi_n(float8, float8) RETURNS float8 AS
+$$ SELECT $1 - $2; $$
+LANGUAGE SQL
+--
+CREATE FUNCTION float8mi_n(float8, float8) RETURNS float8 AS $$ SELECT $1 - $2; $$ LANGUAGE sql
+== 055
+CREATE AGGREGATE invalidsumdouble (float8)
+(
+    stype = float8,
+    sfunc = float8pl,
+    mstype = float8,
+    msfunc = float8pl,
+    minvfunc = float8mi_n
+)
+--
+CREATE AGGREGATE invalidsumdouble (float8) (stype = float8, sfunc = float8pl, mstype = float8, msfunc = float8pl, minvfunc = float8mi_n)
+== 056
+-- invalid: non-matching result types
+
+CREATE FUNCTION float8mi_int(float8, float8) RETURNS int AS
+$$ SELECT CAST($1 - $2 AS INT); $$
+LANGUAGE SQL
+--
+CREATE FUNCTION float8mi_int(float8, float8) RETURNS int AS $$ SELECT CAST($1 - $2 AS INT); $$ LANGUAGE sql
+== 057
+CREATE AGGREGATE wrongreturntype (float8)
+(
+    stype = float8,
+    sfunc = float8pl,
+    mstype = float8,
+    msfunc = float8pl,
+    minvfunc = float8mi_int
+)
+--
+CREATE AGGREGATE wrongreturntype (float8) (stype = float8, sfunc = float8pl, mstype = float8, msfunc = float8pl, minvfunc = float8mi_int)
+== 058
+-- invalid: non-lowercase quoted identifiers
+
+CREATE AGGREGATE case_agg ( -- old syntax
+	"Sfunc1" = int4pl,
+	"Basetype" = int4,
+	"Stype1" = int4,
+	"Initcond1" = '0',
+	"Parallel" = safe
+)
+--
+CREATE AGGREGATE case_agg ("Sfunc1" = int4pl, "Basetype" = int4, "Stype1" = int4, "Initcond1" = '0', "Parallel" = safe)
+== 059
+CREATE AGGREGATE case_agg(float8)
+(
+	"Stype" = internal,
+	"Sfunc" = ordered_set_transition,
+	"Finalfunc" = percentile_disc_final,
+	"Finalfunc_extra" = true,
+	"Finalfunc_modify" = read_write,
+	"Parallel" = safe
+)
+--
+CREATE AGGREGATE case_agg (float8) ("Stype" = internal, "Sfunc" = ordered_set_transition, "Finalfunc" = percentile_disc_final, "Finalfunc_extra" = true, "Finalfunc_modify" = read_write, "Parallel" = safe)

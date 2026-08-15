@@ -1,0 +1,291 @@
+== 001
+|--
+-- SELECT_VIEWS
+-- test the views defined in CREATE_VIEWS
+|--
+
+SELECT * FROM street
+--
+243e11ecacac8e86
+== 002
+SELECT name, #thepath FROM iexit ORDER BY name COLLATE "C", 2
+--
+694a57404e922726
+== 003
+SELECT * FROM toyemp WHERE name = 'sharon'
+--
+a0c1782205640c01
+== 004
+|--
+-- Test for Leaky view scenario
+|--
+CREATE ROLE regress_alice
+--
+3ef84f2b1509ce4f
+== 005
+CREATE FUNCTION f_leak (text)
+       RETURNS bool LANGUAGE 'plpgsql' COST 0.0000001
+       AS 'BEGIN RAISE NOTICE ''f_leak => %'', $1; RETURN true; END'
+--
+4e907f33b64063b9
+== 006
+CREATE TABLE customer (
+       cid      int primary key,
+       name     text not null,
+       tel      text,
+       passwd	text
+)
+--
+4133344978959f54
+== 007
+CREATE TABLE credit_card (
+       cid      int references customer(cid),
+       cnum     text,
+       climit   int
+)
+--
+247288ba5eefa224
+== 008
+CREATE TABLE credit_usage (
+       cid      int references customer(cid),
+       ymd      date,
+       usage    int
+)
+--
+02e4e5a34654c957
+== 009
+INSERT INTO customer
+       VALUES (101, 'regress_alice', '+81-12-3456-7890', 'passwd123'),
+              (102, 'regress_bob',   '+01-234-567-8901', 'beafsteak'),
+              (103, 'regress_eve',   '+49-8765-43210',   'hamburger')
+--
+bcf919658c9217b2
+== 010
+INSERT INTO credit_card
+       VALUES (101, '1111-2222-3333-4444', 4000),
+              (102, '5555-6666-7777-8888', 3000),
+              (103, '9801-2345-6789-0123', 2000)
+--
+5c885a8382d95b88
+== 011
+INSERT INTO credit_usage
+       VALUES (101, '2011-09-15', 120),
+	      (101, '2011-10-05',  90),
+	      (101, '2011-10-18', 110),
+	      (101, '2011-10-21', 200),
+	      (101, '2011-11-10',  80),
+	      (102, '2011-09-22', 300),
+	      (102, '2011-10-12', 120),
+	      (102, '2011-10-28', 200),
+	      (103, '2011-10-15', 480)
+--
+22616057efb4e7c4
+== 012
+CREATE VIEW my_property_normal AS
+       SELECT * FROM customer WHERE name = current_user
+--
+a4e69b583223e4e6
+== 013
+CREATE VIEW my_property_secure WITH (security_barrier) AS
+       SELECT * FROM customer WHERE name = current_user
+--
+a982f5e27dc72545
+== 014
+CREATE VIEW my_credit_card_normal AS
+       SELECT * FROM customer l NATURAL JOIN credit_card r
+       WHERE l.name = current_user
+--
+5726e98bdcd0aa44
+== 015
+CREATE VIEW my_credit_card_secure WITH (security_barrier) AS
+       SELECT * FROM customer l NATURAL JOIN credit_card r
+       WHERE l.name = current_user
+--
+171e0575d707eb47
+== 016
+CREATE VIEW my_credit_card_usage_normal AS
+       SELECT * FROM my_credit_card_secure l NATURAL JOIN credit_usage r
+--
+43ab809f055277d0
+== 017
+CREATE VIEW my_credit_card_usage_secure WITH (security_barrier) AS
+       SELECT * FROM my_credit_card_secure l NATURAL JOIN credit_usage r
+--
+0d34bb008e2c9e6b
+== 018
+GRANT SELECT ON my_property_normal TO public
+--
+182c1ceb53777f66
+== 019
+GRANT SELECT ON my_property_secure TO public
+--
+c89ce04b3671e0be
+== 020
+GRANT SELECT ON my_credit_card_normal TO public
+--
+46de732fcaaec984
+== 021
+GRANT SELECT ON my_credit_card_secure TO public
+--
+3451f96c4650398d
+== 022
+GRANT SELECT ON my_credit_card_usage_normal TO public
+--
+a5978d752d439882
+== 023
+GRANT SELECT ON my_credit_card_usage_secure TO public
+--
+f6a74e3c2c86c957
+== 024
+|--
+-- Run leaky view scenarios
+|--
+SET SESSION AUTHORIZATION regress_alice
+--
+532a0ea53df105d9
+== 025
+|--
+-- scenario: if a qualifier with tiny-cost is given, it shall be launched
+--           prior to the security policy of the view.
+|--
+SELECT * FROM my_property_normal WHERE f_leak(passwd)
+--
+777779c6efddf33b
+== 026
+EXPLAIN (COSTS OFF) SELECT * FROM my_property_normal WHERE f_leak(passwd)
+--
+fca49570ff5d2337
+== 027
+SELECT * FROM my_property_secure WHERE f_leak(passwd)
+--
+f0ded726a787303f
+== 028
+EXPLAIN (COSTS OFF) SELECT * FROM my_property_secure WHERE f_leak(passwd)
+--
+b304463815c9ceea
+== 029
+|--
+-- scenario: qualifiers can be pushed down if they contain leaky functions,
+--           provided they aren't passed data from inside the view.
+|--
+SELECT * FROM my_property_normal v
+		WHERE f_leak('passwd') AND f_leak(passwd)
+--
+2d8045cf20761ed2
+== 030
+EXPLAIN (COSTS OFF) SELECT * FROM my_property_normal v
+		WHERE f_leak('passwd') AND f_leak(passwd)
+--
+b2aac65105817916
+== 031
+SELECT * FROM my_property_secure v
+		WHERE f_leak('passwd') AND f_leak(passwd)
+--
+ac5f2fb666d9c922
+== 032
+EXPLAIN (COSTS OFF) SELECT * FROM my_property_secure v
+		WHERE f_leak('passwd') AND f_leak(passwd)
+--
+200869a6598029f9
+== 033
+|--
+-- scenario: if a qualifier references only one-side of a particular join-
+--           tree, it shall be distributed to the most deep scan plan as
+--           possible as we can.
+|--
+SELECT * FROM my_credit_card_normal WHERE f_leak(cnum)
+--
+11a312c77b506e0c
+== 034
+EXPLAIN (COSTS OFF) SELECT * FROM my_credit_card_normal WHERE f_leak(cnum)
+--
+664365668072837d
+== 035
+SELECT * FROM my_credit_card_secure WHERE f_leak(cnum)
+--
+4c519a3bc9eea4c8
+== 036
+EXPLAIN (COSTS OFF) SELECT * FROM my_credit_card_secure WHERE f_leak(cnum)
+--
+49c1860f4350fef8
+== 037
+|--
+-- scenario: an external qualifier can be pushed-down by in-front-of the
+--           views with "security_barrier" attribute, except for operators
+--           implemented with leakproof functions.
+|--
+SELECT * FROM my_credit_card_usage_normal
+       WHERE f_leak(cnum) AND ymd >= '2011-10-01' AND ymd < '2011-11-01'
+--
+562afa38c8e60390
+== 038
+EXPLAIN (COSTS OFF) SELECT * FROM my_credit_card_usage_normal
+       WHERE f_leak(cnum) AND ymd >= '2011-10-01' AND ymd < '2011-11-01'
+--
+85be1405a2274185
+== 039
+SELECT * FROM my_credit_card_usage_secure
+       WHERE f_leak(cnum) AND ymd >= '2011-10-01' AND ymd < '2011-11-01'
+--
+84a58e7851b787fc
+== 040
+EXPLAIN (COSTS OFF) SELECT * FROM my_credit_card_usage_secure
+       WHERE f_leak(cnum) AND ymd >= '2011-10-01' AND ymd < '2011-11-01'
+--
+c1b3ac5d6b8582b0
+== 041
+|--
+-- Test for the case when security_barrier gets changed between rewriter
+-- and planner stage.
+|--
+PREPARE p1 AS SELECT * FROM my_property_normal WHERE f_leak(passwd)
+--
+deec4fe811c90f93
+== 042
+PREPARE p2 AS SELECT * FROM my_property_secure WHERE f_leak(passwd)
+--
+33f98dce5bf8e576
+== 043
+EXECUTE p1
+--
+44ef1d2beabd53e8
+== 044
+EXECUTE p2
+--
+44ef1d2beabd53e8
+== 045
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 046
+ALTER VIEW my_property_normal SET (security_barrier=true)
+--
+a8e7af9fec6a3310
+== 047
+ALTER VIEW my_property_secure SET (security_barrier=false)
+--
+f779a4318cb6fa8f
+== 048
+SET SESSION AUTHORIZATION regress_alice
+--
+532a0ea53df105d9
+== 049
+EXECUTE p1
+--
+44ef1d2beabd53e8
+== 050
+-- To be perform as a view with security-barrier
+EXECUTE p2
+--
+44ef1d2beabd53e8
+== 051
+-- To be perform as a view without security-barrier
+
+-- Cleanup.
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 052
+DROP ROLE regress_alice
+--
+d5d626b0f4e27fda

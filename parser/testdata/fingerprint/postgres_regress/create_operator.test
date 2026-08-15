@@ -1,0 +1,523 @@
+== 001
+|--
+-- CREATE_OPERATOR
+|--
+
+CREATE OPERATOR ## (
+   leftarg = path,
+   rightarg = path,
+   function = path_inter,
+   commutator = ##
+)
+--
+6c12ae3c220b9ee7
+== 002
+CREATE OPERATOR @#@ (
+   rightarg = int8,		-- prefix
+   procedure = factorial
+)
+--
+d13bd0719f699253
+== 003
+CREATE OPERATOR #%# (
+   leftarg = int8,		-- fail, postfix is no longer supported
+   procedure = factorial
+)
+--
+8740b1e719b0c07e
+== 004
+-- Test operator created above
+SELECT @#@ 24
+--
+5f80294ccd83bcbf
+== 005
+-- Test comments
+COMMENT ON OPERATOR ###### (NONE, int4) IS 'bad prefix'
+--
+ff40c1b0e4224915
+== 006
+COMMENT ON OPERATOR ###### (int4, NONE) IS 'bad postfix'
+--
+9c8abd171cec09dc
+== 007
+COMMENT ON OPERATOR ###### (int4, int8) IS 'bad infix'
+--
+3cce6baa48a103c1
+== 008
+-- Check that DROP on a nonexistent op behaves sanely, too
+DROP OPERATOR ###### (NONE, int4)
+--
+b753638eb96818a2
+== 009
+DROP OPERATOR ###### (int4, NONE)
+--
+b753638eb96818a2
+== 010
+DROP OPERATOR ###### (int4, int8)
+--
+909b56f3d9b97bbc
+== 011
+-- => is disallowed as an operator name now
+CREATE OPERATOR => (
+   rightarg = int8,
+   procedure = factorial
+)
+--
+ERROR: syntax error at or near "=>"
+CURSORPOS: 61
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 012
+-- lexing of <=, >=, <>, != has a number of edge cases
+-- (=> is tested elsewhere)
+
+-- this is legal because ! is not allowed in sql ops
+CREATE OPERATOR !=- (
+   rightarg = int8,
+   procedure = factorial
+)
+--
+d2120f0988c0d321
+== 013
+SELECT !=- 10
+--
+850fe8db999b20f9
+== 014
+-- postfix operators don't work anymore
+SELECT 10 !=-
+--
+ERROR: syntax error at end of input
+CURSORPOS: 54
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 015
+-- make sure lexer returns != as <> even in edge cases
+SELECT 2 !=/**/ 1, 2 !=/**/ 2
+--
+ad0364b047714f43
+== 016
+SELECT 2 !=-- comment to be removed by psql
+  1
+--
+ad0364b047714f43
+== 017
+DO $$ -- use DO to protect -- from psql
+  declare r boolean;
+  begin
+    execute $e$ select 2 !=-- comment
+      1 $e$ into r;
+    raise info 'r = %', r;
+  end;
+$$
+--
+f936eab75b8c1b90
+== 018
+-- check that <= etc. followed by more operator characters are returned
+-- as the correct token with correct precedence
+SELECT true<>-1 BETWEEN 1 AND 1
+--
+ba9d1d70d28a97fd
+== 019
+-- BETWEEN has prec. above <> but below Op
+SELECT false<>/**/1 BETWEEN 1 AND 1
+--
+ba9d1d70d28a97fd
+== 020
+SELECT false<=-1 BETWEEN 1 AND 1
+--
+1089609e5b18b5f0
+== 021
+SELECT false>=-1 BETWEEN 1 AND 1
+--
+41a968be929f20c7
+== 022
+SELECT 2<=/**/3, 3>=/**/2, 2<>/**/3
+--
+7194bff4c37df56b
+== 023
+SELECT 3<=/**/2, 2>=/**/3, 2<>/**/2
+--
+7194bff4c37df56b
+== 024
+-- Should fail. CREATE OPERATOR requires USAGE on SCHEMA
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 025
+CREATE ROLE regress_rol_op1
+--
+c7d0d587649239bc
+== 026
+CREATE SCHEMA schema_op1
+--
+c0bdad12712bbdf0
+== 027
+GRANT USAGE ON SCHEMA schema_op1 TO PUBLIC
+--
+fba8a7f35ee21099
+== 028
+REVOKE USAGE ON SCHEMA schema_op1 FROM regress_rol_op1
+--
+d96fca617d117529
+== 029
+SET ROLE regress_rol_op1
+--
+56facc463e2de425
+== 030
+CREATE OPERATOR schema_op1.#*# (
+   rightarg = int8,
+   procedure = factorial
+)
+--
+26e5ed56e1a9926d
+== 031
+ROLLBACK
+--
+a46081a556fda027
+== 032
+-- Should fail. SETOF type functions not allowed as argument (testing leftarg)
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 033
+CREATE OPERATOR #*# (
+   leftarg = SETOF int8,
+   procedure = factorial
+)
+--
+d2e21356f2f2bf5d
+== 034
+ROLLBACK
+--
+a46081a556fda027
+== 035
+-- Should fail. SETOF type functions not allowed as argument (testing rightarg)
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 036
+CREATE OPERATOR #*# (
+   rightarg = SETOF int8,
+   procedure = factorial
+)
+--
+97d960a3b867a6ab
+== 037
+ROLLBACK
+--
+a46081a556fda027
+== 038
+-- Should work. Sample text-book case
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 039
+CREATE OR REPLACE FUNCTION fn_op2(boolean, boolean)
+RETURNS boolean AS $$
+    SELECT NULL::BOOLEAN;
+$$ LANGUAGE sql IMMUTABLE
+--
+3b519500ae0b3356
+== 040
+CREATE OPERATOR === (
+    LEFTARG = boolean,
+    RIGHTARG = boolean,
+    PROCEDURE = fn_op2,
+    COMMUTATOR = ===,
+    NEGATOR = !==,
+    RESTRICT = contsel,
+    JOIN = contjoinsel,
+    SORT1, SORT2, LTCMP, GTCMP, HASHES, MERGES
+)
+--
+3f76199edcf9a905
+== 041
+ROLLBACK
+--
+a46081a556fda027
+== 042
+-- Should fail. Invalid attribute
+CREATE OPERATOR #@%# (
+   rightarg = int8,
+   procedure = factorial,
+   invalid_att = int8
+)
+--
+a0f788bba277fdd3
+== 043
+-- Should fail. At least rightarg should be mandatorily specified
+CREATE OPERATOR #@%# (
+   procedure = factorial
+)
+--
+a967938a623e1927
+== 044
+-- Should fail. Procedure should be mandatorily specified
+CREATE OPERATOR #@%# (
+   rightarg = int8
+)
+--
+29120c0287f9795d
+== 045
+-- Should fail. CREATE OPERATOR requires USAGE on TYPE
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 046
+CREATE ROLE regress_rol_op3
+--
+b9722549f90ecce1
+== 047
+CREATE TYPE type_op3 AS ENUM ('new', 'open', 'closed')
+--
+7fb0841e8c0cd9ce
+== 048
+CREATE FUNCTION fn_op3(type_op3, int8)
+RETURNS int8 AS $$
+    SELECT NULL::int8;
+$$ LANGUAGE sql IMMUTABLE
+--
+0ee57fe76607d617
+== 049
+REVOKE USAGE ON TYPE type_op3 FROM regress_rol_op3
+--
+579283c9a0cb4057
+== 050
+REVOKE USAGE ON TYPE type_op3 FROM PUBLIC
+--
+b780a9c6bda957ef
+== 051
+-- Need to do this so that regress_rol_op3 is not allowed USAGE via PUBLIC
+SET ROLE regress_rol_op3
+--
+56facc463e2de425
+== 052
+CREATE OPERATOR #*# (
+   leftarg = type_op3,
+   rightarg = int8,
+   procedure = fn_op3
+)
+--
+680cb316003564b3
+== 053
+ROLLBACK
+--
+a46081a556fda027
+== 054
+-- Should fail. CREATE OPERATOR requires USAGE on TYPE (need to check separately for rightarg)
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 055
+CREATE ROLE regress_rol_op4
+--
+3ff2ecd48c55399d
+== 056
+CREATE TYPE type_op4 AS ENUM ('new', 'open', 'closed')
+--
+8657a3b501261c6c
+== 057
+CREATE FUNCTION fn_op4(int8, type_op4)
+RETURNS int8 AS $$
+    SELECT NULL::int8;
+$$ LANGUAGE sql IMMUTABLE
+--
+17f4794e33941484
+== 058
+REVOKE USAGE ON TYPE type_op4 FROM regress_rol_op4
+--
+d76a6502cd5fea6a
+== 059
+REVOKE USAGE ON TYPE type_op4 FROM PUBLIC
+--
+23ed18c8d6ef8bda
+== 060
+-- Need to do this so that regress_rol_op3 is not allowed USAGE via PUBLIC
+SET ROLE regress_rol_op4
+--
+56facc463e2de425
+== 061
+CREATE OPERATOR #*# (
+   leftarg = int8,
+   rightarg = type_op4,
+   procedure = fn_op4
+)
+--
+aca76784ac6e8a66
+== 062
+ROLLBACK
+--
+a46081a556fda027
+== 063
+-- Should fail. CREATE OPERATOR requires EXECUTE on function
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 064
+CREATE ROLE regress_rol_op5
+--
+6ad69fa76f6e3c21
+== 065
+CREATE TYPE type_op5 AS ENUM ('new', 'open', 'closed')
+--
+0c3a845f9555c53c
+== 066
+CREATE FUNCTION fn_op5(int8, int8)
+RETURNS int8 AS $$
+    SELECT NULL::int8;
+$$ LANGUAGE sql IMMUTABLE
+--
+3fd8f2fbc1b0be35
+== 067
+REVOKE EXECUTE ON FUNCTION fn_op5(int8, int8) FROM regress_rol_op5
+--
+0e28ec601a84dbf7
+== 068
+REVOKE EXECUTE ON FUNCTION fn_op5(int8, int8) FROM PUBLIC
+--
+514a17a1353cc5cb
+== 069
+-- Need to do this so that regress_rol_op3 is not allowed EXECUTE via PUBLIC
+SET ROLE regress_rol_op5
+--
+56facc463e2de425
+== 070
+CREATE OPERATOR #*# (
+   leftarg = int8,
+   rightarg = int8,
+   procedure = fn_op5
+)
+--
+8838c99cc95e8ff9
+== 071
+ROLLBACK
+--
+a46081a556fda027
+== 072
+-- Should fail. CREATE OPERATOR requires USAGE on return TYPE
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 073
+CREATE ROLE regress_rol_op6
+--
+025ac50fdfab56c7
+== 074
+CREATE TYPE type_op6 AS ENUM ('new', 'open', 'closed')
+--
+67eb2625a2aa2598
+== 075
+CREATE FUNCTION fn_op6(int8, int8)
+RETURNS type_op6 AS $$
+    SELECT NULL::type_op6;
+$$ LANGUAGE sql IMMUTABLE
+--
+391d6312ef3ebdcc
+== 076
+REVOKE USAGE ON TYPE type_op6 FROM regress_rol_op6
+--
+bb48e572a135ec3e
+== 077
+REVOKE USAGE ON TYPE type_op6 FROM PUBLIC
+--
+2587fd0cba6a44f2
+== 078
+-- Need to do this so that regress_rol_op3 is not allowed USAGE via PUBLIC
+SET ROLE regress_rol_op6
+--
+56facc463e2de425
+== 079
+CREATE OPERATOR #*# (
+   leftarg = int8,
+   rightarg = int8,
+   procedure = fn_op6
+)
+--
+f171676d06b9a09e
+== 080
+ROLLBACK
+--
+a46081a556fda027
+== 081
+-- Should fail. An operator cannot be its own negator.
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 082
+CREATE OPERATOR === (
+    leftarg = integer,
+    rightarg = integer,
+    procedure = int4eq,
+    negator = ===
+)
+--
+8c7654ba4f7b6ee0
+== 083
+ROLLBACK
+--
+a46081a556fda027
+== 084
+-- Should fail. An operator cannot be its own negator. Here we check that
+-- this error is detected when replacing a shell operator.
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 085
+-- create a shell operator for ===!!! by referencing it as a commutator
+CREATE OPERATOR === (
+    leftarg = integer,
+    rightarg = integer,
+    procedure = int4eq,
+    commutator = ===!!!
+)
+--
+91cd9274dee956ab
+== 086
+CREATE OPERATOR ===!!! (
+    leftarg = integer,
+    rightarg = integer,
+    procedure = int4ne,
+    negator = ===!!!
+)
+--
+3dbc09ee133b905b
+== 087
+ROLLBACK
+--
+a46081a556fda027
+== 088
+-- test that we can't use part of an existing commutator or negator pair
+-- as a commutator or negator
+CREATE OPERATOR === (
+    leftarg = integer,
+    rightarg = integer,
+    procedure = int4eq,
+    commutator = =
+)
+--
+931b104ba7761d3f
+== 089
+CREATE OPERATOR === (
+    leftarg = integer,
+    rightarg = integer,
+    procedure = int4eq,
+    negator = <>
+)
+--
+c3d352c78c05a2c7
+== 090
+-- invalid: non-lowercase quoted identifiers
+CREATE OPERATOR ===
+(
+	"Leftarg" = box,
+	"Rightarg" = box,
+	"Procedure" = area_equal_function,
+	"Commutator" = ===,
+	"Negator" = !==,
+	"Restrict" = area_restriction_function,
+	"Join" = area_join_function,
+	"Hashes",
+	"Merges"
+)
+--
+3bd0d50dea390849

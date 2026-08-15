@@ -1,0 +1,1722 @@
+== 001
+|--
+-- SUBSELECT
+|--
+
+SELECT 1 AS one WHERE 1 IN (SELECT 1)
+--
+4c4afa6906596a43
+== 002
+SELECT 1 AS zero WHERE 1 NOT IN (SELECT 1)
+--
+5be27cfabc16bef0
+== 003
+SELECT 1 AS zero WHERE 1 IN (SELECT 2)
+--
+4c4afa6906596a43
+== 004
+-- Check grammar's handling of extra parens in assorted contexts
+
+SELECT * FROM (SELECT 1 AS x) ss
+--
+50c8b3506f16ac61
+== 005
+SELECT * FROM ((SELECT 1 AS x)) ss
+--
+50c8b3506f16ac61
+== 006
+SELECT * FROM ((SELECT 1 AS x)), ((SELECT * FROM ((SELECT 2 AS y))))
+--
+02b6a93d66e066e4
+== 007
+(SELECT 2) UNION SELECT 2
+--
+043f6db7b76feb7f
+== 008
+((SELECT 2)) UNION SELECT 2
+--
+043f6db7b76feb7f
+== 009
+SELECT ((SELECT 2) UNION SELECT 2)
+--
+187fdec0b6b4c754
+== 010
+SELECT (((SELECT 2)) UNION SELECT 2)
+--
+187fdec0b6b4c754
+== 011
+SELECT (SELECT ARRAY[1,2,3])[1]
+--
+e35b9eba10ee1f17
+== 012
+SELECT ((SELECT ARRAY[1,2,3]))[2]
+--
+e35b9eba10ee1f17
+== 013
+SELECT (((SELECT ARRAY[1,2,3])))[3]
+--
+e35b9eba10ee1f17
+== 014
+-- Set up some simple test tables
+
+CREATE TABLE SUBSELECT_TBL (
+  f1 integer,
+  f2 integer,
+  f3 float
+)
+--
+5ba6f2eefa7ca3b9
+== 015
+INSERT INTO SUBSELECT_TBL VALUES (1, 2, 3)
+--
+1d1aacf952d8fb55
+== 016
+INSERT INTO SUBSELECT_TBL VALUES (2, 3, 4)
+--
+1d1aacf952d8fb55
+== 017
+INSERT INTO SUBSELECT_TBL VALUES (3, 4, 5)
+--
+1d1aacf952d8fb55
+== 018
+INSERT INTO SUBSELECT_TBL VALUES (1, 1, 1)
+--
+1d1aacf952d8fb55
+== 019
+INSERT INTO SUBSELECT_TBL VALUES (2, 2, 2)
+--
+1d1aacf952d8fb55
+== 020
+INSERT INTO SUBSELECT_TBL VALUES (3, 3, 3)
+--
+1d1aacf952d8fb55
+== 021
+INSERT INTO SUBSELECT_TBL VALUES (6, 7, 8)
+--
+1d1aacf952d8fb55
+== 022
+INSERT INTO SUBSELECT_TBL VALUES (8, 9, NULL)
+--
+1d1aacf952d8fb55
+== 023
+SELECT * FROM SUBSELECT_TBL
+--
+454b2c91fa4a31f5
+== 024
+-- Uncorrelated subselects
+
+SELECT f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1)
+--
+66192e013e90356e
+== 025
+SELECT f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL)
+--
+21b228dfad54b920
+== 026
+SELECT f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL))
+--
+ea64dca0fcef88a4
+== 027
+SELECT f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL)
+--
+7140a57ad1b4a9c2
+== 028
+-- Correlated subselects
+
+SELECT f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1)
+--
+9790569a6184db36
+== 029
+SELECT f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+--
+ed6ae021c0b2218d
+== 030
+SELECT f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer))
+--
+dc733cbcd4af93cd
+== 031
+SELECT f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL)
+--
+f88226e365291bf2
+== 032
+-- Check ROWCOMPARE cases, both correlated and not
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT ROW(1, 2) = (SELECT f1, f2) AS eq FROM SUBSELECT_TBL
+--
+e87c6d939c22d236
+== 033
+SELECT ROW(1, 2) = (SELECT f1, f2) AS eq FROM SUBSELECT_TBL
+--
+5628ae83f46ab524
+== 034
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT ROW(1, 2) = (SELECT 3, 4) AS eq FROM SUBSELECT_TBL
+--
+911cfb5805e38b75
+== 035
+SELECT ROW(1, 2) = (SELECT 3, 4) AS eq FROM SUBSELECT_TBL
+--
+2df420151200b424
+== 036
+SELECT ROW(1, 2) = (SELECT f1, f2 FROM SUBSELECT_TBL)
+--
+345a896f3bef6398
+== 037
+-- error
+
+-- Subselects without aliases
+
+SELECT count FROM (SELECT COUNT(DISTINCT name) FROM road)
+--
+18bd1bdb7a266810
+== 038
+SELECT COUNT(*) FROM (SELECT DISTINCT name FROM road)
+--
+d9ed84a381b0cddd
+== 039
+SELECT * FROM (SELECT * FROM int4_tbl), (VALUES (123456)) WHERE f1 = column1
+--
+404050f6b0f86100
+== 040
+CREATE VIEW view_unnamed_ss AS
+SELECT * FROM (SELECT * FROM (SELECT abs(f1) AS a1 FROM int4_tbl)),
+              (SELECT * FROM int8_tbl)
+  WHERE a1 < 10 AND q1 > a1 ORDER BY q1, q2
+--
+8e59bc1a5231e21c
+== 041
+SELECT * FROM view_unnamed_ss
+--
+d67b052e0c2ee054
+== 042
+DROP VIEW view_unnamed_ss
+--
+4473c467858c4095
+== 043
+-- Test matching of locking clause to correct alias
+
+CREATE VIEW view_unnamed_ss_locking AS
+SELECT * FROM (SELECT * FROM int4_tbl), int8_tbl AS unnamed_subquery
+  WHERE f1 = q1
+  FOR UPDATE OF unnamed_subquery
+--
+477b169fbfb066e8
+== 044
+DROP VIEW view_unnamed_ss_locking
+--
+0074af5ae904d149
+== 045
+|--
+-- Use some existing tables in the regression test
+|--
+
+SELECT ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647)
+--
+33f983edb1c04f6b
+== 046
+select q1, float8(count(*)) / (select count(*) from int8_tbl)
+from int8_tbl group by q1 order by q1
+--
+05528570bd6b516a
+== 047
+-- Unspecified-type literals in output columns should resolve as text
+
+SELECT *, pg_typeof(f1) FROM
+  (SELECT 'foo' AS f1 FROM generate_series(1,3)) ss ORDER BY 1
+--
+00792c9839fd60a5
+== 048
+-- ... unless there's context to suggest differently
+
+explain (verbose, costs off) select '42' union all select '43'
+--
+d369850788001a8e
+== 049
+explain (verbose, costs off) select '42' union all select 43
+--
+d369850788001a8e
+== 050
+-- check materialization of an initplan reference (bug #14524)
+explain (verbose, costs off)
+select 1 = all (select (select 1))
+--
+5eb6395b65764d0b
+== 051
+select 1 = all (select (select 1))
+--
+6317fd206c8c7eb8
+== 052
+|--
+-- Check EXISTS simplification with LIMIT
+|--
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit null)
+--
+70681753e85c2f37
+== 053
+explain (costs off)
+select * from int4_tbl o where not exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 1)
+--
+4faf520e73ddebe2
+== 054
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 0)
+--
+70681753e85c2f37
+== 055
+|--
+-- Test cases to catch unpleasant interactions between IN-join processing
+-- and subquery pullup.
+|--
+
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss
+--
+0b496d3d049f91d9
+== 056
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss
+--
+fe9c233752295924
+== 057
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss
+--
+a28b06a9d5810246
+== 058
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss
+--
+ef8fe092d480b4c8
+== 059
+|--
+-- Test cases to check for overenthusiastic optimization of
+-- "IN (SELECT DISTINCT ...)" and related cases.  Per example from
+-- Luca Pireddu and Michael Fuhr.
+|--
+
+CREATE TEMP TABLE foo (id integer)
+--
+ceedbb5f580ee7b8
+== 060
+CREATE TEMP TABLE bar (id1 integer, id2 integer)
+--
+a9d2e7a63bdb5f2b
+== 061
+INSERT INTO foo VALUES (1)
+--
+28301851ae28adec
+== 062
+INSERT INTO bar VALUES (1, 1)
+--
+dc676e6d2643be87
+== 063
+INSERT INTO bar VALUES (2, 2)
+--
+dc676e6d2643be87
+== 064
+INSERT INTO bar VALUES (3, 1)
+--
+dc676e6d2643be87
+== 065
+-- These cases require an extra level of distinct-ing above subquery s
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM bar) AS s)
+--
+b1486d167bac02a3
+== 066
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM bar GROUP BY id1,id2) AS s)
+--
+1c066e781a000c33
+== 067
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM bar UNION
+                      SELECT id1, id2 FROM bar) AS s)
+--
+512c17b3cee42c88
+== 068
+-- These cases do not
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM bar) AS s)
+--
+25c2885c21b775e9
+== 069
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM bar GROUP BY id2) AS s)
+--
+aaaf551a89943fb8
+== 070
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM bar UNION
+                      SELECT id2 FROM bar) AS s)
+--
+46d70927c58bc408
+== 071
+|--
+-- Test case to catch problems with multiply nested sub-SELECTs not getting
+-- recalculated properly.  Per bug report from Didier Moens.
+|--
+
+CREATE TABLE orderstest (
+    approver_ref integer,
+    po_ref integer,
+    ordercanceled boolean
+)
+--
+ac4f1162085aad0b
+== 072
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+c14263a22523860c
+== 073
+INSERT INTO orderstest VALUES (66, 5, false)
+--
+c14263a22523860c
+== 074
+INSERT INTO orderstest VALUES (66, 6, false)
+--
+c14263a22523860c
+== 075
+INSERT INTO orderstest VALUES (66, 7, false)
+--
+c14263a22523860c
+== 076
+INSERT INTO orderstest VALUES (66, 1, true)
+--
+c14263a22523860c
+== 077
+INSERT INTO orderstest VALUES (66, 8, false)
+--
+c14263a22523860c
+== 078
+INSERT INTO orderstest VALUES (66, 1, false)
+--
+c14263a22523860c
+== 079
+INSERT INTO orderstest VALUES (77, 1, false)
+--
+c14263a22523860c
+== 080
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+c14263a22523860c
+== 081
+INSERT INTO orderstest VALUES (66, 1, false)
+--
+c14263a22523860c
+== 082
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+c14263a22523860c
+== 083
+CREATE VIEW orders_view AS
+SELECT *,
+(SELECT CASE
+   WHEN ord.approver_ref=1 THEN '---' ELSE 'Approved'
+ END) AS "Approved",
+(SELECT CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (SELECT CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (SELECT CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status",
+(CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status_OK"
+FROM orderstest ord
+--
+48eca4e66bd1a7a7
+== 084
+SELECT * FROM orders_view
+--
+6e90d4d0acbc958e
+== 085
+DROP TABLE orderstest cascade
+--
+ba5a43ef125a9971
+== 086
+|--
+-- Test cases to catch situations where rule rewriter fails to propagate
+-- hasSubLinks flag correctly.  Per example from Kyle Bateman.
+|--
+
+create temp table parts (
+    partnum     text,
+    cost        float8
+)
+--
+a597137e2930e3ce
+== 087
+create temp table shipped (
+    ttype       char(2),
+    ordnum      int4,
+    partnum     text,
+    value       float8
+)
+--
+33853e7fbeb61520
+== 088
+create temp view shipped_view as
+    select * from shipped where ttype = 'wt'
+--
+27c435c913391d96
+== 089
+create rule shipped_view_insert as on insert to shipped_view do instead
+    insert into shipped values('wt', new.ordnum, new.partnum, new.value)
+--
+414424dd494faae9
+== 090
+insert into parts (partnum, cost) values (1, 1234.56)
+--
+20a0dc63675865c2
+== 091
+insert into shipped_view (ordnum, partnum, value)
+    values (0, 1, (select cost from parts where partnum = '1'))
+--
+197d6dc955f9cb8b
+== 092
+select * from shipped_view
+--
+daa7fa59f1453199
+== 093
+create rule shipped_view_update as on update to shipped_view do instead
+    update shipped set partnum = new.partnum, value = new.value
+        where ttype = new.ttype and ordnum = new.ordnum
+--
+3ad69e9ee1a66d33
+== 094
+update shipped_view set value = 11
+    from int4_tbl a join int4_tbl b
+      on (a.f1 = (select f1 from int4_tbl c where c.f1=b.f1))
+    where ordnum = a.f1
+--
+79e2d01d0f446d22
+== 095
+select * from shipped_view
+--
+daa7fa59f1453199
+== 096
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss
+--
+e622bab5c290d852
+== 097
+|--
+-- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
+-- Per bug report from David Sanchez i Gregori.
+|--
+
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss
+--
+04a35bb6a6455367
+== 098
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss
+--
+20e0138acfd6e888
+== 099
+|--
+-- Test that an IN implemented using a UniquePath does unique-ification
+-- with the right semantics, as per bug #4113.  (Unfortunately we have
+-- no simple way to ensure that this test case actually chooses that type
+-- of plan, but it does in releases 7.4-8.3.  Note that an ordering difference
+-- here might mean that some other plan type is being used, rendering the test
+-- pointless.)
+|--
+
+create temp table numeric_table (num_col numeric)
+--
+40921a396ce68502
+== 100
+insert into numeric_table values (1), (1.000000000000000000001), (2), (3)
+--
+131d2f32c7f40c62
+== 101
+create temp table float_table (float_col float8)
+--
+cc1d86e31fdff5d4
+== 102
+insert into float_table values (1), (2), (3)
+--
+f69c99afd8c7a223
+== 103
+select * from float_table
+  where float_col in (select num_col from numeric_table)
+--
+242ff0b8ebb2b99a
+== 104
+select * from numeric_table
+  where num_col in (select float_col from float_table)
+--
+54a7b3285501aa93
+== 105
+|--
+-- Test case for bug #4290: bogus calculation of subplan param sets
+|--
+
+create temp table ta (id int primary key, val int)
+--
+62066901f4803d35
+== 106
+insert into ta values(1,1)
+--
+07cc71ec4fecdc6e
+== 107
+insert into ta values(2,2)
+--
+07cc71ec4fecdc6e
+== 108
+create temp table tb (id int primary key, aval int)
+--
+08a1cfb89c3afa63
+== 109
+insert into tb values(1,1)
+--
+dc1bfbeed8a108c0
+== 110
+insert into tb values(2,1)
+--
+dc1bfbeed8a108c0
+== 111
+insert into tb values(3,2)
+--
+dc1bfbeed8a108c0
+== 112
+insert into tb values(4,2)
+--
+dc1bfbeed8a108c0
+== 113
+create temp table tc (id int primary key, aid int)
+--
+f5646be5044e609d
+== 114
+insert into tc values(1,1)
+--
+97a8affd81c723e4
+== 115
+insert into tc values(2,2)
+--
+97a8affd81c723e4
+== 116
+select
+  ( select min(tb.id) from tb
+    where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
+from tc
+--
+d5dcc7c34bdad4eb
+== 117
+|--
+-- Test case for 8.3 "failed to locate grouping columns" bug
+|--
+
+create temp table t1 (f1 numeric(14,0), f2 varchar(30))
+--
+857882f09a61967c
+== 118
+select * from
+  (select distinct f1, f2, (select f2 from t1 x where x.f1 = up.f1) as fs
+   from t1 up) ss
+group by f1,f2,fs
+--
+4ef3e9d3ebe4b602
+== 119
+|--
+-- Test case for bug #5514 (mishandling of whole-row Vars in subselects)
+|--
+
+create temp table table_a(id integer)
+--
+ceedbb5f580ee7b8
+== 120
+insert into table_a values (42)
+--
+bf99e7636576c473
+== 121
+create temp view view_a as select * from table_a
+--
+e1b0b642692233e3
+== 122
+select view_a from view_a
+--
+b8261f95c727be9e
+== 123
+select (select view_a) from view_a
+--
+4205ec2864c5de89
+== 124
+select (select (select view_a)) from view_a
+--
+dfd2eec1880f4cb6
+== 125
+select (select (a.*)::text) from view_a a
+--
+23d0b6f7a462635b
+== 126
+|--
+-- Test case for bug #19037: no relation entry for relid N
+|--
+
+explain (costs off)
+select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
+--
+514058019eb398e6
+== 127
+select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
+--
+3f7d1c6b9575ea9e
+== 128
+|--
+-- Check that whole-row Vars reading the result of a subselect don't include
+-- any junk columns therein
+|--
+
+select q from (select max(f1) from int4_tbl group by f1 order by f1) q
+--
+dd918e1f793c2539
+== 129
+with q as (select max(f1) from int4_tbl group by f1 order by f1)
+  select q from q
+--
+89c08072bf65e22b
+== 130
+|--
+-- Test case for sublinks pulled up into joinaliasvars lists in an
+-- inherited update/delete query
+|--
+
+begin
+--
+b16b431979fc3e05
+== 131
+--  this shouldn't delete anything, but be safe
+
+delete from road
+where exists (
+  select 1
+  from
+    int4_tbl cross join
+    ( select f1, array(select q1 from int8_tbl) as arr
+      from text_tbl ) ss
+  where road.name = ss.f1 )
+--
+bd2f5f3832b61aa4
+== 132
+rollback
+--
+a46081a556fda027
+== 133
+|--
+-- Test case for sublinks pushed down into subselects via join alias expansion
+|--
+
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = q2) as sq1, 42 as dummy
+   from int8_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1
+--
+860ffccde51c1ded
+== 134
+|--
+-- Test case for subselect within UPDATE of INSERT...ON CONFLICT DO UPDATE
+|--
+create temp table upsert(key int4 primary key, val text)
+--
+c016791d9b1338fe
+== 135
+insert into upsert values(1, 'val') on conflict (key) do update set val = 'not seen'
+--
+251ee56afeff5741
+== 136
+insert into upsert values(1, 'val') on conflict (key) do update set val = 'seen with subselect ' || (select f1 from int4_tbl where f1 != 0 limit 1)::text
+--
+ab3db5bceb3d4583
+== 137
+select * from upsert
+--
+b625f243af8db32c
+== 138
+with aa as (select 'int4_tbl' u from int4_tbl limit 1)
+insert into upsert values (1, 'x'), (999, 'y')
+on conflict (key) do update set val = (select u from aa)
+returning *
+--
+954e9433c29f73da
+== 139
+|--
+-- Test case for cross-type partial matching in hashed subplan (bug #7597)
+|--
+
+create temp table outer_7597 (f1 int4, f2 int4)
+--
+aaeb8e0c514415ac
+== 140
+insert into outer_7597 values (0, 0)
+--
+50c61f115fa4fcb5
+== 141
+insert into outer_7597 values (1, 0)
+--
+50c61f115fa4fcb5
+== 142
+insert into outer_7597 values (0, null)
+--
+50c61f115fa4fcb5
+== 143
+insert into outer_7597 values (1, null)
+--
+50c61f115fa4fcb5
+== 144
+create temp table inner_7597(c1 int8, c2 int8)
+--
+70d29ea6012e25fb
+== 145
+insert into inner_7597 values(0, null)
+--
+40507d8300ca2846
+== 146
+select * from outer_7597 where (f1, f2) not in (select * from inner_7597)
+--
+05daa9cea4045470
+== 147
+|--
+-- Similar test case using text that verifies that collation
+-- information is passed through by execTuplesEqual() in nodeSubplan.c
+-- (otherwise it would error in texteq())
+|--
+
+create temp table outer_text (f1 text, f2 text)
+--
+5c1fc89b0ff0098a
+== 148
+insert into outer_text values ('a', 'a')
+--
+17fd8e5a54db78e2
+== 149
+insert into outer_text values ('b', 'a')
+--
+17fd8e5a54db78e2
+== 150
+insert into outer_text values ('a', null)
+--
+17fd8e5a54db78e2
+== 151
+insert into outer_text values ('b', null)
+--
+17fd8e5a54db78e2
+== 152
+create temp table inner_text (c1 text, c2 text)
+--
+faa1047f567a8612
+== 153
+insert into inner_text values ('a', null)
+--
+3097725a0f6bf511
+== 154
+insert into inner_text values ('123', '456')
+--
+3097725a0f6bf511
+== 155
+select * from outer_text where (f1, f2) not in (select * from inner_text)
+--
+f06508d8ece4ebd8
+== 156
+|--
+-- Another test case for cross-type hashed subplans: comparison of
+-- inner-side values must be done with appropriate operator
+|--
+
+explain (verbose, costs off)
+select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
+--
+a9b5395c82979d13
+== 157
+select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
+--
+ccf2556879665967
+== 158
+|--
+-- Test that we don't try to hash nested records (bug #17363)
+-- (Hashing could be supported, but for now we don't)
+|--
+
+explain (verbose, costs off)
+select row(row(row(1))) = any (select row(row(1)))
+--
+9f675219772ed65d
+== 159
+select row(row(row(1))) = any (select row(row(1)))
+--
+a2a2374a20894770
+== 160
+|--
+-- Test case for premature memory release during hashing of subplan output
+|--
+
+select '1'::text in (select '1'::name union all select '1'::name)
+--
+ccf2556879665967
+== 161
+|--
+-- Test that we don't try to use a hashed subplan if the simplified
+-- testexpr isn't of the right shape
+|--
+
+-- this fails by default, of course
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+ee3177a8a55d75f7
+== 162
+begin
+--
+b16b431979fc3e05
+== 163
+-- make an operator to allow it to succeed
+create function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $1::text = $2'
+--
+0a9fdcb06e1be878
+== 164
+create operator = (procedure=bogus_int8_text_eq, leftarg=int8, rightarg=text)
+--
+f0eca37bc3b2f975
+== 165
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+696cb7495bf2abb6
+== 166
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+ee3177a8a55d75f7
+== 167
+-- inlining of this function results in unusual number of hash clauses,
+-- which we can still cope with
+create or replace function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $1::text = $2 and $1::text = $2'
+--
+234d1041a5a74e11
+== 168
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+696cb7495bf2abb6
+== 169
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+ee3177a8a55d75f7
+== 170
+-- inlining of this function causes LHS and RHS to be switched,
+-- which we can't cope with, so hashing should be abandoned
+create or replace function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $2 = $1::text'
+--
+234d1041a5a74e11
+== 171
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+696cb7495bf2abb6
+== 172
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+ee3177a8a55d75f7
+== 173
+rollback
+--
+a46081a556fda027
+== 174
+-- to get rid of the bogus operator
+
+|--
+-- Test resolution of hashed vs non-hashed implementation of EXISTS subplan
+|--
+explain (costs off)
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+--
+dcbacd0c0d386e08
+== 175
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+--
+4c22fb912a9056b7
+== 176
+explain (costs off)
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+  and thousand = 1
+--
+19dc9841ca8046f5
+== 177
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+  and thousand = 1
+--
+9760caaaa413b734
+== 178
+-- It's possible for the same EXISTS to get resolved both ways
+create temp table exists_tbl (c1 int, c2 int, c3 int) partition by list (c1)
+--
+b00ed3e8badb2e0e
+== 179
+create temp table exists_tbl_null partition of exists_tbl for values in (null)
+--
+924055aad3d16c21
+== 180
+create temp table exists_tbl_def partition of exists_tbl default
+--
+81f8fdbd1754589d
+== 181
+insert into exists_tbl select x, x/2, x+1 from generate_series(0,10) x
+--
+e55e04cca02194d0
+== 182
+analyze exists_tbl
+--
+bf9bce6f1550bbde
+== 183
+explain (costs off)
+select * from exists_tbl t1
+  where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
+--
+c2e3649606aa6ffd
+== 184
+select * from exists_tbl t1
+  where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
+--
+66ec1880c99e077c
+== 185
+|--
+-- Test case for planner bug with nested EXISTS handling
+|--
+select a.thousand from tenk1 a, tenk1 b
+where a.thousand = b.thousand
+  and exists ( select 1 from tenk1 c where b.hundred = c.hundred
+                   and not exists ( select 1 from tenk1 d
+                                    where a.thousand = d.thousand ) )
+--
+fc93d7af6bb2d326
+== 186
+|--
+-- Check that nested sub-selects are not pulled up if they contain volatiles
+|--
+explain (verbose, costs off)
+  select x, x from
+    (select (select now()) as x from (values(1),(2)) v(y)) ss
+--
+d025c4035b466f26
+== 187
+explain (verbose, costs off)
+  select x, x from
+    (select (select random()) as x from (values(1),(2)) v(y)) ss
+--
+3a4b1c6b34541409
+== 188
+explain (verbose, costs off)
+  select x, x from
+    (select (select now() where y=y) as x from (values(1),(2)) v(y)) ss
+--
+6315f44c224bcca6
+== 189
+explain (verbose, costs off)
+  select x, x from
+    (select (select random() where y=y) as x from (values(1),(2)) v(y)) ss
+--
+3f1e80ca37233d66
+== 190
+|--
+-- Test rescan of a hashed subplan (the use of random() is to prevent the
+-- sub-select from being pulled up, which would result in not hashing)
+|--
+explain (verbose, costs off)
+select sum(ss.tst::int) from
+  onek o cross join lateral (
+  select i.ten in (select f1 from int4_tbl where f1 <= o.hundred) as tst,
+         random() as r
+  from onek i where i.unique1 = o.unique1 ) ss
+where o.ten = 0
+--
+d39d8f9a359fc9a9
+== 191
+select sum(ss.tst::int) from
+  onek o cross join lateral (
+  select i.ten in (select f1 from int4_tbl where f1 <= o.hundred) as tst,
+         random() as r
+  from onek i where i.unique1 = o.unique1 ) ss
+where o.ten = 0
+--
+fba24f7cec73e15e
+== 192
+|--
+-- Test rescan of a SetOp node
+|--
+explain (costs off)
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+dc40d84af4d7c284
+== 193
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+d19b9ef78d42af97
+== 194
+|--
+-- Test rescan of a RecursiveUnion node
+|--
+explain (costs off)
+select sum(o.four), sum(ss.a) from
+  onek o cross join lateral (
+    with recursive x(a) as
+      (select o.four as a
+       union
+       select a + 1 from x
+       where a < 10)
+    select * from x
+  ) ss
+where o.ten = 1
+--
+dd98d718829ddd9c
+== 195
+select sum(o.four), sum(ss.a) from
+  onek o cross join lateral (
+    with recursive x(a) as
+      (select o.four as a
+       union
+       select a + 1 from x
+       where a < 10)
+    select * from x
+  ) ss
+where o.ten = 1
+--
+08dc4180edc5749c
+== 196
+|--
+-- Check we don't misoptimize a NOT IN where the subquery returns no rows.
+|--
+create temp table notinouter (a int)
+--
+bf4f5b4f6f8b713d
+== 197
+create temp table notininner (b int not null)
+--
+82d332cc9df70538
+== 198
+insert into notinouter values (null), (1)
+--
+c12cd5dff57b67c3
+== 199
+select * from notinouter where a not in (select b from notininner)
+--
+2ee8ec630fa7c4ec
+== 200
+|--
+-- Check we behave sanely in corner case of empty SELECT list (bug #8648)
+|--
+create temp table nocolumns()
+--
+c4ffa91c4e58c194
+== 201
+select exists(select * from nocolumns)
+--
+f2d28edea3708390
+== 202
+|--
+-- Check behavior with a SubPlan in VALUES (bug #14924)
+|--
+select val.x
+  from generate_series(1,10) as s(i),
+  lateral (
+    values ((select s.i + 1)), (s.i + 101)
+  ) as val(x)
+where s.i < 10 and (select val.x) < 110
+--
+bf8ee0971b89282b
+== 203
+-- another variant of that (bug #16213)
+explain (verbose, costs off)
+select * from
+(values
+  (3 not in (select * from (values (1), (2)) ss1)),
+  (false)
+) ss
+--
+366407b1fa88c0ee
+== 204
+select * from
+(values
+  (3 not in (select * from (values (1), (2)) ss1)),
+  (false)
+) ss
+--
+1034e9c61b5b7f03
+== 205
+|--
+-- Check sane behavior with nested IN SubLinks
+|--
+explain (verbose, costs off)
+select * from int4_tbl where
+  (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
+  (select ten from tenk1 b)
+--
+882cb02af012af74
+== 206
+select * from int4_tbl where
+  (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
+  (select ten from tenk1 b)
+--
+1b43f58b45bd85e3
+== 207
+|--
+-- Check for incorrect optimization when IN subquery contains a SRF
+|--
+explain (verbose, costs off)
+select * from int4_tbl o where (f1, f1) in
+  (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
+--
+dfbab72a6a8119fd
+== 208
+select * from int4_tbl o where (f1, f1) in
+  (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
+--
+05d28ca3e794950f
+== 209
+|--
+-- check for over-optimization of whole-row Var referencing an Append plan
+|--
+select (select q from
+         (select 1,2,3 where f1 > 0
+          union all
+          select 4,5,6.0 where f1 <= 0
+         ) q )
+from int4_tbl
+--
+6ac18a56fdc8fb37
+== 210
+|--
+-- Check for sane handling of a lateral reference in a subquery's quals
+-- (most of the complication here is to prevent the test case from being
+-- flattened too much)
+|--
+explain (verbose, costs off)
+select * from
+    int4_tbl i4,
+    lateral (
+        select i4.f1 > 1 as b, 1 as id
+        from (select random() order by 1) as t1
+      union all
+        select true as b, 2 as id
+    ) as t2
+where b and f1 >= 0
+--
+9a0bf240a0f5b59a
+== 211
+select * from
+    int4_tbl i4,
+    lateral (
+        select i4.f1 > 1 as b, 1 as id
+        from (select random() order by 1) as t1
+      union all
+        select true as b, 2 as id
+    ) as t2
+where b and f1 >= 0
+--
+4eabdfa0557c25b0
+== 212
+|--
+-- Check that volatile quals aren't pushed down past a DISTINCT:
+-- nextval() should not be called more than the nominal number of times
+|--
+create temp sequence ts1
+--
+bf8a6d60c661029b
+== 213
+select * from
+  (select distinct ten from tenk1) ss
+  where ten < 10 + nextval('ts1')
+  order by 1
+--
+74898d1a6e4bb7c8
+== 214
+select nextval('ts1')
+--
+4506a11da6bc909e
+== 215
+|--
+-- Check that volatile quals aren't pushed down past a set-returning function;
+-- while a nonvolatile qual can be, if it doesn't reference the SRF.
+|--
+create function tattle(x int, y int) returns bool
+volatile language plpgsql as $$
+begin
+  raise notice 'x = %, y = %', x, y;
+  return x > y;
+end$$
+--
+36c42e8532398935
+== 216
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+19024084edba25d5
+== 217
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+55a7c9e6392a9df7
+== 218
+-- if we pretend it's stable, we get different results:
+alter function tattle(x int, y int) stable
+--
+5949ca7fe72af9f3
+== 219
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+19024084edba25d5
+== 220
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+55a7c9e6392a9df7
+== 221
+-- although even a stable qual should not be pushed down if it references SRF
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, u)
+--
+65bdd5a532c6d806
+== 222
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, u)
+--
+6d05da3c600c96b4
+== 223
+drop function tattle(x int, y int)
+--
+718eef4c1b0cb41e
+== 224
+|--
+-- Test that LIMIT can be pushed to SORT through a subquery that just projects
+-- columns.  We check for that having happened by looking to see if EXPLAIN
+-- ANALYZE shows that a top-N sort was used.  We must suppress or filter away
+-- all the non-invariant parts of the EXPLAIN ANALYZE output.
+|--
+create table sq_limit (pk int primary key, c1 int, c2 int)
+--
+145af06e07815e23
+== 225
+insert into sq_limit values
+    (1, 1, 1),
+    (2, 2, 2),
+    (3, 3, 3),
+    (4, 4, 4),
+    (5, 1, 1),
+    (6, 2, 2),
+    (7, 3, 3),
+    (8, 4, 4)
+--
+9684f94a39cfab03
+== 226
+create function explain_sq_limit() returns setof text language plpgsql as
+$$
+declare ln text;
+begin
+    for ln in
+        explain (analyze, summary off, timing off, costs off)
+        select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
+    loop
+        ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
+        return next ln;
+    end loop;
+end;
+$$
+--
+e1c4692a019211a3
+== 227
+select * from explain_sq_limit()
+--
+e3e0650e26113d12
+== 228
+select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
+--
+026835e44272015b
+== 229
+drop function explain_sq_limit()
+--
+cce5d4d04e13c639
+== 230
+drop table sq_limit
+--
+01efdba8cb2995a2
+== 231
+|--
+-- Ensure that backward scan direction isn't propagated into
+-- expression subqueries (bug #15336)
+|--
+
+begin
+--
+b16b431979fc3e05
+== 232
+declare c1 scroll cursor for
+ select * from generate_series(1,4) i
+  where i <> all (values (2),(3))
+--
+c62efb60997ee43e
+== 233
+move forward all in c1
+--
+5460f87c3fc61c40
+== 234
+fetch backward all in c1
+--
+8288712b9f752e9f
+== 235
+commit
+--
+7bbcde9cfab6c79c
+== 236
+|--
+-- Check that JsonConstructorExpr is treated as non-strict, and thus can be
+-- wrapped in a PlaceHolderVar
+|--
+
+begin
+--
+b16b431979fc3e05
+== 237
+create temp table json_tab (a int)
+--
+bf4f5b4f6f8b713d
+== 238
+insert into json_tab values (1)
+--
+e09f8f99ebbcad25
+== 239
+explain (verbose, costs off)
+select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
+--
+5aa76c96c49d2e25
+== 240
+select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
+--
+a63a23a28358a59a
+== 241
+rollback
+--
+a46081a556fda027
+== 242
+|--
+-- Verify that we correctly flatten cases involving a subquery output
+-- expression that doesn't need to be wrapped in a PlaceHolderVar
+|--
+
+explain (costs off)
+select tname, attname from (
+select relname::information_schema.sql_identifier as tname, * from
+  (select * from pg_class c) ss1) ss2
+  right join pg_attribute a on a.attrelid = ss2.oid
+where tname = 'tenk1' and attnum = 1
+--
+59ac9e70006f0a44
+== 243
+select tname, attname from (
+select relname::information_schema.sql_identifier as tname, * from
+  (select * from pg_class c) ss1) ss2
+  right join pg_attribute a on a.attrelid = ss2.oid
+where tname = 'tenk1' and attnum = 1
+--
+dfcd31dc71735d2e
+== 244
+-- Check behavior when there's a lateral reference in the output expression
+explain (verbose, costs off)
+select t1.ten, sum(x) from
+  tenk1 t1 left join lateral (
+    select t1.ten + t2.ten as x, t2.fivethous from tenk1 t2
+  ) ss on t1.unique1 = ss.fivethous
+group by t1.ten
+order by t1.ten
+--
+f9850cafe147f8e5
+== 245
+select t1.ten, sum(x) from
+  tenk1 t1 left join lateral (
+    select t1.ten + t2.ten as x, t2.fivethous from tenk1 t2
+  ) ss on t1.unique1 = ss.fivethous
+group by t1.ten
+order by t1.ten
+--
+fa641729cac0f277
+== 246
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+t3.q1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+739fc8ad37a8d3ff
+== 247
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+t3.q1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+c43ab77e5f19e562
+== 248
+|--
+-- Tests for CTE inlining behavior
+|--
+
+-- Basic subquery that can be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+9f448b486713d1b2
+== 249
+-- Explicitly request materialization
+explain (verbose, costs off)
+with x as materialized (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+a7e3d0cffd15c164
+== 250
+-- Stable functions are safe to inline
+explain (verbose, costs off)
+with x as (select * from (select f1, now() from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+189fe8a5de80972c
+== 251
+-- Volatile functions prevent inlining
+explain (verbose, costs off)
+with x as (select * from (select f1, random() from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+8502f7c3e0cd7098
+== 252
+-- SELECT FOR UPDATE cannot be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl for update) ss)
+select * from x where f1 = 1
+--
+41d16f3be5017bc6
+== 253
+-- Multiply-referenced CTEs are inlined only when requested
+explain (verbose, costs off)
+with x as (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n
+--
+1c023a612c63662f
+== 254
+explain (verbose, costs off)
+with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n
+--
+4113c89db99ecb02
+== 255
+-- Multiply-referenced CTEs can't be inlined if they contain outer self-refs
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x
+--
+1aba08a4dc3cbfbd
+== 256
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x
+--
+3fd575696eaf280f
+== 257
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x
+--
+9b7cb3adc4c6a0e7
+== 258
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x
+--
+fefa37994f032db3
+== 259
+-- Check handling of outer references
+explain (verbose, costs off)
+with x as (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss
+--
+ebbe9eefd9b04b6d
+== 260
+explain (verbose, costs off)
+with x as materialized (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss
+--
+507c18119c57bee0
+== 261
+-- Ensure that we inline the correct CTE when there are
+-- multiple CTEs with the same name
+explain (verbose, costs off)
+with x as (select 1 as y)
+select * from (with x as (select 2 as y) select * from x) ss
+--
+0763c99bbe2b26fe
+== 262
+-- Row marks are not pushed into CTEs
+explain (verbose, costs off)
+with x as (select * from subselect_tbl)
+select * from x for update
+--
+6e0aa28f52d149c8
+== 263
+-- Pull up direct-correlated ANY_SUBLINKs
+explain (costs off)
+select * from tenk1 A where hundred in (select hundred from tenk2 B where B.odd = A.odd)
+--
+970ddd2177dbb1d9
+== 264
+explain (costs off)
+select * from tenk1 A where exists
+(select 1 from tenk2 B
+where A.hundred in (select C.hundred FROM tenk2 C
+WHERE c.odd = b.odd))
+--
+80ebe2f9761310a3
+== 265
+-- we should only try to pull up the sublink into RHS of a left join
+-- but a.hundred is not available.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+--
+58a78c786ceac50f
+== 266
+-- we should only try to pull up the sublink into RHS of a left join
+-- but a.odd is not available for this.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = a.odd)
+--
+f942e5ea2c4e0c60
+== 267
+-- should be able to pull up since all the references are available.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+--
+083caca0f4d70457
+== 268
+-- we can pull up the sublink into the inner JoinExpr.
+explain (costs off)
+SELECT * FROM tenk1 A INNER JOIN tenk2 B
+ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+WHERE a.thousand < 750
+--
+41988eac958e630d
+== 269
+-- we can pull up the aggregate sublink into RHS of a left join.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT min(c.hundred) FROM tenk2 C WHERE c.odd = b.odd)
+--
+4cc8334d835bb87d

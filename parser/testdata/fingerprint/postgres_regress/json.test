@@ -1,0 +1,2158 @@
+== 001
+-- Strings.
+SELECT '""'::json
+--
+50fde20626009aba
+== 002
+-- OK.
+SELECT $$''$$::json
+--
+50fde20626009aba
+== 003
+-- ERROR, single quotes are not allowed
+SELECT '"abc"'::json
+--
+50fde20626009aba
+== 004
+-- OK
+SELECT '"abc'::json
+--
+50fde20626009aba
+== 005
+-- ERROR, quotes not closed
+SELECT '"abc
+def"'::json
+--
+50fde20626009aba
+== 006
+-- ERROR, unescaped newline in string constant
+SELECT '"\n\"\\"'::json
+--
+50fde20626009aba
+== 007
+-- OK, legal escapes
+SELECT '"\v"'::json
+--
+50fde20626009aba
+== 008
+-- ERROR, not a valid JSON escape
+
+-- Check fast path for longer strings (at least 16 bytes long)
+SELECT ('"'||repeat('.', 12)||'abc"')::json
+--
+2a14fe449c213d91
+== 009
+-- OK
+SELECT ('"'||repeat('.', 12)||'abc\n"')::json
+--
+2a14fe449c213d91
+== 010
+-- OK, legal escapes
+
+-- see json_encoding test for input with unicode escapes
+
+-- Numbers.
+SELECT '1'::json
+--
+50fde20626009aba
+== 011
+-- OK
+SELECT '0'::json
+--
+50fde20626009aba
+== 012
+-- OK
+SELECT '01'::json
+--
+50fde20626009aba
+== 013
+-- ERROR, not valid according to JSON spec
+SELECT '0.1'::json
+--
+50fde20626009aba
+== 014
+-- OK
+SELECT '9223372036854775808'::json
+--
+50fde20626009aba
+== 015
+-- OK, even though it's too large for int8
+SELECT '1e100'::json
+--
+50fde20626009aba
+== 016
+-- OK
+SELECT '1.3e100'::json
+--
+50fde20626009aba
+== 017
+-- OK
+SELECT '1f2'::json
+--
+50fde20626009aba
+== 018
+-- ERROR
+SELECT '0.x1'::json
+--
+50fde20626009aba
+== 019
+-- ERROR
+SELECT '1.3ex100'::json
+--
+50fde20626009aba
+== 020
+-- ERROR
+
+-- Arrays.
+SELECT '[]'::json
+--
+50fde20626009aba
+== 021
+-- OK
+SELECT '[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]'::json
+--
+50fde20626009aba
+== 022
+-- OK
+SELECT '[1,2]'::json
+--
+50fde20626009aba
+== 023
+-- OK
+SELECT '[1,2,]'::json
+--
+50fde20626009aba
+== 024
+-- ERROR, trailing comma
+SELECT '[1,2'::json
+--
+50fde20626009aba
+== 025
+-- ERROR, no closing bracket
+SELECT '[1,[2]'::json
+--
+50fde20626009aba
+== 026
+-- ERROR, no closing bracket
+
+-- Objects.
+SELECT '{}'::json
+--
+50fde20626009aba
+== 027
+-- OK
+SELECT '{"abc"}'::json
+--
+50fde20626009aba
+== 028
+-- ERROR, no value
+SELECT '{"abc":1}'::json
+--
+50fde20626009aba
+== 029
+-- OK
+SELECT '{1:"abc"}'::json
+--
+50fde20626009aba
+== 030
+-- ERROR, keys must be strings
+SELECT '{"abc",1}'::json
+--
+50fde20626009aba
+== 031
+-- ERROR, wrong separator
+SELECT '{"abc"=1}'::json
+--
+50fde20626009aba
+== 032
+-- ERROR, totally wrong separator
+SELECT '{"abc"::1}'::json
+--
+50fde20626009aba
+== 033
+-- ERROR, another wrong separator
+SELECT '{"abc":1,"def":2,"ghi":[3,4],"hij":{"klm":5,"nop":[6]}}'::json
+--
+50fde20626009aba
+== 034
+-- OK
+SELECT '{"abc":1:2}'::json
+--
+50fde20626009aba
+== 035
+-- ERROR, colon in wrong spot
+SELECT '{"abc":1,3}'::json
+--
+50fde20626009aba
+== 036
+-- ERROR, no value
+
+-- Recursion.
+SET max_stack_depth = '100kB'
+--
+1ca796e55e145255
+== 037
+SELECT repeat('[', 10000)::json
+--
+40f7c15a4c738e41
+== 038
+SELECT repeat('{"a":', 10000)::json
+--
+40f7c15a4c738e41
+== 039
+RESET max_stack_depth
+--
+987d7d406e1e1c9b
+== 040
+-- Miscellaneous stuff.
+SELECT 'true'::json
+--
+50fde20626009aba
+== 041
+-- OK
+SELECT 'false'::json
+--
+50fde20626009aba
+== 042
+-- OK
+SELECT 'null'::json
+--
+50fde20626009aba
+== 043
+-- OK
+SELECT ' true '::json
+--
+50fde20626009aba
+== 044
+-- OK, even with extra whitespace
+SELECT 'true false'::json
+--
+50fde20626009aba
+== 045
+-- ERROR, too many values
+SELECT 'true, false'::json
+--
+50fde20626009aba
+== 046
+-- ERROR, too many values
+SELECT 'truf'::json
+--
+50fde20626009aba
+== 047
+-- ERROR, not a keyword
+SELECT 'trues'::json
+--
+50fde20626009aba
+== 048
+-- ERROR, not a keyword
+SELECT ''::json
+--
+50fde20626009aba
+== 049
+-- ERROR, no value
+SELECT '    '::json
+--
+50fde20626009aba
+== 050
+-- ERROR, no value
+
+-- Multi-line JSON input to check ERROR reporting
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"three":
+		true}'::json
+--
+50fde20626009aba
+== 051
+-- OK
+SELECT '{
+		"one": 1,
+		"two":,"two",  -- ERROR extraneous comma before field "two"
+		"three":
+		true}'::json
+--
+50fde20626009aba
+== 052
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"averyveryveryveryveryveryveryveryveryverylongfieldname":}'::json
+--
+50fde20626009aba
+== 053
+-- ERROR missing value for last field
+
+-- test non-error-throwing input
+select pg_input_is_valid('{"a":true}', 'json')
+--
+15f508bf2432ed80
+== 054
+select pg_input_is_valid('{"a":true', 'json')
+--
+15f508bf2432ed80
+== 055
+select * from pg_input_error_info('{"a":true', 'json')
+--
+3498aded7ef03791
+== 056
+--constructors
+-- array_to_json
+
+SELECT array_to_json(array(select 1 as a))
+--
+762a3b93374d67ae
+== 057
+SELECT array_to_json(array_agg(q),false) from (select x as b, x * 2 as c from generate_series(1,3) x) q
+--
+fbe59020e7d5ec3a
+== 058
+SELECT array_to_json(array_agg(q),true) from (select x as b, x * 2 as c from generate_series(1,3) x) q
+--
+fbe59020e7d5ec3a
+== 059
+SELECT array_to_json(array_agg(q),false)
+  FROM ( SELECT $$a$$ || x AS b, y AS c,
+               ARRAY[ROW(x.*,ARRAY[1,2,3]),
+               ROW(y.*,ARRAY[4,5,6])] AS z
+         FROM generate_series(1,2) x,
+              generate_series(4,5) y) q
+--
+f99ea7ee70130baa
+== 060
+SELECT array_to_json(array_agg(x),false) from generate_series(5,10) x
+--
+9e6b14916ccf544b
+== 061
+SELECT array_to_json('{{1,5},{99,100}}'::int[])
+--
+b60192759f322556
+== 062
+-- row_to_json
+SELECT row_to_json(row(1,'foo'))
+--
+4e9487595998cd30
+== 063
+SELECT row_to_json(q)
+FROM (SELECT $$a$$ || x AS b,
+         y AS c,
+         ARRAY[ROW(x.*,ARRAY[1,2,3]),
+               ROW(y.*,ARRAY[4,5,6])] AS z
+      FROM generate_series(1,2) x,
+           generate_series(4,5) y) q
+--
+633ffd4dc62cc150
+== 064
+SELECT row_to_json(q,true)
+FROM (SELECT $$a$$ || x AS b,
+         y AS c,
+         ARRAY[ROW(x.*,ARRAY[1,2,3]),
+               ROW(y.*,ARRAY[4,5,6])] AS z
+      FROM generate_series(1,2) x,
+           generate_series(4,5) y) q
+--
+633ffd4dc62cc150
+== 065
+CREATE TEMP TABLE rows AS
+SELECT x, 'txt' || x as y
+FROM generate_series(1,3) AS x
+--
+c8568ecffbaec931
+== 066
+SELECT row_to_json(q,true)
+FROM rows q
+--
+10ba3113a074f2f0
+== 067
+SELECT row_to_json(row((select array_agg(x) as d from generate_series(5,10) x)),false)
+--
+3df712db1ac8ab85
+== 068
+-- anyarray column
+
+analyze rows
+--
+87f7ccf384919f92
+== 069
+select attname, to_json(histogram_bounds) histogram_bounds
+from pg_stats
+where tablename = 'rows' and
+      schemaname = pg_my_temp_schema()::regnamespace::text
+order by 1
+--
+6116a6e56754aee7
+== 070
+-- to_json, timestamps
+
+select to_json(timestamp '2014-05-28 12:22:35.614298')
+--
+9adb9ab4c56c2974
+== 071
+BEGIN
+--
+b16b431979fc3e05
+== 072
+SET LOCAL TIME ZONE 10.5
+--
+75f13354e56681c8
+== 073
+select to_json(timestamptz '2014-05-28 12:22:35.614298-04')
+--
+9adb9ab4c56c2974
+== 074
+SET LOCAL TIME ZONE -8
+--
+75f13354e56681c8
+== 075
+select to_json(timestamptz '2014-05-28 12:22:35.614298-04')
+--
+9adb9ab4c56c2974
+== 076
+COMMIT
+--
+7bbcde9cfab6c79c
+== 077
+select to_json(date '2014-05-28')
+--
+9adb9ab4c56c2974
+== 078
+select to_json(date 'Infinity')
+--
+9adb9ab4c56c2974
+== 079
+select to_json(date '-Infinity')
+--
+9adb9ab4c56c2974
+== 080
+select to_json(timestamp 'Infinity')
+--
+9adb9ab4c56c2974
+== 081
+select to_json(timestamp '-Infinity')
+--
+9adb9ab4c56c2974
+== 082
+select to_json(timestamptz 'Infinity')
+--
+9adb9ab4c56c2974
+== 083
+select to_json(timestamptz '-Infinity')
+--
+9adb9ab4c56c2974
+== 084
+--json_agg
+
+SELECT json_agg(q)
+  FROM ( SELECT $$a$$ || x AS b, y AS c,
+               ARRAY[ROW(x.*,ARRAY[1,2,3]),
+               ROW(y.*,ARRAY[4,5,6])] AS z
+         FROM generate_series(1,2) x,
+              generate_series(4,5) y) q
+--
+ea8985b2b9cd2c71
+== 085
+SELECT json_agg(q ORDER BY x, y)
+  FROM rows q
+--
+bd53466450dc6166
+== 086
+UPDATE rows SET x = NULL WHERE x = 1
+--
+1d7ad0f1515846ca
+== 087
+SELECT json_agg(q ORDER BY x NULLS FIRST, y)
+  FROM rows q
+--
+6ecebb6286b66eaf
+== 088
+-- non-numeric output
+SELECT row_to_json(q)
+FROM (SELECT 'NaN'::float8 AS "float8field") q
+--
+1ecc76b9b9a1af3d
+== 089
+SELECT row_to_json(q)
+FROM (SELECT 'Infinity'::float8 AS "float8field") q
+--
+1ecc76b9b9a1af3d
+== 090
+SELECT row_to_json(q)
+FROM (SELECT '-Infinity'::float8 AS "float8field") q
+--
+1ecc76b9b9a1af3d
+== 091
+-- json input
+SELECT row_to_json(q)
+FROM (SELECT '{"a":1,"b": [2,3,4,"d","e","f"],"c":{"p":1,"q":2}}'::json AS "jsonfield") q
+--
+1ecc76b9b9a1af3d
+== 092
+-- json extraction functions
+
+CREATE TEMP TABLE test_json (
+       json_type text,
+       test_json json
+)
+--
+9c9797c99e3ae61b
+== 093
+INSERT INTO test_json VALUES
+('scalar','"a scalar"'),
+('array','["zero", "one","two",null,"four","five", [1,2,3],{"f1":9}]'),
+('object','{"field1":"val1","field2":"val2","field3":null, "field4": 4, "field5": [1,2,3], "field6": {"f1":9}}')
+--
+e1f3c96548d265dd
+== 094
+SELECT test_json -> 'x'
+FROM test_json
+WHERE json_type = 'scalar'
+--
+99680ca0fe106f5e
+== 095
+SELECT test_json -> 'x'
+FROM test_json
+WHERE json_type = 'array'
+--
+99680ca0fe106f5e
+== 096
+SELECT test_json -> 'x'
+FROM test_json
+WHERE json_type = 'object'
+--
+99680ca0fe106f5e
+== 097
+SELECT test_json->'field2'
+FROM test_json
+WHERE json_type = 'object'
+--
+99680ca0fe106f5e
+== 098
+SELECT test_json->>'field2'
+FROM test_json
+WHERE json_type = 'object'
+--
+40180463dde2243c
+== 099
+SELECT test_json -> 2
+FROM test_json
+WHERE json_type = 'scalar'
+--
+99680ca0fe106f5e
+== 100
+SELECT test_json -> 2
+FROM test_json
+WHERE json_type = 'array'
+--
+99680ca0fe106f5e
+== 101
+SELECT test_json -> -1
+FROM test_json
+WHERE json_type = 'array'
+--
+99680ca0fe106f5e
+== 102
+SELECT test_json -> 2
+FROM test_json
+WHERE json_type = 'object'
+--
+99680ca0fe106f5e
+== 103
+SELECT test_json->>2
+FROM test_json
+WHERE json_type = 'array'
+--
+40180463dde2243c
+== 104
+SELECT test_json ->> 6 FROM test_json WHERE json_type = 'array'
+--
+40180463dde2243c
+== 105
+SELECT test_json ->> 7 FROM test_json WHERE json_type = 'array'
+--
+40180463dde2243c
+== 106
+SELECT test_json ->> 'field4' FROM test_json WHERE json_type = 'object'
+--
+40180463dde2243c
+== 107
+SELECT test_json ->> 'field5' FROM test_json WHERE json_type = 'object'
+--
+40180463dde2243c
+== 108
+SELECT test_json ->> 'field6' FROM test_json WHERE json_type = 'object'
+--
+40180463dde2243c
+== 109
+SELECT json_object_keys(test_json)
+FROM test_json
+WHERE json_type = 'scalar'
+--
+732d0eb5438e7191
+== 110
+SELECT json_object_keys(test_json)
+FROM test_json
+WHERE json_type = 'array'
+--
+732d0eb5438e7191
+== 111
+SELECT json_object_keys(test_json)
+FROM test_json
+WHERE json_type = 'object'
+--
+732d0eb5438e7191
+== 112
+-- test extending object_keys resultset - initial resultset size is 256
+
+select count(*) from
+    (select json_object_keys(json_object(array_agg(g)))
+     from (select unnest(array['f'||n,n::text])as g
+           from generate_series(1,300) as n) x ) y
+--
+8aa9905a0d3d8985
+== 113
+-- nulls
+
+select (test_json->'field3') is null as expect_false
+from test_json
+where json_type = 'object'
+--
+36bb93836e2942a2
+== 114
+select (test_json->>'field3') is null as expect_true
+from test_json
+where json_type = 'object'
+--
+6122ae0c34c5fab4
+== 115
+select (test_json->3) is null as expect_false
+from test_json
+where json_type = 'array'
+--
+36bb93836e2942a2
+== 116
+select (test_json->>3) is null as expect_true
+from test_json
+where json_type = 'array'
+--
+6122ae0c34c5fab4
+== 117
+-- corner cases
+
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> null::text
+--
+0de3fcf3c83f68b8
+== 118
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> null::int
+--
+0de3fcf3c83f68b8
+== 119
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> 1
+--
+0de3fcf3c83f68b8
+== 120
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> -1
+--
+0de3fcf3c83f68b8
+== 121
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> 'z'
+--
+0de3fcf3c83f68b8
+== 122
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json -> ''
+--
+0de3fcf3c83f68b8
+== 123
+select '[{"b": "c"}, {"b": "cc"}]'::json -> 1
+--
+0de3fcf3c83f68b8
+== 124
+select '[{"b": "c"}, {"b": "cc"}]'::json -> 3
+--
+0de3fcf3c83f68b8
+== 125
+select '[{"b": "c"}, {"b": "cc"}]'::json -> 'z'
+--
+0de3fcf3c83f68b8
+== 126
+select '{"a": "c", "b": null}'::json -> 'b'
+--
+0de3fcf3c83f68b8
+== 127
+select '"foo"'::json -> 1
+--
+0de3fcf3c83f68b8
+== 128
+select '"foo"'::json -> 'z'
+--
+0de3fcf3c83f68b8
+== 129
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json ->> null::text
+--
+46f338ce51f6e90f
+== 130
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json ->> null::int
+--
+46f338ce51f6e90f
+== 131
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json ->> 1
+--
+46f338ce51f6e90f
+== 132
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json ->> 'z'
+--
+46f338ce51f6e90f
+== 133
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json ->> ''
+--
+46f338ce51f6e90f
+== 134
+select '[{"b": "c"}, {"b": "cc"}]'::json ->> 1
+--
+46f338ce51f6e90f
+== 135
+select '[{"b": "c"}, {"b": "cc"}]'::json ->> 3
+--
+46f338ce51f6e90f
+== 136
+select '[{"b": "c"}, {"b": "cc"}]'::json ->> 'z'
+--
+46f338ce51f6e90f
+== 137
+select '{"a": "c", "b": null}'::json ->> 'b'
+--
+46f338ce51f6e90f
+== 138
+select '"foo"'::json ->> 1
+--
+46f338ce51f6e90f
+== 139
+select '"foo"'::json ->> 'z'
+--
+46f338ce51f6e90f
+== 140
+-- array length
+
+SELECT json_array_length('[1,2,3,{"f1":1,"f2":[5,6]},4]')
+--
+c299072d6aa0d0e9
+== 141
+SELECT json_array_length('[]')
+--
+c299072d6aa0d0e9
+== 142
+SELECT json_array_length('{"f1":1,"f2":[5,6]}')
+--
+c299072d6aa0d0e9
+== 143
+SELECT json_array_length('4')
+--
+c299072d6aa0d0e9
+== 144
+-- each
+
+select json_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}')
+--
+2214381dabb1789b
+== 145
+select * from json_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q
+--
+0fd8b7cf36be403c
+== 146
+select json_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":"null"}')
+--
+4052694208d39580
+== 147
+select * from json_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q
+--
+621e5d822bdddb35
+== 148
+-- extract_path, extract_path_as_text
+
+select json_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6')
+--
+52f4c258450c996a
+== 149
+select json_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2')
+--
+52f4c258450c996a
+== 150
+select json_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text)
+--
+52f4c258450c996a
+== 151
+select json_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text)
+--
+52f4c258450c996a
+== 152
+select json_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6')
+--
+7f055b5f3ff8649d
+== 153
+select json_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2')
+--
+7f055b5f3ff8649d
+== 154
+select json_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text)
+--
+7f055b5f3ff8649d
+== 155
+select json_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text)
+--
+7f055b5f3ff8649d
+== 156
+-- extract_path nulls
+
+select json_extract_path('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') is null as expect_false
+--
+02e479e85f60131d
+== 157
+select json_extract_path_text('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') is null as expect_true
+--
+64432b2889d2c5e0
+== 158
+select json_extract_path('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') is null as expect_false
+--
+02e479e85f60131d
+== 159
+select json_extract_path_text('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') is null as expect_true
+--
+64432b2889d2c5e0
+== 160
+-- extract_path operators
+
+select '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::json#>array['f4','f6']
+--
+9b97627598182f50
+== 161
+select '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::json#>array['f2']
+--
+9b97627598182f50
+== 162
+select '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::json#>array['f2','0']
+--
+9b97627598182f50
+== 163
+select '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::json#>array['f2','1']
+--
+9b97627598182f50
+== 164
+select '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::json#>>array['f4','f6']
+--
+d13122b3055e3a2a
+== 165
+select '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::json#>>array['f2']
+--
+d13122b3055e3a2a
+== 166
+select '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::json#>>array['f2','0']
+--
+d13122b3055e3a2a
+== 167
+select '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::json#>>array['f2','1']
+--
+d13122b3055e3a2a
+== 168
+-- corner cases for same
+select '{"a": {"b":{"c": "foo"}}}'::json #> '{}'
+--
+c8676bae5fad8633
+== 169
+select '[1,2,3]'::json #> '{}'
+--
+c8676bae5fad8633
+== 170
+select '"foo"'::json #> '{}'
+--
+c8676bae5fad8633
+== 171
+select '42'::json #> '{}'
+--
+c8676bae5fad8633
+== 172
+select 'null'::json #> '{}'
+--
+c8676bae5fad8633
+== 173
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a']
+--
+9b97627598182f50
+== 174
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a', null]
+--
+9b97627598182f50
+== 175
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a', '']
+--
+9b97627598182f50
+== 176
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a','b']
+--
+9b97627598182f50
+== 177
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a','b','c']
+--
+9b97627598182f50
+== 178
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a','b','c','d']
+--
+9b97627598182f50
+== 179
+select '{"a": {"b":{"c": "foo"}}}'::json #> array['a','z','c']
+--
+9b97627598182f50
+== 180
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json #> array['a','1','b']
+--
+9b97627598182f50
+== 181
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json #> array['a','z','b']
+--
+9b97627598182f50
+== 182
+select '[{"b": "c"}, {"b": "cc"}]'::json #> array['1','b']
+--
+9b97627598182f50
+== 183
+select '[{"b": "c"}, {"b": "cc"}]'::json #> array['z','b']
+--
+9b97627598182f50
+== 184
+select '[{"b": "c"}, {"b": null}]'::json #> array['1','b']
+--
+9b97627598182f50
+== 185
+select '"foo"'::json #> array['z']
+--
+9b97627598182f50
+== 186
+select '42'::json #> array['f2']
+--
+9b97627598182f50
+== 187
+select '42'::json #> array['0']
+--
+9b97627598182f50
+== 188
+select '{"a": {"b":{"c": "foo"}}}'::json #>> '{}'
+--
+a963e12faa75a980
+== 189
+select '[1,2,3]'::json #>> '{}'
+--
+a963e12faa75a980
+== 190
+select '"foo"'::json #>> '{}'
+--
+a963e12faa75a980
+== 191
+select '42'::json #>> '{}'
+--
+a963e12faa75a980
+== 192
+select 'null'::json #>> '{}'
+--
+a963e12faa75a980
+== 193
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a']
+--
+d13122b3055e3a2a
+== 194
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a', null]
+--
+d13122b3055e3a2a
+== 195
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a', '']
+--
+d13122b3055e3a2a
+== 196
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a','b']
+--
+d13122b3055e3a2a
+== 197
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a','b','c']
+--
+d13122b3055e3a2a
+== 198
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a','b','c','d']
+--
+d13122b3055e3a2a
+== 199
+select '{"a": {"b":{"c": "foo"}}}'::json #>> array['a','z','c']
+--
+d13122b3055e3a2a
+== 200
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json #>> array['a','1','b']
+--
+d13122b3055e3a2a
+== 201
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::json #>> array['a','z','b']
+--
+d13122b3055e3a2a
+== 202
+select '[{"b": "c"}, {"b": "cc"}]'::json #>> array['1','b']
+--
+d13122b3055e3a2a
+== 203
+select '[{"b": "c"}, {"b": "cc"}]'::json #>> array['z','b']
+--
+d13122b3055e3a2a
+== 204
+select '[{"b": "c"}, {"b": null}]'::json #>> array['1','b']
+--
+d13122b3055e3a2a
+== 205
+select '"foo"'::json #>> array['z']
+--
+d13122b3055e3a2a
+== 206
+select '42'::json #>> array['f2']
+--
+d13122b3055e3a2a
+== 207
+select '42'::json #>> array['0']
+--
+d13122b3055e3a2a
+== 208
+-- array_elements
+
+select json_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]')
+--
+c5928cf90b65027d
+== 209
+select * from json_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]') q
+--
+7a6200f8e23b39cb
+== 210
+select json_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]')
+--
+ab85a60cd0ea4a62
+== 211
+select * from json_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]') q
+--
+f3915caa03bd9185
+== 212
+-- populate_record
+create type jpop as (a text, b int, c timestamp)
+--
+302892bcd305f0c1
+== 213
+CREATE DOMAIN js_int_not_null  AS int     NOT NULL
+--
+7271220b2aed136d
+== 214
+CREATE DOMAIN js_int_array_1d  AS int[]   CHECK(array_length(VALUE, 1) = 3)
+--
+fc87d0f2a43d8a51
+== 215
+CREATE DOMAIN js_int_array_2d  AS int[][] CHECK(array_length(VALUE, 2) = 3)
+--
+19283cfe3e7bef6d
+== 216
+create type j_unordered_pair as (x int, y int)
+--
+9519dc3167f231f3
+== 217
+create domain j_ordered_pair as j_unordered_pair check((value).x <= (value).y)
+--
+0383ac03965bfa94
+== 218
+CREATE TYPE jsrec AS (
+	i	int,
+	ia	_int4,
+	ia1	int[],
+	ia2	int[][],
+	ia3	int[][][],
+	ia1d	js_int_array_1d,
+	ia2d	js_int_array_2d,
+	t	text,
+	ta	text[],
+	c	char(10),
+	ca	char(10)[],
+	ts	timestamp,
+	js	json,
+	jsb	jsonb,
+	jsa	json[],
+	rec	jpop,
+	reca	jpop[]
+)
+--
+a7e63e855d9e87b5
+== 219
+CREATE TYPE jsrec_i_not_null AS (
+	i	js_int_not_null
+)
+--
+f53953dfad3daf27
+== 220
+select * from json_populate_record(null::jpop,'{"a":"blurfl","x":43.2}') q
+--
+85599a1958d8f9fd
+== 221
+select * from json_populate_record(row('x',3,'2012-12-31 15:30:56')::jpop,'{"a":"blurfl","x":43.2}') q
+--
+167a9ff587c6da61
+== 222
+select * from json_populate_record(null::jpop,'{"a":"blurfl","x":43.2}') q
+--
+85599a1958d8f9fd
+== 223
+select * from json_populate_record(row('x',3,'2012-12-31 15:30:56')::jpop,'{"a":"blurfl","x":43.2}') q
+--
+167a9ff587c6da61
+== 224
+select * from json_populate_record(null::jpop,'{"a":[100,200,false],"x":43.2}') q
+--
+85599a1958d8f9fd
+== 225
+select * from json_populate_record(row('x',3,'2012-12-31 15:30:56')::jpop,'{"a":[100,200,false],"x":43.2}') q
+--
+167a9ff587c6da61
+== 226
+select * from json_populate_record(row('x',3,'2012-12-31 15:30:56')::jpop,'{"c":[100,200,false],"x":43.2}') q
+--
+167a9ff587c6da61
+== 227
+select * from json_populate_record(row('x',3,'2012-12-31 15:30:56')::jpop,'{}') q
+--
+167a9ff587c6da61
+== 228
+SELECT i FROM json_populate_record(NULL::jsrec_i_not_null, '{"x": 43.2}') q
+--
+38f776343cebc723
+== 229
+SELECT i FROM json_populate_record(NULL::jsrec_i_not_null, '{"i": null}') q
+--
+38f776343cebc723
+== 230
+SELECT i FROM json_populate_record(NULL::jsrec_i_not_null, '{"i": 12345}') q
+--
+38f776343cebc723
+== 231
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": null}') q
+--
+e5ff89f4158a3710
+== 232
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": 123}') q
+--
+e5ff89f4158a3710
+== 233
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": [1, "2", null, 4]}') q
+--
+e5ff89f4158a3710
+== 234
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": [[1, 2], [3, 4]]}') q
+--
+e5ff89f4158a3710
+== 235
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": [[1], 2]}') q
+--
+e5ff89f4158a3710
+== 236
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": [[1], [2, 3]]}') q
+--
+e5ff89f4158a3710
+== 237
+SELECT ia FROM json_populate_record(NULL::jsrec, '{"ia": "{1,2,3}"}') q
+--
+e5ff89f4158a3710
+== 238
+SELECT ia1 FROM json_populate_record(NULL::jsrec, '{"ia1": null}') q
+--
+6fce7502ea45e93d
+== 239
+SELECT ia1 FROM json_populate_record(NULL::jsrec, '{"ia1": 123}') q
+--
+6fce7502ea45e93d
+== 240
+SELECT ia1 FROM json_populate_record(NULL::jsrec, '{"ia1": [1, "2", null, 4]}') q
+--
+6fce7502ea45e93d
+== 241
+SELECT ia1 FROM json_populate_record(NULL::jsrec, '{"ia1": [[1, 2, 3]]}') q
+--
+6fce7502ea45e93d
+== 242
+SELECT ia1d FROM json_populate_record(NULL::jsrec, '{"ia1d": null}') q
+--
+e7c3b887b6ec0b1c
+== 243
+SELECT ia1d FROM json_populate_record(NULL::jsrec, '{"ia1d": 123}') q
+--
+e7c3b887b6ec0b1c
+== 244
+SELECT ia1d FROM json_populate_record(NULL::jsrec, '{"ia1d": [1, "2", null, 4]}') q
+--
+e7c3b887b6ec0b1c
+== 245
+SELECT ia1d FROM json_populate_record(NULL::jsrec, '{"ia1d": [1, "2", null]}') q
+--
+e7c3b887b6ec0b1c
+== 246
+SELECT ia2 FROM json_populate_record(NULL::jsrec, '{"ia2": [1, "2", null, 4]}') q
+--
+0c379d8402448088
+== 247
+SELECT ia2 FROM json_populate_record(NULL::jsrec, '{"ia2": [[1, 2], [null, 4]]}') q
+--
+0c379d8402448088
+== 248
+SELECT ia2 FROM json_populate_record(NULL::jsrec, '{"ia2": [[], []]}') q
+--
+0c379d8402448088
+== 249
+SELECT ia2 FROM json_populate_record(NULL::jsrec, '{"ia2": [[1, 2], [3]]}') q
+--
+0c379d8402448088
+== 250
+SELECT ia2 FROM json_populate_record(NULL::jsrec, '{"ia2": [[1, 2], 3, 4]}') q
+--
+0c379d8402448088
+== 251
+SELECT ia2d FROM json_populate_record(NULL::jsrec, '{"ia2d": [[1, "2"], [null, 4]]}') q
+--
+2c129ff5b38892d4
+== 252
+SELECT ia2d FROM json_populate_record(NULL::jsrec, '{"ia2d": [[1, "2", 3], [null, 5, 6]]}') q
+--
+2c129ff5b38892d4
+== 253
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [1, "2", null, 4]}') q
+--
+3760eb75fd2afdac
+== 254
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [[1, 2], [null, 4]]}') q
+--
+3760eb75fd2afdac
+== 255
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [ [[], []], [[], []], [[], []] ]}') q
+--
+3760eb75fd2afdac
+== 256
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [ [[1, 2]], [[3, 4]] ]}') q
+--
+3760eb75fd2afdac
+== 257
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [ [[1, 2], [3, 4]], [[5, 6], [7, 8]] ]}') q
+--
+3760eb75fd2afdac
+== 258
+SELECT ia3 FROM json_populate_record(NULL::jsrec, '{"ia3": [ [[1, 2], [3, 4]], [[5, 6], [7, 8], [9, 10]] ]}') q
+--
+3760eb75fd2afdac
+== 259
+SELECT ta FROM json_populate_record(NULL::jsrec, '{"ta": null}') q
+--
+8e3a4ffdbec30718
+== 260
+SELECT ta FROM json_populate_record(NULL::jsrec, '{"ta": 123}') q
+--
+8e3a4ffdbec30718
+== 261
+SELECT ta FROM json_populate_record(NULL::jsrec, '{"ta": [1, "2", null, 4]}') q
+--
+8e3a4ffdbec30718
+== 262
+SELECT ta FROM json_populate_record(NULL::jsrec, '{"ta": [[1, 2, 3], {"k": "v"}]}') q
+--
+8e3a4ffdbec30718
+== 263
+SELECT c FROM json_populate_record(NULL::jsrec, '{"c": null}') q
+--
+1be20457536d85c8
+== 264
+SELECT c FROM json_populate_record(NULL::jsrec, '{"c": "aaa"}') q
+--
+1be20457536d85c8
+== 265
+SELECT c FROM json_populate_record(NULL::jsrec, '{"c": "aaaaaaaaaa"}') q
+--
+1be20457536d85c8
+== 266
+SELECT c FROM json_populate_record(NULL::jsrec, '{"c": "aaaaaaaaaaaaa"}') q
+--
+1be20457536d85c8
+== 267
+SELECT ca FROM json_populate_record(NULL::jsrec, '{"ca": null}') q
+--
+5f626b42d28830b0
+== 268
+SELECT ca FROM json_populate_record(NULL::jsrec, '{"ca": 123}') q
+--
+5f626b42d28830b0
+== 269
+SELECT ca FROM json_populate_record(NULL::jsrec, '{"ca": [1, "2", null, 4]}') q
+--
+5f626b42d28830b0
+== 270
+SELECT ca FROM json_populate_record(NULL::jsrec, '{"ca": ["aaaaaaaaaaaaaaaa"]}') q
+--
+5f626b42d28830b0
+== 271
+SELECT ca FROM json_populate_record(NULL::jsrec, '{"ca": [[1, 2, 3], {"k": "v"}]}') q
+--
+5f626b42d28830b0
+== 272
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": null}') q
+--
+858022df85659909
+== 273
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": true}') q
+--
+858022df85659909
+== 274
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": 123.45}') q
+--
+858022df85659909
+== 275
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": "123.45"}') q
+--
+858022df85659909
+== 276
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": "abc"}') q
+--
+858022df85659909
+== 277
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": [123, "123", null, {"key": "value"}]}') q
+--
+858022df85659909
+== 278
+SELECT js FROM json_populate_record(NULL::jsrec, '{"js": {"a": "bbb", "b": null, "c": 123.45}}') q
+--
+858022df85659909
+== 279
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": null}') q
+--
+5df7627698bc661d
+== 280
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": true}') q
+--
+5df7627698bc661d
+== 281
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": 123.45}') q
+--
+5df7627698bc661d
+== 282
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": "123.45"}') q
+--
+5df7627698bc661d
+== 283
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": "abc"}') q
+--
+5df7627698bc661d
+== 284
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": [123, "123", null, {"key": "value"}]}') q
+--
+5df7627698bc661d
+== 285
+SELECT jsb FROM json_populate_record(NULL::jsrec, '{"jsb": {"a": "bbb", "b": null, "c": 123.45}}') q
+--
+5df7627698bc661d
+== 286
+SELECT jsa FROM json_populate_record(NULL::jsrec, '{"jsa": null}') q
+--
+819e868c62e63245
+== 287
+SELECT jsa FROM json_populate_record(NULL::jsrec, '{"jsa": 123}') q
+--
+819e868c62e63245
+== 288
+SELECT jsa FROM json_populate_record(NULL::jsrec, '{"jsa": [1, "2", null, 4]}') q
+--
+819e868c62e63245
+== 289
+SELECT jsa FROM json_populate_record(NULL::jsrec, '{"jsa": ["aaa", null, [1, 2, "3", {}], { "k" : "v" }]}') q
+--
+819e868c62e63245
+== 290
+SELECT rec FROM json_populate_record(NULL::jsrec, '{"rec": 123}') q
+--
+3a11333cf8a4d412
+== 291
+SELECT rec FROM json_populate_record(NULL::jsrec, '{"rec": [1, 2]}') q
+--
+3a11333cf8a4d412
+== 292
+SELECT rec FROM json_populate_record(NULL::jsrec, '{"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2}}') q
+--
+3a11333cf8a4d412
+== 293
+SELECT rec FROM json_populate_record(NULL::jsrec, '{"rec": "(abc,42,01.02.2003)"}') q
+--
+3a11333cf8a4d412
+== 294
+SELECT reca FROM json_populate_record(NULL::jsrec, '{"reca": 123}') q
+--
+7c431509e88c88de
+== 295
+SELECT reca FROM json_populate_record(NULL::jsrec, '{"reca": [1, 2]}') q
+--
+7c431509e88c88de
+== 296
+SELECT reca FROM json_populate_record(NULL::jsrec, '{"reca": [{"a": "abc", "b": 456}, null, {"c": "01.02.2003", "x": 43.2}]}') q
+--
+7c431509e88c88de
+== 297
+SELECT reca FROM json_populate_record(NULL::jsrec, '{"reca": ["(abc,42,01.02.2003)"]}') q
+--
+7c431509e88c88de
+== 298
+SELECT reca FROM json_populate_record(NULL::jsrec, '{"reca": "{\"(abc,42,01.02.2003)\"}"}') q
+--
+7c431509e88c88de
+== 299
+SELECT rec FROM json_populate_record(
+	row(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
+		row('x',3,'2012-12-31 15:30:56')::jpop,NULL)::jsrec,
+	'{"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2}}'
+) q
+--
+2c6ce5c23614232a
+== 300
+-- anonymous record type
+SELECT json_populate_record(null::record, '{"x": 0, "y": 1}')
+--
+6b56b907a53d3b04
+== 301
+SELECT json_populate_record(row(1,2), '{"f1": 0, "f2": 1}')
+--
+266499b31303e57a
+== 302
+SELECT * FROM
+  json_populate_record(null::record, '{"x": 776}') AS (x int, y int)
+--
+96f0a0506c75a09a
+== 303
+-- composite domain
+SELECT json_populate_record(null::j_ordered_pair, '{"x": 0, "y": 1}')
+--
+6b56b907a53d3b04
+== 304
+SELECT json_populate_record(row(1,2)::j_ordered_pair, '{"x": 0}')
+--
+6b089cd00c4d7664
+== 305
+SELECT json_populate_record(row(1,2)::j_ordered_pair, '{"x": 1, "y": 0}')
+--
+6b089cd00c4d7664
+== 306
+-- populate_recordset
+
+select * from json_populate_recordset(null::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+a31355b7a9055c7b
+== 307
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 308
+select * from json_populate_recordset(null::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+a31355b7a9055c7b
+== 309
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 310
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"a":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 311
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"c":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 312
+create type jpop2 as (a int, b json, c int, d int)
+--
+c7ed29b1fca07bb2
+== 313
+select * from json_populate_recordset(null::jpop2, '[{"a":2,"c":3,"b":{"z":4},"d":6}]') q
+--
+a31355b7a9055c7b
+== 314
+select * from json_populate_recordset(null::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+a31355b7a9055c7b
+== 315
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 316
+select * from json_populate_recordset(row('def',99,null)::jpop,'[{"a":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+dd27495579a9fb93
+== 317
+-- anonymous record type
+SELECT json_populate_recordset(null::record, '[{"x": 0, "y": 1}]')
+--
+70bb19c523cf3077
+== 318
+SELECT json_populate_recordset(row(1,2), '[{"f1": 0, "f2": 1}]')
+--
+c6893d55e1a0dd49
+== 319
+SELECT i, json_populate_recordset(row(i,50), '[{"f1":"42"},{"f2":"43"}]')
+FROM (VALUES (1),(2)) v(i)
+--
+2fca491f7eb27a2e
+== 320
+SELECT * FROM
+  json_populate_recordset(null::record, '[{"x": 776}]') AS (x int, y int)
+--
+38a93c5daf6ccef8
+== 321
+-- empty array is a corner case
+SELECT json_populate_recordset(null::record, '[]')
+--
+70bb19c523cf3077
+== 322
+SELECT json_populate_recordset(row(1,2), '[]')
+--
+c6893d55e1a0dd49
+== 323
+SELECT * FROM json_populate_recordset(NULL::jpop,'[]') q
+--
+a31355b7a9055c7b
+== 324
+SELECT * FROM
+  json_populate_recordset(null::record, '[]') AS (x int, y int)
+--
+38a93c5daf6ccef8
+== 325
+-- composite domain
+SELECT json_populate_recordset(null::j_ordered_pair, '[{"x": 0, "y": 1}]')
+--
+70bb19c523cf3077
+== 326
+SELECT json_populate_recordset(row(1,2)::j_ordered_pair, '[{"x": 0}, {"y": 3}]')
+--
+cecfd494d011dd4b
+== 327
+SELECT json_populate_recordset(row(1,2)::j_ordered_pair, '[{"x": 1, "y": 0}]')
+--
+cecfd494d011dd4b
+== 328
+-- negative cases where the wrong record type is supplied
+select * from json_populate_recordset(row(0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+bce69a7913750812
+== 329
+select * from json_populate_recordset(row(0::int,0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+bce69a7913750812
+== 330
+select * from json_populate_recordset(row(0::int,0::int,0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+bce69a7913750812
+== 331
+select * from json_populate_recordset(row(1000000000::int,50::int),'[{"b":"2"},{"a":"3"}]') q (a text, b text)
+--
+bce69a7913750812
+== 332
+-- test type info caching in json_populate_record()
+CREATE TEMP TABLE jspoptest (js json)
+--
+0774be25a927dab9
+== 333
+INSERT INTO jspoptest
+SELECT '{
+	"jsa": [1, "2", null, 4],
+	"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2},
+	"reca": [{"a": "abc", "b": 456}, null, {"c": "01.02.2003", "x": 43.2}]
+}'::json
+FROM generate_series(1, 3)
+--
+bf4eeda7f6480a4b
+== 334
+SELECT (json_populate_record(NULL::jsrec, js)).* FROM jspoptest
+--
+c553999f54e42178
+== 335
+DROP TYPE jsrec
+--
+6c16209ec5144b22
+== 336
+DROP TYPE jsrec_i_not_null
+--
+2d378e0f862ec485
+== 337
+DROP DOMAIN js_int_not_null
+--
+68fa82ca50f6da4c
+== 338
+DROP DOMAIN js_int_array_1d
+--
+3ddf63f539766f87
+== 339
+DROP DOMAIN js_int_array_2d
+--
+14a0955341e5e736
+== 340
+DROP DOMAIN j_ordered_pair
+--
+5323b4d386609b98
+== 341
+DROP TYPE j_unordered_pair
+--
+9c1db2e5409a0a4d
+== 342
+--json_typeof() function
+select value, json_typeof(value)
+  from (values (json '123.4'),
+               (json '-1'),
+               (json '"foo"'),
+               (json 'true'),
+               (json 'false'),
+               (json 'null'),
+               (json '[1, 2, 3]'),
+               (json '[]'),
+               (json '{"x":"foo", "y":123}'),
+               (json '{}'),
+               (NULL::json))
+      as data(value)
+--
+07056bc87a79cc66
+== 343
+-- json_build_array, json_build_object, json_object_agg
+
+SELECT json_build_array('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}')
+--
+78f7ca552a971bfa
+== 344
+SELECT json_build_array('a', NULL)
+--
+78f7ca552a971bfa
+== 345
+-- ok
+SELECT json_build_array(VARIADIC NULL::text[])
+--
+9596d05851998fb6
+== 346
+-- ok
+SELECT json_build_array(VARIADIC '{}'::text[])
+--
+9596d05851998fb6
+== 347
+-- ok
+SELECT json_build_array(VARIADIC '{a,b,c}'::text[])
+--
+9596d05851998fb6
+== 348
+-- ok
+SELECT json_build_array(VARIADIC ARRAY['a', NULL]::text[])
+--
+463f8cd0afba522f
+== 349
+-- ok
+SELECT json_build_array(VARIADIC '{1,2,3,4}'::text[])
+--
+9596d05851998fb6
+== 350
+-- ok
+SELECT json_build_array(VARIADIC '{1,2,3,4}'::int[])
+--
+9596d05851998fb6
+== 351
+-- ok
+SELECT json_build_array(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][])
+--
+9596d05851998fb6
+== 352
+-- ok
+
+SELECT json_build_object('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}')
+--
+0895285482ef57b7
+== 353
+SELECT json_build_object(
+       'a', json_build_object('b',false,'c',99),
+       'd', json_build_object('e',array[9,8,7]::int[],
+           'f', (select row_to_json(r) from ( select relkind, oid::regclass as name from pg_class where relname = 'pg_class') r)))
+--
+49a1d56f90beadd9
+== 354
+SELECT json_build_object('{a,b,c}'::text[])
+--
+0895285482ef57b7
+== 355
+-- error
+SELECT json_build_object('{a,b,c}'::text[], '{d,e,f}'::text[])
+--
+0895285482ef57b7
+== 356
+-- error, key cannot be array
+SELECT json_build_object('a', 'b', 'c')
+--
+0895285482ef57b7
+== 357
+-- error
+SELECT json_build_object(NULL, 'a')
+--
+0895285482ef57b7
+== 358
+-- error, key cannot be NULL
+SELECT json_build_object('a', NULL)
+--
+0895285482ef57b7
+== 359
+-- ok
+SELECT json_build_object(VARIADIC NULL::text[])
+--
+77879bd3f5867225
+== 360
+-- ok
+SELECT json_build_object(VARIADIC '{}'::text[])
+--
+77879bd3f5867225
+== 361
+-- ok
+SELECT json_build_object(VARIADIC '{a,b,c}'::text[])
+--
+77879bd3f5867225
+== 362
+-- error
+SELECT json_build_object(VARIADIC ARRAY['a', NULL]::text[])
+--
+a23d2fd0f9f89050
+== 363
+-- ok
+SELECT json_build_object(VARIADIC ARRAY[NULL, 'a']::text[])
+--
+a23d2fd0f9f89050
+== 364
+-- error, key cannot be NULL
+SELECT json_build_object(VARIADIC '{1,2,3,4}'::text[])
+--
+77879bd3f5867225
+== 365
+-- ok
+SELECT json_build_object(VARIADIC '{1,2,3,4}'::int[])
+--
+77879bd3f5867225
+== 366
+-- ok
+SELECT json_build_object(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][])
+--
+77879bd3f5867225
+== 367
+-- ok
+
+-- empty objects/arrays
+SELECT json_build_array()
+--
+78f7ca552a971bfa
+== 368
+SELECT json_build_object()
+--
+0895285482ef57b7
+== 369
+-- make sure keys are quoted
+SELECT json_build_object(1,2)
+--
+0895285482ef57b7
+== 370
+-- keys must be scalar and not null
+SELECT json_build_object(null,2)
+--
+0895285482ef57b7
+== 371
+SELECT json_build_object(r,2) FROM (SELECT 1 AS a, 2 AS b) r
+--
+8da2f21e796cb87e
+== 372
+SELECT json_build_object(json '{"a":1,"b":2}', 3)
+--
+0895285482ef57b7
+== 373
+SELECT json_build_object('{1,2,3}'::int[], 3)
+--
+0895285482ef57b7
+== 374
+CREATE TEMP TABLE foo (serial_num int, name text, type text)
+--
+8c911387c1cf127f
+== 375
+INSERT INTO foo VALUES (847001,'t15','GE1043')
+--
+28301851ae28adec
+== 376
+INSERT INTO foo VALUES (847002,'t16','GE1043')
+--
+28301851ae28adec
+== 377
+INSERT INTO foo VALUES (847003,'sub-alpha','GESS90')
+--
+28301851ae28adec
+== 378
+SELECT json_build_object('turbines',json_object_agg(serial_num,json_build_object('name',name,'type',type)))
+FROM foo
+--
+a708b0338d09c8a2
+== 379
+SELECT json_object_agg(name, type) FROM foo
+--
+5ad563d56bc0eb7c
+== 380
+INSERT INTO foo VALUES (999999, NULL, 'bar')
+--
+28301851ae28adec
+== 381
+SELECT json_object_agg(name, type) FROM foo
+--
+5ad563d56bc0eb7c
+== 382
+-- json_object
+
+-- empty object, one dimension
+SELECT json_object('{}')
+--
+999a5a5bc613b37a
+== 383
+-- empty object, two dimensions
+SELECT json_object('{}', '{}')
+--
+999a5a5bc613b37a
+== 384
+-- one dimension
+SELECT json_object('{a,1,b,2,3,NULL,"d e f","a b c"}')
+--
+999a5a5bc613b37a
+== 385
+-- same but with two dimensions
+SELECT json_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}')
+--
+999a5a5bc613b37a
+== 386
+-- odd number error
+SELECT json_object('{a,b,c}')
+--
+999a5a5bc613b37a
+== 387
+-- one column error
+SELECT json_object('{{a},{b}}')
+--
+999a5a5bc613b37a
+== 388
+-- too many columns error
+SELECT json_object('{{a,b,c},{b,c,d}}')
+--
+999a5a5bc613b37a
+== 389
+-- too many dimensions error
+SELECT json_object('{{{a,b},{c,d}},{{b,c},{d,e}}}')
+--
+999a5a5bc613b37a
+== 390
+--two argument form of json_object
+
+select json_object('{a,b,c,"d e f"}','{1,2,3,"a b c"}')
+--
+999a5a5bc613b37a
+== 391
+-- too many dimensions
+SELECT json_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}', '{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}')
+--
+999a5a5bc613b37a
+== 392
+-- mismatched dimensions
+
+select json_object('{a,b,c,"d e f",g}','{1,2,3,"a b c"}')
+--
+999a5a5bc613b37a
+== 393
+select json_object('{a,b,c,"d e f"}','{1,2,3,"a b c",g}')
+--
+999a5a5bc613b37a
+== 394
+-- null key error
+
+select json_object('{a,b,NULL,"d e f"}','{1,2,3,"a b c"}')
+--
+999a5a5bc613b37a
+== 395
+-- empty key is allowed
+
+select json_object('{a,b,"","d e f"}','{1,2,3,"a b c"}')
+--
+999a5a5bc613b37a
+== 396
+-- json_object_agg_unique requires unique keys
+select json_object_agg_unique(mod(i,100), i) from generate_series(0, 199) i
+--
+803967e2804809f5
+== 397
+-- json_to_record and json_to_recordset
+
+select * from json_to_record('{"a":1,"b":"foo","c":"bar"}')
+    as x(a int, b text, d text)
+--
+96fd81cf4836f9f8
+== 398
+select * from json_to_recordset('[{"a":1,"b":"foo","d":false},{"a":2,"b":"bar","c":true}]')
+    as x(a int, b text, c boolean)
+--
+b63e0986aab15120
+== 399
+select * from json_to_recordset('[{"a":1,"b":{"d":"foo"},"c":true},{"a":2,"c":false,"b":{"d":"bar"}}]')
+    as x(a int, b json, c boolean)
+--
+edaf27943ee24009
+== 400
+select *, c is null as c_is_null
+from json_to_record('{"a":1, "b":{"c":16, "d":2}, "x":8, "ca": ["1 2", 3], "ia": [[1,2],[3,4]], "r": {"a": "aaa", "b": 123}}'::json)
+    as t(a int, b json, c text, x int, ca char(5)[], ia int[][], r jpop)
+--
+d86f8ade49ef0950
+== 401
+select *, c is null as c_is_null
+from json_to_recordset('[{"a":1, "b":{"c":16, "d":2}, "x":8}]'::json)
+    as t(a int, b json, c text, x int)
+--
+bbd757d0346cbbc6
+== 402
+select * from json_to_record('{"ia": null}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 403
+select * from json_to_record('{"ia": 123}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 404
+select * from json_to_record('{"ia": [1, "2", null, 4]}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 405
+select * from json_to_record('{"ia": [[1, 2], [3, 4]]}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 406
+select * from json_to_record('{"ia": [[1], 2]}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 407
+select * from json_to_record('{"ia": [[1], [2, 3]]}') as x(ia _int4)
+--
+60cb83c5ac2f1d7e
+== 408
+select * from json_to_record('{"ia2": [1, 2, 3]}') as x(ia2 int[][])
+--
+4c78607e156665d3
+== 409
+select * from json_to_record('{"ia2": [[1, 2], [3, 4]]}') as x(ia2 int4[][])
+--
+e2b94260b807438b
+== 410
+select * from json_to_record('{"ia2": [[[1], [2], [3]]]}') as x(ia2 int4[][])
+--
+e2b94260b807438b
+== 411
+select * from json_to_record('{"out": {"key": 1}}') as x(out json)
+--
+e48a0ebf4ad2d797
+== 412
+select * from json_to_record('{"out": [{"key": 1}]}') as x(out json)
+--
+e48a0ebf4ad2d797
+== 413
+select * from json_to_record('{"out": "{\"key\": 1}"}') as x(out json)
+--
+e48a0ebf4ad2d797
+== 414
+select * from json_to_record('{"out": {"key": 1}}') as x(out jsonb)
+--
+ee3438bf7baa9ff8
+== 415
+select * from json_to_record('{"out": [{"key": 1}]}') as x(out jsonb)
+--
+ee3438bf7baa9ff8
+== 416
+select * from json_to_record('{"out": "{\"key\": 1}"}') as x(out jsonb)
+--
+ee3438bf7baa9ff8
+== 417
+-- json_strip_nulls
+
+select json_strip_nulls(null)
+--
+b0974fda09fd1e7f
+== 418
+select json_strip_nulls('1')
+--
+b0974fda09fd1e7f
+== 419
+select json_strip_nulls('"a string"')
+--
+b0974fda09fd1e7f
+== 420
+select json_strip_nulls('null')
+--
+b0974fda09fd1e7f
+== 421
+select json_strip_nulls('[1,2,null,3,4]')
+--
+b0974fda09fd1e7f
+== 422
+select json_strip_nulls('{"a":1,"b":null,"c":[2,null,3],"d":{"e":4,"f":null}}')
+--
+b0974fda09fd1e7f
+== 423
+select json_strip_nulls('[1,{"a":1,"b":null,"c":2},3]')
+--
+b0974fda09fd1e7f
+== 424
+-- an empty object is not null and should not be stripped
+select json_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }')
+--
+b0974fda09fd1e7f
+== 425
+-- json to tsvector
+select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::json)
+--
+92ee74bff088e9f4
+== 426
+-- json to tsvector with config
+select to_tsvector('simple', '{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::json)
+--
+92ee74bff088e9f4
+== 427
+-- json to tsvector with stop words
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": ["the eee fff ggg"], "c": {"d": "hhh. iii"}}'::json)
+--
+92ee74bff088e9f4
+== 428
+-- json to tsvector with numeric values
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::json)
+--
+92ee74bff088e9f4
+== 429
+-- json_to_tsvector
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 430
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"key"')
+--
+1f34f4eb34a37f70
+== 431
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"string"')
+--
+1f34f4eb34a37f70
+== 432
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"numeric"')
+--
+1f34f4eb34a37f70
+== 433
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"boolean"')
+--
+1f34f4eb34a37f70
+== 434
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '["string", "numeric"]')
+--
+1f34f4eb34a37f70
+== 435
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 436
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"key"')
+--
+1f34f4eb34a37f70
+== 437
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"string"')
+--
+1f34f4eb34a37f70
+== 438
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"numeric"')
+--
+1f34f4eb34a37f70
+== 439
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '"boolean"')
+--
+1f34f4eb34a37f70
+== 440
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '["string", "numeric"]')
+--
+1f34f4eb34a37f70
+== 441
+-- to_tsvector corner cases
+select to_tsvector('""'::json)
+--
+92ee74bff088e9f4
+== 442
+select to_tsvector('{}'::json)
+--
+92ee74bff088e9f4
+== 443
+select to_tsvector('[]'::json)
+--
+92ee74bff088e9f4
+== 444
+select to_tsvector('null'::json)
+--
+92ee74bff088e9f4
+== 445
+-- json_to_tsvector corner cases
+select json_to_tsvector('""'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 446
+select json_to_tsvector('{}'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 447
+select json_to_tsvector('[]'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 448
+select json_to_tsvector('null'::json, '"all"')
+--
+1f34f4eb34a37f70
+== 449
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '""')
+--
+1f34f4eb34a37f70
+== 450
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '{}')
+--
+1f34f4eb34a37f70
+== 451
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '[]')
+--
+1f34f4eb34a37f70
+== 452
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, 'null')
+--
+1f34f4eb34a37f70
+== 453
+select json_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::json, '["all", null]')
+--
+1f34f4eb34a37f70
+== 454
+-- ts_headline for json
+select ts_headline('{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::json, tsquery('bbb & ddd & hhh'))
+--
+8e61e3e3d8ba2c30
+== 455
+select ts_headline('english', '{"a": "aaa bbb", "b": {"c": "ccc ddd fff"}, "d": ["ggg hhh", "iii jjj"]}'::json, tsquery('bbb & ddd & hhh'))
+--
+8e61e3e3d8ba2c30
+== 456
+select ts_headline('{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::json, tsquery('bbb & ddd & hhh'), 'StartSel = <, StopSel = >')
+--
+8e61e3e3d8ba2c30
+== 457
+select ts_headline('english', '{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::json, tsquery('bbb & ddd & hhh'), 'StartSel = <, StopSel = >')
+--
+8e61e3e3d8ba2c30
+== 458
+-- corner cases for ts_headline with json
+select ts_headline('null'::json, tsquery('aaa & bbb'))
+--
+8e61e3e3d8ba2c30
+== 459
+select ts_headline('{}'::json, tsquery('aaa & bbb'))
+--
+8e61e3e3d8ba2c30
+== 460
+select ts_headline('[]'::json, tsquery('aaa & bbb'))
+--
+8e61e3e3d8ba2c30

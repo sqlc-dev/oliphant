@@ -1,0 +1,931 @@
+== 001
+|--
+-- SP-GiST index tests
+|--
+
+CREATE TABLE quad_point_tbl AS
+    SELECT point(unique1,unique2) AS p FROM tenk1
+--
+1fb42d84552277da
+== 002
+INSERT INTO quad_point_tbl
+    SELECT '(333.0,400.0)'::point FROM generate_series(1,1000)
+--
+06728ae2b7edbcbf
+== 003
+INSERT INTO quad_point_tbl VALUES (NULL), (NULL), (NULL)
+--
+6020bfc45b0d06a2
+== 004
+CREATE INDEX sp_quad_ind ON quad_point_tbl USING spgist (p)
+--
+e90929aff1585e06
+== 005
+CREATE TABLE kd_point_tbl AS SELECT * FROM quad_point_tbl
+--
+46027e3f916eb0ca
+== 006
+CREATE INDEX sp_kd_ind ON kd_point_tbl USING spgist (p kd_point_ops)
+--
+33e337b97c075b59
+== 007
+CREATE TABLE radix_text_tbl AS
+    SELECT name AS t FROM road WHERE name !~ '^[0-9]'
+--
+8b9ac694574463ba
+== 008
+INSERT INTO radix_text_tbl
+    SELECT 'P0123456789abcdef' FROM generate_series(1,1000)
+--
+a1911c0bcc9738f8
+== 009
+INSERT INTO radix_text_tbl VALUES ('P0123456789abcde')
+--
+76a4fb6f01056825
+== 010
+INSERT INTO radix_text_tbl VALUES ('P0123456789abcdefF')
+--
+76a4fb6f01056825
+== 011
+CREATE INDEX sp_radix_ind ON radix_text_tbl USING spgist (t)
+--
+443b24b66c2733d9
+== 012
+-- get non-indexed results for comparison purposes
+
+SET enable_seqscan = ON
+--
+b6355b32597ef7db
+== 013
+SET enable_indexscan = OFF
+--
+c95f6a280f5be733
+== 014
+SET enable_bitmapscan = OFF
+--
+aa90c60f48f4fef4
+== 015
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+1bb576864d2d15a3
+== 016
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+011918fa0d480bf7
+== 017
+SELECT count(*) FROM quad_point_tbl
+--
+3da1f24b38675c69
+== 018
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+47fd1cd7f8efd4fa
+== 019
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+c9e97700a8b7bd24
+== 020
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+0bb0029e7443ecbf
+== 021
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+0ba7c16fc27ca795
+== 022
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+0ac21ed4726e8e6c
+== 023
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+e9c0fa0e7ec3231a
+== 024
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+3f3239eef7e47274
+== 025
+CREATE TEMP TABLE quad_point_tbl_ord_seq1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+24d31dcc2ce1eaf9
+== 026
+CREATE TEMP TABLE quad_point_tbl_ord_seq2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+0f9602ca51c51573
+== 027
+CREATE TEMP TABLE quad_point_tbl_ord_seq3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+567fddb2ab3a4432
+== 028
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+9884241809b93920
+== 029
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+9884241809b93920
+== 030
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+9884241809b93920
+== 031
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+2cb9ab89ef044887
+== 032
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+c37578fb218ca019
+== 033
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+fdea526b4a10e16d
+== 034
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+231d83408a5eb5f8
+== 035
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+9884241809b93920
+== 036
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+9884241809b93920
+== 037
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+89f08b99b1c74728
+== 038
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+ce2b73dca5aa6268
+== 039
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+94c1febea4b31e9d
+== 040
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+26914716dffe170c
+== 041
+SELECT count(*) FROM radix_text_tbl WHERE t ^@  'Worth'
+--
+ed8600bda1765439
+== 042
+-- Now check the results from plain indexscan
+SET enable_seqscan = OFF
+--
+b6355b32597ef7db
+== 043
+SET enable_indexscan = ON
+--
+c95f6a280f5be733
+== 044
+SET enable_bitmapscan = OFF
+--
+aa90c60f48f4fef4
+== 045
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+f77dab77a120b5da
+== 046
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+1bb576864d2d15a3
+== 047
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+07934e602cbf2cb0
+== 048
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+011918fa0d480bf7
+== 049
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+--
+466633d1cf329e73
+== 050
+SELECT count(*) FROM quad_point_tbl
+--
+3da1f24b38675c69
+== 051
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+21baefa2218a4e8d
+== 052
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+47fd1cd7f8efd4fa
+== 053
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+2fac24b036a2b065
+== 054
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+c9e97700a8b7bd24
+== 055
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+3b68cafb66bcdca2
+== 056
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+0bb0029e7443ecbf
+== 057
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+502c5f7bb3ee511a
+== 058
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+0ba7c16fc27ca795
+== 059
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+af08db33d80e0ed3
+== 060
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+0ac21ed4726e8e6c
+== 061
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+c622e219a295ee75
+== 062
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+e9c0fa0e7ec3231a
+== 063
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+2e229fd373e06c49
+== 064
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+3f3239eef7e47274
+== 065
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+2c32489458d4b329
+== 066
+CREATE TEMP TABLE quad_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+24d31dcc2ce1eaf9
+== 067
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN quad_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+596b23a9f5cc5c09
+== 068
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+8cd0165f44a83850
+== 069
+CREATE TEMP TABLE quad_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+0f9602ca51c51573
+== 070
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN quad_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+1348731a5da7113e
+== 071
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+24ac23d13e139029
+== 072
+CREATE TEMP TABLE quad_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+567fddb2ab3a4432
+== 073
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN quad_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+55a17cacae4bdafc
+== 074
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+9081de69fa28d8ed
+== 075
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+2c7b905513f51bec
+== 076
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+3b4c041721881283
+== 077
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+0907365f28702b4b
+== 078
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+a06eff851bb2a1b5
+== 079
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+e365172f999a6ec7
+== 080
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+a6f5a6b1b31c87ef
+== 081
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+ffdf46f823f33c29
+== 082
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+b923a07e13764bc9
+== 083
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+56b09154de9d88b5
+== 084
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+57c78e6f8ab04343
+== 085
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+a5080375d117ec0e
+== 086
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+68da11011448055a
+== 087
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+9a597cfd9016b59b
+== 088
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl
+--
+670bfd14ca51b26a
+== 089
+CREATE TEMP TABLE kd_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl
+--
+e737ae7cd53c0650
+== 090
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN kd_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+e7c9d78be837e324
+== 091
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+ff16c4f58b0bddc9
+== 092
+CREATE TEMP TABLE kd_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+f69716a367f70031
+== 093
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN kd_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+9e7fbb246047e5f8
+== 094
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+--
+52ba9c716800f945
+== 095
+CREATE TEMP TABLE kd_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+--
+61054571b43bd1c4
+== 096
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN kd_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+0f6ad8cf44f084ee
+== 097
+-- test KNN scan with included columns
+-- the distance numbers are not exactly the same across platforms
+SET extra_float_digits = 0
+--
+e4d6a0d1aa7aee70
+== 098
+CREATE INDEX ON quad_point_tbl_ord_seq1 USING spgist(p) INCLUDE(dist)
+--
+40b60bb8c4dbd589
+== 099
+EXPLAIN (COSTS OFF)
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> '0,0' LIMIT 10
+--
+6b998174774046e4
+== 100
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> '0,0' LIMIT 10
+--
+586a797691b79c51
+== 101
+RESET extra_float_digits
+--
+d4bd68c1cc694a07
+== 102
+-- check ORDER BY distance to NULL
+SELECT (SELECT p FROM kd_point_tbl ORDER BY p <-> pt, p <-> '0,0' LIMIT 1)
+FROM (VALUES (point '1,2'), (NULL), ('1234,5678')) pts(pt)
+--
+707c7623dfe3a265
+== 103
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+64a86693815a673d
+== 104
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+9884241809b93920
+== 105
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+64a86693815a673d
+== 106
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+9884241809b93920
+== 107
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+64a86693815a673d
+== 108
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+9884241809b93920
+== 109
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+b8faaca126019640
+== 110
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+2cb9ab89ef044887
+== 111
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+1e03f28dd3915fdb
+== 112
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+c37578fb218ca019
+== 113
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+ab94683586268c3f
+== 114
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+fdea526b4a10e16d
+== 115
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+47b6543b0b16225d
+== 116
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+231d83408a5eb5f8
+== 117
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+64a86693815a673d
+== 118
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+9884241809b93920
+== 119
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+64a86693815a673d
+== 120
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+9884241809b93920
+== 121
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+0284cca205eeecdd
+== 122
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+89f08b99b1c74728
+== 123
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+52cf41934664c92f
+== 124
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+ce2b73dca5aa6268
+== 125
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+43f1e5910cd96289
+== 126
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+94c1febea4b31e9d
+== 127
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+4f9b9bd8a7cced51
+== 128
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+26914716dffe170c
+== 129
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+002777352d51ee94
+== 130
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+ed8600bda1765439
+== 131
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+932b5479acdc5b8c
+== 132
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+c11af084518f0d47
+== 133
+-- Now check the results from bitmap indexscan
+SET enable_seqscan = OFF
+--
+b6355b32597ef7db
+== 134
+SET enable_indexscan = OFF
+--
+c95f6a280f5be733
+== 135
+SET enable_bitmapscan = ON
+--
+aa90c60f48f4fef4
+== 136
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+f77dab77a120b5da
+== 137
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+1bb576864d2d15a3
+== 138
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+07934e602cbf2cb0
+== 139
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+011918fa0d480bf7
+== 140
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+--
+466633d1cf329e73
+== 141
+SELECT count(*) FROM quad_point_tbl
+--
+3da1f24b38675c69
+== 142
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+21baefa2218a4e8d
+== 143
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+47fd1cd7f8efd4fa
+== 144
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+2fac24b036a2b065
+== 145
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+c9e97700a8b7bd24
+== 146
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+3b68cafb66bcdca2
+== 147
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+0bb0029e7443ecbf
+== 148
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+502c5f7bb3ee511a
+== 149
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+0ba7c16fc27ca795
+== 150
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+af08db33d80e0ed3
+== 151
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+0ac21ed4726e8e6c
+== 152
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+c622e219a295ee75
+== 153
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+e9c0fa0e7ec3231a
+== 154
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+2e229fd373e06c49
+== 155
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+3f3239eef7e47274
+== 156
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+9081de69fa28d8ed
+== 157
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+2c7b905513f51bec
+== 158
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+3b4c041721881283
+== 159
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+0907365f28702b4b
+== 160
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+a06eff851bb2a1b5
+== 161
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+e365172f999a6ec7
+== 162
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+a6f5a6b1b31c87ef
+== 163
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+ffdf46f823f33c29
+== 164
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+b923a07e13764bc9
+== 165
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+56b09154de9d88b5
+== 166
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+57c78e6f8ab04343
+== 167
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+a5080375d117ec0e
+== 168
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+68da11011448055a
+== 169
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+9a597cfd9016b59b
+== 170
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+64a86693815a673d
+== 171
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+9884241809b93920
+== 172
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+64a86693815a673d
+== 173
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+9884241809b93920
+== 174
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+64a86693815a673d
+== 175
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+9884241809b93920
+== 176
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+b8faaca126019640
+== 177
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+2cb9ab89ef044887
+== 178
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+1e03f28dd3915fdb
+== 179
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+c37578fb218ca019
+== 180
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+ab94683586268c3f
+== 181
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+fdea526b4a10e16d
+== 182
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+47b6543b0b16225d
+== 183
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+231d83408a5eb5f8
+== 184
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+64a86693815a673d
+== 185
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+9884241809b93920
+== 186
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+64a86693815a673d
+== 187
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+9884241809b93920
+== 188
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+0284cca205eeecdd
+== 189
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+89f08b99b1c74728
+== 190
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+52cf41934664c92f
+== 191
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+ce2b73dca5aa6268
+== 192
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+43f1e5910cd96289
+== 193
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+94c1febea4b31e9d
+== 194
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+4f9b9bd8a7cced51
+== 195
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+26914716dffe170c
+== 196
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+002777352d51ee94
+== 197
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+ed8600bda1765439
+== 198
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+932b5479acdc5b8c
+== 199
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+c11af084518f0d47
+== 200
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 201
+RESET enable_indexscan
+--
+f0fcaf221af6b112
+== 202
+RESET enable_bitmapscan
+--
+e4cb3f6b223046e8

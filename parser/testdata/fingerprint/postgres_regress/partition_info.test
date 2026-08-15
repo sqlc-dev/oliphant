@@ -1,0 +1,339 @@
+== 001
+|--
+-- Tests for functions providing information about partitions
+|--
+SELECT * FROM pg_partition_tree(NULL)
+--
+19a2489ac23e96f8
+== 002
+SELECT * FROM pg_partition_tree(0)
+--
+19a2489ac23e96f8
+== 003
+SELECT * FROM pg_partition_ancestors(NULL)
+--
+1230d296e94359c8
+== 004
+SELECT * FROM pg_partition_ancestors(0)
+--
+1230d296e94359c8
+== 005
+SELECT pg_partition_root(NULL)
+--
+a77e307de4423bc4
+== 006
+SELECT pg_partition_root(0)
+--
+a77e307de4423bc4
+== 007
+-- Test table partition trees
+CREATE TABLE ptif_test (a int, b int) PARTITION BY range (a)
+--
+b1a029a6838963ce
+== 008
+CREATE TABLE ptif_test0 PARTITION OF ptif_test
+  FOR VALUES FROM (minvalue) TO (0) PARTITION BY list (b)
+--
+6e5a861eaeb3ac5c
+== 009
+CREATE TABLE ptif_test01 PARTITION OF ptif_test0 FOR VALUES IN (1)
+--
+593bb7262e212af4
+== 010
+CREATE TABLE ptif_test1 PARTITION OF ptif_test
+  FOR VALUES FROM (0) TO (100) PARTITION BY list (b)
+--
+f638e62a5799517c
+== 011
+CREATE TABLE ptif_test11 PARTITION OF ptif_test1 FOR VALUES IN (1)
+--
+efb878ff24d3c8a7
+== 012
+CREATE TABLE ptif_test2 PARTITION OF ptif_test
+  FOR VALUES FROM (100) TO (200)
+--
+f69fa17e3f3d027a
+== 013
+-- This partitioned table should remain with no partitions.
+CREATE TABLE ptif_test3 PARTITION OF ptif_test
+  FOR VALUES FROM (200) TO (maxvalue) PARTITION BY list (b)
+--
+e99077a6632f6e5a
+== 014
+-- Test pg_partition_root for tables
+SELECT pg_partition_root('ptif_test')
+--
+a77e307de4423bc4
+== 015
+SELECT pg_partition_root('ptif_test0')
+--
+a77e307de4423bc4
+== 016
+SELECT pg_partition_root('ptif_test01')
+--
+a77e307de4423bc4
+== 017
+SELECT pg_partition_root('ptif_test3')
+--
+a77e307de4423bc4
+== 018
+-- Test index partition tree
+CREATE INDEX ptif_test_index ON ONLY ptif_test (a)
+--
+72df1fce37194dc3
+== 019
+CREATE INDEX ptif_test0_index ON ONLY ptif_test0 (a)
+--
+f41e95d6fb62cade
+== 020
+ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test0_index
+--
+299b0d0692c525d1
+== 021
+CREATE INDEX ptif_test01_index ON ptif_test01 (a)
+--
+16a058fe0f1fceaf
+== 022
+ALTER INDEX ptif_test0_index ATTACH PARTITION ptif_test01_index
+--
+2c80afbd7fec31fd
+== 023
+CREATE INDEX ptif_test1_index ON ONLY ptif_test1 (a)
+--
+273f5f08023e449d
+== 024
+ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test1_index
+--
+57e71a2681d411db
+== 025
+CREATE INDEX ptif_test11_index ON ptif_test11 (a)
+--
+5211732b9870b288
+== 026
+ALTER INDEX ptif_test1_index ATTACH PARTITION ptif_test11_index
+--
+e26c3e9cb6d14ca8
+== 027
+CREATE INDEX ptif_test2_index ON ptif_test2 (a)
+--
+420b2b359b7fdad4
+== 028
+ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test2_index
+--
+84c62d40835cf72d
+== 029
+CREATE INDEX ptif_test3_index ON ptif_test3 (a)
+--
+1ec858e6679e6d09
+== 030
+ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test3_index
+--
+f43c2e8b5ba5614e
+== 031
+-- Test pg_partition_root for indexes
+SELECT pg_partition_root('ptif_test_index')
+--
+a77e307de4423bc4
+== 032
+SELECT pg_partition_root('ptif_test0_index')
+--
+a77e307de4423bc4
+== 033
+SELECT pg_partition_root('ptif_test01_index')
+--
+a77e307de4423bc4
+== 034
+SELECT pg_partition_root('ptif_test3_index')
+--
+a77e307de4423bc4
+== 035
+-- List all tables members of the tree
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test')
+--
+6b7823f47e13ac9e
+== 036
+-- List tables from an intermediate level
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test0') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 037
+-- List from leaf table
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test01') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 038
+-- List from partitioned table with no partitions
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test3') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 039
+-- List all ancestors of root and leaf tables
+SELECT * FROM pg_partition_ancestors('ptif_test01')
+--
+1230d296e94359c8
+== 040
+SELECT * FROM pg_partition_ancestors('ptif_test')
+--
+1230d296e94359c8
+== 041
+-- List all members using pg_partition_root with leaf table reference
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree(pg_partition_root('ptif_test01')) p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+d4662435ef340f21
+== 042
+-- List all indexes members of the tree
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test_index')
+--
+6b7823f47e13ac9e
+== 043
+-- List indexes from an intermediate level
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test0_index') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 044
+-- List from leaf index
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test01_index') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 045
+-- List from partitioned index with no partitions
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test3_index') p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+6a023024e52bb6ba
+== 046
+-- List all members using pg_partition_root with leaf index reference
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree(pg_partition_root('ptif_test01_index')) p
+  JOIN pg_class c ON (p.relid = c.oid)
+--
+d4662435ef340f21
+== 047
+-- List all ancestors of root and leaf indexes
+SELECT * FROM pg_partition_ancestors('ptif_test01_index')
+--
+1230d296e94359c8
+== 048
+SELECT * FROM pg_partition_ancestors('ptif_test_index')
+--
+1230d296e94359c8
+== 049
+DROP TABLE ptif_test
+--
+d52457eb62214c16
+== 050
+-- Table that is not part of any partition tree is not listed.
+CREATE TABLE ptif_normal_table(a int)
+--
+d301a57d0593f86f
+== 051
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_normal_table')
+--
+6b7823f47e13ac9e
+== 052
+SELECT * FROM pg_partition_ancestors('ptif_normal_table')
+--
+1230d296e94359c8
+== 053
+SELECT pg_partition_root('ptif_normal_table')
+--
+a77e307de4423bc4
+== 054
+DROP TABLE ptif_normal_table
+--
+c3b17811bd2876ae
+== 055
+-- Various partitioning-related functions return empty/NULL if passed relations
+-- of types that cannot be part of a partition tree; for example, views,
+-- materialized views, legacy inheritance children or parents, etc.
+CREATE VIEW ptif_test_view AS SELECT 1
+--
+9ad430826d79bdef
+== 056
+CREATE MATERIALIZED VIEW ptif_test_matview AS SELECT 1
+--
+de5166b986655f1b
+== 057
+CREATE TABLE ptif_li_parent ()
+--
+b45b3bd25a0f41df
+== 058
+CREATE TABLE ptif_li_child () INHERITS (ptif_li_parent)
+--
+1dec95a0ed7723d1
+== 059
+SELECT * FROM pg_partition_tree('ptif_test_view')
+--
+19a2489ac23e96f8
+== 060
+SELECT * FROM pg_partition_tree('ptif_test_matview')
+--
+19a2489ac23e96f8
+== 061
+SELECT * FROM pg_partition_tree('ptif_li_parent')
+--
+19a2489ac23e96f8
+== 062
+SELECT * FROM pg_partition_tree('ptif_li_child')
+--
+19a2489ac23e96f8
+== 063
+SELECT * FROM pg_partition_ancestors('ptif_test_view')
+--
+1230d296e94359c8
+== 064
+SELECT * FROM pg_partition_ancestors('ptif_test_matview')
+--
+1230d296e94359c8
+== 065
+SELECT * FROM pg_partition_ancestors('ptif_li_parent')
+--
+1230d296e94359c8
+== 066
+SELECT * FROM pg_partition_ancestors('ptif_li_child')
+--
+1230d296e94359c8
+== 067
+SELECT pg_partition_root('ptif_test_view')
+--
+a77e307de4423bc4
+== 068
+SELECT pg_partition_root('ptif_test_matview')
+--
+a77e307de4423bc4
+== 069
+SELECT pg_partition_root('ptif_li_parent')
+--
+a77e307de4423bc4
+== 070
+SELECT pg_partition_root('ptif_li_child')
+--
+a77e307de4423bc4
+== 071
+DROP VIEW ptif_test_view
+--
+d1b836b5c31ccf09
+== 072
+DROP MATERIALIZED VIEW ptif_test_matview
+--
+a54b8c0ed1f4e740
+== 073
+DROP TABLE ptif_li_parent, ptif_li_child
+--
+56e72067378452f5

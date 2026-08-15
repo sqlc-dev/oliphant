@@ -1,0 +1,220 @@
+== 001
+|--
+-- Regression tests for schemas (namespaces)
+|--
+
+-- set the whitespace-only search_path to test that the
+-- GUC list syntax is preserved during a schema creation
+SELECT pg_catalog.set_config('search_path', ' ', false)
+--
+SELECT pg_catalog.set_config('search_path', ' ', false)
+== 002
+CREATE SCHEMA test_ns_schema_1
+       CREATE UNIQUE INDEX abc_a_idx ON abc (a)
+
+       CREATE VIEW abc_view AS
+              SELECT a+1 AS a, b+1 AS b FROM abc
+
+       CREATE TABLE abc (
+              a serial,
+              b int UNIQUE
+       )
+--
+CREATE SCHEMA test_ns_schema_1 CREATE UNIQUE INDEX abc_a_idx ON abc USING btree (a) CREATE VIEW abc_view AS SELECT a + 1 AS a, b + 1 AS b FROM abc  CREATE TABLE abc (a serial, b int UNIQUE)
+== 003
+-- verify that the correct search_path restored on abort
+SET search_path to public
+--
+SET search_path TO public
+== 004
+BEGIN
+--
+BEGIN
+== 005
+SET search_path to public, test_ns_schema_1
+--
+SET search_path TO public, test_ns_schema_1
+== 006
+CREATE SCHEMA test_ns_schema_2
+       CREATE VIEW abc_view AS SELECT c FROM abc
+--
+CREATE SCHEMA test_ns_schema_2 CREATE VIEW abc_view AS SELECT c FROM abc
+== 007
+COMMIT
+--
+COMMIT
+== 008
+SHOW search_path
+--
+SHOW search_path
+== 009
+-- verify that the correct search_path preserved
+-- after creating the schema and on commit
+BEGIN
+--
+BEGIN
+== 010
+SET search_path to public, test_ns_schema_1
+--
+SET search_path TO public, test_ns_schema_1
+== 011
+CREATE SCHEMA test_ns_schema_2
+       CREATE VIEW abc_view AS SELECT a FROM abc
+--
+CREATE SCHEMA test_ns_schema_2 CREATE VIEW abc_view AS SELECT a FROM abc
+== 012
+SHOW search_path
+--
+SHOW search_path
+== 013
+COMMIT
+--
+COMMIT
+== 014
+SHOW search_path
+--
+SHOW search_path
+== 015
+DROP SCHEMA test_ns_schema_2 CASCADE
+--
+DROP SCHEMA test_ns_schema_2 CASCADE
+== 016
+-- verify that the objects were created
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+--
+SELECT count(*) FROM pg_class WHERE relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+== 017
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+== 018
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+== 019
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+--
+INSERT INTO test_ns_schema_1.abc DEFAULT VALUES
+== 020
+SELECT * FROM test_ns_schema_1.abc
+--
+SELECT * FROM test_ns_schema_1.abc
+== 021
+SELECT * FROM test_ns_schema_1.abc_view
+--
+SELECT * FROM test_ns_schema_1.abc_view
+== 022
+ALTER SCHEMA test_ns_schema_1 RENAME TO test_ns_schema_renamed
+--
+ALTER SCHEMA test_ns_schema_1 RENAME TO test_ns_schema_renamed
+== 023
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+--
+SELECT count(*) FROM pg_class WHERE relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_1')
+== 024
+-- test IF NOT EXISTS cases
+CREATE SCHEMA test_ns_schema_renamed
+--
+CREATE SCHEMA test_ns_schema_renamed
+== 025
+-- fail, already exists
+CREATE SCHEMA IF NOT EXISTS test_ns_schema_renamed
+--
+CREATE SCHEMA IF NOT EXISTS test_ns_schema_renamed
+== 026
+-- ok with notice
+CREATE SCHEMA IF NOT EXISTS test_ns_schema_renamed -- fail, disallowed
+       CREATE TABLE abc (
+              a serial,
+              b int UNIQUE
+       )
+--
+ERROR: CREATE SCHEMA IF NOT EXISTS cannot include schema elements
+CURSORPOS: 97
+FILENAME: gram.y
+FUNCNAME: base_yyparse
+== 027
+DROP SCHEMA test_ns_schema_renamed CASCADE
+--
+DROP SCHEMA test_ns_schema_renamed CASCADE
+== 028
+-- verify that the objects were dropped
+SELECT COUNT(*) FROM pg_class WHERE relnamespace =
+    (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_renamed')
+--
+SELECT count(*) FROM pg_class WHERE relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'test_ns_schema_renamed')
+== 029
+|--
+-- Verify that search_path is set to a safe value during maintenance
+-- commands.
+|--
+
+CREATE SCHEMA test_maint_search_path
+--
+CREATE SCHEMA test_maint_search_path
+== 030
+SET search_path = test_maint_search_path
+--
+SET search_path TO test_maint_search_path
+== 031
+CREATE FUNCTION fn(INT) RETURNS INT IMMUTABLE LANGUAGE plpgsql AS $$
+  BEGIN
+    RAISE NOTICE 'current search_path: %', current_setting('search_path');
+    RETURN $1;
+  END;
+$$
+--
+CREATE FUNCTION fn(int) RETURNS int IMMUTABLE LANGUAGE plpgsql AS $$
+  BEGIN
+    RAISE NOTICE 'current search_path: %', current_setting('search_path');
+    RETURN $1;
+  END;
+$$
+== 032
+CREATE TABLE test_maint(i INT)
+--
+CREATE TABLE test_maint (i int)
+== 033
+INSERT INTO test_maint VALUES (1), (2)
+--
+INSERT INTO test_maint VALUES (1), (2)
+== 034
+CREATE MATERIALIZED VIEW test_maint_mv AS SELECT fn(i) FROM test_maint
+--
+CREATE MATERIALIZED VIEW test_maint_mv AS SELECT fn(i) FROM test_maint
+== 035
+-- the following commands should see search_path as pg_catalog, pg_temp
+
+CREATE INDEX test_maint_idx ON test_maint_search_path.test_maint (fn(i))
+--
+CREATE INDEX test_maint_idx ON test_maint_search_path.test_maint USING btree (fn(i))
+== 036
+REINDEX TABLE test_maint_search_path.test_maint
+--
+REINDEX TABLE test_maint_search_path.test_maint
+== 037
+ANALYZE test_maint_search_path.test_maint
+--
+ANALYZE test_maint_search_path.test_maint
+== 038
+VACUUM FULL test_maint_search_path.test_maint
+--
+VACUUM (FULL) test_maint_search_path.test_maint
+== 039
+CLUSTER test_maint_search_path.test_maint USING test_maint_idx
+--
+CLUSTER test_maint_search_path.test_maint USING test_maint_idx
+== 040
+REFRESH MATERIALIZED VIEW test_maint_search_path.test_maint_mv
+--
+REFRESH MATERIALIZED VIEW test_maint_search_path.test_maint_mv
+== 041
+RESET search_path
+--
+RESET search_path
+== 042
+DROP SCHEMA test_maint_search_path CASCADE
+--
+DROP SCHEMA test_maint_search_path CASCADE

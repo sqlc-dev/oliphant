@@ -1,0 +1,1598 @@
+== 001
+|--
+-- CREATE_VIEW
+-- Virtual class definitions
+--	(this also tests the query rewrite system)
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION interpt_pp(path, path)
+    RETURNS point
+    AS :'regresslib'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 238
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+CREATE TABLE real_city (
+	pop			int4,
+	cname		text,
+	outline 	path
+)
+--
+9abcd151b736697a
+== 003
+COPY real_city FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+ANALYZE real_city
+--
+602374f490fa2883
+== 005
+SELECT *
+   INTO TABLE ramp
+   FROM ONLY road
+   WHERE name ~ '.*Ramp'
+--
+c73bdea0d8e52124
+== 006
+CREATE VIEW street AS
+   SELECT r.name, r.thepath, c.cname AS cname
+   FROM ONLY road r, real_city c
+   WHERE c.outline ?# r.thepath
+--
+0899703365016350
+== 007
+CREATE VIEW iexit AS
+   SELECT ih.name, ih.thepath,
+	interpt_pp(ih.thepath, r.thepath) AS exit
+   FROM ihighway ih, ramp r
+   WHERE ih.thepath ?# r.thepath
+--
+a6688ac7e2db91e9
+== 008
+CREATE VIEW toyemp AS
+   SELECT name, age, location, 12*salary AS annualsal
+   FROM emp
+--
+3f05a54238dff41d
+== 009
+-- Test comments
+COMMENT ON VIEW noview IS 'no view'
+--
+a79eae1f43508314
+== 010
+COMMENT ON VIEW toyemp IS 'is a view'
+--
+97a26fcdeec2daa7
+== 011
+COMMENT ON VIEW toyemp IS NULL
+--
+7af47396e0e5f26d
+== 012
+-- These views are left around mainly to exercise special cases in pg_dump.
+
+CREATE TABLE view_base_table (key int PRIMARY KEY, data varchar(20))
+--
+ca1ce2e5ce220316
+== 013
+CREATE VIEW key_dependent_view AS
+   SELECT * FROM view_base_table GROUP BY key
+--
+87ce4f9a1e5e0276
+== 014
+ALTER TABLE view_base_table DROP CONSTRAINT view_base_table_pkey
+--
+7c1b13e4bbdc4a5a
+== 015
+-- fails
+
+CREATE VIEW key_dependent_view_no_cols AS
+   SELECT FROM view_base_table GROUP BY key HAVING length(data) > 0
+--
+bc87c92173bbdb6e
+== 016
+|--
+-- CREATE OR REPLACE VIEW
+|--
+
+CREATE TABLE viewtest_tbl (a int, b int, c numeric(10,1), d text COLLATE "C")
+--
+98028a28dc9c3810
+== 017
+COPY viewtest_tbl FROM stdin
+--
+4b0918f046afabec
+== 018
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT * FROM viewtest_tbl
+--
+50cfe88aefba1deb
+== 019
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT * FROM viewtest_tbl WHERE a > 10
+--
+9c9d360024686329
+== 020
+SELECT * FROM viewtest
+--
+f52ea94523d48f7f
+== 021
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b, c, d FROM viewtest_tbl WHERE a > 5 ORDER BY b DESC
+--
+063924c264a69d8c
+== 022
+SELECT * FROM viewtest
+--
+f52ea94523d48f7f
+== 023
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a FROM viewtest_tbl WHERE a <> 20
+--
+63a82c1282810c50
+== 024
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT 1, * FROM viewtest_tbl
+--
+39ce6d50405fe5c2
+== 025
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b::numeric, c, d FROM viewtest_tbl
+--
+c17b2cb7aaa481ce
+== 026
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b, c::numeric(10,2), d FROM viewtest_tbl
+--
+f16b9521e9b56c46
+== 027
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b, c, d COLLATE "POSIX" FROM viewtest_tbl
+--
+3b7c747ab3b9d284
+== 028
+-- should work
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b, c, d, 0 AS e FROM viewtest_tbl
+--
+746b143ef70fa25f
+== 029
+DROP VIEW viewtest
+--
+94d9e7c1ebe7b826
+== 030
+DROP TABLE viewtest_tbl
+--
+11f2f05aace85f60
+== 031
+-- tests for temporary views
+
+CREATE SCHEMA temp_view_test
+    CREATE TABLE base_table (a int, id int)
+    CREATE TABLE base_table2 (a int, id int)
+--
+0733fb2fdc3a2d08
+== 032
+SET search_path TO temp_view_test, public
+--
+972eb2e22f47f95c
+== 033
+CREATE TEMPORARY TABLE temp_table (a int, id int)
+--
+f938be493b067072
+== 034
+-- should be created in temp_view_test schema
+CREATE VIEW v1 AS SELECT * FROM base_table
+--
+94bb2499a23edc68
+== 035
+-- should be created in temp object schema
+CREATE VIEW v1_temp AS SELECT * FROM temp_table
+--
+f22fa026a1da49ca
+== 036
+-- should be created in temp object schema
+CREATE TEMP VIEW v2_temp AS SELECT * FROM base_table
+--
+42fe27fceb6cce85
+== 037
+-- should be created in temp_views schema
+CREATE VIEW temp_view_test.v2 AS SELECT * FROM base_table
+--
+01f49b8760f69e8d
+== 038
+-- should fail
+CREATE VIEW temp_view_test.v3_temp AS SELECT * FROM temp_table
+--
+6f6d04442906030b
+== 039
+-- should fail
+CREATE SCHEMA test_view_schema
+    CREATE TEMP VIEW testview AS SELECT 1
+--
+7ea758fd208342e0
+== 040
+-- joins: if any of the join relations are temporary, the view
+-- should also be temporary
+
+-- should be non-temp
+CREATE VIEW v3 AS
+    SELECT t1.a AS t1_a, t2.a AS t2_a
+    FROM base_table t1, base_table2 t2
+    WHERE t1.id = t2.id
+--
+563f3489ebfa7ab0
+== 041
+-- should be temp (one join rel is temp)
+CREATE VIEW v4_temp AS
+    SELECT t1.a AS t1_a, t2.a AS t2_a
+    FROM base_table t1, temp_table t2
+    WHERE t1.id = t2.id
+--
+c7c1ed22a925b8b0
+== 042
+-- should be temp
+CREATE VIEW v5_temp AS
+    SELECT t1.a AS t1_a, t2.a AS t2_a, t3.a AS t3_a
+    FROM base_table t1, base_table2 t2, temp_table t3
+    WHERE t1.id = t2.id and t2.id = t3.id
+--
+8a92c92bff20de84
+== 043
+-- subqueries
+CREATE VIEW v4 AS SELECT * FROM base_table WHERE id IN (SELECT id FROM base_table2)
+--
+f789b2b3676d206c
+== 044
+CREATE VIEW v5 AS SELECT t1.id, t2.a FROM base_table t1, (SELECT * FROM base_table2) t2
+--
+7d677c03ed13b947
+== 045
+CREATE VIEW v6 AS SELECT * FROM base_table WHERE EXISTS (SELECT 1 FROM base_table2)
+--
+d9b60ea046a21250
+== 046
+CREATE VIEW v7 AS SELECT * FROM base_table WHERE NOT EXISTS (SELECT 1 FROM base_table2)
+--
+ed5045cd16e94e59
+== 047
+CREATE VIEW v8 AS SELECT * FROM base_table WHERE EXISTS (SELECT 1)
+--
+7f1062fccb33b5ec
+== 048
+CREATE VIEW v6_temp AS SELECT * FROM base_table WHERE id IN (SELECT id FROM temp_table)
+--
+8bb14c0aa26e48ee
+== 049
+CREATE VIEW v7_temp AS SELECT t1.id, t2.a FROM base_table t1, (SELECT * FROM temp_table) t2
+--
+25fe9529b9d46080
+== 050
+CREATE VIEW v8_temp AS SELECT * FROM base_table WHERE EXISTS (SELECT 1 FROM temp_table)
+--
+af112d04337ab452
+== 051
+CREATE VIEW v9_temp AS SELECT * FROM base_table WHERE NOT EXISTS (SELECT 1 FROM temp_table)
+--
+6e853d948b9916bc
+== 052
+-- a view should also be temporary if it references a temporary view
+CREATE VIEW v10_temp AS SELECT * FROM v7_temp
+--
+8bc1b709eb78d256
+== 053
+CREATE VIEW v11_temp AS SELECT t1.id, t2.a FROM base_table t1, v10_temp t2
+--
+bc82518793f02bf7
+== 054
+CREATE VIEW v12_temp AS SELECT true FROM v11_temp
+--
+441cd6adac2b2cfe
+== 055
+-- a view should also be temporary if it references a temporary sequence
+CREATE SEQUENCE seq1
+--
+8e89c120eb7d9e3d
+== 056
+CREATE TEMPORARY SEQUENCE seq1_temp
+--
+bf8a6d60c661029b
+== 057
+CREATE VIEW v9 AS SELECT seq1.is_called FROM seq1
+--
+d027bc9328ac6d36
+== 058
+CREATE VIEW v13_temp AS SELECT seq1_temp.is_called FROM seq1_temp
+--
+f4eb9f867b4f5132
+== 059
+SELECT relname FROM pg_class
+    WHERE relname LIKE 'v_'
+    AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'temp_view_test')
+    ORDER BY relname
+--
+20dfd085aee28418
+== 060
+SELECT relname FROM pg_class
+    WHERE relname LIKE 'v%'
+    AND relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname LIKE 'pg_temp%')
+    ORDER BY relname
+--
+6508c36d87d7d4d5
+== 061
+CREATE SCHEMA testviewschm2
+--
+ac67a3c0733f7491
+== 062
+SET search_path TO testviewschm2, public
+--
+972eb2e22f47f95c
+== 063
+CREATE TABLE t1 (num int, name text)
+--
+794b7a1aa8f675f3
+== 064
+CREATE TABLE t2 (num2 int, value text)
+--
+ec7c5ea79b4cfc2a
+== 065
+CREATE TEMP TABLE tt (num2 int, value text)
+--
+ed12b1a6726a5629
+== 066
+CREATE VIEW nontemp1 AS SELECT * FROM t1 CROSS JOIN t2
+--
+820d709f66aa1f48
+== 067
+CREATE VIEW temporal1 AS SELECT * FROM t1 CROSS JOIN tt
+--
+f9b6372c9f61bcb7
+== 068
+CREATE VIEW nontemp2 AS SELECT * FROM t1 INNER JOIN t2 ON t1.num = t2.num2
+--
+3e5d9cee78f6e183
+== 069
+CREATE VIEW temporal2 AS SELECT * FROM t1 INNER JOIN tt ON t1.num = tt.num2
+--
+8f0d6fdb2fa0049b
+== 070
+CREATE VIEW nontemp3 AS SELECT * FROM t1 LEFT JOIN t2 ON t1.num = t2.num2
+--
+22ab2ec3ac5bd05f
+== 071
+CREATE VIEW temporal3 AS SELECT * FROM t1 LEFT JOIN tt ON t1.num = tt.num2
+--
+d5d22967a9a68624
+== 072
+CREATE VIEW nontemp4 AS SELECT * FROM t1 LEFT JOIN t2 ON t1.num = t2.num2 AND t2.value = 'xxx'
+--
+c1ba2bb077c95953
+== 073
+CREATE VIEW temporal4 AS SELECT * FROM t1 LEFT JOIN tt ON t1.num = tt.num2 AND tt.value = 'xxx'
+--
+b93ac1822efdc8bb
+== 074
+SELECT relname FROM pg_class
+    WHERE relname LIKE 'nontemp%'
+    AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'testviewschm2')
+    ORDER BY relname
+--
+20dfd085aee28418
+== 075
+SELECT relname FROM pg_class
+    WHERE relname LIKE 'temporal%'
+    AND relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname LIKE 'pg_temp%')
+    ORDER BY relname
+--
+6508c36d87d7d4d5
+== 076
+CREATE TABLE tbl1 ( a int, b int)
+--
+25fc35173b1abf39
+== 077
+CREATE TABLE tbl2 (c int, d int)
+--
+a442eef178cf9091
+== 078
+CREATE TABLE tbl3 (e int, f int)
+--
+a89fe6e2104a31c1
+== 079
+CREATE TABLE tbl4 (g int, h int)
+--
+8bfe13ab4b50e175
+== 080
+CREATE TEMP TABLE tmptbl (i int, j int)
+--
+3dc62bfb191850c1
+== 081
+--Should be in testviewschm2
+CREATE   VIEW  pubview AS SELECT * FROM tbl1 WHERE tbl1.a
+BETWEEN (SELECT d FROM tbl2 WHERE c = 1) AND (SELECT e FROM tbl3 WHERE f = 2)
+AND EXISTS (SELECT g FROM tbl4 LEFT JOIN tbl3 ON tbl4.h = tbl3.f)
+--
+709d98629506957d
+== 082
+SELECT count(*) FROM pg_class where relname = 'pubview'
+AND relnamespace IN (SELECT OID FROM pg_namespace WHERE nspname = 'testviewschm2')
+--
+d0c8ba47b591a005
+== 083
+--Should be in temp object schema
+CREATE   VIEW  mytempview AS SELECT * FROM tbl1 WHERE tbl1.a
+BETWEEN (SELECT d FROM tbl2 WHERE c = 1) AND (SELECT e FROM tbl3 WHERE f = 2)
+AND EXISTS (SELECT g FROM tbl4 LEFT JOIN tbl3 ON tbl4.h = tbl3.f)
+AND NOT EXISTS (SELECT g FROM tbl4 LEFT JOIN tmptbl ON tbl4.h = tmptbl.j)
+--
+57c8685622e95b14
+== 084
+SELECT count(*) FROM pg_class where relname LIKE 'mytempview'
+And relnamespace IN (SELECT OID FROM pg_namespace WHERE nspname LIKE 'pg_temp%')
+--
+8649cd42c3025657
+== 085
+|--
+-- CREATE VIEW and WITH(...) clause
+|--
+CREATE VIEW mysecview1
+       AS SELECT * FROM tbl1 WHERE a = 0
+--
+3d1d4189185a29db
+== 086
+CREATE VIEW mysecview2 WITH (security_barrier=true)
+       AS SELECT * FROM tbl1 WHERE a > 0
+--
+63af28f908fe0097
+== 087
+CREATE VIEW mysecview3 WITH (security_barrier=false)
+       AS SELECT * FROM tbl1 WHERE a < 0
+--
+7253fca6b2fc0f2f
+== 088
+CREATE VIEW mysecview4 WITH (security_barrier)
+       AS SELECT * FROM tbl1 WHERE a <> 0
+--
+efea9c36be762e12
+== 089
+CREATE VIEW mysecview5 WITH (security_barrier=100)	-- Error
+       AS SELECT * FROM tbl1 WHERE a > 100
+--
+64cd7c7ea0d53ae2
+== 090
+CREATE VIEW mysecview6 WITH (invalid_option)		-- Error
+       AS SELECT * FROM tbl1 WHERE a < 100
+--
+4a14d8e83483cfa9
+== 091
+CREATE VIEW mysecview7 WITH (security_invoker=true)
+       AS SELECT * FROM tbl1 WHERE a = 100
+--
+f328323b014dc61f
+== 092
+CREATE VIEW mysecview8 WITH (security_invoker=false, security_barrier=true)
+       AS SELECT * FROM tbl1 WHERE a > 100
+--
+d8c6751c97ab94db
+== 093
+CREATE VIEW mysecview9 WITH (security_invoker)
+       AS SELECT * FROM tbl1 WHERE a < 100
+--
+cb9bf7091794fb7e
+== 094
+CREATE VIEW mysecview10 WITH (security_invoker=100)	-- Error
+       AS SELECT * FROM tbl1 WHERE a <> 100
+--
+255a52f6a69b5202
+== 095
+SELECT relname, relkind, reloptions FROM pg_class
+       WHERE oid in ('mysecview1'::regclass, 'mysecview2'::regclass,
+                     'mysecview3'::regclass, 'mysecview4'::regclass,
+                     'mysecview7'::regclass, 'mysecview8'::regclass,
+                     'mysecview9'::regclass)
+       ORDER BY relname
+--
+e03dbba1a1cfbce2
+== 096
+CREATE OR REPLACE VIEW mysecview1
+       AS SELECT * FROM tbl1 WHERE a = 256
+--
+665bd26552238668
+== 097
+CREATE OR REPLACE VIEW mysecview2
+       AS SELECT * FROM tbl1 WHERE a > 256
+--
+57d25954ea9717e2
+== 098
+CREATE OR REPLACE VIEW mysecview3 WITH (security_barrier=true)
+       AS SELECT * FROM tbl1 WHERE a < 256
+--
+77d3cbddb1968d13
+== 099
+CREATE OR REPLACE VIEW mysecview4 WITH (security_barrier=false)
+       AS SELECT * FROM tbl1 WHERE a <> 256
+--
+f9f25b95cc5163fa
+== 100
+CREATE OR REPLACE VIEW mysecview7
+       AS SELECT * FROM tbl1 WHERE a > 256
+--
+c686aa150da4e08b
+== 101
+CREATE OR REPLACE VIEW mysecview8 WITH (security_invoker=true)
+       AS SELECT * FROM tbl1 WHERE a < 256
+--
+3a87c16234de773c
+== 102
+CREATE OR REPLACE VIEW mysecview9 WITH (security_invoker=false, security_barrier=true)
+       AS SELECT * FROM tbl1 WHERE a <> 256
+--
+fef67a6063734bff
+== 103
+SELECT relname, relkind, reloptions FROM pg_class
+       WHERE oid in ('mysecview1'::regclass, 'mysecview2'::regclass,
+                     'mysecview3'::regclass, 'mysecview4'::regclass,
+                     'mysecview7'::regclass, 'mysecview8'::regclass,
+                     'mysecview9'::regclass)
+       ORDER BY relname
+--
+e03dbba1a1cfbce2
+== 104
+-- Check that unknown literals are converted to "text" in CREATE VIEW,
+-- so that we don't end up with unknown-type columns.
+
+CREATE VIEW unspecified_types AS
+  SELECT 42 as i, 42.5 as num, 'foo' as u, 'foo'::unknown as u2, null as n
+--
+8bfce14ba1492ca6
+== 105
+SELECT * FROM unspecified_types
+--
+349938da1665c2c5
+== 106
+-- This test checks that proper typmods are assigned in a multi-row VALUES
+
+CREATE VIEW tt1 AS
+  SELECT * FROM (
+    VALUES
+       ('abc'::varchar(3), '0123456789', 42, 'abcd'::varchar(4)),
+       ('0123456789', 'abc'::varchar(3), 42.12, 'abc'::varchar(4))
+  ) vv(a,b,c,d)
+--
+9d5157a654acd78c
+== 107
+SELECT * FROM tt1
+--
+62925cb1aceae942
+== 108
+SELECT a::varchar(3) FROM tt1
+--
+9d19a940ebe73dc4
+== 109
+DROP VIEW tt1
+--
+5f440e75c9c8b3c3
+== 110
+-- Test view decompilation in the face of relation renaming conflicts
+
+CREATE TABLE tt1 (f1 int, f2 int, f3 text)
+--
+a1a83ff971fb40e5
+== 111
+CREATE TABLE tx1 (x1 int, x2 int, x3 text)
+--
+82ce9c3db2c93c81
+== 112
+CREATE TABLE temp_view_test.tt1 (y1 int, f2 int, f3 text)
+--
+f4870c79573c3049
+== 113
+CREATE VIEW aliased_view_1 AS
+  select * from tt1
+    where exists (select 1 from tx1 where tt1.f1 = tx1.x1)
+--
+8c8979a3d3f4c869
+== 114
+CREATE VIEW aliased_view_2 AS
+  select * from tt1 a1
+    where exists (select 1 from tx1 where a1.f1 = tx1.x1)
+--
+c0057015f8da2c43
+== 115
+CREATE VIEW aliased_view_3 AS
+  select * from tt1
+    where exists (select 1 from tx1 a2 where tt1.f1 = a2.x1)
+--
+fab1bfe6d868a132
+== 116
+CREATE VIEW aliased_view_4 AS
+  select * from temp_view_test.tt1
+    where exists (select 1 from tt1 where temp_view_test.tt1.y1 = tt1.f1)
+--
+dd4f8d2248adc996
+== 117
+ALTER TABLE tx1 RENAME TO a1
+--
+ac4de0c207e54d34
+== 118
+ALTER TABLE tt1 RENAME TO a2
+--
+020cb56560f9d151
+== 119
+ALTER TABLE a1 RENAME TO tt1
+--
+1cf8e41278cbfe6b
+== 120
+ALTER TABLE a2 RENAME TO tx1
+--
+d3c786014104c27a
+== 121
+ALTER TABLE tx1 SET SCHEMA temp_view_test
+--
+dd6695e4c2d3a9af
+== 122
+ALTER TABLE temp_view_test.tt1 RENAME TO tmp1
+--
+0aef3b73f94676cc
+== 123
+ALTER TABLE temp_view_test.tmp1 SET SCHEMA testviewschm2
+--
+b6c64d631030fcba
+== 124
+ALTER TABLE tmp1 RENAME TO tx1
+--
+cc3bc0672d59688b
+== 125
+-- Test correct deparsing of ORDER BY when there is an output name conflict
+
+create view aliased_order_by as
+select x1 as x2, x2 as x1, x3 from tt1
+  order by x2
+--
+f631269a443059fa
+== 126
+-- this is interpreted per SQL92, so really ordering by x1
+
+
+alter view aliased_order_by rename column x1 to x0
+--
+895f6bc8663bd6ce
+== 127
+alter view aliased_order_by rename column x3 to x1
+--
+a0f5fb81865f0f83
+== 128
+-- Test aliasing of joins
+
+create view view_of_joins as
+select * from
+  (select * from (tbl1 cross join tbl2) same) ss,
+  (tbl3 cross join tbl4) same
+--
+9d23ed59f3ef81c0
+== 129
+create table tbl1a (a int, c int)
+--
+91b74dfe375428d9
+== 130
+create view view_of_joins_2a as select * from tbl1 join tbl1a using (a)
+--
+0ab6326983279fc5
+== 131
+create view view_of_joins_2b as select * from tbl1 join tbl1a using (a) as x
+--
+5ea19f75fbedb7e3
+== 132
+create view view_of_joins_2c as select * from (tbl1 join tbl1a using (a)) as y
+--
+2549986f5d04633c
+== 133
+create view view_of_joins_2d as select * from (tbl1 join tbl1a using (a) as x) as y
+--
+1e88ec0f9c6b687d
+== 134
+select pg_get_viewdef('view_of_joins_2a', true)
+--
+ab8a8d46fb75759f
+== 135
+select pg_get_viewdef('view_of_joins_2b', true)
+--
+ab8a8d46fb75759f
+== 136
+select pg_get_viewdef('view_of_joins_2c', true)
+--
+ab8a8d46fb75759f
+== 137
+select pg_get_viewdef('view_of_joins_2d', true)
+--
+ab8a8d46fb75759f
+== 138
+-- Test view decompilation in the face of column addition/deletion/renaming
+
+create table tt2 (a int, b int, c int)
+--
+480557c1e2e71b31
+== 139
+create table tt3 (ax int8, b int2, c numeric)
+--
+a379cc2d9febf05a
+== 140
+create table tt4 (ay int, b int, q int)
+--
+7116fce0cb5acb9a
+== 141
+create view v1 as select * from tt2 natural join tt3
+--
+733604977b10b834
+== 142
+create view v1a as select * from (tt2 natural join tt3) j
+--
+6eba3b8e0dec47be
+== 143
+create view v2 as select * from tt2 join tt3 using (b,c) join tt4 using (b)
+--
+796dd9fcb9a64a7f
+== 144
+create view v2a as select * from (tt2 join tt3 using (b,c) join tt4 using (b)) j
+--
+15fdb431775a31dd
+== 145
+create view v3 as select * from tt2 join tt3 using (b,c) full join tt4 using (b)
+--
+74ed5f0110eb61c0
+== 146
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 147
+select pg_get_viewdef('v1a', true)
+--
+ab8a8d46fb75759f
+== 148
+select pg_get_viewdef('v2', true)
+--
+ab8a8d46fb75759f
+== 149
+select pg_get_viewdef('v2a', true)
+--
+ab8a8d46fb75759f
+== 150
+select pg_get_viewdef('v3', true)
+--
+ab8a8d46fb75759f
+== 151
+alter table tt2 add column d int
+--
+b518cc9fd4436cd6
+== 152
+alter table tt2 add column e int
+--
+42d0b53613f5876e
+== 153
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 154
+select pg_get_viewdef('v1a', true)
+--
+ab8a8d46fb75759f
+== 155
+select pg_get_viewdef('v2', true)
+--
+ab8a8d46fb75759f
+== 156
+select pg_get_viewdef('v2a', true)
+--
+ab8a8d46fb75759f
+== 157
+select pg_get_viewdef('v3', true)
+--
+ab8a8d46fb75759f
+== 158
+alter table tt3 rename c to d
+--
+577fcedb293b9a1b
+== 159
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 160
+select pg_get_viewdef('v1a', true)
+--
+ab8a8d46fb75759f
+== 161
+select pg_get_viewdef('v2', true)
+--
+ab8a8d46fb75759f
+== 162
+select pg_get_viewdef('v2a', true)
+--
+ab8a8d46fb75759f
+== 163
+select pg_get_viewdef('v3', true)
+--
+ab8a8d46fb75759f
+== 164
+alter table tt3 add column c int
+--
+408f83c01eab977f
+== 165
+alter table tt3 add column e int
+--
+661b14edb9c56eb0
+== 166
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 167
+select pg_get_viewdef('v1a', true)
+--
+ab8a8d46fb75759f
+== 168
+select pg_get_viewdef('v2', true)
+--
+ab8a8d46fb75759f
+== 169
+select pg_get_viewdef('v2a', true)
+--
+ab8a8d46fb75759f
+== 170
+select pg_get_viewdef('v3', true)
+--
+ab8a8d46fb75759f
+== 171
+alter table tt2 drop column d
+--
+ce9a55e24074d0b3
+== 172
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 173
+select pg_get_viewdef('v1a', true)
+--
+ab8a8d46fb75759f
+== 174
+select pg_get_viewdef('v2', true)
+--
+ab8a8d46fb75759f
+== 175
+select pg_get_viewdef('v2a', true)
+--
+ab8a8d46fb75759f
+== 176
+select pg_get_viewdef('v3', true)
+--
+ab8a8d46fb75759f
+== 177
+create table tt5 (a int, b int)
+--
+758d841f31b406f5
+== 178
+create table tt6 (c int, d int)
+--
+a8bb8f382f1c49a8
+== 179
+create view vv1 as select * from (tt5 cross join tt6) j(aa,bb,cc,dd)
+--
+a30a4a1725bdbb0b
+== 180
+select pg_get_viewdef('vv1', true)
+--
+ab8a8d46fb75759f
+== 181
+alter table tt5 add column c int
+--
+f39202833e3c85c8
+== 182
+select pg_get_viewdef('vv1', true)
+--
+ab8a8d46fb75759f
+== 183
+alter table tt5 add column cc int
+--
+5f203eab0c27301f
+== 184
+select pg_get_viewdef('vv1', true)
+--
+ab8a8d46fb75759f
+== 185
+alter table tt5 drop column c
+--
+1f008b9621dc85e2
+== 186
+select pg_get_viewdef('vv1', true)
+--
+ab8a8d46fb75759f
+== 187
+create view v4 as select * from v1
+--
+011237221868577c
+== 188
+alter view v1 rename column a to x
+--
+f352776f8fce06a2
+== 189
+select pg_get_viewdef('v1', true)
+--
+ab8a8d46fb75759f
+== 190
+select pg_get_viewdef('v4', true)
+--
+ab8a8d46fb75759f
+== 191
+-- Unnamed FULL JOIN USING is lots of fun too
+
+create table tt7 (x int, xx int, y int)
+--
+14e0433cbb5590dd
+== 192
+alter table tt7 drop column xx
+--
+068ffa8a47b0369a
+== 193
+create table tt8 (x int, z int)
+--
+4e7c136d86e9c3b9
+== 194
+create view vv2 as
+select * from (values(1,2,3,4,5)) v(a,b,c,d,e)
+union all
+select * from tt7 full join tt8 using (x), tt8 tt8x
+--
+a564c0e067bb4a8e
+== 195
+select pg_get_viewdef('vv2', true)
+--
+ab8a8d46fb75759f
+== 196
+create view vv3 as
+select * from (values(1,2,3,4,5,6)) v(a,b,c,x,e,f)
+union all
+select * from
+  tt7 full join tt8 using (x),
+  tt7 tt7x full join tt8 tt8x using (x)
+--
+15a95fc8fc6ee69f
+== 197
+select pg_get_viewdef('vv3', true)
+--
+ab8a8d46fb75759f
+== 198
+create view vv4 as
+select * from (values(1,2,3,4,5,6,7)) v(a,b,c,x,e,f,g)
+union all
+select * from
+  tt7 full join tt8 using (x),
+  tt7 tt7x full join tt8 tt8x using (x) full join tt8 tt8y using (x)
+--
+7021e625e924470b
+== 199
+select pg_get_viewdef('vv4', true)
+--
+ab8a8d46fb75759f
+== 200
+alter table tt7 add column zz int
+--
+9472ed5ff0e4705e
+== 201
+alter table tt7 add column z int
+--
+8c9636d2bc837708
+== 202
+alter table tt7 drop column zz
+--
+05d3bc45792f3a95
+== 203
+alter table tt8 add column z2 int
+--
+ce6e6c9e50b31ba8
+== 204
+select pg_get_viewdef('vv2', true)
+--
+ab8a8d46fb75759f
+== 205
+select pg_get_viewdef('vv3', true)
+--
+ab8a8d46fb75759f
+== 206
+select pg_get_viewdef('vv4', true)
+--
+ab8a8d46fb75759f
+== 207
+-- Implicit coercions in a JOIN USING create issues similar to FULL JOIN
+
+create table tt7a (x date, xx int, y int)
+--
+1ae7e3d9040fa20e
+== 208
+alter table tt7a drop column xx
+--
+34318c6c4cb84e46
+== 209
+create table tt8a (x timestamptz, z int)
+--
+b5994d3aa6379377
+== 210
+create view vv2a as
+select * from (values(now(),2,3,now(),5)) v(a,b,c,d,e)
+union all
+select * from tt7a left join tt8a using (x), tt8a tt8ax
+--
+5f093b20455436b4
+== 211
+select pg_get_viewdef('vv2a', true)
+--
+ab8a8d46fb75759f
+== 212
+|--
+-- Also check dropping a column that existed when the view was made
+|--
+
+create table tt9 (x int, xx int, y int)
+--
+9228a4ba7826b13e
+== 213
+create table tt10 (x int, z int)
+--
+4c012b9e086eeb18
+== 214
+create view vv5 as select x,y,z from tt9 join tt10 using(x)
+--
+42c70122a8608166
+== 215
+select pg_get_viewdef('vv5', true)
+--
+ab8a8d46fb75759f
+== 216
+alter table tt9 drop column xx
+--
+027b80507664bc66
+== 217
+select pg_get_viewdef('vv5', true)
+--
+ab8a8d46fb75759f
+== 218
+|--
+-- Another corner case is that we might add a column to a table below a
+-- JOIN USING, and thereby make the USING column name ambiguous
+|--
+
+create table tt11 (x int, y int)
+--
+4020fab2e3f312b8
+== 219
+create table tt12 (x int, z int)
+--
+4c012b9e086eeb18
+== 220
+create table tt13 (z int, q int)
+--
+37a71399a7c98aaf
+== 221
+create view vv6 as select x,y,z,q from
+  (tt11 join tt12 using(x)) join tt13 using(z)
+--
+257e57c66e363989
+== 222
+select pg_get_viewdef('vv6', true)
+--
+ab8a8d46fb75759f
+== 223
+alter table tt11 add column z int
+--
+089c9d81238afd33
+== 224
+select pg_get_viewdef('vv6', true)
+--
+ab8a8d46fb75759f
+== 225
+|--
+-- Check cases involving dropped/altered columns in a function's rowtype result
+|--
+
+create table tt14t (f1 text, f2 text, f3 text, f4 text)
+--
+70228a09c48817a2
+== 226
+insert into tt14t values('foo', 'bar', 'baz', '42')
+--
+1bc76fff3e033e8a
+== 227
+alter table tt14t drop column f2
+--
+e3ae4407cb86e332
+== 228
+create function tt14f() returns setof tt14t as
+$$
+declare
+    rec1 record;
+begin
+    for rec1 in select * from tt14t
+    loop
+        return next rec1;
+    end loop;
+end;
+$$
+language plpgsql
+--
+8ab310050e027d51
+== 229
+create view tt14v as select t.* from tt14f() t
+--
+2b02e057696f7c1f
+== 230
+select pg_get_viewdef('tt14v', true)
+--
+ab8a8d46fb75759f
+== 231
+select * from tt14v
+--
+02306c0d9d6394a3
+== 232
+alter table tt14t drop column f3
+--
+7c64b4c2e248fd07
+== 233
+-- fail, view has explicit reference to f3
+
+-- We used to have a bug that would allow the above to succeed, posing
+-- hazards for later execution of the view.  Check that the internal
+-- defenses for those hazards haven't bit-rotted, in case some other
+-- bug with similar symptoms emerges.
+begin
+--
+b16b431979fc3e05
+== 234
+-- destroy the dependency entry that prevents the DROP:
+delete from pg_depend where
+  objid = (select oid from pg_rewrite
+           where ev_class = 'tt14v'::regclass and rulename = '_RETURN')
+  and refobjsubid = 3
+returning pg_describe_object(classid, objid, objsubid) as obj,
+          pg_describe_object(refclassid, refobjid, refobjsubid) as ref,
+          deptype
+--
+c817133740beec02
+== 235
+-- this will now succeed:
+alter table tt14t drop column f3
+--
+7c64b4c2e248fd07
+== 236
+-- column f3 is still in the view, sort of ...
+select pg_get_viewdef('tt14v', true)
+--
+ab8a8d46fb75759f
+== 237
+-- ... and you can even EXPLAIN it ...
+explain (verbose, costs off) select * from tt14v
+--
+dbced4516aae640d
+== 238
+-- but it will fail at execution
+select f1, f4 from tt14v
+--
+fd709cd9f5ae43be
+== 239
+select * from tt14v
+--
+02306c0d9d6394a3
+== 240
+rollback
+--
+a46081a556fda027
+== 241
+-- likewise, altering a referenced column's type is prohibited ...
+alter table tt14t alter column f4 type integer using f4::integer
+--
+f88c7f3d17386fd9
+== 242
+-- fail
+
+-- ... but some bug might let it happen, so check defenses
+begin
+--
+b16b431979fc3e05
+== 243
+-- destroy the dependency entry that prevents the ALTER:
+delete from pg_depend where
+  objid = (select oid from pg_rewrite
+           where ev_class = 'tt14v'::regclass and rulename = '_RETURN')
+  and refobjsubid = 4
+returning pg_describe_object(classid, objid, objsubid) as obj,
+          pg_describe_object(refclassid, refobjid, refobjsubid) as ref,
+          deptype
+--
+c817133740beec02
+== 244
+-- this will now succeed:
+alter table tt14t alter column f4 type integer using f4::integer
+--
+f88c7f3d17386fd9
+== 245
+-- f4 is still in the view ...
+select pg_get_viewdef('tt14v', true)
+--
+ab8a8d46fb75759f
+== 246
+-- but will fail at execution
+select f1, f3 from tt14v
+--
+0be7179231c7d977
+== 247
+select * from tt14v
+--
+02306c0d9d6394a3
+== 248
+rollback
+--
+a46081a556fda027
+== 249
+drop view tt14v
+--
+72e8537e27bf7c57
+== 250
+create view tt14v as select t.f1, t.f4 from tt14f() t
+--
+869b06ecb9ffa573
+== 251
+select pg_get_viewdef('tt14v', true)
+--
+ab8a8d46fb75759f
+== 252
+select * from tt14v
+--
+02306c0d9d6394a3
+== 253
+alter table tt14t drop column f3
+--
+7c64b4c2e248fd07
+== 254
+-- ok
+
+select pg_get_viewdef('tt14v', true)
+--
+ab8a8d46fb75759f
+== 255
+explain (verbose, costs off) select * from tt14v
+--
+dbced4516aae640d
+== 256
+select * from tt14v
+--
+02306c0d9d6394a3
+== 257
+-- check display of whole-row variables in some corner cases
+
+create type nestedcomposite as (x int8_tbl)
+--
+71df52184bb58640
+== 258
+create view tt15v as select row(i)::nestedcomposite from int8_tbl i
+--
+7e35abbd6444e7fa
+== 259
+select * from tt15v
+--
+02306c0d9d6394a3
+== 260
+select pg_get_viewdef('tt15v', true)
+--
+ab8a8d46fb75759f
+== 261
+select row(i.*::int8_tbl)::nestedcomposite from int8_tbl i
+--
+21ab94e8a10eb04d
+== 262
+create view tt16v as select * from int8_tbl i, lateral(values(i)) ss
+--
+c82edce3ab536d24
+== 263
+select * from tt16v
+--
+02306c0d9d6394a3
+== 264
+select pg_get_viewdef('tt16v', true)
+--
+ab8a8d46fb75759f
+== 265
+select * from int8_tbl i, lateral(values(i.*::int8_tbl)) ss
+--
+d00ab4b88edc00ee
+== 266
+create view tt17v as select * from int8_tbl i where i in (values(i))
+--
+a6f20af6eaa26e60
+== 267
+select * from tt17v
+--
+02306c0d9d6394a3
+== 268
+select pg_get_viewdef('tt17v', true)
+--
+ab8a8d46fb75759f
+== 269
+select * from int8_tbl i where i.* in (values(i.*::int8_tbl))
+--
+2eb9692c16dd3f0b
+== 270
+create table tt15v_log(o tt15v, n tt15v, incr bool)
+--
+21918a6b17cd7469
+== 271
+create rule updlog as on update to tt15v do also
+  insert into tt15v_log values(old, new, row(old,old) < row(new,new))
+--
+abc8428d0d7abcee
+== 272
+-- check unique-ification of overlength names
+
+create view tt18v as
+  select * from int8_tbl xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxy
+  union all
+  select * from int8_tbl xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxz
+--
+03f015fbd72fcbec
+== 273
+select pg_get_viewdef('tt18v', true)
+--
+ab8a8d46fb75759f
+== 274
+explain (costs off) select * from tt18v
+--
+940f1a6d7b32a952
+== 275
+-- check display of ScalarArrayOp with a sub-select
+
+select 'foo'::text = any(array['abc','def','foo']::text[])
+--
+62f18d7c429377d4
+== 276
+select 'foo'::text = any((select array['abc','def','foo']::text[]))
+--
+71e7ad7b405f8017
+== 277
+-- fail
+select 'foo'::text = any((select array['abc','def','foo']::text[])::text[])
+--
+6dc033bb8d1ac37f
+== 278
+create view tt19v as
+select 'foo'::text = any(array['abc','def','foo']::text[]) c1,
+       'foo'::text = any((select array['abc','def','foo']::text[])::text[]) c2
+--
+85c0f0e7dd344045
+== 279
+select pg_get_viewdef('tt19v', true)
+--
+ab8a8d46fb75759f
+== 280
+-- check display of assorted RTE_FUNCTION expressions
+
+create view tt20v as
+select * from
+  coalesce(1,2) as c,
+  collation for ('x'::text) col,
+  current_date as d,
+  localtimestamp(3) as t,
+  cast(1+2 as int4) as i4,
+  cast(1+2 as int8) as i8
+--
+9e818446d9b867b3
+== 281
+select pg_get_viewdef('tt20v', true)
+--
+ab8a8d46fb75759f
+== 282
+-- reverse-listing of various special function syntaxes required by SQL
+
+create view tt201v as
+select
+  ('2022-12-01'::date + '1 day'::interval) at time zone 'UTC' as atz,
+  extract(day from now()) as extr,
+  (now(), '1 day'::interval) overlaps
+    (current_timestamp(2), '1 day'::interval) as o,
+  'foo' is normalized isn,
+  'foo' is nfkc normalized isnn,
+  normalize('foo') as n,
+  normalize('foo', nfkd) as nfkd,
+  overlay('foo' placing 'bar' from 2) as ovl,
+  overlay('foo' placing 'bar' from 2 for 3) as ovl2,
+  position('foo' in 'foobar') as p,
+  substring('foo' from 2 for 3) as s,
+  substring('foo' similar 'f' escape '#') as ss,
+  substring('foo' from 'oo') as ssf,  -- historically-permitted abuse
+  trim(' ' from ' foo ') as bt,
+  trim(leading ' ' from ' foo ') as lt,
+  trim(trailing ' foo ') as rt,
+  trim(E'\\000'::bytea from E'\\000Tom\\000'::bytea) as btb,
+  trim(leading E'\\000'::bytea from E'\\000Tom\\000'::bytea) as ltb,
+  trim(trailing E'\\000'::bytea from E'\\000Tom\\000'::bytea) as rtb,
+  CURRENT_DATE as cd,
+  (select * from CURRENT_DATE) as cd2,
+  CURRENT_TIME as ct,
+  (select * from CURRENT_TIME) as ct2,
+  CURRENT_TIME (1) as ct3,
+  (select * from CURRENT_TIME (1)) as ct4,
+  CURRENT_TIMESTAMP as ct5,
+  (select * from CURRENT_TIMESTAMP) as ct6,
+  CURRENT_TIMESTAMP (1) as ct7,
+  (select * from CURRENT_TIMESTAMP (1)) as ct8,
+  LOCALTIME as lt1,
+  (select * from LOCALTIME) as lt2,
+  LOCALTIME (1) as lt3,
+  (select * from LOCALTIME (1)) as lt4,
+  LOCALTIMESTAMP as lt5,
+  (select * from LOCALTIMESTAMP) as lt6,
+  LOCALTIMESTAMP (1) as lt7,
+  (select * from LOCALTIMESTAMP (1)) as lt8,
+  CURRENT_CATALOG as ca,
+  (select * from CURRENT_CATALOG) as ca2,
+  CURRENT_ROLE as cr,
+  (select * from CURRENT_ROLE) as cr2,
+  CURRENT_SCHEMA as cs,
+  (select * from CURRENT_SCHEMA) as cs2,
+  CURRENT_USER as cu,
+  (select * from CURRENT_USER) as cu2,
+  USER as us,
+  (select * from USER) as us2,
+  SESSION_USER seu,
+  (select * from SESSION_USER) as seu2,
+  SYSTEM_USER as su,
+  (select * from SYSTEM_USER) as su2
+--
+cd3f460ad6caf247
+== 283
+select pg_get_viewdef('tt201v', true)
+--
+ab8a8d46fb75759f
+== 284
+-- corner cases with empty join conditions
+
+create view tt21v as
+select * from tt5 natural inner join tt6
+--
+dce968919f597e47
+== 285
+select pg_get_viewdef('tt21v', true)
+--
+ab8a8d46fb75759f
+== 286
+create view tt22v as
+select * from tt5 natural left join tt6
+--
+0c3804ac8a43e1f5
+== 287
+select pg_get_viewdef('tt22v', true)
+--
+ab8a8d46fb75759f
+== 288
+-- check handling of views with immediately-renamed columns
+
+create view tt23v (col_a, col_b) as
+select q1 as other_name1, q2 as other_name2 from int8_tbl
+union
+select 42, 43
+--
+b7c76fd43b9c84f9
+== 289
+select pg_get_viewdef('tt23v', true)
+--
+ab8a8d46fb75759f
+== 290
+select pg_get_ruledef(oid, true) from pg_rewrite
+  where ev_class = 'tt23v'::regclass and ev_type = '1'
+--
+e5c1beac4186c2fd
+== 291
+-- test extraction of FieldSelect field names (get_name_for_var_field)
+
+create view tt24v as
+with cte as materialized (select r from (values(1,2),(3,4)) r)
+select (r).column2 as col_a, (rr).column2 as col_b from
+  cte join (select rr from (values(1,7),(3,8)) rr limit 2) ss
+  on (r).column1 = (rr).column1
+--
+084c6c54732efaed
+== 292
+select pg_get_viewdef('tt24v', true)
+--
+ab8a8d46fb75759f
+== 293
+create view tt25v as
+with cte as materialized (select pg_get_keywords() k)
+select (k).word from cte
+--
+e0c4b96435416748
+== 294
+select pg_get_viewdef('tt25v', true)
+--
+ab8a8d46fb75759f
+== 295
+-- also check cases seen only in EXPLAIN
+explain (verbose, costs off)
+select * from tt24v
+--
+dbced4516aae640d
+== 296
+explain (verbose, costs off)
+select (r).column2 from (select r from (values(1,2),(3,4)) r limit 1) ss
+--
+263ba9bf93aaac9e
+== 297
+-- test pretty-print parenthesization rules, and SubLink deparsing
+
+create view tt26v as
+select x + y + z as c1,
+       (x * y) + z as c2,
+       x + (y * z) as c3,
+       (x + y) * z as c4,
+       x * (y + z) as c5,
+       x + (y + z) as c6,
+       x + (y # z) as c7,
+       (x > y) AND (y > z OR x > z) as c8,
+       (x > y) OR (y > z AND NOT (x > z)) as c9,
+       (x,y) <> ALL (values(1,2),(3,4)) as c10,
+       (x,y) <= ANY (values(1,2),(3,4)) as c11
+from (values(1,2,3)) v(x,y,z)
+--
+7a30154ed0b5a73b
+== 298
+select pg_get_viewdef('tt26v', true)
+--
+ab8a8d46fb75759f
+== 299
+-- test restriction on non-system view expansion.
+create table tt27v_tbl (a int)
+--
+43cfb992b8211d75
+== 300
+create view tt27v as select a from tt27v_tbl
+--
+78f1bb9153b805f8
+== 301
+set restrict_nonsystem_relation_kind to 'view'
+--
+cf5f9ed2627fb893
+== 302
+select a from tt27v where a > 0
+--
+1388021c0d0a84c9
+== 303
+-- Error
+insert into tt27v values (1)
+--
+5303f7374bd0032f
+== 304
+-- Error
+select viewname from pg_views where viewname = 'tt27v'
+--
+0e1ff34de4295207
+== 305
+-- Ok to access a system view.
+reset restrict_nonsystem_relation_kind
+--
+558efa9199078cbc
+== 306
+-- clean up all the random objects we made above
+DROP SCHEMA temp_view_test CASCADE
+--
+ef51882334d377f7
+== 307
+DROP SCHEMA testviewschm2 CASCADE
+--
+7d97df0b89c9ae7c

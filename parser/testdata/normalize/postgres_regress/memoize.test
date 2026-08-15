@@ -1,0 +1,458 @@
+== 001
+-- Perform tests on the Memoize node.
+
+-- The cache hits/misses/evictions from the Memoize node can vary between
+-- machines.  Let's just replace the number with an 'N'.  In order to allow us
+-- to perform validation when the measure was zero, we replace a zero value
+-- with "Zero".  All other numbers are replaced with 'N'.
+create function explain_memoize(query text, hide_hitmiss bool) returns setof text
+language plpgsql as
+$$
+declare
+    ln text;
+begin
+    for ln in
+        execute format('explain (analyze, costs off, summary off, timing off) %s',
+            query)
+    loop
+        if hide_hitmiss = true then
+                ln := regexp_replace(ln, 'Hits: 0', 'Hits: Zero');
+                ln := regexp_replace(ln, 'Hits: \d+', 'Hits: N');
+                ln := regexp_replace(ln, 'Misses: 0', 'Misses: Zero');
+                ln := regexp_replace(ln, 'Misses: \d+', 'Misses: N');
+        end if;
+        ln := regexp_replace(ln, 'Evictions: 0', 'Evictions: Zero');
+        ln := regexp_replace(ln, 'Evictions: \d+', 'Evictions: N');
+        ln := regexp_replace(ln, 'Memory Usage: \d+', 'Memory Usage: N');
+	ln := regexp_replace(ln, 'Heap Fetches: \d+', 'Heap Fetches: N');
+	ln := regexp_replace(ln, 'loops=\d+', 'loops=N');
+        return next ln;
+    end loop;
+end;
+$$
+--
+-- Perform tests on the Memoize node.
+
+-- The cache hits/misses/evictions from the Memoize node can vary between
+-- machines.  Let's just replace the number with an 'N'.  In order to allow us
+-- to perform validation when the measure was zero, we replace a zero value
+-- with "Zero".  All other numbers are replaced with 'N'.
+create function explain_memoize(query text, hide_hitmiss bool) returns setof text
+language plpgsql as
+$1
+== 002
+-- Ensure we get a memoize node on the inner side of the nested loop
+SET enable_hashjoin TO off
+--
+-- Ensure we get a memoize node on the inner side of the nested loop
+SET enable_hashjoin TO $1
+== 003
+SET enable_bitmapscan TO off
+--
+SET enable_bitmapscan TO $1
+== 004
+SELECT explain_memoize('
+SELECT COUNT(*),AVG(t1.unique1) FROM tenk1 t1
+INNER JOIN tenk1 t2 ON t1.unique1 = t2.twenty
+WHERE t2.unique1 < 1000;', false)
+--
+SELECT explain_memoize($1, $2)
+== 005
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t1.unique1) FROM tenk1 t1
+INNER JOIN tenk1 t2 ON t1.unique1 = t2.twenty
+WHERE t2.unique1 < 1000
+--
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t1.unique1) FROM tenk1 t1
+INNER JOIN tenk1 t2 ON t1.unique1 = t2.twenty
+WHERE t2.unique1 < $1
+== 006
+-- Try with LATERAL joins
+SELECT explain_memoize('
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2
+         WHERE t1.twenty = t2.unique1 OFFSET 0) t2
+WHERE t1.unique1 < 1000;', false)
+--
+-- Try with LATERAL joins
+SELECT explain_memoize($1, $2)
+== 007
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2
+         WHERE t1.twenty = t2.unique1 OFFSET 0) t2
+WHERE t1.unique1 < 1000
+--
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2
+         WHERE t1.twenty = t2.unique1 OFFSET $1) t2
+WHERE t1.unique1 < $2
+== 008
+-- Try with LATERAL joins
+SELECT explain_memoize('
+SELECT COUNT(*),AVG(t2.t1two) FROM tenk1 t1 LEFT JOIN
+LATERAL (
+    SELECT t1.two as t1two, * FROM tenk1 t2 WHERE t2.unique1 < 4 OFFSET 0
+) t2
+ON t1.two = t2.two
+WHERE t1.unique1 < 10;', false)
+--
+-- Try with LATERAL joins
+SELECT explain_memoize($1, $2)
+== 009
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t2.t1two) FROM tenk1 t1 LEFT JOIN
+LATERAL (
+    SELECT t1.two as t1two, * FROM tenk1 t2 WHERE t2.unique1 < 4 OFFSET 0
+) t2
+ON t1.two = t2.two
+WHERE t1.unique1 < 10
+--
+-- And check we get the expected results.
+SELECT COUNT(*),AVG(t2.t1two) FROM tenk1 t1 LEFT JOIN
+LATERAL (
+    SELECT t1.two as t1two, * FROM tenk1 t2 WHERE t2.unique1 < $1 OFFSET $2
+) t2
+ON t1.two = t2.two
+WHERE t1.unique1 < $3
+== 010
+SET enable_mergejoin TO off
+--
+SET enable_mergejoin TO $1
+== 011
+-- Test for varlena datatype with expr evaluation
+CREATE TABLE expr_key (x numeric, t text)
+--
+-- Test for varlena datatype with expr evaluation
+CREATE TABLE expr_key (x numeric, t text)
+== 012
+INSERT INTO expr_key (x, t)
+SELECT d1::numeric, d1::text FROM (
+    SELECT round((d / pi())::numeric, 7) AS d1 FROM generate_series(1, 20) AS d
+) t
+--
+INSERT INTO expr_key (x, t)
+SELECT d1::numeric, d1::text FROM (
+    SELECT round((d / pi())::numeric, $1) AS d1 FROM generate_series($2, $3) AS d
+) t
+== 013
+-- duplicate rows so we get some cache hits
+INSERT INTO expr_key SELECT * FROM expr_key
+--
+-- duplicate rows so we get some cache hits
+INSERT INTO expr_key SELECT * FROM expr_key
+== 014
+CREATE INDEX expr_key_idx_x_t ON expr_key (x, t)
+--
+CREATE INDEX expr_key_idx_x_t ON expr_key (x, t)
+== 015
+VACUUM ANALYZE expr_key
+--
+VACUUM ANALYZE expr_key
+== 016
+-- Ensure we get we get a cache miss and hit for each of the 20 distinct values
+SELECT explain_memoize('
+SELECT * FROM expr_key t1 INNER JOIN expr_key t2
+ON t1.x = t2.t::numeric AND t1.t::numeric = t2.x;', false)
+--
+-- Ensure we get we get a cache miss and hit for each of the 20 distinct values
+SELECT explain_memoize($1, $2)
+== 017
+DROP TABLE expr_key
+--
+DROP TABLE expr_key
+== 018
+-- Reduce work_mem and hash_mem_multiplier so that we see some cache evictions
+SET work_mem TO '64kB'
+--
+-- Reduce work_mem and hash_mem_multiplier so that we see some cache evictions
+SET work_mem TO $1
+== 019
+SET hash_mem_multiplier TO 1.0
+--
+SET hash_mem_multiplier TO $1
+== 020
+-- Ensure we get some evictions.  We're unable to validate the hits and misses
+-- here as the number of entries that fit in the cache at once will vary
+-- between different machines.
+SELECT explain_memoize('
+SELECT COUNT(*),AVG(t1.unique1) FROM tenk1 t1
+INNER JOIN tenk1 t2 ON t1.unique1 = t2.thousand
+WHERE t2.unique1 < 1200;', true)
+--
+-- Ensure we get some evictions.  We're unable to validate the hits and misses
+-- here as the number of entries that fit in the cache at once will vary
+-- between different machines.
+SELECT explain_memoize($1, $2)
+== 021
+CREATE TABLE flt (f float)
+--
+CREATE TABLE flt (f float)
+== 022
+CREATE INDEX flt_f_idx ON flt (f)
+--
+CREATE INDEX flt_f_idx ON flt (f)
+== 023
+INSERT INTO flt VALUES('-0.0'::float),('+0.0'::float)
+--
+INSERT INTO flt VALUES($1::float),($2::float)
+== 024
+ANALYZE flt
+--
+ANALYZE flt
+== 025
+SET enable_seqscan TO off
+--
+SET enable_seqscan TO $1
+== 026
+-- Ensure memoize operates in logical mode
+SELECT explain_memoize('
+SELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f = f2.f;', false)
+--
+-- Ensure memoize operates in logical mode
+SELECT explain_memoize($1, $2)
+== 027
+-- Ensure memoize operates in binary mode
+SELECT explain_memoize('
+SELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f >= f2.f;', false)
+--
+-- Ensure memoize operates in binary mode
+SELECT explain_memoize($1, $2)
+== 028
+DROP TABLE flt
+--
+DROP TABLE flt
+== 029
+-- Exercise Memoize in binary mode with a large fixed width type and a
+-- varlena type.
+CREATE TABLE strtest (n name, t text)
+--
+-- Exercise Memoize in binary mode with a large fixed width type and a
+-- varlena type.
+CREATE TABLE strtest (n name, t text)
+== 030
+CREATE INDEX strtest_n_idx ON strtest (n)
+--
+CREATE INDEX strtest_n_idx ON strtest (n)
+== 031
+CREATE INDEX strtest_t_idx ON strtest (t)
+--
+CREATE INDEX strtest_t_idx ON strtest (t)
+== 032
+INSERT INTO strtest VALUES('one','one'),('two','two'),('three',repeat(fipshash('three'),100))
+--
+INSERT INTO strtest VALUES($1,$2),($3,$4),($5,repeat(fipshash($6),$7))
+== 033
+-- duplicate rows so we get some cache hits
+INSERT INTO strtest SELECT * FROM strtest
+--
+-- duplicate rows so we get some cache hits
+INSERT INTO strtest SELECT * FROM strtest
+== 034
+ANALYZE strtest
+--
+ANALYZE strtest
+== 035
+-- Ensure we get 3 hits and 3 misses
+SELECT explain_memoize('
+SELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.n >= s2.n;', false)
+--
+-- Ensure we get 3 hits and 3 misses
+SELECT explain_memoize($1, $2)
+== 036
+-- Ensure we get 3 hits and 3 misses
+SELECT explain_memoize('
+SELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.t >= s2.t;', false)
+--
+-- Ensure we get 3 hits and 3 misses
+SELECT explain_memoize($1, $2)
+== 037
+DROP TABLE strtest
+--
+DROP TABLE strtest
+== 038
+-- Ensure memoize works with partitionwise join
+SET enable_partitionwise_join TO on
+--
+-- Ensure memoize works with partitionwise join
+SET enable_partitionwise_join TO $1
+== 039
+CREATE TABLE prt (a int) PARTITION BY RANGE(a)
+--
+CREATE TABLE prt (a int) PARTITION BY RANGE(a)
+== 040
+CREATE TABLE prt_p1 PARTITION OF prt FOR VALUES FROM (0) TO (10)
+--
+CREATE TABLE prt_p1 PARTITION OF prt FOR VALUES FROM (0) TO (10)
+== 041
+CREATE TABLE prt_p2 PARTITION OF prt FOR VALUES FROM (10) TO (20)
+--
+CREATE TABLE prt_p2 PARTITION OF prt FOR VALUES FROM (10) TO (20)
+== 042
+INSERT INTO prt VALUES (0), (0), (0), (0)
+--
+INSERT INTO prt VALUES ($1), ($2), ($3), ($4)
+== 043
+INSERT INTO prt VALUES (10), (10), (10), (10)
+--
+INSERT INTO prt VALUES ($1), ($2), ($3), ($4)
+== 044
+CREATE INDEX iprt_p1_a ON prt_p1 (a)
+--
+CREATE INDEX iprt_p1_a ON prt_p1 (a)
+== 045
+CREATE INDEX iprt_p2_a ON prt_p2 (a)
+--
+CREATE INDEX iprt_p2_a ON prt_p2 (a)
+== 046
+ANALYZE prt
+--
+ANALYZE prt
+== 047
+SELECT explain_memoize('
+SELECT * FROM prt t1 INNER JOIN prt t2 ON t1.a = t2.a;', false)
+--
+SELECT explain_memoize($1, $2)
+== 048
+-- Ensure memoize works with parameterized union-all Append path
+SET enable_partitionwise_join TO off
+--
+-- Ensure memoize works with parameterized union-all Append path
+SET enable_partitionwise_join TO $1
+== 049
+SELECT explain_memoize('
+SELECT * FROM prt_p1 t1 INNER JOIN
+(SELECT * FROM prt_p1 UNION ALL SELECT * FROM prt_p2) t2
+ON t1.a = t2.a;', false)
+--
+SELECT explain_memoize($1, $2)
+== 050
+DROP TABLE prt
+--
+DROP TABLE prt
+== 051
+RESET enable_partitionwise_join
+--
+RESET enable_partitionwise_join
+== 052
+-- Exercise Memoize code that flushes the cache when a parameter changes which
+-- is not part of the cache key.
+
+-- Ensure we get a Memoize plan
+EXPLAIN (COSTS OFF)
+SELECT unique1 FROM tenk1 t0
+WHERE unique1 < 3
+  AND EXISTS (
+	SELECT 1 FROM tenk1 t1
+	INNER JOIN tenk1 t2 ON t1.unique1 = t2.hundred
+	WHERE t0.ten = t1.twenty AND t0.two <> t2.four OFFSET 0)
+--
+-- Exercise Memoize code that flushes the cache when a parameter changes which
+-- is not part of the cache key.
+
+-- Ensure we get a Memoize plan
+EXPLAIN (COSTS OFF)
+SELECT unique1 FROM tenk1 t0
+WHERE unique1 < $1
+  AND EXISTS (
+	SELECT $2 FROM tenk1 t1
+	INNER JOIN tenk1 t2 ON t1.unique1 = t2.hundred
+	WHERE t0.ten = t1.twenty AND t0.two <> t2.four OFFSET $3)
+== 053
+-- Ensure the above query returns the correct result
+SELECT unique1 FROM tenk1 t0
+WHERE unique1 < 3
+  AND EXISTS (
+	SELECT 1 FROM tenk1 t1
+	INNER JOIN tenk1 t2 ON t1.unique1 = t2.hundred
+	WHERE t0.ten = t1.twenty AND t0.two <> t2.four OFFSET 0)
+--
+-- Ensure the above query returns the correct result
+SELECT unique1 FROM tenk1 t0
+WHERE unique1 < $1
+  AND EXISTS (
+	SELECT $2 FROM tenk1 t1
+	INNER JOIN tenk1 t2 ON t1.unique1 = t2.hundred
+	WHERE t0.ten = t1.twenty AND t0.two <> t2.four OFFSET $3)
+== 054
+RESET enable_seqscan
+--
+RESET enable_seqscan
+== 055
+RESET enable_mergejoin
+--
+RESET enable_mergejoin
+== 056
+RESET work_mem
+--
+RESET work_mem
+== 057
+RESET hash_mem_multiplier
+--
+RESET hash_mem_multiplier
+== 058
+RESET enable_bitmapscan
+--
+RESET enable_bitmapscan
+== 059
+RESET enable_hashjoin
+--
+RESET enable_hashjoin
+== 060
+-- Test parallel plans with Memoize
+SET min_parallel_table_scan_size TO 0
+--
+-- Test parallel plans with Memoize
+SET min_parallel_table_scan_size TO $1
+== 061
+SET parallel_setup_cost TO 0
+--
+SET parallel_setup_cost TO $1
+== 062
+SET parallel_tuple_cost TO 0
+--
+SET parallel_tuple_cost TO $1
+== 063
+SET max_parallel_workers_per_gather TO 2
+--
+SET max_parallel_workers_per_gather TO $1
+== 064
+-- Ensure we get a parallel plan.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2 WHERE t1.twenty = t2.unique1) t2
+WHERE t1.unique1 < 1000
+--
+-- Ensure we get a parallel plan.
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2 WHERE t1.twenty = t2.unique1) t2
+WHERE t1.unique1 < $1
+== 065
+-- And ensure the parallel plan gives us the correct results.
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2 WHERE t1.twenty = t2.unique1) t2
+WHERE t1.unique1 < 1000
+--
+-- And ensure the parallel plan gives us the correct results.
+SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
+LATERAL (SELECT t2.unique1 FROM tenk1 t2 WHERE t1.twenty = t2.unique1) t2
+WHERE t1.unique1 < $1
+== 066
+RESET max_parallel_workers_per_gather
+--
+RESET max_parallel_workers_per_gather
+== 067
+RESET parallel_tuple_cost
+--
+RESET parallel_tuple_cost
+== 068
+RESET parallel_setup_cost
+--
+RESET parallel_setup_cost
+== 069
+RESET min_parallel_table_scan_size
+--
+RESET min_parallel_table_scan_size

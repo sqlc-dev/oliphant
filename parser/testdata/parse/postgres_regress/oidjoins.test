@@ -1,0 +1,52 @@
+== 001
+|--
+-- Verify system catalog foreign key relationships
+|--
+DO $doblock$
+declare
+  fk record;
+  nkeys integer;
+  cmd text;
+  err record;
+begin
+  for fk in select * from pg_get_catalog_foreign_keys()
+  loop
+    raise notice 'checking % % => % %',
+      fk.fktable, fk.fkcols, fk.pktable, fk.pkcols;
+    nkeys := array_length(fk.fkcols, 1);
+    cmd := 'SELECT ctid';
+    for i in 1 .. nkeys loop
+      cmd := cmd || ', ' || quote_ident(fk.fkcols[i]);
+    end loop;
+    if fk.is_array then
+      cmd := cmd || ' FROM (SELECT ctid';
+      for i in 1 .. nkeys-1 loop
+        cmd := cmd || ', ' || quote_ident(fk.fkcols[i]);
+      end loop;
+      cmd := cmd || ', unnest(' || quote_ident(fk.fkcols[nkeys]);
+      cmd := cmd || ') as ' || quote_ident(fk.fkcols[nkeys]);
+      cmd := cmd || ' FROM ' || fk.fktable::text || ') fk WHERE ';
+    else
+      cmd := cmd || ' FROM ' || fk.fktable::text || ' fk WHERE ';
+    end if;
+    if fk.is_opt then
+      for i in 1 .. nkeys loop
+        cmd := cmd || quote_ident(fk.fkcols[i]) || ' != 0 AND ';
+      end loop;
+    end if;
+    cmd := cmd || 'NOT EXISTS(SELECT 1 FROM ' || fk.pktable::text || ' pk WHERE ';
+    for i in 1 .. nkeys loop
+      if i > 1 then cmd := cmd || ' AND '; end if;
+      cmd := cmd || 'pk.' || quote_ident(fk.pkcols[i]);
+      cmd := cmd || ' = fk.' || quote_ident(fk.fkcols[i]);
+    end loop;
+    cmd := cmd || ')';
+    -- raise notice 'cmd = %', cmd;
+    for err in execute cmd loop
+      raise warning 'FK VIOLATION IN %(%): %', fk.fktable, fk.fkcols, err;
+    end loop;
+  end loop;
+end
+$doblock$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\ndeclare\n  fk record;\n  nkeys integer;\n  cmd text;\n  err record;\nbegin\n  for fk in select * from pg_get_catalog_foreign_keys()\n  loop\n    raise notice 'checking % % =\u003e % %',\n      fk.fktable, fk.fkcols, fk.pktable, fk.pkcols;\n    nkeys := array_length(fk.fkcols, 1);\n    cmd := 'SELECT ctid';\n    for i in 1 .. nkeys loop\n      cmd := cmd || ', ' || quote_ident(fk.fkcols[i]);\n    end loop;\n    if fk.is_array then\n      cmd := cmd || ' FROM (SELECT ctid';\n      for i in 1 .. nkeys-1 loop\n        cmd := cmd || ', ' || quote_ident(fk.fkcols[i]);\n      end loop;\n      cmd := cmd || ', unnest(' || quote_ident(fk.fkcols[nkeys]);\n      cmd := cmd || ') as ' || quote_ident(fk.fkcols[nkeys]);\n      cmd := cmd || ' FROM ' || fk.fktable::text || ') fk WHERE ';\n    else\n      cmd := cmd || ' FROM ' || fk.fktable::text || ' fk WHERE ';\n    end if;\n    if fk.is_opt then\n      for i in 1 .. nkeys loop\n        cmd := cmd || quote_ident(fk.fkcols[i]) || ' != 0 AND ';\n      end loop;\n    end if;\n    cmd := cmd || 'NOT EXISTS(SELECT 1 FROM ' || fk.pktable::text || ' pk WHERE ';\n    for i in 1 .. nkeys loop\n      if i \u003e 1 then cmd := cmd || ' AND '; end if;\n      cmd := cmd || 'pk.' || quote_ident(fk.pkcols[i]);\n      cmd := cmd || ' = fk.' || quote_ident(fk.fkcols[i]);\n    end loop;\n    cmd := cmd || ')';\n    -- raise notice 'cmd = %', cmd;\n    for err in execute cmd loop\n      raise warning 'FK VIOLATION IN %(%): %', fk.fktable, fk.fkcols, err;\n    end loop;\n  end loop;\nend\n"}},"defaction":"DEFELEM_UNSPEC","location":60}}]}}}]}

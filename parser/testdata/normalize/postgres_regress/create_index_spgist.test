@@ -1,0 +1,1054 @@
+== 001
+|--
+-- SP-GiST index tests
+|--
+
+CREATE TABLE quad_point_tbl AS
+    SELECT point(unique1,unique2) AS p FROM tenk1
+--
+|--
+-- SP-GiST index tests
+|--
+
+CREATE TABLE quad_point_tbl AS
+    SELECT point(unique1,unique2) AS p FROM tenk1
+== 002
+INSERT INTO quad_point_tbl
+    SELECT '(333.0,400.0)'::point FROM generate_series(1,1000)
+--
+INSERT INTO quad_point_tbl
+    SELECT $1::point FROM generate_series($2,$3)
+== 003
+INSERT INTO quad_point_tbl VALUES (NULL), (NULL), (NULL)
+--
+INSERT INTO quad_point_tbl VALUES ($1), ($2), ($3)
+== 004
+CREATE INDEX sp_quad_ind ON quad_point_tbl USING spgist (p)
+--
+CREATE INDEX sp_quad_ind ON quad_point_tbl USING spgist (p)
+== 005
+CREATE TABLE kd_point_tbl AS SELECT * FROM quad_point_tbl
+--
+CREATE TABLE kd_point_tbl AS SELECT * FROM quad_point_tbl
+== 006
+CREATE INDEX sp_kd_ind ON kd_point_tbl USING spgist (p kd_point_ops)
+--
+CREATE INDEX sp_kd_ind ON kd_point_tbl USING spgist (p kd_point_ops)
+== 007
+CREATE TABLE radix_text_tbl AS
+    SELECT name AS t FROM road WHERE name !~ '^[0-9]'
+--
+CREATE TABLE radix_text_tbl AS
+    SELECT name AS t FROM road WHERE name !~ '^[0-9]'
+== 008
+INSERT INTO radix_text_tbl
+    SELECT 'P0123456789abcdef' FROM generate_series(1,1000)
+--
+INSERT INTO radix_text_tbl
+    SELECT $1 FROM generate_series($2,$3)
+== 009
+INSERT INTO radix_text_tbl VALUES ('P0123456789abcde')
+--
+INSERT INTO radix_text_tbl VALUES ($1)
+== 010
+INSERT INTO radix_text_tbl VALUES ('P0123456789abcdefF')
+--
+INSERT INTO radix_text_tbl VALUES ($1)
+== 011
+CREATE INDEX sp_radix_ind ON radix_text_tbl USING spgist (t)
+--
+CREATE INDEX sp_radix_ind ON radix_text_tbl USING spgist (t)
+== 012
+-- get non-indexed results for comparison purposes
+
+SET enable_seqscan = ON
+--
+-- get non-indexed results for comparison purposes
+
+SET enable_seqscan = $1
+== 013
+SET enable_indexscan = OFF
+--
+SET enable_indexscan = $1
+== 014
+SET enable_bitmapscan = OFF
+--
+SET enable_bitmapscan = $1
+== 015
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+== 016
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+== 017
+SELECT count(*) FROM quad_point_tbl
+--
+SELECT count(*) FROM quad_point_tbl
+== 018
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box $1
+== 019
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+SELECT count(*) FROM quad_point_tbl WHERE box $1 @> p
+== 020
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p << $1
+== 021
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p >> $1
+== 022
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <<| $1
+== 023
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p |>> $1
+== 024
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p ~= $1
+== 025
+CREATE TEMP TABLE quad_point_tbl_ord_seq1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+CREATE TEMP TABLE quad_point_tbl_ord_seq1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+== 026
+CREATE TEMP TABLE quad_point_tbl_ord_seq2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+CREATE TEMP TABLE quad_point_tbl_ord_seq2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+== 027
+CREATE TEMP TABLE quad_point_tbl_ord_seq3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+CREATE TEMP TABLE quad_point_tbl_ord_seq3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+== 028
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 029
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 030
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 031
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <    $1
+== 032
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  $1
+== 033
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <=   $1
+== 034
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ $1
+== 035
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 036
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 037
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >=   $1
+== 038
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ $1
+== 039
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >    $1
+== 040
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  $1
+== 041
+SELECT count(*) FROM radix_text_tbl WHERE t ^@  'Worth'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ^@  $1
+== 042
+-- Now check the results from plain indexscan
+SET enable_seqscan = OFF
+--
+-- Now check the results from plain indexscan
+SET enable_seqscan = $1
+== 043
+SET enable_indexscan = ON
+--
+SET enable_indexscan = $1
+== 044
+SET enable_bitmapscan = OFF
+--
+SET enable_bitmapscan = $1
+== 045
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+== 046
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+== 047
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+== 048
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+== 049
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+== 050
+SELECT count(*) FROM quad_point_tbl
+--
+SELECT count(*) FROM quad_point_tbl
+== 051
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box $1
+== 052
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box $1
+== 053
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box $1 @> p
+== 054
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+SELECT count(*) FROM quad_point_tbl WHERE box $1 @> p
+== 055
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << $1
+== 056
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p << $1
+== 057
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> $1
+== 058
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p >> $1
+== 059
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| $1
+== 060
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <<| $1
+== 061
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> $1
+== 062
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p |>> $1
+== 063
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= $1
+== 064
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p ~= $1
+== 065
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM quad_point_tbl
+== 066
+CREATE TEMP TABLE quad_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+--
+CREATE TEMP TABLE quad_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl
+== 067
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN quad_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN quad_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 068
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM quad_point_tbl WHERE p <@ box $3
+== 069
+CREATE TEMP TABLE quad_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+CREATE TEMP TABLE quad_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+== 070
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN quad_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN quad_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 071
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+== 072
+CREATE TEMP TABLE quad_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+--
+CREATE TEMP TABLE quad_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM quad_point_tbl WHERE p IS NOT NULL
+== 073
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN quad_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN quad_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 074
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box $1
+== 075
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box $1
+== 076
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box $1 @> p
+== 077
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+SELECT count(*) FROM kd_point_tbl WHERE box $1 @> p
+== 078
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << $1
+== 079
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p << $1
+== 080
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> $1
+== 081
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p >> $1
+== 082
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| $1
+== 083
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p <<| $1
+== 084
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> $1
+== 085
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p |>> $1
+== 086
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= $1
+== 087
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p ~= $1
+== 088
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM kd_point_tbl
+== 089
+CREATE TEMP TABLE kd_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl
+--
+CREATE TEMP TABLE kd_point_tbl_ord_idx1 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl
+== 090
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN kd_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq1 seq FULL JOIN kd_point_tbl_ord_idx1 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 091
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM kd_point_tbl WHERE p <@ box $3
+== 092
+CREATE TEMP TABLE kd_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+CREATE TEMP TABLE kd_point_tbl_ord_idx2 AS
+SELECT row_number() OVER (ORDER BY p <-> '0,0') n, p <-> '0,0' dist, p
+FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+== 093
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN kd_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq2 seq FULL JOIN kd_point_tbl_ord_idx2 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 094
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT row_number() OVER (ORDER BY p <-> $1) n, p <-> $2 dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+== 095
+CREATE TEMP TABLE kd_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+--
+CREATE TEMP TABLE kd_point_tbl_ord_idx3 AS
+SELECT row_number() OVER (ORDER BY p <-> '333,400') n, p <-> '333,400' dist, p
+FROM kd_point_tbl WHERE p IS NOT NULL
+== 096
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN kd_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+--
+SELECT * FROM quad_point_tbl_ord_seq3 seq FULL JOIN kd_point_tbl_ord_idx3 idx
+ON seq.n = idx.n
+WHERE seq.dist IS DISTINCT FROM idx.dist
+== 097
+-- test KNN scan with included columns
+-- the distance numbers are not exactly the same across platforms
+SET extra_float_digits = 0
+--
+-- test KNN scan with included columns
+-- the distance numbers are not exactly the same across platforms
+SET extra_float_digits = $1
+== 098
+CREATE INDEX ON quad_point_tbl_ord_seq1 USING spgist(p) INCLUDE(dist)
+--
+CREATE INDEX ON quad_point_tbl_ord_seq1 USING spgist(p) INCLUDE(dist)
+== 099
+EXPLAIN (COSTS OFF)
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> '0,0' LIMIT 10
+--
+EXPLAIN (COSTS OFF)
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> $1 LIMIT $2
+== 100
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> '0,0' LIMIT 10
+--
+SELECT p, dist FROM quad_point_tbl_ord_seq1 ORDER BY p <-> $1 LIMIT $2
+== 101
+RESET extra_float_digits
+--
+RESET extra_float_digits
+== 102
+-- check ORDER BY distance to NULL
+SELECT (SELECT p FROM kd_point_tbl ORDER BY p <-> pt, p <-> '0,0' LIMIT 1)
+FROM (VALUES (point '1,2'), (NULL), ('1234,5678')) pts(pt)
+--
+-- check ORDER BY distance to NULL
+SELECT (SELECT p FROM kd_point_tbl ORDER BY p <-> pt, p <-> $1 LIMIT $2)
+FROM (VALUES (point $3), ($4), ($5)) pts(pt)
+== 103
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 104
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 105
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 106
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 107
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 108
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 109
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    $1
+== 110
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <    $1
+== 111
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  $1
+== 112
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  $1
+== 113
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   $1
+== 114
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <=   $1
+== 115
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ $1
+== 116
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ $1
+== 117
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 118
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 119
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 120
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 121
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   $1
+== 122
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >=   $1
+== 123
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ $1
+== 124
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ $1
+== 125
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    $1
+== 126
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >    $1
+== 127
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  $1
+== 128
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  $1
+== 129
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 $1
+== 130
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 $1
+== 131
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, $1)
+== 132
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, $1)
+== 133
+-- Now check the results from bitmap indexscan
+SET enable_seqscan = OFF
+--
+-- Now check the results from bitmap indexscan
+SET enable_seqscan = $1
+== 134
+SET enable_indexscan = OFF
+--
+SET enable_indexscan = $1
+== 135
+SET enable_bitmapscan = ON
+--
+SET enable_bitmapscan = $1
+== 136
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+== 137
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NULL
+== 138
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+== 139
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+--
+SELECT count(*) FROM quad_point_tbl WHERE p IS NOT NULL
+== 140
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl
+== 141
+SELECT count(*) FROM quad_point_tbl
+--
+SELECT count(*) FROM quad_point_tbl
+== 142
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box $1
+== 143
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <@ box $1
+== 144
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE box $1 @> p
+== 145
+SELECT count(*) FROM quad_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+SELECT count(*) FROM quad_point_tbl WHERE box $1 @> p
+== 146
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p << $1
+== 147
+SELECT count(*) FROM quad_point_tbl WHERE p << '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p << $1
+== 148
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p >> $1
+== 149
+SELECT count(*) FROM quad_point_tbl WHERE p >> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p >> $1
+== 150
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p <<| $1
+== 151
+SELECT count(*) FROM quad_point_tbl WHERE p <<| '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p <<| $1
+== 152
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p |>> $1
+== 153
+SELECT count(*) FROM quad_point_tbl WHERE p |>> '(5000, 4000)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p |>> $1
+== 154
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_point_tbl WHERE p ~= $1
+== 155
+SELECT count(*) FROM quad_point_tbl WHERE p ~= '(4585, 365)'
+--
+SELECT count(*) FROM quad_point_tbl WHERE p ~= $1
+== 156
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box $1
+== 157
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box '(200,200,1000,1000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p <@ box $1
+== 158
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE box $1 @> p
+== 159
+SELECT count(*) FROM kd_point_tbl WHERE box '(200,200,1000,1000)' @> p
+--
+SELECT count(*) FROM kd_point_tbl WHERE box $1 @> p
+== 160
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p << $1
+== 161
+SELECT count(*) FROM kd_point_tbl WHERE p << '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p << $1
+== 162
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p >> $1
+== 163
+SELECT count(*) FROM kd_point_tbl WHERE p >> '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p >> $1
+== 164
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p <<| $1
+== 165
+SELECT count(*) FROM kd_point_tbl WHERE p <<| '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p <<| $1
+== 166
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p |>> $1
+== 167
+SELECT count(*) FROM kd_point_tbl WHERE p |>> '(5000, 4000)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p |>> $1
+== 168
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM kd_point_tbl WHERE p ~= $1
+== 169
+SELECT count(*) FROM kd_point_tbl WHERE p ~= '(4585, 365)'
+--
+SELECT count(*) FROM kd_point_tbl WHERE p ~= $1
+== 170
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 171
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdef'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 172
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 173
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcde'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 174
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 175
+SELECT count(*) FROM radix_text_tbl WHERE t = 'P0123456789abcdefF'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t = $1
+== 176
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <    $1
+== 177
+SELECT count(*) FROM radix_text_tbl WHERE t <    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <    $1
+== 178
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  $1
+== 179
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<~  $1
+== 180
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t <=   $1
+== 181
+SELECT count(*) FROM radix_text_tbl WHERE t <=   'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t <=   $1
+== 182
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ $1
+== 183
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ 'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~<=~ $1
+== 184
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 185
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Aztec                         Ct  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 186
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 187
+SELECT count(*) FROM radix_text_tbl WHERE t =    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t =    $1
+== 188
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >=   $1
+== 189
+SELECT count(*) FROM radix_text_tbl WHERE t >=   'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >=   $1
+== 190
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ $1
+== 191
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ 'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>=~ $1
+== 192
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t >    $1
+== 193
+SELECT count(*) FROM radix_text_tbl WHERE t >    'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t >    $1
+== 194
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  $1
+== 195
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  'Worth                         St  '
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ~>~  $1
+== 196
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 $1
+== 197
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 'Worth'
+--
+SELECT count(*) FROM radix_text_tbl WHERE t ^@	 $1
+== 198
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, $1)
+== 199
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, 'Worth')
+--
+SELECT count(*) FROM radix_text_tbl WHERE starts_with(t, $1)
+== 200
+RESET enable_seqscan
+--
+RESET enable_seqscan
+== 201
+RESET enable_indexscan
+--
+RESET enable_indexscan
+== 202
+RESET enable_bitmapscan
+--
+RESET enable_bitmapscan

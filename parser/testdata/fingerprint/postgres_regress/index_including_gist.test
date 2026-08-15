@@ -1,0 +1,231 @@
+== 001
+/*
+ * 1.1. test CREATE INDEX with buffered build
+ */
+
+-- Regular index with included columns
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 002
+-- size is chosen to exceed page size and trigger actual truncation
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,8000) AS x
+--
+9939b3dcaebb6d2f
+== 003
+CREATE INDEX tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c2,c3)
+--
+8764fc4f5f038c06
+== 004
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_gist'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 005
+SELECT * FROM tbl_gist where c4 <@ box(point(1,1),point(10,10))
+--
+a29bbd9b5197839c
+== 006
+SET enable_bitmapscan TO off
+--
+aa90c60f48f4fef4
+== 007
+EXPLAIN  (costs off) SELECT * FROM tbl_gist where c4 <@ box(point(1,1),point(10,10))
+--
+d8390e54ec7ab71c
+== 008
+SET enable_bitmapscan TO default
+--
+fd2fa18202891ce6
+== 009
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 010
+/*
+ * 1.2. test CREATE INDEX with inserts
+ */
+
+-- Regular index with included columns
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 011
+-- size is chosen to exceed page size and trigger actual truncation
+CREATE INDEX tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c2,c3)
+--
+8764fc4f5f038c06
+== 012
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,8000) AS x
+--
+9939b3dcaebb6d2f
+== 013
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_gist'::regclass ORDER BY c.relname
+--
+ecbc0dcb9234088c
+== 014
+SELECT * FROM tbl_gist where c4 <@ box(point(1,1),point(10,10))
+--
+a29bbd9b5197839c
+== 015
+SET enable_bitmapscan TO off
+--
+aa90c60f48f4fef4
+== 016
+EXPLAIN  (costs off) SELECT * FROM tbl_gist where c4 <@ box(point(1,1),point(10,10))
+--
+d8390e54ec7ab71c
+== 017
+SET enable_bitmapscan TO default
+--
+fd2fa18202891ce6
+== 018
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 019
+/*
+ * 2. CREATE INDEX CONCURRENTLY
+ */
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 020
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,10) AS x
+--
+9939b3dcaebb6d2f
+== 021
+CREATE INDEX CONCURRENTLY tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c2,c3)
+--
+091520d5ed4e7c33
+== 022
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl_gist' ORDER BY indexname
+--
+fa26214577001e3e
+== 023
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 024
+/*
+ * 3. REINDEX
+ */
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 025
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,10) AS x
+--
+9939b3dcaebb6d2f
+== 026
+CREATE INDEX tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c3)
+--
+056dccb8ce0c6237
+== 027
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl_gist' ORDER BY indexname
+--
+fa26214577001e3e
+== 028
+REINDEX INDEX tbl_gist_idx
+--
+da9bda08a93f1291
+== 029
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl_gist' ORDER BY indexname
+--
+fa26214577001e3e
+== 030
+ALTER TABLE tbl_gist DROP COLUMN c1
+--
+63fd1ae46c0134d7
+== 031
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl_gist' ORDER BY indexname
+--
+fa26214577001e3e
+== 032
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 033
+/*
+ * 4. Update, delete values in indexed table.
+ */
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 034
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,10) AS x
+--
+9939b3dcaebb6d2f
+== 035
+CREATE INDEX tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c3)
+--
+056dccb8ce0c6237
+== 036
+UPDATE tbl_gist SET c1 = 100 WHERE c1 = 2
+--
+2c4e757999791666
+== 037
+UPDATE tbl_gist SET c1 = 1 WHERE c1 = 3
+--
+2c4e757999791666
+== 038
+DELETE FROM tbl_gist WHERE c1 = 5 OR c3 = 12
+--
+b604072aba2386fc
+== 039
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 040
+/*
+ * 5. Alter column type.
+ */
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box)
+--
+26b4066f36a177f2
+== 041
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,10) AS x
+--
+9939b3dcaebb6d2f
+== 042
+CREATE INDEX tbl_gist_idx ON tbl_gist using gist (c4) INCLUDE (c1,c3)
+--
+056dccb8ce0c6237
+== 043
+ALTER TABLE tbl_gist ALTER c1 TYPE bigint
+--
+b82f2648bd6990e1
+== 044
+ALTER TABLE tbl_gist ALTER c3 TYPE bigint
+--
+d650213764b9417d
+== 045
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2
+== 046
+/*
+ * 6. EXCLUDE constraint.
+ */
+CREATE TABLE tbl_gist (c1 int, c2 int, c3 int, c4 box, EXCLUDE USING gist (c4 WITH &&) INCLUDE (c1, c2, c3))
+--
+8aa00705574ab68a
+== 047
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(x,x+1),point(2*x,2*x+1)) FROM generate_series(1,10) AS x
+--
+9939b3dcaebb6d2f
+== 048
+INSERT INTO tbl_gist SELECT x, 2*x, 3*x, box(point(3*x,2*x),point(3*x+1,2*x+1)) FROM generate_series(1,10) AS x
+--
+8c730953b7878cfc
+== 049
+EXPLAIN  (costs off) SELECT * FROM tbl_gist where c4 <@ box(point(1,1),point(10,10))
+--
+d8390e54ec7ab71c
+== 050
+DROP TABLE tbl_gist
+--
+bff37cb8a3e403c2

@@ -1,0 +1,210 @@
+== 001
+|--
+-- POINT
+|--
+
+-- avoid bit-exact output here because operations may not be bit-exact.
+SET extra_float_digits = 0
+--
+e4d6a0d1aa7aee70
+== 002
+-- point_tbl was already created and filled in test_setup.sql.
+-- Here we just try to insert bad values.
+
+INSERT INTO POINT_TBL(f1) VALUES ('asdfasdf')
+--
+0a81733ab2c2a1d1
+== 003
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0 10.0)')
+--
+0a81733ab2c2a1d1
+== 004
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0, 10.0) x')
+--
+0a81733ab2c2a1d1
+== 005
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0,10.0')
+--
+0a81733ab2c2a1d1
+== 006
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0, 1e+500)')
+--
+0a81733ab2c2a1d1
+== 007
+-- Out of range
+
+
+SELECT * FROM POINT_TBL
+--
+f0e7dfac150d6c11
+== 008
+-- left of
+SELECT p.* FROM POINT_TBL p WHERE p.f1 << '(0.0, 0.0)'
+--
+297ecf1b58b992ad
+== 009
+-- right of
+SELECT p.* FROM POINT_TBL p WHERE '(0.0,0.0)' >> p.f1
+--
+8e86db1c0c118375
+== 010
+-- above
+SELECT p.* FROM POINT_TBL p WHERE '(0.0,0.0)' |>> p.f1
+--
+5ebb9bef3ac4a8cd
+== 011
+-- below
+SELECT p.* FROM POINT_TBL p WHERE p.f1 <<| '(0.0, 0.0)'
+--
+2a5195a3422f4e03
+== 012
+-- equal
+SELECT p.* FROM POINT_TBL p WHERE p.f1 ~= '(5.1, 34.5)'
+--
+a49883d469c89131
+== 013
+-- point in box
+SELECT p.* FROM POINT_TBL p
+   WHERE p.f1 <@ box '(0,0,100,100)'
+--
+856c5087519ad3cd
+== 014
+SELECT p.* FROM POINT_TBL p
+   WHERE box '(0,0,100,100)' @> p.f1
+--
+a5ee2926f3a4c3eb
+== 015
+SELECT p.* FROM POINT_TBL p
+   WHERE not p.f1 <@ box '(0,0,100,100)'
+--
+280e38a4bba3bc46
+== 016
+SELECT p.* FROM POINT_TBL p
+   WHERE p.f1 <@ path '[(0,0),(-10,0),(-10,10)]'
+--
+856c5087519ad3cd
+== 017
+SELECT p.* FROM POINT_TBL p
+   WHERE not box '(0,0,100,100)' @> p.f1
+--
+23e0dd445bb28fd5
+== 018
+SELECT p.f1, p.f1 <-> point '(0,0)' AS dist
+   FROM POINT_TBL p
+   ORDER BY dist
+--
+7822449ecc50b9f5
+== 019
+SELECT p1.f1 AS point1, p2.f1 AS point2, p1.f1 <-> p2.f1 AS dist
+   FROM POINT_TBL p1, POINT_TBL p2
+   ORDER BY dist, p1.f1[0], p2.f1[0]
+--
+5ee98226fa753161
+== 020
+SELECT p1.f1 AS point1, p2.f1 AS point2
+   FROM POINT_TBL p1, POINT_TBL p2
+   WHERE (p1.f1 <-> p2.f1) > 3
+--
+0d808cfab37ca4e0
+== 021
+-- put distance result into output to allow sorting with GEQ optimizer - tgl 97/05/10
+SELECT p1.f1 AS point1, p2.f1 AS point2, (p1.f1 <-> p2.f1) AS distance
+   FROM POINT_TBL p1, POINT_TBL p2
+   WHERE (p1.f1 <-> p2.f1) > 3 and p1.f1 << p2.f1
+   ORDER BY distance, p1.f1[0], p2.f1[0]
+--
+ed406d52d3114049
+== 022
+-- put distance result into output to allow sorting with GEQ optimizer - tgl 97/05/10
+SELECT p1.f1 AS point1, p2.f1 AS point2, (p1.f1 <-> p2.f1) AS distance
+   FROM POINT_TBL p1, POINT_TBL p2
+   WHERE (p1.f1 <-> p2.f1) > 3 and p1.f1 << p2.f1 and p1.f1 |>> p2.f1
+   ORDER BY distance
+--
+8dff7c884a600a80
+== 023
+-- Test that GiST indexes provide same behavior as sequential scan
+CREATE TEMP TABLE point_gist_tbl(f1 point)
+--
+5e3a182f410a05be
+== 024
+INSERT INTO point_gist_tbl SELECT '(0,0)' FROM generate_series(0,1000)
+--
+05cbc9dd35208090
+== 025
+CREATE INDEX point_gist_tbl_index ON point_gist_tbl USING gist (f1)
+--
+a687a6d334bc2329
+== 026
+INSERT INTO point_gist_tbl VALUES ('(0.0000009,0.0000009)')
+--
+156abadd728d646f
+== 027
+SET enable_seqscan TO true
+--
+b6355b32597ef7db
+== 028
+SET enable_indexscan TO false
+--
+c95f6a280f5be733
+== 029
+SET enable_bitmapscan TO false
+--
+aa90c60f48f4fef4
+== 030
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 ~= '(0.0000009,0.0000009)'::point
+--
+39ffc25ffc76aa88
+== 031
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 <@ '(0.0000009,0.0000009),(0.0000009,0.0000009)'::box
+--
+dda88bc999107b46
+== 032
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 ~= '(0.0000018,0.0000018)'::point
+--
+39ffc25ffc76aa88
+== 033
+SET enable_seqscan TO false
+--
+b6355b32597ef7db
+== 034
+SET enable_indexscan TO true
+--
+c95f6a280f5be733
+== 035
+SET enable_bitmapscan TO true
+--
+aa90c60f48f4fef4
+== 036
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 ~= '(0.0000009,0.0000009)'::point
+--
+39ffc25ffc76aa88
+== 037
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 <@ '(0.0000009,0.0000009),(0.0000009,0.0000009)'::box
+--
+dda88bc999107b46
+== 038
+SELECT COUNT(*) FROM point_gist_tbl WHERE f1 ~= '(0.0000018,0.0000018)'::point
+--
+39ffc25ffc76aa88
+== 039
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 040
+RESET enable_indexscan
+--
+f0fcaf221af6b112
+== 041
+RESET enable_bitmapscan
+--
+e4cb3f6b223046e8
+== 042
+-- test non-error-throwing API for some core types
+SELECT pg_input_is_valid('1,y', 'point')
+--
+15f508bf2432ed80
+== 043
+SELECT * FROM pg_input_error_info('1,y', 'point')
+--
+3498aded7ef03791

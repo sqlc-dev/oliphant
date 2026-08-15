@@ -1,0 +1,489 @@
+== 001
+|--
+-- SELECT
+|--
+
+-- btree index
+-- awk '{if($1<10){print;}else{next;}}' onek.data | sort +0n -1
+|--
+SELECT * FROM onek
+   WHERE onek.unique1 < 10
+   ORDER BY onek.unique1
+--
+50e2fd8d94ae24fe
+== 002
+|--
+-- awk '{if($1<20){print $1,$14;}else{next;}}' onek.data | sort +0nr -1
+|--
+SELECT onek.unique1, onek.stringu1 FROM onek
+   WHERE onek.unique1 < 20
+   ORDER BY unique1 using >
+--
+6b2ed8b5a1a85cf8
+== 003
+|--
+-- awk '{if($1>980){print $1,$14;}else{next;}}' onek.data | sort +1d -2
+|--
+SELECT onek.unique1, onek.stringu1 FROM onek
+   WHERE onek.unique1 > 980
+   ORDER BY stringu1 using <
+--
+4e677d9f9b34e77e
+== 004
+|--
+-- awk '{if($1>980){print $1,$16;}else{next;}}' onek.data |
+-- sort +1d -2 +0nr -1
+|--
+SELECT onek.unique1, onek.string4 FROM onek
+   WHERE onek.unique1 > 980
+   ORDER BY string4 using <, unique1 using >
+--
+b5a0c27b6b4b9962
+== 005
+|--
+-- awk '{if($1>980){print $1,$16;}else{next;}}' onek.data |
+-- sort +1dr -2 +0n -1
+|--
+SELECT onek.unique1, onek.string4 FROM onek
+   WHERE onek.unique1 > 980
+   ORDER BY string4 using >, unique1 using <
+--
+98798126b0dda309
+== 006
+|--
+-- awk '{if($1<20){print $1,$16;}else{next;}}' onek.data |
+-- sort +0nr -1 +1d -2
+|--
+SELECT onek.unique1, onek.string4 FROM onek
+   WHERE onek.unique1 < 20
+   ORDER BY unique1 using >, string4 using <
+--
+fa5024826c54121d
+== 007
+|--
+-- awk '{if($1<20){print $1,$16;}else{next;}}' onek.data |
+-- sort +0n -1 +1dr -2
+|--
+SELECT onek.unique1, onek.string4 FROM onek
+   WHERE onek.unique1 < 20
+   ORDER BY unique1 using <, string4 using >
+--
+6ec99d0cae7d8e8c
+== 008
+|--
+-- test partial btree indexes
+|--
+-- As of 7.2, planner probably won't pick an indexscan without stats,
+-- so ANALYZE first.  Also, we want to prevent it from picking a bitmapscan
+-- followed by sort, because that could hide index ordering problems.
+|--
+ANALYZE onek2
+--
+8dcac7876f3bb764
+== 009
+SET enable_seqscan TO off
+--
+b6355b32597ef7db
+== 010
+SET enable_bitmapscan TO off
+--
+aa90c60f48f4fef4
+== 011
+SET enable_sort TO off
+--
+dbc5616b4af60b97
+== 012
+|--
+-- awk '{if($1<10){print $0;}else{next;}}' onek.data | sort +0n -1
+|--
+SELECT onek2.* FROM onek2 WHERE onek2.unique1 < 10
+--
+19e2477888b3baae
+== 013
+|--
+-- awk '{if($1<20){print $1,$14;}else{next;}}' onek.data | sort +0nr -1
+|--
+SELECT onek2.unique1, onek2.stringu1 FROM onek2
+    WHERE onek2.unique1 < 20
+    ORDER BY unique1 using >
+--
+cb4f7d29827eeed4
+== 014
+|--
+-- awk '{if($1>980){print $1,$14;}else{next;}}' onek.data | sort +1d -2
+|--
+SELECT onek2.unique1, onek2.stringu1 FROM onek2
+   WHERE onek2.unique1 > 980
+--
+ffaeecdddd0582c3
+== 015
+RESET enable_seqscan
+--
+4dec036bbc151e13
+== 016
+RESET enable_bitmapscan
+--
+e4cb3f6b223046e8
+== 017
+RESET enable_sort
+--
+29a0e20ec2f6fde2
+== 018
+|--
+-- awk '{print $1,$2;}' person.data |
+-- awk '{if(NF!=2){print $3,$2;}else{print;}}' - emp.data |
+-- awk '{if(NF!=2){print $3,$2;}else{print;}}' - student.data |
+-- awk 'BEGIN{FS="      ";}{if(NF!=2){print $4,$5;}else{print;}}' - stud_emp.data
+|--
+-- SELECT name, age FROM person*; ??? check if different
+SELECT p.name, p.age FROM person* p
+--
+66ce76ee17c55247
+== 019
+|--
+-- awk '{print $1,$2;}' person.data |
+-- awk '{if(NF!=2){print $3,$2;}else{print;}}' - emp.data |
+-- awk '{if(NF!=2){print $3,$2;}else{print;}}' - student.data |
+-- awk 'BEGIN{FS="      ";}{if(NF!=1){print $4,$5;}else{print;}}' - stud_emp.data |
+-- sort +1nr -2
+|--
+SELECT p.name, p.age FROM person* p ORDER BY age using >, name
+--
+5e1de1ebc33d81e0
+== 020
+|--
+-- Test some cases involving whole-row Var referencing a subquery
+|--
+select foo from (select 1 offset 0) as foo
+--
+65b583472fcb0773
+== 021
+select foo from (select null offset 0) as foo
+--
+65b583472fcb0773
+== 022
+select foo from (select 'xyzzy',1,null offset 0) as foo
+--
+65b583472fcb0773
+== 023
+|--
+-- Test VALUES lists
+|--
+select * from onek, (values(147, 'RFAAAA'), (931, 'VJAAAA')) as v (i, j)
+    WHERE onek.unique1 = v.i and onek.stringu1 = v.j
+--
+a8d138e8d68cefb5
+== 024
+-- a more complex case
+-- looks like we're coding lisp :-)
+select * from onek,
+  (values ((select i from
+    (values(10000), (2), (389), (1000), (2000), ((select 10029))) as foo(i)
+    order by i asc limit 1))) bar (i)
+  where onek.unique1 = bar.i
+--
+6ceb119cf67e5378
+== 025
+-- try VALUES in a subquery
+select * from onek
+    where (unique1,ten) in (values (1,1), (20,0), (99,9), (17,99))
+    order by unique1
+--
+608b4737af1da502
+== 026
+-- VALUES is also legal as a standalone query or a set-operation member
+VALUES (1,2), (3,4+4), (7,77.7)
+--
+972bb64c2c341c25
+== 027
+VALUES (1,2), (3,4+4), (7,77.7)
+UNION ALL
+SELECT 2+2, 57
+UNION ALL
+TABLE int8_tbl
+--
+d32ce35ec17e229d
+== 028
+-- corner case: VALUES with no columns
+CREATE TEMP TABLE nocols()
+--
+c4ffa91c4e58c194
+== 029
+INSERT INTO nocols DEFAULT VALUES
+--
+1a7640dc463b5c00
+== 030
+SELECT * FROM nocols n, LATERAL (VALUES(n.*)) v
+--
+6c9edc121aefa4a2
+== 031
+|--
+-- Test ORDER BY options
+|--
+
+CREATE TEMP TABLE foo (f1 int)
+--
+cecd718310a73ba0
+== 032
+INSERT INTO foo VALUES (42),(3),(10),(7),(null),(null),(1)
+--
+28301851ae28adec
+== 033
+SELECT * FROM foo ORDER BY f1
+--
+afce20ecc742156e
+== 034
+SELECT * FROM foo ORDER BY f1 ASC
+--
+b1b7a9cf2453398b
+== 035
+-- same thing
+SELECT * FROM foo ORDER BY f1 NULLS FIRST
+--
+2afcc38715487b65
+== 036
+SELECT * FROM foo ORDER BY f1 DESC
+--
+68730615f8d5a871
+== 037
+SELECT * FROM foo ORDER BY f1 DESC NULLS LAST
+--
+baf5c835c52687ef
+== 038
+-- check if indexscans do the right things
+CREATE INDEX fooi ON foo (f1)
+--
+6efa4fb7160c5f8a
+== 039
+SET enable_sort = false
+--
+dbc5616b4af60b97
+== 040
+SELECT * FROM foo ORDER BY f1
+--
+afce20ecc742156e
+== 041
+SELECT * FROM foo ORDER BY f1 NULLS FIRST
+--
+2afcc38715487b65
+== 042
+SELECT * FROM foo ORDER BY f1 DESC
+--
+68730615f8d5a871
+== 043
+SELECT * FROM foo ORDER BY f1 DESC NULLS LAST
+--
+baf5c835c52687ef
+== 044
+DROP INDEX fooi
+--
+c352d2556c5b4f0f
+== 045
+CREATE INDEX fooi ON foo (f1 DESC)
+--
+08faca122d3699ff
+== 046
+SELECT * FROM foo ORDER BY f1
+--
+afce20ecc742156e
+== 047
+SELECT * FROM foo ORDER BY f1 NULLS FIRST
+--
+2afcc38715487b65
+== 048
+SELECT * FROM foo ORDER BY f1 DESC
+--
+68730615f8d5a871
+== 049
+SELECT * FROM foo ORDER BY f1 DESC NULLS LAST
+--
+baf5c835c52687ef
+== 050
+DROP INDEX fooi
+--
+c352d2556c5b4f0f
+== 051
+CREATE INDEX fooi ON foo (f1 DESC NULLS LAST)
+--
+761c1cddaab5160f
+== 052
+SELECT * FROM foo ORDER BY f1
+--
+afce20ecc742156e
+== 053
+SELECT * FROM foo ORDER BY f1 NULLS FIRST
+--
+2afcc38715487b65
+== 054
+SELECT * FROM foo ORDER BY f1 DESC
+--
+68730615f8d5a871
+== 055
+SELECT * FROM foo ORDER BY f1 DESC NULLS LAST
+--
+baf5c835c52687ef
+== 056
+|--
+-- Test planning of some cases with partial indexes
+|--
+
+-- partial index is usable
+explain (costs off)
+select * from onek2 where unique2 = 11 and stringu1 = 'ATAAAA'
+--
+f79cefe0f03bce81
+== 057
+select * from onek2 where unique2 = 11 and stringu1 = 'ATAAAA'
+--
+78acf41cb12eb8da
+== 058
+-- actually run the query with an analyze to use the partial index
+explain (costs off, analyze on, timing off, summary off)
+select * from onek2 where unique2 = 11 and stringu1 = 'ATAAAA'
+--
+184bb730f043f39d
+== 059
+explain (costs off)
+select unique2 from onek2 where unique2 = 11 and stringu1 = 'ATAAAA'
+--
+10fa54ce145d8bc6
+== 060
+select unique2 from onek2 where unique2 = 11 and stringu1 = 'ATAAAA'
+--
+33fef920ff9b3f8c
+== 061
+-- partial index predicate implies clause, so no need for retest
+explain (costs off)
+select * from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+feb100d3a0351020
+== 062
+select * from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+03aed4508df5eb42
+== 063
+explain (costs off)
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+15adafa759a6238c
+== 064
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+aaf4a6b05d7f94de
+== 065
+-- but if it's an update target, must retest anyway
+explain (costs off)
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B' for update
+--
+79074d9330d9f34d
+== 066
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B' for update
+--
+61ded1cb0f3d2513
+== 067
+-- partial index is not applicable
+explain (costs off)
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'C'
+--
+15adafa759a6238c
+== 068
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'C'
+--
+aaf4a6b05d7f94de
+== 069
+-- partial index implies clause, but bitmap scan must recheck predicate anyway
+SET enable_indexscan TO off
+--
+c95f6a280f5be733
+== 070
+explain (costs off)
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+15adafa759a6238c
+== 071
+select unique2 from onek2 where unique2 = 11 and stringu1 < 'B'
+--
+aaf4a6b05d7f94de
+== 072
+RESET enable_indexscan
+--
+f0fcaf221af6b112
+== 073
+-- check multi-index cases too
+explain (costs off)
+select unique1, unique2 from onek2
+  where (unique2 = 11 or unique1 = 0) and stringu1 < 'B'
+--
+1b7f7636cc032ca3
+== 074
+select unique1, unique2 from onek2
+  where (unique2 = 11 or unique1 = 0) and stringu1 < 'B'
+--
+325018ba72defd21
+== 075
+explain (costs off)
+select unique1, unique2 from onek2
+  where (unique2 = 11 and stringu1 < 'B') or unique1 = 0
+--
+84936d388ee693f2
+== 076
+select unique1, unique2 from onek2
+  where (unique2 = 11 and stringu1 < 'B') or unique1 = 0
+--
+33185c6377fa8894
+== 077
+|--
+-- Test some corner cases that have been known to confuse the planner
+|--
+
+-- ORDER BY on a constant doesn't really need any sorting
+SELECT 1 AS x ORDER BY x
+--
+7fcd51031a2b4cc9
+== 078
+-- But ORDER BY on a set-valued expression does
+create function sillysrf(int) returns setof int as
+  'values (1),(10),(2),($1)' language sql immutable
+--
+4969240959c7e873
+== 079
+select sillysrf(42)
+--
+d2950d2a96671da1
+== 080
+select sillysrf(-1) order by 1
+--
+72db546f0b395413
+== 081
+drop function sillysrf(int)
+--
+2ea5e96b055341ae
+== 082
+-- X = X isn't a no-op, it's effectively X IS NOT NULL assuming = is strict
+-- (see bug #5084)
+select * from (values (2),(null),(1)) v(k) where k = k order by k
+--
+6769e327e68cce00
+== 083
+select * from (values (2),(null),(1)) v(k) where k = k
+--
+8088ebfc8ad60ab0
+== 084
+-- Test partitioned tables with no partitions, which should be handled the
+-- same as the non-inheritance case when expanding its RTE.
+create table list_parted_tbl (a int,b int) partition by list (a)
+--
+4cd31416d152a01d
+== 085
+create table list_parted_tbl1 partition of list_parted_tbl
+  for values in (1) partition by list(b)
+--
+c1f41e823d26e131
+== 086
+explain (costs off) select * from list_parted_tbl
+--
+a034e36b4b70600a
+== 087
+drop table list_parted_tbl
+--
+dc3bdecd1a41988b

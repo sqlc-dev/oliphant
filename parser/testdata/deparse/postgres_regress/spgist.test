@@ -1,0 +1,169 @@
+== 001
+|--
+-- Test SP-GiST indexes.
+|--
+-- There are other tests to test different SP-GiST opclasses. This is for
+-- testing SP-GiST code itself.
+
+create table spgist_point_tbl(id int4, p point)
+--
+CREATE TABLE spgist_point_tbl (id int4, p point)
+== 002
+create index spgist_point_idx on spgist_point_tbl using spgist(p) with (fillfactor = 75)
+--
+CREATE INDEX spgist_point_idx ON spgist_point_tbl USING spgist (p) WITH (fillfactor=75)
+== 003
+-- Test vacuum-root operation. It gets invoked when the root is also a leaf,
+-- i.e. the index is very small.
+insert into spgist_point_tbl (id, p)
+select g, point(g*10, g*10) from generate_series(1, 10) g
+--
+INSERT INTO spgist_point_tbl (id, p) SELECT g, point(g * 10, g * 10) FROM generate_series(1, 10) g
+== 004
+delete from spgist_point_tbl where id < 5
+--
+DELETE FROM spgist_point_tbl WHERE id < 5
+== 005
+vacuum spgist_point_tbl
+--
+VACUUM spgist_point_tbl
+== 006
+-- Insert more data, to make the index a few levels deep.
+insert into spgist_point_tbl (id, p)
+select g,      point(g*10, g*10) from generate_series(1, 10000) g
+--
+INSERT INTO spgist_point_tbl (id, p) SELECT g, point(g * 10, g * 10) FROM generate_series(1, 10000) g
+== 007
+insert into spgist_point_tbl (id, p)
+select g+100000, point(g*10+1, g*10+1) from generate_series(1, 10000) g
+--
+INSERT INTO spgist_point_tbl (id, p) SELECT g + 100000, point((g * 10) + 1, (g * 10) + 1) FROM generate_series(1, 10000) g
+== 008
+-- To test vacuum, delete some entries from all over the index.
+delete from spgist_point_tbl where id % 2 = 1
+--
+DELETE FROM spgist_point_tbl WHERE (id % 2) = 1
+== 009
+-- And also delete some concentration of values. (SP-GiST doesn't currently
+-- attempt to delete pages even when they become empty, but if it did, this
+-- would exercise it)
+delete from spgist_point_tbl where id < 10000
+--
+DELETE FROM spgist_point_tbl WHERE id < 10000
+== 010
+vacuum spgist_point_tbl
+--
+VACUUM spgist_point_tbl
+== 011
+-- Test rescan paths (cf. bug #15378)
+-- use box and && rather than point, so that rescan happens when the
+-- traverse stack is non-empty
+
+create table spgist_box_tbl(id serial, b box)
+--
+CREATE TABLE spgist_box_tbl (id serial, b box)
+== 012
+insert into spgist_box_tbl(b)
+select box(point(i,j),point(i+s,j+s))
+  from generate_series(1,100,5) i,
+       generate_series(1,100,5) j,
+       generate_series(1,10) s
+--
+INSERT INTO spgist_box_tbl (b) SELECT box(point(i, j), point(i + s, j + s)) FROM generate_series(1, 100, 5) i, generate_series(1, 100, 5) j, generate_series(1, 10) s
+== 013
+create index spgist_box_idx on spgist_box_tbl using spgist (b)
+--
+CREATE INDEX spgist_box_idx ON spgist_box_tbl USING spgist (b)
+== 014
+select count(*)
+  from (values (point(5,5)),(point(8,8)),(point(12,12))) v(p)
+ where exists(select * from spgist_box_tbl b where b.b && box(v.p,v.p))
+--
+SELECT count(*) FROM (VALUES (point(5, 5)), (point(8, 8)), (point(12, 12))) v(p) WHERE EXISTS (SELECT * FROM spgist_box_tbl b WHERE b.b && box(v.p, v.p))
+== 015
+-- The point opclass's choose method only uses the spgMatchNode action,
+-- so the other actions are not tested by the above. Create an index using
+-- text opclass, which uses the others actions.
+
+create table spgist_text_tbl(id int4, t text)
+--
+CREATE TABLE spgist_text_tbl (id int4, t text)
+== 016
+create index spgist_text_idx on spgist_text_tbl using spgist(t)
+--
+CREATE INDEX spgist_text_idx ON spgist_text_tbl USING spgist (t)
+== 017
+insert into spgist_text_tbl (id, t)
+select g, 'f' || repeat('o', 100) || g from generate_series(1, 10000) g
+union all
+select g, 'baaaaaaaaaaaaaar' || g from generate_series(1, 1000) g
+--
+INSERT INTO spgist_text_tbl (id, t) SELECT g, ('f' || repeat('o', 100)) || g FROM generate_series(1, 10000) g UNION ALL SELECT g, 'baaaaaaaaaaaaaar' || g FROM generate_series(1, 1000) g
+== 018
+-- Do a lot of insertions that have to split an existing node. Hopefully
+-- one of these will cause the page to run out of space, causing the inner
+-- tuple to be moved to another page.
+insert into spgist_text_tbl (id, t)
+select -g, 'f' || repeat('o', 100-g) || 'surprise' from generate_series(1, 100) g
+--
+INSERT INTO spgist_text_tbl (id, t) SELECT - g, ('f' || repeat('o', 100 - g)) || 'surprise' FROM generate_series(1, 100) g
+== 019
+-- Test out-of-range fillfactor values
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 9)
+--
+CREATE INDEX spgist_point_idx2 ON spgist_point_tbl USING spgist (p) WITH (fillfactor=9)
+== 020
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 101)
+--
+CREATE INDEX spgist_point_idx2 ON spgist_point_tbl USING spgist (p) WITH (fillfactor=101)
+== 021
+-- Modify fillfactor in existing index
+alter index spgist_point_idx set (fillfactor = 90)
+--
+ALTER INDEX spgist_point_idx SET (fillfactor=90)
+== 022
+reindex index spgist_point_idx
+--
+REINDEX INDEX spgist_point_idx
+== 023
+-- Test index over a domain
+create domain spgist_text as varchar
+--
+CREATE DOMAIN spgist_text AS varchar
+== 024
+create table spgist_domain_tbl (f1 spgist_text)
+--
+CREATE TABLE spgist_domain_tbl (f1 spgist_text)
+== 025
+create index spgist_domain_idx on spgist_domain_tbl using spgist(f1)
+--
+CREATE INDEX spgist_domain_idx ON spgist_domain_tbl USING spgist (f1)
+== 026
+insert into spgist_domain_tbl values('fee'), ('fi'), ('fo'), ('fum')
+--
+INSERT INTO spgist_domain_tbl VALUES ('fee'), ('fi'), ('fo'), ('fum')
+== 027
+explain (costs off)
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+EXPLAIN (COSTS OFF) SELECT * FROM spgist_domain_tbl WHERE f1 = 'fo'
+== 028
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+SELECT * FROM spgist_domain_tbl WHERE f1 = 'fo'
+== 029
+-- test an unlogged table, mostly to get coverage of spgistbuildempty
+create unlogged table spgist_unlogged_tbl(id serial, b box)
+--
+CREATE UNLOGGED TABLE spgist_unlogged_tbl (id serial, b box)
+== 030
+create index spgist_unlogged_idx on spgist_unlogged_tbl using spgist (b)
+--
+CREATE INDEX spgist_unlogged_idx ON spgist_unlogged_tbl USING spgist (b)
+== 031
+insert into spgist_unlogged_tbl(b)
+select box(point(i,j))
+  from generate_series(1,100,5) i,
+       generate_series(1,10,5) j
+--
+INSERT INTO spgist_unlogged_tbl (b) SELECT box(point(i, j)) FROM generate_series(1, 100, 5) i, generate_series(1, 10, 5) j

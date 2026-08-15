@@ -1,0 +1,416 @@
+== 001
+|--
+-- Test GiST indexes.
+|--
+-- There are other tests to test different GiST opclasses. This is for
+-- testing GiST code itself. Vacuuming in particular.
+
+create table gist_point_tbl(id int4, p point)
+--
+|--
+-- Test GiST indexes.
+|--
+-- There are other tests to test different GiST opclasses. This is for
+-- testing GiST code itself. Vacuuming in particular.
+
+create table gist_point_tbl(id int4, p point)
+== 002
+create index gist_pointidx on gist_point_tbl using gist(p)
+--
+create index gist_pointidx on gist_point_tbl using gist(p)
+== 003
+-- Verify the fillfactor and buffering options
+create index gist_pointidx2 on gist_point_tbl using gist(p) with (buffering = on, fillfactor=50)
+--
+-- Verify the fillfactor and buffering options
+create index gist_pointidx2 on gist_point_tbl using gist(p) with (buffering = on, fillfactor=50)
+== 004
+create index gist_pointidx3 on gist_point_tbl using gist(p) with (buffering = off)
+--
+create index gist_pointidx3 on gist_point_tbl using gist(p) with (buffering = off)
+== 005
+create index gist_pointidx4 on gist_point_tbl using gist(p) with (buffering = auto)
+--
+create index gist_pointidx4 on gist_point_tbl using gist(p) with (buffering = auto)
+== 006
+drop index gist_pointidx2, gist_pointidx3, gist_pointidx4
+--
+drop index gist_pointidx2, gist_pointidx3, gist_pointidx4
+== 007
+-- Make sure bad values are refused
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (buffering = invalid_value)
+--
+-- Make sure bad values are refused
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (buffering = invalid_value)
+== 008
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=9)
+--
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=9)
+== 009
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=101)
+--
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=101)
+== 010
+-- Insert enough data to create a tree that's a couple of levels deep.
+insert into gist_point_tbl (id, p)
+select g,        point(g*10, g*10) from generate_series(1, 10000) g
+--
+-- Insert enough data to create a tree that's a couple of levels deep.
+insert into gist_point_tbl (id, p)
+select g,        point(g*$1, g*$2) from generate_series($3, $4) g
+== 011
+insert into gist_point_tbl (id, p)
+select g+100000, point(g*10+1, g*10+1) from generate_series(1, 10000) g
+--
+insert into gist_point_tbl (id, p)
+select g+$1, point(g*$2+$3, g*$4+$5) from generate_series($6, $7) g
+== 012
+-- To test vacuum, delete some entries from all over the index.
+delete from gist_point_tbl where id % 2 = 1
+--
+-- To test vacuum, delete some entries from all over the index.
+delete from gist_point_tbl where id % $1 = $2
+== 013
+-- And also delete some concentration of values.
+delete from gist_point_tbl where id > 5000
+--
+-- And also delete some concentration of values.
+delete from gist_point_tbl where id > $1
+== 014
+vacuum analyze gist_point_tbl
+--
+vacuum analyze gist_point_tbl
+== 015
+-- rebuild the index with a different fillfactor
+alter index gist_pointidx SET (fillfactor = 40)
+--
+-- rebuild the index with a different fillfactor
+alter index gist_pointidx SET (fillfactor = 40)
+== 016
+reindex index gist_pointidx
+--
+reindex index gist_pointidx
+== 017
+|--
+-- Test Index-only plans on GiST indexes
+|--
+
+create table gist_tbl (b box, p point, c circle)
+--
+|--
+-- Test Index-only plans on GiST indexes
+|--
+
+create table gist_tbl (b box, p point, c circle)
+== 018
+insert into gist_tbl
+select box(point(0.05*i, 0.05*i), point(0.05*i, 0.05*i)),
+       point(0.05*i, 0.05*i),
+       circle(point(0.05*i, 0.05*i), 1.0)
+from generate_series(0,10000) as i
+--
+insert into gist_tbl
+select box(point($1*i, $2*i), point($3*i, $4*i)),
+       point($5*i, $6*i),
+       circle(point($7*i, $8*i), $9)
+from generate_series($10,$11) as i
+== 019
+vacuum analyze gist_tbl
+--
+vacuum analyze gist_tbl
+== 020
+set enable_seqscan=off
+--
+set enable_seqscan=$1
+== 021
+set enable_bitmapscan=off
+--
+set enable_bitmapscan=$1
+== 022
+set enable_indexonlyscan=on
+--
+set enable_indexonlyscan=$1
+== 023
+-- Test index-only scan with point opclass
+create index gist_tbl_point_index on gist_tbl using gist (p)
+--
+-- Test index-only scan with point opclass
+create index gist_tbl_point_index on gist_tbl using gist (p)
+== 024
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+--
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+== 025
+-- execute the same
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+--
+-- execute the same
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+== 026
+-- Also test an index-only knn-search
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by p <-> point(0.201, 0.201)
+--
+-- Also test an index-only knn-search
+explain (costs off)
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+order by p <-> point($5, $6)
+== 027
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by p <-> point(0.201, 0.201)
+--
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+order by p <-> point($5, $6)
+== 028
+-- Check commuted case as well
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by point(0.101, 0.101) <-> p
+--
+-- Check commuted case as well
+explain (costs off)
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+order by point($5, $6) <-> p
+== 029
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by point(0.101, 0.101) <-> p
+--
+select p from gist_tbl where p <@ box(point($1,$2), point($3, $4))
+order by point($5, $6) <-> p
+== 030
+-- Check case with multiple rescans (bug #14641)
+explain (costs off)
+select p from
+  (values (box(point(0,0), point(0.5,0.5))),
+          (box(point(0.5,0.5), point(0.75,0.75))),
+          (box(point(0.8,0.8), point(1.0,1.0)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[0] limit 2) ss
+--
+-- Check case with multiple rescans (bug #14641)
+explain (costs off)
+select p from
+  (values (box(point($1,$2), point($3,$4))),
+          (box(point($5,$6), point($7,$8))),
+          (box(point($9,$10), point($11,$12)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[$13] limit $14) ss
+== 031
+select p from
+  (values (box(point(0,0), point(0.5,0.5))),
+          (box(point(0.5,0.5), point(0.75,0.75))),
+          (box(point(0.8,0.8), point(1.0,1.0)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[0] limit 2) ss
+--
+select p from
+  (values (box(point($1,$2), point($3,$4))),
+          (box(point($5,$6), point($7,$8))),
+          (box(point($9,$10), point($11,$12)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[$13] limit $14) ss
+== 032
+drop index gist_tbl_point_index
+--
+drop index gist_tbl_point_index
+== 033
+-- Test index-only scan with box opclass
+create index gist_tbl_box_index on gist_tbl using gist (b)
+--
+-- Test index-only scan with box opclass
+create index gist_tbl_box_index on gist_tbl using gist (b)
+== 034
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+--
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+== 035
+-- execute the same
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+--
+-- execute the same
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+== 036
+-- Also test an index-only knn-search
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by b <-> point(5.2, 5.91)
+--
+-- Also test an index-only knn-search
+explain (costs off)
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+order by b <-> point($5, $6)
+== 037
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by b <-> point(5.2, 5.91)
+--
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+order by b <-> point($5, $6)
+== 038
+-- Check commuted case as well
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by point(5.2, 5.91) <-> b
+--
+-- Check commuted case as well
+explain (costs off)
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+order by point($5, $6) <-> b
+== 039
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by point(5.2, 5.91) <-> b
+--
+select b from gist_tbl where b <@ box(point($1,$2), point($3,$4))
+order by point($5, $6) <-> b
+== 040
+drop index gist_tbl_box_index
+--
+drop index gist_tbl_box_index
+== 041
+-- Test that an index-only scan is not chosen, when the query involves the
+-- circle column (the circle opclass does not support index-only scans).
+create index gist_tbl_multi_index on gist_tbl using gist (p, c)
+--
+-- Test that an index-only scan is not chosen, when the query involves the
+-- circle column (the circle opclass does not support index-only scans).
+create index gist_tbl_multi_index on gist_tbl using gist (p, c)
+== 042
+explain (costs off)
+select p, c from gist_tbl
+where p <@ box(point(5,5), point(6, 6))
+--
+explain (costs off)
+select p, c from gist_tbl
+where p <@ box(point($1,$2), point($3, $4))
+== 043
+-- execute the same
+select b, p from gist_tbl
+where b <@ box(point(4.5, 4.5), point(5.5, 5.5))
+and p <@ box(point(5,5), point(6, 6))
+--
+-- execute the same
+select b, p from gist_tbl
+where b <@ box(point($1, $2), point($3, $4))
+and p <@ box(point($5,$6), point($7, $8))
+== 044
+drop index gist_tbl_multi_index
+--
+drop index gist_tbl_multi_index
+== 045
+-- Test that we don't try to return the value of a non-returnable
+-- column in an index-only scan.  (This isn't GIST-specific, but
+-- it only applies to index AMs that can return some columns and not
+-- others, so GIST with appropriate opclasses is a convenient test case.)
+create index gist_tbl_multi_index on gist_tbl using gist (circle(p,1), p)
+--
+-- Test that we don't try to return the value of a non-returnable
+-- column in an index-only scan.  (This isn't GIST-specific, but
+-- it only applies to index AMs that can return some columns and not
+-- others, so GIST with appropriate opclasses is a convenient test case.)
+create index gist_tbl_multi_index on gist_tbl using gist (circle(p,1), p)
+== 046
+explain (verbose, costs off)
+select circle(p,1) from gist_tbl
+where p <@ box(point(5, 5), point(5.3, 5.3))
+--
+explain (verbose, costs off)
+select circle(p,$1) from gist_tbl
+where p <@ box(point($2, $3), point($4, $5))
+== 047
+select circle(p,1) from gist_tbl
+where p <@ box(point(5, 5), point(5.3, 5.3))
+--
+select circle(p,$1) from gist_tbl
+where p <@ box(point($2, $3), point($4, $5))
+== 048
+-- Similarly, test that index rechecks involving a non-returnable column
+-- are done correctly.
+explain (verbose, costs off)
+select p from gist_tbl where circle(p,1) @> circle(point(0,0),0.95)
+--
+-- Similarly, test that index rechecks involving a non-returnable column
+-- are done correctly.
+explain (verbose, costs off)
+select p from gist_tbl where circle(p,$1) @> circle(point($2,$3),$4)
+== 049
+select p from gist_tbl where circle(p,1) @> circle(point(0,0),0.95)
+--
+select p from gist_tbl where circle(p,$1) @> circle(point($2,$3),$4)
+== 050
+-- Also check that use_physical_tlist doesn't trigger in such cases.
+explain (verbose, costs off)
+select count(*) from gist_tbl
+--
+-- Also check that use_physical_tlist doesn't trigger in such cases.
+explain (verbose, costs off)
+select count(*) from gist_tbl
+== 051
+select count(*) from gist_tbl
+--
+select count(*) from gist_tbl
+== 052
+-- This case isn't supported, but it should at least EXPLAIN correctly.
+explain (verbose, costs off)
+select p from gist_tbl order by circle(p,1) <-> point(0,0) limit 1
+--
+-- This case isn't supported, but it should at least EXPLAIN correctly.
+explain (verbose, costs off)
+select p from gist_tbl order by circle(p,$1) <-> point($2,$3) limit $4
+== 053
+select p from gist_tbl order by circle(p,1) <-> point(0,0) limit 1
+--
+select p from gist_tbl order by circle(p,$1) <-> point($2,$3) limit $4
+== 054
+-- Force an index build using buffering.
+create index gist_tbl_box_index_forcing_buffering on gist_tbl using gist (p)
+  with (buffering=on, fillfactor=50)
+--
+-- Force an index build using buffering.
+create index gist_tbl_box_index_forcing_buffering on gist_tbl using gist (p)
+  with (buffering=on, fillfactor=50)
+== 055
+-- Clean up
+reset enable_seqscan
+--
+-- Clean up
+reset enable_seqscan
+== 056
+reset enable_bitmapscan
+--
+reset enable_bitmapscan
+== 057
+reset enable_indexonlyscan
+--
+reset enable_indexonlyscan
+== 058
+drop table gist_tbl
+--
+drop table gist_tbl
+== 059
+-- test an unlogged table, mostly to get coverage of gistbuildempty
+create unlogged table gist_tbl (b box)
+--
+-- test an unlogged table, mostly to get coverage of gistbuildempty
+create unlogged table gist_tbl (b box)
+== 060
+create index gist_tbl_box_index on gist_tbl using gist (b)
+--
+create index gist_tbl_box_index on gist_tbl using gist (b)
+== 061
+insert into gist_tbl
+  select box(point(0.05*i, 0.05*i)) from generate_series(0,10) as i
+--
+insert into gist_tbl
+  select box(point($1*i, $2*i)) from generate_series($3,$4) as i
+== 062
+drop table gist_tbl
+--
+drop table gist_tbl

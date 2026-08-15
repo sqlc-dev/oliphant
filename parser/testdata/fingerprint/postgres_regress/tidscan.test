@@ -1,0 +1,239 @@
+== 001
+-- tests for tidscans
+
+CREATE TABLE tidscan(id integer)
+--
+595d1e110cc1f7ff
+== 002
+-- only insert a few rows, we don't want to spill onto a second table page
+INSERT INTO tidscan VALUES (1), (2), (3)
+--
+4c8ecdc39328e6cd
+== 003
+-- show ctids
+SELECT ctid, * FROM tidscan
+--
+0f9a14887927803d
+== 004
+-- ctid equality - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+3520459621af17c2
+== 005
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+64b11634809bf294
+== 006
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+eba8e862642e71d3
+== 007
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+181115df4422e521
+== 008
+-- OR'd clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+522f85b49024c5f4
+== 009
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+cd58b6b44e8262a1
+== 010
+-- ctid = ScalarArrayOp - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+58f29bb9b59f19ba
+== 011
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+42a603f781e41e48
+== 012
+-- ctid != ScalarArrayOp - can't be implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+b0ee47be73ffcfa5
+== 013
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+7467296012e94ee7
+== 014
+-- tid equality extracted from sub-AND clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+a3ab094539852088
+== 015
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+02c7621f45363ef6
+== 016
+-- nestloop-with-inner-tidscan joins on tid
+SET enable_hashjoin TO off
+--
+1c83d8645c9b8506
+== 017
+-- otherwise hash join might win
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+1c7bda444f769ef4
+== 018
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+2c95724a60f7b801
+== 019
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+197d59538badf701
+== 020
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+6f50aa64559cced5
+== 021
+RESET enable_hashjoin
+--
+e201b38c75630c5b
+== 022
+-- exercise backward scan and rewind
+BEGIN
+--
+b16b431979fc3e05
+== 023
+DECLARE c CURSOR FOR
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+065ce93024af7399
+== 024
+FETCH ALL FROM c
+--
+177cc47209e3bb6a
+== 025
+FETCH BACKWARD 1 FROM c
+--
+c1db20292effe803
+== 026
+FETCH FIRST FROM c
+--
+f311bc209888b596
+== 027
+ROLLBACK
+--
+a46081a556fda027
+== 028
+-- tidscan via CURRENT OF
+BEGIN
+--
+b16b431979fc3e05
+== 029
+DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan
+--
+b68936e5f6b5901b
+== 030
+FETCH NEXT FROM c
+--
+81daee5623e71d72
+== 031
+-- skip one row
+FETCH NEXT FROM c
+--
+81daee5623e71d72
+== 032
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+0adabb06ddfe2ec7
+== 033
+FETCH NEXT FROM c
+--
+81daee5623e71d72
+== 034
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+0adabb06ddfe2ec7
+== 035
+SELECT * FROM tidscan
+--
+fdda74cd1e8fa59a
+== 036
+-- position cursor past any rows
+FETCH NEXT FROM c
+--
+81daee5623e71d72
+== 037
+-- should error out
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+0adabb06ddfe2ec7
+== 038
+ROLLBACK
+--
+a46081a556fda027
+== 039
+-- bulk joins on CTID
+-- (these plans don't use TID scans, but this still seems like an
+-- appropriate place for these tests)
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+64ad6356689209b4
+== 040
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+572c540bd4f665d9
+== 041
+SET enable_hashjoin TO off
+--
+1c83d8645c9b8506
+== 042
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+64ad6356689209b4
+== 043
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+572c540bd4f665d9
+== 044
+RESET enable_hashjoin
+--
+e201b38c75630c5b
+== 045
+-- check predicate lock on CTID
+BEGIN ISOLATION LEVEL SERIALIZABLE
+--
+b16b431979fc3e05
+== 046
+SELECT * FROM tidscan WHERE ctid = '(0,1)'
+--
+33803579b3b0002f
+== 047
+-- locktype should be 'tuple'
+SELECT locktype, mode FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'SIReadLock'
+--
+f8f3f32173b0c995
+== 048
+ROLLBACK
+--
+a46081a556fda027
+== 049
+DROP TABLE tidscan
+--
+9b6b58d4ba26e4bc

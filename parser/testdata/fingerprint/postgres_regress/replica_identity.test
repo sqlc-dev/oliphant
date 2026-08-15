@@ -1,0 +1,272 @@
+== 001
+CREATE TABLE test_replica_identity (
+       id serial primary key,
+       keya text not null,
+       keyb text not null,
+       nonkey text,
+       CONSTRAINT test_replica_identity_unique_defer UNIQUE (keya, keyb) DEFERRABLE,
+       CONSTRAINT test_replica_identity_unique_nondefer UNIQUE (keya, keyb)
+)
+--
+0be04d6c6d848f32
+== 002
+CREATE TABLE test_replica_identity_othertable (id serial primary key)
+--
+b60cb50fd9c72e79
+== 003
+CREATE TABLE test_replica_identity_t3 (id serial constraint pk primary key deferrable)
+--
+bdebaa1a8791b822
+== 004
+CREATE INDEX test_replica_identity_keyab ON test_replica_identity (keya, keyb)
+--
+29101331cdbb7fb5
+== 005
+CREATE UNIQUE INDEX test_replica_identity_keyab_key ON test_replica_identity (keya, keyb)
+--
+26ebf5521b8b02b7
+== 006
+CREATE UNIQUE INDEX test_replica_identity_nonkey ON test_replica_identity (keya, nonkey)
+--
+896cd7a17290eb47
+== 007
+CREATE INDEX test_replica_identity_hash ON test_replica_identity USING hash (nonkey)
+--
+e2c34bed6a899c30
+== 008
+CREATE UNIQUE INDEX test_replica_identity_expr ON test_replica_identity (keya, keyb, (3))
+--
+b7d3a19b6806c050
+== 009
+CREATE UNIQUE INDEX test_replica_identity_partial ON test_replica_identity (keya, keyb) WHERE keyb != '3'
+--
+07c07c0193ca440b
+== 010
+-- default is 'd'/DEFAULT for user created tables
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 011
+-- but 'none' for system tables
+SELECT relreplident FROM pg_class WHERE oid = 'pg_class'::regclass
+--
+7b12847461d3a02e
+== 012
+SELECT relreplident FROM pg_class WHERE oid = 'pg_constraint'::regclass
+--
+7b12847461d3a02e
+== 013
+----
+-- Make sure we detect ineligible indexes
+----
+
+-- fail, not unique
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab
+--
+45cf46af4439c64e
+== 014
+-- fail, not a candidate key, nullable column
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_nonkey
+--
+9a47625048414732
+== 015
+-- fail, hash indexes cannot do uniqueness
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_hash
+--
+a126c1a055132ca2
+== 016
+-- fail, expression index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_expr
+--
+c390258ee0499d71
+== 017
+-- fail, partial index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_partial
+--
+efc6c99ff020a90d
+== 018
+-- fail, not our index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_othertable_pkey
+--
+572a1205f284a963
+== 019
+-- fail, deferrable
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_unique_defer
+--
+b1995b33cc11f8a1
+== 020
+-- fail, deferrable
+ALTER TABLE test_replica_identity_t3 REPLICA IDENTITY USING INDEX pk
+--
+8bf45ae8641a82ef
+== 021
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 022
+----
+-- Make sure index cases succeed
+----
+
+-- succeed, primary key
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_pkey
+--
+c8d4ffd58428c028
+== 023
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 024
+-- succeed, nondeferrable unique constraint over nonnullable cols
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_unique_nondefer
+--
+85d609a2a2cbb4b1
+== 025
+-- succeed unique index over nonnullable cols
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab_key
+--
+63dbe2ca58a6b2de
+== 026
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab_key
+--
+63dbe2ca58a6b2de
+== 027
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 028
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident
+--
+9f113d8d9839d549
+== 029
+----
+-- Make sure non index cases work
+----
+ALTER TABLE test_replica_identity REPLICA IDENTITY DEFAULT
+--
+329a357cb43c004c
+== 030
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 031
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident
+--
+9f113d8d9839d549
+== 032
+ALTER TABLE test_replica_identity REPLICA IDENTITY FULL
+--
+91511f24363f1fad
+== 033
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 034
+ALTER TABLE test_replica_identity REPLICA IDENTITY NOTHING
+--
+f0705a8ae1b3392d
+== 035
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+7b12847461d3a02e
+== 036
+---
+-- Test that ALTER TABLE rewrite preserves nondefault replica identity
+---
+
+-- constraint variant
+CREATE TABLE test_replica_identity2 (id int UNIQUE NOT NULL)
+--
+3747b626f36ad7be
+== 037
+ALTER TABLE test_replica_identity2 REPLICA IDENTITY USING INDEX test_replica_identity2_id_key
+--
+b2a412bf3d0b5637
+== 038
+ALTER TABLE test_replica_identity2 ALTER COLUMN id TYPE bigint
+--
+2aa0ad7bf75f07f3
+== 039
+-- straight index variant
+CREATE TABLE test_replica_identity3 (id int NOT NULL)
+--
+26ea49d7dd642f5e
+== 040
+CREATE UNIQUE INDEX test_replica_identity3_id_key ON test_replica_identity3 (id)
+--
+794e0d0d6452a489
+== 041
+ALTER TABLE test_replica_identity3 REPLICA IDENTITY USING INDEX test_replica_identity3_id_key
+--
+2f1d54d720d2e512
+== 042
+ALTER TABLE test_replica_identity3 ALTER COLUMN id TYPE bigint
+--
+762468473249c2f5
+== 043
+-- ALTER TABLE DROP NOT NULL is not allowed for columns part of an index
+-- used as replica identity.
+ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL
+--
+97e3ed8060661147
+== 044
+|--
+-- Test that replica identity can be set on an index that's not yet valid.
+-- (This matches the way pg_dump will try to dump a partitioned table.)
+|--
+CREATE TABLE test_replica_identity4(id integer NOT NULL) PARTITION BY LIST (id)
+--
+f0361d9ab1a90de0
+== 045
+CREATE TABLE test_replica_identity4_1(id integer NOT NULL)
+--
+454170ea6696561a
+== 046
+ALTER TABLE ONLY test_replica_identity4
+  ATTACH PARTITION test_replica_identity4_1 FOR VALUES IN (1)
+--
+cc7fef355749ea68
+== 047
+ALTER TABLE ONLY test_replica_identity4
+  ADD CONSTRAINT test_replica_identity4_pkey PRIMARY KEY (id)
+--
+05b34a379e75c107
+== 048
+ALTER TABLE ONLY test_replica_identity4
+  REPLICA IDENTITY USING INDEX test_replica_identity4_pkey
+--
+9ae9a9777c4c3f6e
+== 049
+ALTER TABLE ONLY test_replica_identity4_1
+  ADD CONSTRAINT test_replica_identity4_1_pkey PRIMARY KEY (id)
+--
+2cd72fc7596af649
+== 050
+ALTER INDEX test_replica_identity4_pkey
+  ATTACH PARTITION test_replica_identity4_1_pkey
+--
+e534864553692095
+== 051
+DROP TABLE test_replica_identity
+--
+82dc082a9b439d49
+== 052
+DROP TABLE test_replica_identity2
+--
+efaa919602a823e1
+== 053
+DROP TABLE test_replica_identity3
+--
+9c328ef77ce87625
+== 054
+DROP TABLE test_replica_identity4
+--
+b3e29e46d2ae2a01
+== 055
+DROP TABLE test_replica_identity_othertable
+--
+69001977dfa25522
+== 056
+DROP TABLE test_replica_identity_t3
+--
+c646b70500b87173

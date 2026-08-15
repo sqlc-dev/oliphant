@@ -1,0 +1,715 @@
+== 001
+|--
+-- SUBSCRIPTION
+|--
+
+CREATE ROLE regress_subscription_user LOGIN SUPERUSER
+--
+9ac53d49059e08e7
+== 002
+CREATE ROLE regress_subscription_user2
+--
+e6f3cd296cdca99f
+== 003
+CREATE ROLE regress_subscription_user3 IN ROLE pg_create_subscription
+--
+05cc160b5ea888d0
+== 004
+CREATE ROLE regress_subscription_user_dummy LOGIN NOSUPERUSER
+--
+da7d8e9293d6c58d
+== 005
+SET SESSION AUTHORIZATION 'regress_subscription_user'
+--
+532a0ea53df105d9
+== 006
+-- fail - no publications
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'foo'
+--
+ERROR: syntax error at end of input
+CURSORPOS: 79
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 007
+-- fail - no connection
+CREATE SUBSCRIPTION regress_testsub PUBLICATION foo
+--
+ERROR: syntax error at or near "PUBLICATION"
+CURSORPOS: 61
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+-- fail - cannot do CREATE SUBSCRIPTION CREATE SLOT inside transaction block
+BEGIN
+--
+b16b431979fc3e05
+== 009
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'testconn' PUBLICATION testpub WITH (create_slot)
+--
+5569fb194bedd9e8
+== 010
+COMMIT
+--
+7bbcde9cfab6c79c
+== 011
+-- fail - invalid connection string
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'testconn' PUBLICATION testpub
+--
+24145261347d39d1
+== 012
+-- fail - duplicate publications
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION foo, testpub, foo WITH (connect = false)
+--
+f46249ae3a16f750
+== 013
+-- ok
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false)
+--
+b830ec29ceaa32f1
+== 014
+COMMENT ON SUBSCRIPTION regress_testsub IS 'test subscription'
+--
+7448ac1bef85b0ee
+== 015
+SELECT obj_description(s.oid, 'pg_subscription') FROM pg_subscription s
+--
+13ff70908978ca38
+== 016
+-- Check if the subscription stats are created and stats_reset is updated
+-- by pg_stat_reset_subscription_stats().
+SELECT subname, stats_reset IS NULL stats_reset_is_null FROM pg_stat_subscription_stats WHERE subname = 'regress_testsub'
+--
+db62be1c2c38c5b4
+== 017
+SELECT pg_stat_reset_subscription_stats(oid) FROM pg_subscription WHERE subname = 'regress_testsub'
+--
+1aed20ad85edb79a
+== 018
+SELECT subname, stats_reset IS NULL stats_reset_is_null FROM pg_stat_subscription_stats WHERE subname = 'regress_testsub'
+--
+db62be1c2c38c5b4
+== 019
+-- Reset the stats again and check if the new reset_stats is updated.
+SELECT stats_reset as prev_stats_reset FROM pg_stat_subscription_stats WHERE subname = 'regress_testsub'
+--
+b04082836480494e
+== 020
+SELECT pg_stat_reset_subscription_stats(oid) FROM pg_subscription WHERE subname = 'regress_testsub'
+--
+1aed20ad85edb79a
+== 021
+SELECT :'prev_stats_reset' < stats_reset FROM pg_stat_subscription_stats WHERE subname = 'regress_testsub'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 022
+-- fail - name already exists
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false)
+--
+b830ec29ceaa32f1
+== 023
+-- fail - must be superuser
+SET SESSION AUTHORIZATION 'regress_subscription_user2'
+--
+532a0ea53df105d9
+== 024
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION foo WITH (connect = false)
+--
+a8ddc44cee2f0bbe
+== 025
+SET SESSION AUTHORIZATION 'regress_subscription_user'
+--
+532a0ea53df105d9
+== 026
+-- fail - invalid option combinations
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, copy_data = true)
+--
+ef2383c8cceb2e44
+== 027
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, enabled = true)
+--
+8a9bdf9f04dbfcd8
+== 028
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, create_slot = true)
+--
+776077275acd0f1b
+== 029
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, enabled = true)
+--
+b9c801d3d885d6dd
+== 030
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, enabled = false, create_slot = true)
+--
+c6a8f2cffd34665e
+== 031
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE)
+--
+e66b63321de439d7
+== 032
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, enabled = false)
+--
+8dcc6681fde07b92
+== 033
+CREATE SUBSCRIPTION regress_testsub2 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, create_slot = false)
+--
+c136c3cb62b80d4d
+== 034
+-- ok - with slot_name = NONE
+CREATE SUBSCRIPTION regress_testsub3 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, connect = false)
+--
+34559aa19afbcc0c
+== 035
+-- fail
+ALTER SUBSCRIPTION regress_testsub3 ENABLE
+--
+c342862cfae5c235
+== 036
+ALTER SUBSCRIPTION regress_testsub3 REFRESH PUBLICATION
+--
+6d35dd2d22716bb5
+== 037
+-- fail - origin must be either none or any
+CREATE SUBSCRIPTION regress_testsub4 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, connect = false, origin = foo)
+--
+551e06cd077f701b
+== 038
+-- now it works
+CREATE SUBSCRIPTION regress_testsub4 CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (slot_name = NONE, connect = false, origin = none)
+--
+24295b48eb51e4c8
+== 039
+ALTER SUBSCRIPTION regress_testsub4 SET (origin = any)
+--
+79b633493ed54485
+== 040
+DROP SUBSCRIPTION regress_testsub3
+--
+0a01222f3249b182
+== 041
+DROP SUBSCRIPTION regress_testsub4
+--
+c68017ff0738c633
+== 042
+-- fail, connection string does not parse
+CREATE SUBSCRIPTION regress_testsub5 CONNECTION 'i_dont_exist=param' PUBLICATION testpub
+--
+3e13ceeb29e8780b
+== 043
+-- fail, connection string parses, but doesn't work (and does so without
+-- connecting, so this is reliable and safe)
+CREATE SUBSCRIPTION regress_testsub5 CONNECTION 'port=-1' PUBLICATION testpub
+--
+0192c45fee9c39f7
+== 044
+-- fail - invalid connection string during ALTER
+ALTER SUBSCRIPTION regress_testsub CONNECTION 'foobar'
+--
+407a8d427e1786d1
+== 045
+ALTER SUBSCRIPTION regress_testsub SET PUBLICATION testpub2, testpub3 WITH (refresh = false)
+--
+a682e3c15a8e054e
+== 046
+ALTER SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist2'
+--
+ded86c2c8c39c979
+== 047
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = 'newname')
+--
+460c22013b9f7bc0
+== 048
+ALTER SUBSCRIPTION regress_testsub SET (password_required = false)
+--
+473a2a248d89389b
+== 049
+ALTER SUBSCRIPTION regress_testsub SET (run_as_owner = true)
+--
+a5b08fe5cd8a1ab6
+== 050
+ALTER SUBSCRIPTION regress_testsub SET (password_required = true)
+--
+ce61542435f502f4
+== 051
+ALTER SUBSCRIPTION regress_testsub SET (run_as_owner = false)
+--
+cd62e5582b0830f6
+== 052
+-- fail
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = '')
+--
+b318635d38942e3d
+== 053
+-- fail
+ALTER SUBSCRIPTION regress_doesnotexist CONNECTION 'dbname=regress_doesnotexist2'
+--
+9bd1147fea77087c
+== 054
+ALTER SUBSCRIPTION regress_testsub SET (create_slot = false)
+--
+d2ecf548fa788c50
+== 055
+-- ok
+ALTER SUBSCRIPTION regress_testsub SKIP (lsn = '0/12345')
+--
+6a27af28ab28b7bf
+== 056
+-- ok - with lsn = NONE
+ALTER SUBSCRIPTION regress_testsub SKIP (lsn = NONE)
+--
+141d441e8c4518b5
+== 057
+-- fail
+ALTER SUBSCRIPTION regress_testsub SKIP (lsn = '0/0')
+--
+282f94d1ef178dca
+== 058
+BEGIN
+--
+b16b431979fc3e05
+== 059
+ALTER SUBSCRIPTION regress_testsub ENABLE
+--
+ee5c8658b29e690a
+== 060
+ALTER SUBSCRIPTION regress_testsub DISABLE
+--
+6ebb14ea112efe0f
+== 061
+COMMIT
+--
+7bbcde9cfab6c79c
+== 062
+-- fail - must be owner of subscription
+SET ROLE regress_subscription_user_dummy
+--
+56facc463e2de425
+== 063
+ALTER SUBSCRIPTION regress_testsub RENAME TO regress_testsub_dummy
+--
+38bc6c02a968208a
+== 064
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 065
+ALTER SUBSCRIPTION regress_testsub RENAME TO regress_testsub_foo
+--
+3d38af707073d870
+== 066
+ALTER SUBSCRIPTION regress_testsub_foo SET (synchronous_commit = local)
+--
+accd863f8e0fdcb5
+== 067
+ALTER SUBSCRIPTION regress_testsub_foo SET (synchronous_commit = foobar)
+--
+c35986b5ecdc2669
+== 068
+-- rename back to keep the rest simple
+ALTER SUBSCRIPTION regress_testsub_foo RENAME TO regress_testsub
+--
+cd150a0d6a74b0cb
+== 069
+-- ok, we're a superuser
+ALTER SUBSCRIPTION regress_testsub OWNER TO regress_subscription_user2
+--
+3cba1b8f048a8d8a
+== 070
+-- fail - cannot do DROP SUBSCRIPTION inside transaction block with slot name
+BEGIN
+--
+b16b431979fc3e05
+== 071
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 072
+COMMIT
+--
+7bbcde9cfab6c79c
+== 073
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 074
+-- now it works
+BEGIN
+--
+b16b431979fc3e05
+== 075
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 076
+COMMIT
+--
+7bbcde9cfab6c79c
+== 077
+DROP SUBSCRIPTION IF EXISTS regress_testsub
+--
+3fb21860e6ebf0a3
+== 078
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 079
+-- fail
+
+-- fail - binary must be boolean
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, binary = foo)
+--
+3c15a97025192018
+== 080
+-- now it works
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, binary = true)
+--
+e47b14f45aa7ec8c
+== 081
+ALTER SUBSCRIPTION regress_testsub SET (binary = false)
+--
+2feab2dd2ba28853
+== 082
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 083
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 084
+-- fail - streaming must be boolean or 'parallel'
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, streaming = foo)
+--
+521f707a1ce2c807
+== 085
+-- now it works
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, streaming = true)
+--
+d884fd42dd6c12c4
+== 086
+ALTER SUBSCRIPTION regress_testsub SET (streaming = parallel)
+--
+9b17e6bc1750859a
+== 087
+ALTER SUBSCRIPTION regress_testsub SET (streaming = false)
+--
+7c48dd0fb8fd5060
+== 088
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 089
+-- fail - publication already exists
+ALTER SUBSCRIPTION regress_testsub ADD PUBLICATION testpub WITH (refresh = false)
+--
+18998d5160ad448b
+== 090
+-- fail - publication used more than once
+ALTER SUBSCRIPTION regress_testsub ADD PUBLICATION testpub1, testpub1 WITH (refresh = false)
+--
+3e34cfdc6c602814
+== 091
+-- ok - add two publications into subscription
+ALTER SUBSCRIPTION regress_testsub ADD PUBLICATION testpub1, testpub2 WITH (refresh = false)
+--
+6ef7022aba29c80c
+== 092
+-- fail - publications already exist
+ALTER SUBSCRIPTION regress_testsub ADD PUBLICATION testpub1, testpub2 WITH (refresh = false)
+--
+6ef7022aba29c80c
+== 093
+-- fail - publication used more than once
+ALTER SUBSCRIPTION regress_testsub DROP PUBLICATION testpub1, testpub1 WITH (refresh = false)
+--
+fcb3318fafcffa60
+== 094
+-- fail - all publications are deleted
+ALTER SUBSCRIPTION regress_testsub DROP PUBLICATION testpub, testpub1, testpub2 WITH (refresh = false)
+--
+29ea4ae661e763ed
+== 095
+-- fail - publication does not exist in subscription
+ALTER SUBSCRIPTION regress_testsub DROP PUBLICATION testpub3 WITH (refresh = false)
+--
+571f7e300f937313
+== 096
+-- ok - delete publications
+ALTER SUBSCRIPTION regress_testsub DROP PUBLICATION testpub1, testpub2 WITH (refresh = false)
+--
+5f12db3c3efdd8e4
+== 097
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 098
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION mypub
+       WITH (connect = false, create_slot = false, copy_data = false)
+--
+3900f5eb05b30f85
+== 099
+ALTER SUBSCRIPTION regress_testsub ENABLE
+--
+ee5c8658b29e690a
+== 100
+-- fail - ALTER SUBSCRIPTION with refresh is not allowed in a transaction
+-- block or function
+BEGIN
+--
+b16b431979fc3e05
+== 101
+ALTER SUBSCRIPTION regress_testsub SET PUBLICATION mypub WITH (refresh = true)
+--
+f9e74aeebb20891a
+== 102
+END
+--
+7bbcde9cfab6c79c
+== 103
+BEGIN
+--
+b16b431979fc3e05
+== 104
+ALTER SUBSCRIPTION regress_testsub REFRESH PUBLICATION
+--
+ff2561d7acf382fd
+== 105
+END
+--
+7bbcde9cfab6c79c
+== 106
+CREATE FUNCTION func() RETURNS VOID AS
+$$ ALTER SUBSCRIPTION regress_testsub SET PUBLICATION mypub WITH (refresh = true) $$ LANGUAGE SQL
+--
+d938dd48c04fec96
+== 107
+SELECT func()
+--
+e6ebbe797b90c99e
+== 108
+ALTER SUBSCRIPTION regress_testsub DISABLE
+--
+6ebb14ea112efe0f
+== 109
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 110
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 111
+DROP FUNCTION func
+--
+20bc73e590dfb955
+== 112
+-- fail - two_phase must be boolean
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, two_phase = foo)
+--
+ab3df80dfb506eb7
+== 113
+-- now it works
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, two_phase = true)
+--
+8c502dbfd896ae4d
+== 114
+--fail - alter of two_phase option not supported.
+ALTER SUBSCRIPTION regress_testsub SET (two_phase = false)
+--
+d878d69f1c9baf22
+== 115
+-- but can alter streaming when two_phase enabled
+ALTER SUBSCRIPTION regress_testsub SET (streaming = true)
+--
+9ab099fcee07f5c6
+== 116
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 117
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 118
+-- two_phase and streaming are compatible.
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, streaming = true, two_phase = true)
+--
+707641693e8b86b1
+== 119
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 120
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 121
+-- fail - disable_on_error must be boolean
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, disable_on_error = foo)
+--
+93e3198daa523dc0
+== 122
+-- now it works
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, disable_on_error = false)
+--
+dde4c7232e227859
+== 123
+ALTER SUBSCRIPTION regress_testsub SET (disable_on_error = true)
+--
+acc0d9f264a7ea13
+== 124
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 125
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 126
+-- let's do some tests with pg_create_subscription rather than superuser
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 127
+-- fail, not enough privileges
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false)
+--
+b830ec29ceaa32f1
+== 128
+-- fail, must specify password
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 129
+GRANT CREATE ON DATABASE REGRESSION TO regress_subscription_user3
+--
+61e76af57c254c63
+== 130
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 131
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false)
+--
+b830ec29ceaa32f1
+== 132
+-- fail, can't set password_required=false
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 133
+GRANT CREATE ON DATABASE REGRESSION TO regress_subscription_user3
+--
+61e76af57c254c63
+== 134
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 135
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist' PUBLICATION testpub WITH (connect = false, password_required = false)
+--
+8963d134893a48aa
+== 136
+-- ok
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 137
+GRANT CREATE ON DATABASE REGRESSION TO regress_subscription_user3
+--
+61e76af57c254c63
+== 138
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 139
+CREATE SUBSCRIPTION regress_testsub CONNECTION 'dbname=regress_doesnotexist password=regress_fakepassword' PUBLICATION testpub WITH (connect = false)
+--
+5a4583f492f6324a
+== 140
+-- we cannot give the subscription away to some random user
+ALTER SUBSCRIPTION regress_testsub OWNER TO regress_subscription_user
+--
+68ce5d1995946c70
+== 141
+-- but we can rename the subscription we just created
+ALTER SUBSCRIPTION regress_testsub RENAME TO regress_testsub2
+--
+0579b53944abedb4
+== 142
+-- ok, even after losing pg_create_subscription we can still rename it
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 143
+REVOKE pg_create_subscription FROM regress_subscription_user3
+--
+118d28c582d85cd9
+== 144
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 145
+ALTER SUBSCRIPTION regress_testsub2 RENAME TO regress_testsub
+--
+a882328bcdc58960
+== 146
+-- fail, after losing CREATE on the database we can't rename it any more
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 147
+REVOKE CREATE ON DATABASE REGRESSION FROM regress_subscription_user3
+--
+4926a06261cc2cef
+== 148
+SET SESSION AUTHORIZATION regress_subscription_user3
+--
+532a0ea53df105d9
+== 149
+ALTER SUBSCRIPTION regress_testsub RENAME TO regress_testsub2
+--
+0579b53944abedb4
+== 150
+-- fail - cannot do ALTER SUBSCRIPTION SET (failover) inside transaction block
+BEGIN
+--
+b16b431979fc3e05
+== 151
+ALTER SUBSCRIPTION regress_testsub SET (failover)
+--
+51d9adb2da4a3b02
+== 152
+COMMIT
+--
+7bbcde9cfab6c79c
+== 153
+-- ok, owning it is enough for this stuff
+ALTER SUBSCRIPTION regress_testsub SET (slot_name = NONE)
+--
+32b53ea52ae2062b
+== 154
+DROP SUBSCRIPTION regress_testsub
+--
+a62d137f82bebf7f
+== 155
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 156
+DROP ROLE regress_subscription_user
+--
+371491b2ced214f5
+== 157
+DROP ROLE regress_subscription_user2
+--
+e67c5bdd3d642a1b
+== 158
+DROP ROLE regress_subscription_user3
+--
+a905dc9b6fb8a8aa
+== 159
+DROP ROLE regress_subscription_user_dummy
+--
+0211141fa659cd74

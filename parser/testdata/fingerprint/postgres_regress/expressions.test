@@ -1,0 +1,386 @@
+== 001
+|--
+-- expression evaluation tests that don't fit into a more specific file
+|--
+
+|--
+-- Tests for SQLValueFunction
+|--
+
+
+-- current_date  (always matches because of transactional behaviour)
+SELECT date(now())::text = current_date::text
+--
+080d5aa657d6c810
+== 002
+-- current_time / localtime
+SELECT now()::timetz::text = current_time::text
+--
+e39cc9ed21f3659f
+== 003
+SELECT now()::timetz(4)::text = current_time(4)::text
+--
+82c689b2fe5226c5
+== 004
+SELECT now()::time::text = localtime::text
+--
+7c3de6cfe906f0fc
+== 005
+SELECT now()::time(3)::text = localtime(3)::text
+--
+3fa9d0e51986d72e
+== 006
+-- current_time[stamp]/ localtime[stamp] (always matches because of transactional behaviour)
+SELECT current_timestamp = NOW()
+--
+1c2d187ae9d85837
+== 007
+-- precision
+SELECT length(current_timestamp::text) >= length(current_timestamp(0)::text)
+--
+a118da8c50b434f1
+== 008
+-- localtimestamp
+SELECT now()::timestamp::text = localtimestamp::text
+--
+26085a6c498f558b
+== 009
+-- precision overflow
+SELECT current_time = current_time(7)
+--
+9c1ba97d660d0cb2
+== 010
+SELECT current_timestamp = current_timestamp(7)
+--
+d6978cdcb90b489f
+== 011
+SELECT localtime = localtime(7)
+--
+4ca2670dc12c5b20
+== 012
+SELECT localtimestamp = localtimestamp(7)
+--
+aec232eb0c798e27
+== 013
+-- current_role/user/user is tested in rolenames.sql
+
+-- current database / catalog
+SELECT current_catalog = current_database()
+--
+0507d7568ee46771
+== 014
+-- current_schema
+SELECT current_schema
+--
+2024e2f2f3b9725f
+== 015
+SET search_path = 'notme'
+--
+972eb2e22f47f95c
+== 016
+SELECT current_schema
+--
+2024e2f2f3b9725f
+== 017
+SET search_path = 'pg_catalog'
+--
+972eb2e22f47f95c
+== 018
+SELECT current_schema
+--
+2024e2f2f3b9725f
+== 019
+RESET search_path
+--
+e97698aade82a29f
+== 020
+|--
+-- Test parsing of a no-op cast to a type with unspecified typmod
+|--
+begin
+--
+b16b431979fc3e05
+== 021
+create table numeric_tbl (f1 numeric(18,3), f2 numeric)
+--
+31666e010254f906
+== 022
+create view numeric_view as
+  select
+    f1, f1::numeric(16,4) as f1164, f1::numeric as f1n,
+    f2, f2::numeric(16,4) as f2164, f2::numeric as f2n
+  from numeric_tbl
+--
+8101bd6b087964b8
+== 023
+explain (verbose, costs off) select * from numeric_view
+--
+9441254a4b5aa379
+== 024
+-- bpchar, lacking planner support for its length coercion function,
+-- could behave differently
+
+create table bpchar_tbl (f1 character(16) unique, f2 bpchar)
+--
+788aec7ad5648f6c
+== 025
+create view bpchar_view as
+  select
+    f1, f1::character(14) as f114, f1::bpchar as f1n,
+    f2, f2::character(14) as f214, f2::bpchar as f2n
+  from bpchar_tbl
+--
+5aee46a5643eadc2
+== 026
+explain (verbose, costs off) select * from bpchar_view
+  where f1::bpchar = 'foo'
+--
+a5194648002649ae
+== 027
+rollback
+--
+a46081a556fda027
+== 028
+|--
+-- Ordinarily, IN/NOT IN can be converted to a ScalarArrayOpExpr
+-- with a suitably-chosen array type.
+|--
+explain (verbose, costs off)
+select random() IN (1, 4, 8.0)
+--
+9de3626c413db940
+== 029
+explain (verbose, costs off)
+select random()::int IN (1, 4, 8.0)
+--
+279c1d21c44803a5
+== 030
+-- However, if there's not a common supertype for the IN elements,
+-- we should instead try to produce "x = v1 OR x = v2 OR ...".
+-- In most cases that'll fail for lack of all the requisite = operators,
+-- but it can succeed sometimes.  So this should complain about lack of
+-- an = operator, not about cast failure.
+select '(0,0)'::point in ('(0,0,0,0)'::box, point(0,0))
+--
+5ead548780f73842
+== 031
+|--
+-- Tests for ScalarArrayOpExpr with a hashfn
+|--
+
+-- create a stable function so that the tests below are not
+-- evaluated using the planner's constant folding.
+begin
+--
+b16b431979fc3e05
+== 032
+create function return_int_input(int) returns int as $$
+begin
+	return $1;
+end;
+$$ language plpgsql stable
+--
+27d0ccd9c48f2001
+== 033
+create function return_text_input(text) returns text as $$
+begin
+	return $1;
+end;
+$$ language plpgsql stable
+--
+8c3bdb6b13373f37
+== 034
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+1a1ee4912316c275
+== 035
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+1a1ee4912316c275
+== 036
+select return_int_input(1) in (null, null, null, null, null, null, null, null, null, null, null)
+--
+1a1ee4912316c275
+== 037
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1, null)
+--
+1a1ee4912316c275
+== 038
+select return_int_input(null::int) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+1a1ee4912316c275
+== 039
+select return_int_input(null::int) in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+1a1ee4912316c275
+== 040
+select return_text_input('a') in ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j')
+--
+a59154e09b5f157f
+== 041
+-- NOT IN
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+e735ec41ea94f715
+== 042
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 0)
+--
+e735ec41ea94f715
+== 043
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 2, null)
+--
+e735ec41ea94f715
+== 044
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1, null)
+--
+e735ec41ea94f715
+== 045
+select return_int_input(1) not in (null, null, null, null, null, null, null, null, null, null, null)
+--
+e735ec41ea94f715
+== 046
+select return_int_input(null::int) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+e735ec41ea94f715
+== 047
+select return_int_input(null::int) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+e735ec41ea94f715
+== 048
+select return_text_input('a') not in ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j')
+--
+d70307a0bebc0ace
+== 049
+rollback
+--
+a46081a556fda027
+== 050
+-- Test with non-strict equality function.
+-- We need to create our own type for this.
+
+begin
+--
+b16b431979fc3e05
+== 051
+create type myint
+--
+f7a47653bff3baf9
+== 052
+create function myintin(cstring) returns myint strict immutable language
+  internal as 'int4in'
+--
+d14b151989cb7c7a
+== 053
+create function myintout(myint) returns cstring strict immutable language
+  internal as 'int4out'
+--
+477b588c145a372e
+== 054
+create function myinthash(myint) returns integer strict immutable language
+  internal as 'hashint4'
+--
+893c1095dd13a621
+== 055
+create type myint (input = myintin, output = myintout, like = int4)
+--
+ef2e4be5f5e86e73
+== 056
+create cast (int4 as myint) without function
+--
+ffde5e0be1e18f48
+== 057
+create cast (myint as int4) without function
+--
+95a4d7314213cf10
+== 058
+create function myinteq(myint, myint) returns bool as $$
+begin
+  if $1 is null and $2 is null then
+    return true;
+  else
+    return $1::int = $2::int;
+  end if;
+end;
+$$ language plpgsql immutable
+--
+f76d4e41ab0658c7
+== 059
+create function myintne(myint, myint) returns bool as $$
+begin
+  return not myinteq($1, $2);
+end;
+$$ language plpgsql immutable
+--
+4dab3070d5d6e5a4
+== 060
+create operator = (
+  leftarg    = myint,
+  rightarg   = myint,
+  commutator = =,
+  negator    = <>,
+  procedure  = myinteq,
+  restrict   = eqsel,
+  join       = eqjoinsel,
+  merges
+)
+--
+2d245a614d38f164
+== 061
+create operator <> (
+  leftarg    = myint,
+  rightarg   = myint,
+  commutator = <>,
+  negator    = =,
+  procedure  = myintne,
+  restrict   = eqsel,
+  join       = eqjoinsel,
+  merges
+)
+--
+4105e7c8ffce3507
+== 062
+create operator class myint_ops
+default for type myint using hash as
+  operator    1   =  (myint, myint),
+  function    1   myinthash(myint)
+--
+9acec57889efd30e
+== 063
+create table inttest (a myint)
+--
+756e192ab3479854
+== 064
+insert into inttest values(1::myint),(null)
+--
+4be71503ab625307
+== 065
+-- try an array with enough elements to cause hashing
+select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+ef8bc69adc3092ee
+== 066
+select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+4902646fa6bb3573
+== 067
+select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+4902646fa6bb3573
+== 068
+-- ensure the result matched with the non-hashed version.  We simply remove
+-- some array elements so that we don't reach the hashing threshold.
+select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+ef8bc69adc3092ee
+== 069
+select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+4902646fa6bb3573
+== 070
+select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+4902646fa6bb3573
+== 071
+rollback
+--
+a46081a556fda027

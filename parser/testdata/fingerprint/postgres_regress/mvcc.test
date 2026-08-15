@@ -1,0 +1,74 @@
+== 001
+|--
+-- Verify that index scans encountering dead rows produced by an
+-- aborted subtransaction of the current transaction can utilize the
+-- kill_prior_tuple optimization
+|--
+-- NB: The table size is currently *not* expected to stay the same, we
+-- don't have logic to trigger opportunistic pruning in cases like
+-- this.
+BEGIN
+--
+b16b431979fc3e05
+== 002
+SET LOCAL enable_seqscan = false
+--
+47651b1ae733ae02
+== 003
+SET LOCAL enable_indexonlyscan = false
+--
+48085f2c9fb1beb4
+== 004
+SET LOCAL enable_bitmapscan = false
+--
+d065a1c209ca0ca8
+== 005
+-- Can't easily use a unique index, since dead tuples can be found
+-- independent of the kill_prior_tuples optimization.
+CREATE TABLE clean_aborted_self(key int, data text)
+--
+eddad4c3a7caf566
+== 006
+CREATE INDEX clean_aborted_self_key ON clean_aborted_self(key)
+--
+5e9e106787c93f6a
+== 007
+INSERT INTO clean_aborted_self (key, data) VALUES (-1, 'just to allocate metapage')
+--
+f158ea79d7dc8e6b
+== 008
+-- save index size from before the changes, for comparison
+SELECT pg_relation_size('clean_aborted_self_key') AS clean_aborted_self_key_before
+--
+6dd1a91c1a691258
+== 009
+DO $$
+BEGIN
+    -- iterate often enough to see index growth even on larger-than-default page sizes
+    FOR i IN 1..100 LOOP
+        BEGIN
+	    -- perform index scan over all the inserted keys to get them to be seen as dead
+            IF EXISTS(SELECT * FROM clean_aborted_self WHERE key > 0 AND key < 100) THEN
+	        RAISE data_corrupted USING MESSAGE = 'these rows should not exist';
+            END IF;
+            INSERT INTO clean_aborted_self SELECT g.i, 'rolling back in a sec' FROM generate_series(1, 100) g(i);
+	    -- just some error that's not normally thrown
+	    RAISE reading_sql_data_not_permitted USING MESSAGE = 'round and round again';
+	EXCEPTION WHEN reading_sql_data_not_permitted THEN END;
+    END LOOP;
+END;$$
+--
+f936eab75b8c1b90
+== 010
+-- show sizes only if they differ
+SELECT :clean_aborted_self_key_before AS size_before, pg_relation_size('clean_aborted_self_key') size_after
+WHERE :clean_aborted_self_key_before != pg_relation_size('clean_aborted_self_key')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 42
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 011
+ROLLBACK
+--
+a46081a556fda027

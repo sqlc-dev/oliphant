@@ -1,0 +1,148 @@
+== 001
+|--
+-- CREATE_CAST
+|--
+
+-- Create some types to test with
+CREATE TYPE casttesttype
+--
+CREATE TYPE casttesttype
+== 002
+CREATE FUNCTION casttesttype_in(cstring)
+   RETURNS casttesttype
+   AS 'textin'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+CREATE FUNCTION casttesttype_in(cstring) RETURNS casttesttype AS $$textin$$ LANGUAGE internal RETURNS NULL ON NULL INPUT IMMUTABLE
+== 003
+CREATE FUNCTION casttesttype_out(casttesttype)
+   RETURNS cstring
+   AS 'textout'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+CREATE FUNCTION casttesttype_out(casttesttype) RETURNS cstring AS $$textout$$ LANGUAGE internal RETURNS NULL ON NULL INPUT IMMUTABLE
+== 004
+CREATE TYPE casttesttype (
+   internallength = variable,
+   input = casttesttype_in,
+   output = casttesttype_out,
+   alignment = int4
+)
+--
+CREATE TYPE casttesttype (internallength = variable, input = casttesttype_in, output = casttesttype_out, alignment = int4)
+== 005
+-- a dummy function to test with
+CREATE FUNCTION casttestfunc(casttesttype) RETURNS int4 LANGUAGE SQL AS
+$$ SELECT 1; $$
+--
+CREATE FUNCTION casttestfunc(casttesttype) RETURNS int4 LANGUAGE sql AS $$ SELECT 1; $$
+== 006
+SELECT casttestfunc('foo'::text)
+--
+SELECT casttestfunc('foo'::text)
+== 007
+-- fails, as there's no cast
+
+-- Try binary coercion cast
+CREATE CAST (text AS casttesttype) WITHOUT FUNCTION
+--
+CREATE CAST (text AS casttesttype) WITHOUT FUNCTION
+== 008
+SELECT casttestfunc('foo'::text)
+--
+SELECT casttestfunc('foo'::text)
+== 009
+-- doesn't work, as the cast is explicit
+SELECT casttestfunc('foo'::text::casttesttype)
+--
+SELECT casttestfunc('foo'::text::casttesttype)
+== 010
+-- should work
+DROP CAST (text AS casttesttype)
+--
+DROP CAST (text AS casttesttype)
+== 011
+-- cleanup
+
+-- Try IMPLICIT binary coercion cast
+CREATE CAST (text AS casttesttype) WITHOUT FUNCTION AS IMPLICIT
+--
+CREATE CAST (text AS casttesttype) WITHOUT FUNCTION AS IMPLICIT
+== 012
+SELECT casttestfunc('foo'::text)
+--
+SELECT casttestfunc('foo'::text)
+== 013
+-- Should work now
+
+-- Try I/O conversion cast.
+SELECT 1234::int4::casttesttype
+--
+SELECT 1234::int4::casttesttype
+== 014
+-- No cast yet, should fail
+
+CREATE CAST (int4 AS casttesttype) WITH INOUT
+--
+CREATE CAST (int4 AS casttesttype) WITH INOUT
+== 015
+SELECT 1234::int4::casttesttype
+--
+SELECT 1234::int4::casttesttype
+== 016
+-- Should work now
+
+DROP CAST (int4 AS casttesttype)
+--
+DROP CAST (int4 AS casttesttype)
+== 017
+-- Try cast with a function
+
+CREATE FUNCTION int4_casttesttype(int4) RETURNS casttesttype LANGUAGE SQL AS
+$$ SELECT ('foo'::text || $1::text)::casttesttype; $$
+--
+CREATE FUNCTION int4_casttesttype(int4) RETURNS casttesttype LANGUAGE sql AS $$ SELECT ('foo'::text || $1::text)::casttesttype; $$
+== 018
+CREATE CAST (int4 AS casttesttype) WITH FUNCTION int4_casttesttype(int4) AS IMPLICIT
+--
+CREATE CAST (int4 AS casttesttype) WITH FUNCTION int4_casttesttype(int4) AS IMPLICIT
+== 019
+SELECT 1234::int4::casttesttype
+--
+SELECT 1234::int4::casttesttype
+== 020
+-- Should work now
+
+DROP FUNCTION int4_casttesttype(int4) CASCADE
+--
+DROP FUNCTION int4_casttesttype(int4) CASCADE
+== 021
+-- Try it with a function that requires an implicit cast
+
+CREATE FUNCTION bar_int4_text(int4) RETURNS text LANGUAGE SQL AS
+$$ SELECT ('bar'::text || $1::text); $$
+--
+CREATE FUNCTION bar_int4_text(int4) RETURNS text LANGUAGE sql AS $$ SELECT ('bar'::text || $1::text); $$
+== 022
+CREATE CAST (int4 AS casttesttype) WITH FUNCTION bar_int4_text(int4) AS IMPLICIT
+--
+CREATE CAST (int4 AS casttesttype) WITH FUNCTION bar_int4_text(int4) AS IMPLICIT
+== 023
+SELECT 1234::int4::casttesttype
+--
+SELECT 1234::int4::casttesttype
+== 024
+-- Should work now
+
+-- check dependencies generated for that
+SELECT pg_describe_object(classid, objid, objsubid) as obj,
+       pg_describe_object(refclassid, refobjid, refobjsubid) as objref,
+       deptype
+FROM pg_depend
+WHERE classid = 'pg_cast'::regclass AND
+      objid = (SELECT oid FROM pg_cast
+               WHERE castsource = 'int4'::regtype
+                 AND casttarget = 'casttesttype'::regtype)
+ORDER BY refclassid
+--
+SELECT pg_describe_object(classid, objid, objsubid) AS obj, pg_describe_object(refclassid, refobjid, refobjsubid) AS objref, deptype FROM pg_depend WHERE classid = 'pg_cast'::regclass AND objid = (SELECT oid FROM pg_cast WHERE castsource = 'int4'::regtype AND casttarget = 'casttesttype'::regtype) ORDER BY refclassid

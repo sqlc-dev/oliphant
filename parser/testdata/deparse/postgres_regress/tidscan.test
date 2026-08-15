@@ -1,0 +1,239 @@
+== 001
+-- tests for tidscans
+
+CREATE TABLE tidscan(id integer)
+--
+CREATE TABLE tidscan (id int)
+== 002
+-- only insert a few rows, we don't want to spill onto a second table page
+INSERT INTO tidscan VALUES (1), (2), (3)
+--
+INSERT INTO tidscan VALUES (1), (2), (3)
+== 003
+-- show ctids
+SELECT ctid, * FROM tidscan
+--
+SELECT ctid, * FROM tidscan
+== 004
+-- ctid equality - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+== 005
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+== 006
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+== 007
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+== 008
+-- OR'd clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+== 009
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+== 010
+-- ctid = ScalarArrayOp - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+== 011
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+== 012
+-- ctid != ScalarArrayOp - can't be implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid <> ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+== 013
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+SELECT ctid, * FROM tidscan WHERE ctid <> ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+== 014
+-- tid equality extracted from sub-AND clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+== 015
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+SELECT ctid, * FROM tidscan WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+== 016
+-- nestloop-with-inner-tidscan joins on tid
+SET enable_hashjoin TO off
+--
+SET enable_hashjoin TO OFF
+== 017
+-- otherwise hash join might win
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+EXPLAIN (COSTS OFF) SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+== 018
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+== 019
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+EXPLAIN (COSTS OFF) SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+== 020
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+== 021
+RESET enable_hashjoin
+--
+RESET enable_hashjoin
+== 022
+-- exercise backward scan and rewind
+BEGIN
+--
+BEGIN
+== 023
+DECLARE c CURSOR FOR
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+== 024
+FETCH ALL FROM c
+--
+FETCH ALL c
+== 025
+FETCH BACKWARD 1 FROM c
+--
+FETCH PRIOR c
+== 026
+FETCH FIRST FROM c
+--
+FETCH FIRST c
+== 027
+ROLLBACK
+--
+ROLLBACK
+== 028
+-- tidscan via CURRENT OF
+BEGIN
+--
+BEGIN
+== 029
+DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan
+--
+DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan
+== 030
+FETCH NEXT FROM c
+--
+FETCH c
+== 031
+-- skip one row
+FETCH NEXT FROM c
+--
+FETCH c
+== 032
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT OF c RETURNING *
+== 033
+FETCH NEXT FROM c
+--
+FETCH c
+== 034
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT OF c RETURNING *
+== 035
+SELECT * FROM tidscan
+--
+SELECT * FROM tidscan
+== 036
+-- position cursor past any rows
+FETCH NEXT FROM c
+--
+FETCH c
+== 037
+-- should error out
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT OF c RETURNING *
+== 038
+ROLLBACK
+--
+ROLLBACK
+== 039
+-- bulk joins on CTID
+-- (these plans don't use TID scans, but this still seems like an
+-- appropriate place for these tests)
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+== 040
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+== 041
+SET enable_hashjoin TO off
+--
+SET enable_hashjoin TO OFF
+== 042
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+== 043
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+== 044
+RESET enable_hashjoin
+--
+RESET enable_hashjoin
+== 045
+-- check predicate lock on CTID
+BEGIN ISOLATION LEVEL SERIALIZABLE
+--
+BEGIN ISOLATION LEVEL SERIALIZABLE
+== 046
+SELECT * FROM tidscan WHERE ctid = '(0,1)'
+--
+SELECT * FROM tidscan WHERE ctid = '(0,1)'
+== 047
+-- locktype should be 'tuple'
+SELECT locktype, mode FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'SIReadLock'
+--
+SELECT locktype, mode FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'SIReadLock'
+== 048
+ROLLBACK
+--
+ROLLBACK
+== 049
+DROP TABLE tidscan
+--
+DROP TABLE tidscan

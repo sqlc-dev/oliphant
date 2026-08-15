@@ -1,0 +1,162 @@
+== 001
+-- Regression tests for prepareable statements. We query the content
+-- of the pg_prepared_statements view as prepared statements are
+-- created and removed.
+
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+--
+75a2973a7058a4cd
+== 002
+PREPARE q1 AS SELECT 1 AS a
+--
+080de42af0124f43
+== 003
+EXECUTE q1
+--
+44ef1d2beabd53e8
+== 004
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+--
+75a2973a7058a4cd
+== 005
+-- should fail
+PREPARE q1 AS SELECT 2
+--
+080de42af0124f43
+== 006
+-- should succeed
+DEALLOCATE q1
+--
+d8a65a814fbc5f95
+== 007
+PREPARE q1 AS SELECT 2
+--
+080de42af0124f43
+== 008
+EXECUTE q1
+--
+44ef1d2beabd53e8
+== 009
+PREPARE q2 AS SELECT 2 AS b
+--
+080de42af0124f43
+== 010
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+--
+75a2973a7058a4cd
+== 011
+-- sql92 syntax
+DEALLOCATE PREPARE q1
+--
+d8a65a814fbc5f95
+== 012
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+--
+75a2973a7058a4cd
+== 013
+DEALLOCATE PREPARE q2
+--
+d8a65a814fbc5f95
+== 014
+-- the view should return the empty set again
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+--
+75a2973a7058a4cd
+== 015
+-- parameterized queries
+PREPARE q2(text) AS
+	SELECT datname, datistemplate, datallowconn
+	FROM pg_database WHERE datname = $1
+--
+839e82bf3fbb7b41
+== 016
+EXECUTE q2('postgres')
+--
+44ef1d2beabd53e8
+== 017
+PREPARE q3(text, int, float, boolean, smallint) AS
+	SELECT * FROM tenk1 WHERE string4 = $1 AND (four = $2 OR
+	ten = $3::bigint OR true = $4 OR odd = $5::int)
+	ORDER BY unique1
+--
+903fd4ea49876bae
+== 018
+EXECUTE q3('AAAAxx', 5::smallint, 10.5::float, false, 4::bigint)
+--
+44ef1d2beabd53e8
+== 019
+-- too few params
+EXECUTE q3('bool')
+--
+44ef1d2beabd53e8
+== 020
+-- too many params
+EXECUTE q3('bytea', 5::smallint, 10.5::float, false, 4::bigint, true)
+--
+44ef1d2beabd53e8
+== 021
+-- wrong param types
+EXECUTE q3(5::smallint, 10.5::float, false, 4::bigint, 'bytea')
+--
+44ef1d2beabd53e8
+== 022
+-- invalid type
+PREPARE q4(nonexistenttype) AS SELECT $1
+--
+b9efa43a11b34ef9
+== 023
+-- create table as execute
+PREPARE q5(int, text) AS
+	SELECT * FROM tenk1 WHERE unique1 = $1 OR stringu1 = $2
+	ORDER BY unique1
+--
+4a0c7a56ce562ec5
+== 024
+CREATE TEMPORARY TABLE q5_prep_results AS EXECUTE q5(200, 'DTAAAA')
+--
+1da98229f1dffde8
+== 025
+SELECT * FROM q5_prep_results
+--
+dfc195d903057bc2
+== 026
+CREATE TEMPORARY TABLE q5_prep_nodata AS EXECUTE q5(200, 'DTAAAA')
+    WITH NO DATA
+--
+9b6da71987d01051
+== 027
+SELECT * FROM q5_prep_nodata
+--
+aebb8d90283c037c
+== 028
+-- unknown or unspecified parameter types: should succeed
+PREPARE q6 AS
+    SELECT * FROM tenk1 WHERE unique1 = $1 AND stringu1 = $2
+--
+060ba0dcf3814740
+== 029
+PREPARE q7(unknown) AS
+    SELECT * FROM road WHERE thepath = $1
+--
+d12d2afe1e8db9e6
+== 030
+-- DML statements
+PREPARE q8 AS
+    UPDATE tenk1 SET stringu1 = $2 WHERE unique1 = $1
+--
+0455ad4a89b585eb
+== 031
+SELECT name, statement, parameter_types, result_types FROM pg_prepared_statements
+    ORDER BY name
+--
+baf773c3dd48a62d
+== 032
+-- test DEALLOCATE ALL;
+DEALLOCATE ALL
+--
+2debfb8745df64a7
+== 033
+SELECT name, statement, parameter_types FROM pg_prepared_statements
+    ORDER BY name
+--
+018de5bc45a4e2c6

@@ -1,0 +1,62 @@
+== 001
+-- Test bitmap AND and OR
+
+
+-- Generate enough data that we can test the lossy bitmaps.
+
+-- There's 55 tuples per page in the table. 53 is just
+-- below 55, so that an index scan with qual a = constant
+-- will return at least one hit per page. 59 is just above
+-- 55, so that an index scan with qual b = constant will return
+-- hits on most but not all pages. 53 and 59 are prime, so that
+-- there's a maximum number of a,b combinations in the table.
+-- That allows us to test all the different combinations of
+-- lossy and non-lossy pages with the minimum amount of data
+
+CREATE TABLE bmscantest (a int, b int, t text)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":586},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":600},"is_local":true,"location":598}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":607},"is_local":true,"location":605}},{"ColumnDef":{"colname":"t","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":614},"is_local":true,"location":612}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 002
+INSERT INTO bmscantest
+  SELECT (r%53), (r%59), 'foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
+  FROM generate_series(1,70000) r
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"%"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":33}},"rexpr":{"A_Const":{"ival":{"ival":53},"location":35}},"location":34}},"location":32}},{"ResTarget":{"val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"%"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"r"}}],"location":41}},"rexpr":{"A_Const":{"ival":{"ival":59},"location":43}},"location":42}},"location":40}},{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"},"location":48}},"location":48}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":181}},{"A_Const":{"ival":{"ival":70000},"location":183}}],"funcformat":"COERCE_EXPLICIT_CALL","location":165}},{}]}}],"alias":{"aliasname":"r"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 003
+CREATE INDEX i_bmtest_a ON bmscantest(a)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"i_bmtest_a","relation":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":27},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"a","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 004
+CREATE INDEX i_bmtest_b ON bmscantest(b)
+--
+{"version":170007,"stmts":[{"stmt":{"IndexStmt":{"idxname":"i_bmtest_b","relation":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":27},"accessMethod":"btree","indexParams":[{"IndexElem":{"name":"b","ordering":"SORTBY_DEFAULT","nulls_ordering":"SORTBY_NULLS_DEFAULT"}}]}}}]}
+== 005
+-- We want to use bitmapscans. With default settings, the planner currently
+-- chooses a bitmap scan for the queries below anyway, but let's make sure.
+set enable_indexscan=false
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_indexscan","args":[{"A_Const":{"sval":{"sval":"false"},"location":173}}]}}}]}
+== 006
+set enable_seqscan=false
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"enable_seqscan","args":[{"A_Const":{"sval":{"sval":"false"},"location":19}}]}}}]}
+== 007
+-- Lower work_mem to trigger use of lossy bitmaps
+set work_mem = 64
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"work_mem","args":[{"A_Const":{"ival":{"ival":64},"location":65}}]}}}]}
+== 008
+-- Test bitmap-and.
+SELECT count(*) FROM bmscantest WHERE a = 1 AND b = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":27}},"location":27}}],"fromClause":[{"RangeVar":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":41}}],"whereClause":{"BoolExpr":{"boolop":"AND_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":58}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":62}},"location":60}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":68}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":72}},"location":70}}],"location":64}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 009
+-- Test bitmap-or.
+SELECT count(*) FROM bmscantest WHERE a = 1 OR b = 1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"count"}}],"agg_star":true,"funcformat":"COERCE_EXPLICIT_CALL","location":26}},"location":26}}],"fromClause":[{"RangeVar":{"relname":"bmscantest","inh":true,"relpersistence":"p","location":40}}],"whereClause":{"BoolExpr":{"boolop":"OR_EXPR","args":[{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":57}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":61}},"location":59}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"b"}}],"location":66}},"rexpr":{"A_Const":{"ival":{"ival":1},"location":70}},"location":68}}],"location":63}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 010
+-- clean up
+DROP TABLE bmscantest
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"bmscantest"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}

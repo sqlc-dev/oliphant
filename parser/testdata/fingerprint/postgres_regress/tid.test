@@ -1,0 +1,196 @@
+== 001
+-- basic tests for the TID data type
+
+SELECT
+  '(0,0)'::tid as tid00,
+  '(0,1)'::tid as tid01,
+  '(-1,0)'::tid as tidm10,
+  '(4294967295,65535)'::tid as tidmax
+--
+50fde20626009aba
+== 002
+SELECT '(4294967296,1)'::tid
+--
+50fde20626009aba
+== 003
+-- error
+SELECT '(1,65536)'::tid
+--
+50fde20626009aba
+== 004
+-- error
+
+-- Also try it with non-error-throwing API
+SELECT pg_input_is_valid('(0)', 'tid')
+--
+15f508bf2432ed80
+== 005
+SELECT * FROM pg_input_error_info('(0)', 'tid')
+--
+3498aded7ef03791
+== 006
+SELECT pg_input_is_valid('(0,-1)', 'tid')
+--
+15f508bf2432ed80
+== 007
+SELECT * FROM pg_input_error_info('(0,-1)', 'tid')
+--
+3498aded7ef03791
+== 008
+-- tests for functions related to TID handling
+
+CREATE TABLE tid_tab (a int)
+--
+d0ae8c69c9514a51
+== 009
+-- min() and max() for TIDs
+INSERT INTO tid_tab VALUES (1), (2)
+--
+09e1f919e82f12eb
+== 010
+SELECT min(ctid) FROM tid_tab
+--
+00f3af06d6e9aa34
+== 011
+SELECT max(ctid) FROM tid_tab
+--
+d3e7b1bac7f4401b
+== 012
+TRUNCATE tid_tab
+--
+3bcd0a2218ca5b0f
+== 013
+-- Tests for currtid2() with various relation kinds
+
+-- Materialized view
+CREATE MATERIALIZED VIEW tid_matview AS SELECT a FROM tid_tab
+--
+bbcecf7936480672
+== 014
+SELECT currtid2('tid_matview'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 015
+-- fails
+INSERT INTO tid_tab VALUES (1)
+--
+09e1f919e82f12eb
+== 016
+REFRESH MATERIALIZED VIEW tid_matview
+--
+bcd294fed7726726
+== 017
+SELECT currtid2('tid_matview'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 018
+-- ok
+DROP MATERIALIZED VIEW tid_matview
+--
+7db871f8106f6460
+== 019
+TRUNCATE tid_tab
+--
+3bcd0a2218ca5b0f
+== 020
+-- Sequence
+CREATE SEQUENCE tid_seq
+--
+1d432875d25b6580
+== 021
+SELECT currtid2('tid_seq'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 022
+-- ok
+DROP SEQUENCE tid_seq
+--
+a883bee9963afd19
+== 023
+-- Index, fails with incorrect relation type
+CREATE INDEX tid_ind ON tid_tab(a)
+--
+a70ed5175ea099b3
+== 024
+SELECT currtid2('tid_ind'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 025
+-- fails
+DROP INDEX tid_ind
+--
+fc8bc6556c78b3b4
+== 026
+-- Partitioned table, no storage
+CREATE TABLE tid_part (a int) PARTITION BY RANGE (a)
+--
+365caf588b76d8c4
+== 027
+SELECT currtid2('tid_part'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 028
+-- fails
+DROP TABLE tid_part
+--
+b8fdb905a6728743
+== 029
+-- Views
+-- ctid not defined in the view
+CREATE VIEW tid_view_no_ctid AS SELECT a FROM tid_tab
+--
+090be5d5f4c6b91a
+== 030
+SELECT currtid2('tid_view_no_ctid'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 031
+-- fails
+DROP VIEW tid_view_no_ctid
+--
+7bcd45041bf2a80b
+== 032
+-- ctid fetched directly from the source table.
+CREATE VIEW tid_view_with_ctid AS SELECT ctid, a FROM tid_tab
+--
+55a42ab4b74e61b0
+== 033
+SELECT currtid2('tid_view_with_ctid'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 034
+-- fails
+INSERT INTO tid_tab VALUES (1)
+--
+09e1f919e82f12eb
+== 035
+SELECT currtid2('tid_view_with_ctid'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 036
+-- ok
+DROP VIEW tid_view_with_ctid
+--
+016527049535a3f2
+== 037
+TRUNCATE tid_tab
+--
+3bcd0a2218ca5b0f
+== 038
+-- ctid attribute with incorrect data type
+CREATE VIEW tid_view_fake_ctid AS SELECT 1 AS ctid, 2 AS a
+--
+343a695cb48186ae
+== 039
+SELECT currtid2('tid_view_fake_ctid'::text, '(0,1)'::tid)
+--
+e14f7cd882e2e0dc
+== 040
+-- fails
+DROP VIEW tid_view_fake_ctid
+--
+3c7c226bf5d9e3ed
+== 041
+DROP TABLE tid_tab CASCADE
+--
+bd104515e624ce0c

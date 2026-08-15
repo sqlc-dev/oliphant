@@ -1,0 +1,645 @@
+== 001
+|--
+-- Test large object support
+|--
+
+-- directory paths are passed to us in environment variables
+
+-- ensure consistent test output regardless of the default bytea format
+SET bytea_output TO escape
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"bytea_output","args":[{"A_Const":{"sval":{"sval":"escape"},"location":190}}]}}}]}
+== 002
+-- Test ALTER LARGE OBJECT OWNER
+CREATE ROLE regress_lo_user
+--
+{"version":170007,"stmts":[{"stmt":{"CreateRoleStmt":{"stmt_type":"ROLESTMT_ROLE","role":"regress_lo_user"}}}]}
+== 003
+SELECT lo_create(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_create"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 004
+ALTER LARGE OBJECT 42 OWNER TO regress_lo_user
+--
+{"version":170007,"stmts":[{"stmt":{"AlterOwnerStmt":{"objectType":"OBJECT_LARGEOBJECT","object":{"Integer":{"ival":42}},"newowner":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_lo_user","location":31}}}}]}
+== 005
+-- Test GRANT, COMMENT as non-superuser
+SET SESSION AUTHORIZATION regress_lo_user
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"session_authorization","args":[{"A_Const":{"sval":{"sval":"regress_lo_user"},"location":66}}]}}}]}
+== 006
+GRANT SELECT ON LARGE OBJECT 42 TO public
+--
+{"version":170007,"stmts":[{"stmt":{"GrantStmt":{"is_grant":true,"targtype":"ACL_TARGET_OBJECT","objtype":"OBJECT_LARGEOBJECT","objects":[{"Integer":{"ival":42}}],"privileges":[{"AccessPriv":{"priv_name":"select"}}],"grantees":[{"RoleSpec":{"roletype":"ROLESPEC_PUBLIC","location":35}}],"behavior":"DROP_RESTRICT"}}}]}
+== 007
+COMMENT ON LARGE OBJECT 42 IS 'the ultimate answer'
+--
+{"version":170007,"stmts":[{"stmt":{"CommentStmt":{"objtype":"OBJECT_LARGEOBJECT","object":{"Integer":{"ival":42}},"comment":"the ultimate answer"}}}]}
+== 008
+RESET SESSION AUTHORIZATION
+--
+{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"session_authorization"}}}]}
+== 009
+-- Test psql's \lo_list et al (we assume no other LOs exist yet)
+
+-- Load a file
+CREATE TABLE lotest_stash_values (loid oid, fd integer)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":94},"tableElts":[{"ColumnDef":{"colname":"loid","typeName":{"names":[{"String":{"sval":"oid"}}],"typemod":-1,"location":120},"is_local":true,"location":115}},{"ColumnDef":{"colname":"fd","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":128},"is_local":true,"location":125}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 010
+-- lo_creat(mode integer) returns oid
+-- The mode arg to lo_creat is unused, some vestigal holdover from ancient times
+-- returns the large object id
+INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":162},"cols":[{"ResTarget":{"name":"loid","location":183}}],"selectStmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_creat"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":205}}],"funcformat":"COERCE_EXPLICIT_CALL","location":196}},"location":196}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 011
+-- NOTE: large objects require transactions
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 012
+-- lo_open(lobjId oid, mode integer) returns integer
+-- The mode parameter to lo_open uses two constants:
+--   INV_WRITE = 0x20000
+--   INV_READ  = 0x40000
+-- The return value is a file descriptor-like value which remains valid for the
+-- transaction.
+UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":259},"targetList":[{"ResTarget":{"name":"fd","val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":296}},{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"|"}}],"lexpr":{"A_Const":{"bsval":{"bsval":"x20000"},"location":307}},"rexpr":{"A_Const":{"bsval":{"bsval":"x40000"},"location":318}},"location":316}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":330},"location":302}}],"funcformat":"COERCE_EXPLICIT_CALL","location":288}},"location":283}}]}}}]}
+== 013
+-- loread/lowrite names are wonky, different from other functions which are lo_*
+-- lowrite(fd integer, data bytea) returns integer
+-- the integer is the number of bytes written
+SELECT lowrite(fd, '
+I wandered lonely as a cloud
+That floats on high o''er vales and hills,
+When all at once I saw a crowd,
+A host, of golden daffodils;
+Beside the lake, beneath the trees,
+Fluttering and dancing in the breeze.
+
+Continuous as the stars that shine
+And twinkle on the milky way,
+They stretched in never-ending line
+Along the margin of a bay:
+Ten thousand saw I at a glance,
+Tossing their heads in sprightly dance.
+
+The waves beside them danced; but they
+Out-did the sparkling waves in glee:
+A poet could not but be gay,
+In such a jocund company:
+I gazed--and gazed--but little thought
+What wealth the show to me had brought:
+
+For oft, when on my couch I lie
+In vacant or in pensive mood,
+They flash upon that inward eye
+Which is the bliss of solitude;
+And then my heart with pleasure fills,
+And dances with the daffodils.
+
+         -- William Wordsworth
+') FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lowrite"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":193}},{"A_Const":{"sval":{"sval":"\nI wandered lonely as a cloud\nThat floats on high o'er vales and hills,\nWhen all at once I saw a crowd,\nA host, of golden daffodils;\nBeside the lake, beneath the trees,\nFluttering and dancing in the breeze.\n\nContinuous as the stars that shine\nAnd twinkle on the milky way,\nThey stretched in never-ending line\nAlong the margin of a bay:\nTen thousand saw I at a glance,\nTossing their heads in sprightly dance.\n\nThe waves beside them danced; but they\nOut-did the sparkling waves in glee:\nA poet could not but be gay,\nIn such a jocund company:\nI gazed--and gazed--but little thought\nWhat wealth the show to me had brought:\n\nFor oft, when on my couch I lie\nIn vacant or in pensive mood,\nThey flash upon that inward eye\nWhich is the bliss of solitude;\nAnd then my heart with pleasure fills,\nAnd dances with the daffodils.\n\n         -- William Wordsworth\n"},"location":197}}],"funcformat":"COERCE_EXPLICIT_CALL","location":185}},"location":185}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":1055}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 014
+-- lo_close(fd integer) returns integer
+-- return value is 0 for success, or <0 for error (actually only -1, but...)
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_close"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":133}}],"funcformat":"COERCE_EXPLICIT_CALL","location":124}},"location":124}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":142}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 015
+END
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 016
+-- Copy to another large object.
+-- Note: we intentionally don't remove the object created here;
+-- it's left behind to help test pg_dump.
+
+SELECT lo_from_bytea(0, lo_get(loid)) AS newloid FROM lotest_stash_values
+
+-- Add a comment to it, as well, for pg_dump/pg_upgrade testing.
+COMMENT ON LARGE OBJECT :newloid IS 'I Wandered Lonely as a Cloud'
+--
+ERROR: syntax error at or near "ON"
+CURSORPOS: 289
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 017
+-- Read out a portion
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 018
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"fd","val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":42}},{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"|"}}],"lexpr":{"A_Const":{"bsval":{"bsval":"x20000"},"location":53}},"rexpr":{"A_Const":{"bsval":{"bsval":"x40000"},"location":64}},"location":62}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":76},"location":48}}],"funcformat":"COERCE_EXPLICIT_CALL","location":34}},"location":31}}]}}}]}
+== 019
+-- lo_lseek(fd integer, offset integer, whence integer) returns integer
+-- offset is in bytes, whence is one of three values:
+--  SEEK_SET (= 0) meaning relative to beginning
+--  SEEK_CUR (= 1) meaning relative to current position
+--  SEEK_END (= 2) meaning relative to end (offset better be negative)
+-- returns current position in file
+SELECT lo_lseek(fd, 104, 0) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":354}},{"A_Const":{"ival":{"ival":104},"location":358}},{"A_Const":{"ival":{},"location":363}}],"funcformat":"COERCE_EXPLICIT_CALL","location":345}},"location":345}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":371}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 020
+-- loread/lowrite names are wonky, different from other functions which are lo_*
+-- loread(fd integer, len integer) returns bytea
+SELECT loread(fd, 28) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":144}},{"A_Const":{"ival":{"ival":28},"location":148}}],"funcformat":"COERCE_EXPLICIT_CALL","location":137}},"location":137}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":157}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 021
+SELECT lo_lseek(fd, -19, 1) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{"ival":-19},"location":20}},{"A_Const":{"ival":{"ival":1},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":33}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
+SELECT lowrite(fd, 'n') FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lowrite"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}},{"A_Const":{"sval":{"sval":"n"},"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":29}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 023
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":24}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 024
+SELECT lo_lseek(fd, -744, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{"ival":-744},"location":20}},{"A_Const":{"ival":{"ival":2},"location":26}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":34}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 025
+SELECT loread(fd, 28) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":14}},{"A_Const":{"ival":{"ival":28},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 026
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_close"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":25}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 027
+END
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 028
+-- Test resource management
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 029
+SELECT lo_open(loid, x'40000'::int) from lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":15}},{"TypeCast":{"arg":{"A_Const":{"bsval":{"bsval":"x40000"},"location":21}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":31},"location":29}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":41}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 030
+ABORT
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 031
+DO :'dobody'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 4
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 032
+-- Test truncation.
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 033
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"fd","val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":42}},{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"|"}}],"lexpr":{"A_Const":{"bsval":{"bsval":"x20000"},"location":53}},"rexpr":{"A_Const":{"bsval":{"bsval":"x40000"},"location":64}},"location":62}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":76},"location":48}}],"funcformat":"COERCE_EXPLICIT_CALL","location":34}},"location":31}}]}}}]}
+== 034
+SELECT lo_truncate(fd, 11) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":19}},{"A_Const":{"ival":{"ival":11},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":32}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 035
+SELECT loread(fd, 15) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":14}},{"A_Const":{"ival":{"ival":15},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 036
+SELECT lo_truncate(fd, 10000) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":19}},{"A_Const":{"ival":{"ival":10000},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 037
+SELECT loread(fd, 10) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":14}},{"A_Const":{"ival":{"ival":10},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 038
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{},"location":20}},{"A_Const":{"ival":{"ival":2},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":31}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 039
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":24}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 040
+SELECT lo_truncate(fd, 5000) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":19}},{"A_Const":{"ival":{"ival":5000},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":34}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 041
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{},"location":20}},{"A_Const":{"ival":{"ival":2},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":31}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 042
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":24}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 043
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_close"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":25}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 044
+END
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 045
+-- Test 64-bit large object functions.
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 046
+UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"fd","val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":44}},{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"|"}}],"lexpr":{"A_Const":{"bsval":{"bsval":"x20000"},"location":55}},"rexpr":{"A_Const":{"bsval":{"bsval":"x40000"},"location":66}},"location":64}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":78},"location":50}}],"funcformat":"COERCE_EXPLICIT_CALL","location":36}},"location":31}}]}}}]}
+== 047
+SELECT lo_lseek64(fd, 4294967296, 0) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":18}},{"A_Const":{"fval":{"fval":"4294967296"},"location":22}},{"A_Const":{"ival":{},"location":34}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":42}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 048
+SELECT lowrite(fd, 'offset:4GB') FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lowrite"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}},{"A_Const":{"sval":{"sval":"offset:4GB"},"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":38}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 049
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":26}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 050
+SELECT lo_lseek64(fd, -10, 1) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":18}},{"A_Const":{"ival":{"ival":-10},"location":22}},{"A_Const":{"ival":{"ival":1},"location":27}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":35}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 051
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":26}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 052
+SELECT loread(fd, 10) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":14}},{"A_Const":{"ival":{"ival":10},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 053
+SELECT lo_truncate64(fd, 5000000000) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":21}},{"A_Const":{"fval":{"fval":"5000000000"},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":42}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 054
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":18}},{"A_Const":{"ival":{},"location":22}},{"A_Const":{"ival":{"ival":2},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":33}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 055
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":26}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 056
+SELECT lo_truncate64(fd, 3000000000) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":21}},{"A_Const":{"fval":{"fval":"3000000000"},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":42}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 057
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":18}},{"A_Const":{"ival":{},"location":22}},{"A_Const":{"ival":{"ival":2},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":33}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 058
+SELECT lo_tell64(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell64"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":26}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 059
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_close"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":25}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 060
+END
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 061
+-- lo_unlink(lobjId oid) returns integer
+-- return value appears to always be 1
+SELECT lo_unlink(loid) from lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_unlink"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":97}}],"funcformat":"COERCE_EXPLICIT_CALL","location":87}},"location":87}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":108}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 062
+TRUNCATE lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 063
+INSERT INTO lotest_stash_values (loid) SELECT lo_import(:'filename')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 57
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 064
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 065
+UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer))
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"fd","val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":42}},{"TypeCast":{"arg":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"|"}}],"lexpr":{"A_Const":{"bsval":{"bsval":"x20000"},"location":53}},"rexpr":{"A_Const":{"bsval":{"bsval":"x40000"},"location":64}},"location":62}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":76},"location":48}}],"funcformat":"COERCE_EXPLICIT_CALL","location":34}},"location":31}}]}}}]}
+== 066
+-- verify length of large object
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":49}},{"A_Const":{"ival":{},"location":53}},{"A_Const":{"ival":{"ival":2},"location":56}}],"funcformat":"COERCE_EXPLICIT_CALL","location":40}},"location":40}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":64}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 067
+-- with the default BLCKSZ, LOBLKSIZE = 2048, so this positions us for a block
+-- edge case
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":108}},{"A_Const":{"ival":{"ival":2030},"location":112}},{"A_Const":{"ival":{},"location":118}}],"funcformat":"COERCE_EXPLICIT_CALL","location":99}},"location":99}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":126}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 068
+-- this should get half of the value from page 0 and half from page 1 of the
+-- large object
+SELECT loread(fd, 36) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":107}},{"A_Const":{"ival":{"ival":36},"location":111}}],"funcformat":"COERCE_EXPLICIT_CALL","location":100}},"location":100}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":120}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 069
+SELECT lo_tell(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_tell"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":24}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 070
+SELECT lo_lseek(fd, -26, 1) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{"ival":-26},"location":20}},{"A_Const":{"ival":{"ival":1},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":33}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 071
+SELECT lowrite(fd, 'abcdefghijklmnop') FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lowrite"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":15}},{"A_Const":{"sval":{"sval":"abcdefghijklmnop"},"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":44}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 072
+SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_lseek"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}},{"A_Const":{"ival":{"ival":2030},"location":20}},{"A_Const":{"ival":{},"location":26}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":34}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 073
+SELECT loread(fd, 36) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"loread"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":14}},{"A_Const":{"ival":{"ival":36},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":27}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 074
+SELECT lo_close(fd) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_close"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"fd"}}],"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":25}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 075
+END
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_COMMIT","location":-1}}}]}
+== 076
+SELECT lo_export(loid, :'filename') FROM lotest_stash_values
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 077
+-- just make sure \lo_export does not barf
+
+-- This is a hack to test that export/import are reversible
+-- This uses knowledge about the inner workings of large object mechanism
+-- which should not be used outside it.  This makes it a HACK
+SELECT pageno, data FROM pg_largeobject WHERE loid = (SELECT loid from lotest_stash_values)
+EXCEPT
+SELECT pageno, data FROM pg_largeobject WHERE loid = :newloid
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 393
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 078
+SELECT lo_unlink(loid) FROM lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_unlink"}}],"args":[{"ColumnRef":{"fields":[{"String":{"sval":"loid"}}],"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":28}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 079
+TRUNCATE lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"lotest_stash_values","inh":true,"relpersistence":"p","location":9}}],"behavior":"DROP_RESTRICT"}}}]}
+== 080
+SELECT lo_from_bytea(0, lo_get(:newloid_1)) AS newloid_2
+
+SELECT fipshash(lo_get(:newloid_1)) = fipshash(lo_get(:newloid_2))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 081
+SELECT lo_get(:newloid_1, 0, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 082
+SELECT lo_get(:newloid_1, 10, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 083
+SELECT lo_put(:newloid_1, 5, decode('afafafaf', 'hex'))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 084
+SELECT lo_get(:newloid_1, 0, 20)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 085
+SELECT lo_put(:newloid_1, 4294967310, 'foo')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 086
+SELECT lo_get(:newloid_1)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 087
+SELECT lo_get(:newloid_1, 4294967294, 100)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 088
+-- This object is left in the database for pg_dump test purposes
+SELECT lo_from_bytea(0, E'\\xdeadbeef') AS newloid
+
+SET bytea_output TO hex
+--
+ERROR: syntax error at or near "SET"
+CURSORPOS: 118
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 089
+SELECT lo_get(:newloid)
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 090
+-- Create one more object that we leave behind for testing pg_dump/pg_upgrade;
+-- this one intentionally has an OID in the system range
+SELECT lo_create(2121)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_create"}}],"args":[{"A_Const":{"ival":{"ival":2121},"location":153}}],"funcformat":"COERCE_EXPLICIT_CALL","location":143}},"location":143}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 091
+COMMENT ON LARGE OBJECT 2121 IS 'testing comments'
+--
+{"version":170007,"stmts":[{"stmt":{"CommentStmt":{"objtype":"OBJECT_LARGEOBJECT","object":{"Integer":{"ival":2121}},"comment":"testing comments"}}}]}
+== 092
+-- Test writes on large objects in read-only transactions
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":76}},"defaction":"DEFELEM_UNSPEC","location":76}}],"location":-1}}}]}
+== 093
+-- INV_READ ... ok
+SELECT lo_open(2121, x'40000'::int)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"A_Const":{"ival":{"ival":2121},"location":34}},{"TypeCast":{"arg":{"A_Const":{"bsval":{"bsval":"x40000"},"location":40}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":50},"location":48}}],"funcformat":"COERCE_EXPLICIT_CALL","location":26}},"location":26}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 094
+-- INV_WRITE ... error
+SELECT lo_open(2121, x'20000'::int)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_open"}}],"args":[{"A_Const":{"ival":{"ival":2121},"location":38}},{"TypeCast":{"arg":{"A_Const":{"bsval":{"bsval":"x20000"},"location":44}},"typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":54},"location":52}}],"funcformat":"COERCE_EXPLICIT_CALL","location":30}},"location":30}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 095
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 096
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 097
+SELECT lo_create(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_create"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 098
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 099
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 100
+SELECT lo_creat(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_creat"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 101
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 102
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 103
+SELECT lo_unlink(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_unlink"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":17}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 104
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 105
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 106
+SELECT lowrite(42, 'x')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lowrite"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":15}},{"A_Const":{"sval":{"sval":"x"},"location":19}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 107
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 108
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 109
+SELECT lo_import(:'filename')
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 18
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 110
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 111
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 112
+SELECT lo_truncate(42, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":19}},{"A_Const":{"ival":{},"location":23}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 113
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 114
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 115
+SELECT lo_truncate64(42, 0)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_truncate64"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":21}},{"A_Const":{"ival":{},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 116
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 117
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 118
+SELECT lo_from_bytea(0, 'x')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_from_bytea"}}],"args":[{"A_Const":{"ival":{},"location":21}},{"A_Const":{"sval":{"sval":"x"},"location":24}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 119
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 120
+START TRANSACTION READ ONLY
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_START","options":[{"DefElem":{"defname":"transaction_read_only","arg":{"A_Const":{"ival":{"ival":1},"location":18}},"defaction":"DEFELEM_UNSPEC","location":18}}],"location":-1}}}]}
+== 121
+SELECT lo_put(42, 0, 'x')
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"lo_put"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":14}},{"A_Const":{"ival":{},"location":18}},{"A_Const":{"sval":{"sval":"x"},"location":21}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 122
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 123
+-- Clean up
+DROP TABLE lotest_stash_values
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"lotest_stash_values"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 124
+DROP ROLE regress_lo_user
+--
+{"version":170007,"stmts":[{"stmt":{"DropRoleStmt":{"roles":[{"RoleSpec":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_lo_user","location":10}}]}}}]}

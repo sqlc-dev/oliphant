@@ -1,0 +1,581 @@
+== 001
+|--
+-- Test the LOCK statement
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+-- Setup
+CREATE SCHEMA lock_schema1
+--
+f5b95a60d05fb582
+== 002
+SET search_path = lock_schema1
+--
+972eb2e22f47f95c
+== 003
+CREATE TABLE lock_tbl1 (a BIGINT)
+--
+ff0e498edf551d0f
+== 004
+CREATE TABLE lock_tbl1a (a BIGINT)
+--
+00f98b49e91509cf
+== 005
+CREATE VIEW lock_view1 AS SELECT * FROM lock_tbl1
+--
+d696201fdf99fcdf
+== 006
+CREATE VIEW lock_view2(a,b) AS SELECT * FROM lock_tbl1, lock_tbl1a
+--
+549352d399bf39d1
+== 007
+CREATE VIEW lock_view3 AS SELECT * from lock_view2
+--
+ef8ebc3d9976490a
+== 008
+CREATE VIEW lock_view4 AS SELECT (select a from lock_tbl1a limit 1) from lock_tbl1
+--
+911edb38dec545f2
+== 009
+CREATE VIEW lock_view5 AS SELECT * from lock_tbl1 where a in (select * from lock_tbl1a)
+--
+401ecd6bc8f91714
+== 010
+CREATE VIEW lock_view6 AS SELECT * from (select * from lock_tbl1) sub
+--
+c4ae6fed600af03d
+== 011
+CREATE ROLE regress_rol_lock1
+--
+949520dec4f99339
+== 012
+ALTER ROLE regress_rol_lock1 SET search_path = lock_schema1
+--
+4cce4e70d40f4dbd
+== 013
+GRANT USAGE ON SCHEMA lock_schema1 TO regress_rol_lock1
+--
+266dd4ecbbc510af
+== 014
+-- Try all valid lock options; also try omitting the optional TABLE keyword.
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 015
+LOCK TABLE lock_tbl1 IN ACCESS SHARE MODE
+--
+239d5066d17ae0aa
+== 016
+LOCK lock_tbl1 IN ROW SHARE MODE
+--
+9cfdeef3f1436520
+== 017
+LOCK TABLE lock_tbl1 IN ROW EXCLUSIVE MODE
+--
+a7a2bcb9f6febc72
+== 018
+LOCK TABLE lock_tbl1 IN SHARE UPDATE EXCLUSIVE MODE
+--
+98a6cd7affe35659
+== 019
+LOCK TABLE lock_tbl1 IN SHARE MODE
+--
+fe520a7fae82a6cc
+== 020
+LOCK lock_tbl1 IN SHARE ROW EXCLUSIVE MODE
+--
+37a877eaa99082a1
+== 021
+LOCK TABLE lock_tbl1 IN EXCLUSIVE MODE
+--
+1ef8e9bd7b279b63
+== 022
+LOCK TABLE lock_tbl1 IN ACCESS EXCLUSIVE MODE
+--
+2f2769033c12e00d
+== 023
+ROLLBACK
+--
+a46081a556fda027
+== 024
+-- Try using NOWAIT along with valid options.
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 025
+LOCK TABLE lock_tbl1 IN ACCESS SHARE MODE NOWAIT
+--
+e34e379767046c54
+== 026
+LOCK TABLE lock_tbl1 IN ROW SHARE MODE NOWAIT
+--
+9dc8084bd294a964
+== 027
+LOCK TABLE lock_tbl1 IN ROW EXCLUSIVE MODE NOWAIT
+--
+d2b5ad1f5fe27d2d
+== 028
+LOCK TABLE lock_tbl1 IN SHARE UPDATE EXCLUSIVE MODE NOWAIT
+--
+b806511513c34e94
+== 029
+LOCK TABLE lock_tbl1 IN SHARE MODE NOWAIT
+--
+acd5607e76422de4
+== 030
+LOCK TABLE lock_tbl1 IN SHARE ROW EXCLUSIVE MODE NOWAIT
+--
+949d4ca3f77f2bec
+== 031
+LOCK TABLE lock_tbl1 IN EXCLUSIVE MODE NOWAIT
+--
+476f75e85e6180f3
+== 032
+LOCK TABLE lock_tbl1 IN ACCESS EXCLUSIVE MODE NOWAIT
+--
+cbd156874e9d5506
+== 033
+ROLLBACK
+--
+a46081a556fda027
+== 034
+-- Verify that we can lock views.
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 035
+LOCK TABLE lock_view1 IN EXCLUSIVE MODE
+--
+8f08260d6a47d4a1
+== 036
+-- lock_view1 and lock_tbl1 are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 037
+ROLLBACK
+--
+a46081a556fda027
+== 038
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 039
+LOCK TABLE lock_view2 IN EXCLUSIVE MODE
+--
+67fc52c3e8886548
+== 040
+-- lock_view1, lock_tbl1, and lock_tbl1a are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 041
+ROLLBACK
+--
+a46081a556fda027
+== 042
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 043
+LOCK TABLE lock_view3 IN EXCLUSIVE MODE
+--
+7c81754389037b29
+== 044
+-- lock_view3, lock_view2, lock_tbl1, and lock_tbl1a are locked recursively.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 045
+ROLLBACK
+--
+a46081a556fda027
+== 046
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 047
+LOCK TABLE lock_view4 IN EXCLUSIVE MODE
+--
+752d638f7c5477ad
+== 048
+-- lock_view4, lock_tbl1, and lock_tbl1a are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 049
+ROLLBACK
+--
+a46081a556fda027
+== 050
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 051
+LOCK TABLE lock_view5 IN EXCLUSIVE MODE
+--
+4c9056c3815bf480
+== 052
+-- lock_view5, lock_tbl1, and lock_tbl1a are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 053
+ROLLBACK
+--
+a46081a556fda027
+== 054
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 055
+LOCK TABLE lock_view6 IN EXCLUSIVE MODE
+--
+d34f8b1800b17368
+== 056
+-- lock_view6 an lock_tbl1 are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'ExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 057
+ROLLBACK
+--
+a46081a556fda027
+== 058
+-- Verify that we cope with infinite recursion in view definitions.
+CREATE OR REPLACE VIEW lock_view2 AS SELECT * from lock_view3
+--
+754772653fda01d6
+== 059
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 060
+LOCK TABLE lock_view2 IN EXCLUSIVE MODE
+--
+67fc52c3e8886548
+== 061
+ROLLBACK
+--
+a46081a556fda027
+== 062
+CREATE VIEW lock_view7 AS SELECT * from lock_view2
+--
+fbe1c8a0c61927f0
+== 063
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 064
+LOCK TABLE lock_view7 IN EXCLUSIVE MODE
+--
+e481589203343d9e
+== 065
+ROLLBACK
+--
+a46081a556fda027
+== 066
+-- Verify that we can lock a table with inheritance children.
+CREATE TABLE lock_tbl2 (b BIGINT) INHERITS (lock_tbl1)
+--
+63c69925e4c7f412
+== 067
+CREATE TABLE lock_tbl3 () INHERITS (lock_tbl2)
+--
+a1fc9a2bc9d03cab
+== 068
+BEGIN TRANSACTION
+--
+b16b431979fc3e05
+== 069
+LOCK TABLE lock_tbl1 * IN ACCESS EXCLUSIVE MODE
+--
+2f2769033c12e00d
+== 070
+ROLLBACK
+--
+a46081a556fda027
+== 071
+-- Child tables are locked without granting explicit permission to do so as
+-- long as we have permission to lock the parent.
+GRANT UPDATE ON TABLE lock_tbl1 TO regress_rol_lock1
+--
+ddf26728a2696def
+== 072
+SET ROLE regress_rol_lock1
+--
+56facc463e2de425
+== 073
+-- fail when child locked directly
+BEGIN
+--
+b16b431979fc3e05
+== 074
+LOCK TABLE lock_tbl2
+--
+2b58791cce490689
+== 075
+ROLLBACK
+--
+a46081a556fda027
+== 076
+BEGIN
+--
+b16b431979fc3e05
+== 077
+LOCK TABLE lock_tbl1 * IN ACCESS EXCLUSIVE MODE
+--
+2f2769033c12e00d
+== 078
+ROLLBACK
+--
+a46081a556fda027
+== 079
+BEGIN
+--
+b16b431979fc3e05
+== 080
+LOCK TABLE ONLY lock_tbl1
+--
+8a59bd44bd3ba1fb
+== 081
+ROLLBACK
+--
+a46081a556fda027
+== 082
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 083
+REVOKE UPDATE ON TABLE lock_tbl1 FROM regress_rol_lock1
+--
+8746f0a78b79c859
+== 084
+-- Tables referred to by views are locked without explicit permission to do so
+-- as long as we have permission to lock the view itself.
+SET ROLE regress_rol_lock1
+--
+56facc463e2de425
+== 085
+-- fail without permissions on the view
+BEGIN
+--
+b16b431979fc3e05
+== 086
+LOCK TABLE lock_view1
+--
+969d49051c86ea7d
+== 087
+ROLLBACK
+--
+a46081a556fda027
+== 088
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 089
+GRANT UPDATE ON TABLE lock_view1 TO regress_rol_lock1
+--
+bb90a40f959db5ec
+== 090
+SET ROLE regress_rol_lock1
+--
+56facc463e2de425
+== 091
+BEGIN
+--
+b16b431979fc3e05
+== 092
+LOCK TABLE lock_view1 IN ACCESS EXCLUSIVE MODE
+--
+969d49051c86ea7d
+== 093
+-- lock_view1 and lock_tbl1 (plus children lock_tbl2 and lock_tbl3) are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'AccessExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 094
+ROLLBACK
+--
+a46081a556fda027
+== 095
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 096
+REVOKE UPDATE ON TABLE lock_view1 FROM regress_rol_lock1
+--
+b5bbeb621853b701
+== 097
+-- Tables referred to by security invoker views require explicit permission to
+-- be locked.
+CREATE VIEW lock_view8 WITH (security_invoker) AS SELECT * FROM lock_tbl1
+--
+4febd70720db5812
+== 098
+SET ROLE regress_rol_lock1
+--
+56facc463e2de425
+== 099
+-- fail without permissions on the view
+BEGIN
+--
+b16b431979fc3e05
+== 100
+LOCK TABLE lock_view8
+--
+aad379c5278c0450
+== 101
+ROLLBACK
+--
+a46081a556fda027
+== 102
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 103
+GRANT UPDATE ON TABLE lock_view8 TO regress_rol_lock1
+--
+c371e24dacf69524
+== 104
+SET ROLE regress_rol_lock1
+--
+56facc463e2de425
+== 105
+-- fail without permissions on the table referenced by the view
+BEGIN
+--
+b16b431979fc3e05
+== 106
+LOCK TABLE lock_view8
+--
+aad379c5278c0450
+== 107
+ROLLBACK
+--
+a46081a556fda027
+== 108
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 109
+GRANT UPDATE ON TABLE lock_tbl1 TO regress_rol_lock1
+--
+ddf26728a2696def
+== 110
+BEGIN
+--
+b16b431979fc3e05
+== 111
+LOCK TABLE lock_view8 IN ACCESS EXCLUSIVE MODE
+--
+aad379c5278c0450
+== 112
+-- lock_view8 and lock_tbl1 (plus children lock_tbl2 and lock_tbl3) are locked.
+select relname from pg_locks l, pg_class c
+ where l.relation = c.oid and relname like '%lock_%' and mode = 'AccessExclusiveLock'
+ order by relname
+--
+b4689bbee02bb05b
+== 113
+ROLLBACK
+--
+a46081a556fda027
+== 114
+RESET ROLE
+--
+01c32d8f5bb0e22a
+== 115
+REVOKE UPDATE ON TABLE lock_view8 FROM regress_rol_lock1
+--
+a359055e6419bfe2
+== 116
+|--
+-- Clean up
+|--
+DROP VIEW lock_view8
+--
+21a7702b4a1db647
+== 117
+DROP VIEW lock_view7
+--
+978d0cf378ff9fd8
+== 118
+DROP VIEW lock_view6
+--
+91de4b696bb2e7ff
+== 119
+DROP VIEW lock_view5
+--
+b40f1599385dbdd7
+== 120
+DROP VIEW lock_view4
+--
+e044ecbc0b28d970
+== 121
+DROP VIEW lock_view3 CASCADE
+--
+7a3aa69d3db4ee8b
+== 122
+DROP VIEW lock_view1
+--
+c5c5ffefcc189bc1
+== 123
+DROP TABLE lock_tbl3
+--
+2eacdc5215093fdc
+== 124
+DROP TABLE lock_tbl2
+--
+45aa64abbb72a6f8
+== 125
+DROP TABLE lock_tbl1
+--
+b8489ba85352e0f8
+== 126
+DROP TABLE lock_tbl1a
+--
+76879aacb1e423f6
+== 127
+DROP SCHEMA lock_schema1 CASCADE
+--
+50294415973a28da
+== 128
+DROP ROLE regress_rol_lock1
+--
+948c1dfc9d917740
+== 129
+-- atomic ops tests
+RESET search_path
+--
+e97698aade82a29f
+== 130
+CREATE FUNCTION test_atomic_ops()
+    RETURNS bool
+    AS :'regresslib'
+    LANGUAGE C
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 59
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 131
+SELECT test_atomic_ops()
+--
+ae5d19588af5b71e

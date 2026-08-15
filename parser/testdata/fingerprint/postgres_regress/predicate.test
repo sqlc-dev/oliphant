@@ -1,0 +1,278 @@
+== 001
+|--
+-- Tests for predicate handling
+|--
+
+|--
+-- Test that restrictions that are always true are ignored, and that are always
+-- false are replaced with constant-FALSE
+|--
+-- Currently we only check for NullTest quals and OR clauses that include
+-- NullTest quals.  We may extend it in the future.
+|--
+CREATE TABLE pred_tab (a int NOT NULL, b int, c int NOT NULL)
+--
+19760cfeaa323bf8
+== 002
+|--
+-- Test restriction clauses
+|--
+
+-- Ensure the IS_NOT_NULL qual is ignored when the column is non-nullable
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.a IS NOT NULL
+--
+c85757f2b3df6ff8
+== 003
+-- Ensure the IS_NOT_NULL qual is not ignored on a nullable column
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.b IS NOT NULL
+--
+18f69dcbf0034c9d
+== 004
+-- Ensure the IS_NULL qual is reduced to constant-FALSE for non-nullable
+-- columns
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.a IS NULL
+--
+1e38ee127a4aad0d
+== 005
+-- Ensure the IS_NULL qual is not reduced to constant-FALSE on nullable
+-- columns
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.b IS NULL
+--
+eae16fd5c3673c83
+== 006
+|--
+-- Tests for OR clauses in restriction clauses
+|--
+
+-- Ensure the OR clause is ignored when an OR branch is always true
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.a IS NOT NULL OR t.b = 1
+--
+421082aa7d9dd999
+== 007
+-- Ensure the OR clause is not ignored for NullTests that can't be proven
+-- always true
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.b IS NOT NULL OR t.a = 1
+--
+b025045f0b7dbe71
+== 008
+-- Ensure the OR clause is reduced to constant-FALSE when all branches are
+-- provably false
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.a IS NULL OR t.c IS NULL
+--
+e888dd554f84df48
+== 009
+-- Ensure the OR clause is not reduced to constant-FALSE when not all branches
+-- are provably false
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t WHERE t.b IS NULL OR t.c IS NULL
+--
+37c598bc04b4569a
+== 010
+|--
+-- Test join clauses
+|--
+
+-- Ensure the IS_NOT_NULL qual is ignored, since a) it's on a NOT NULL column,
+-- and b) its Var is not nullable by any outer joins
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON t1.a IS NOT NULL
+--
+f63cb7e158f7abe8
+== 011
+-- Ensure the IS_NOT_NULL qual is not ignored when columns are made nullable
+-- by an outer join
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    FULL JOIN pred_tab t2 ON t1.a = t2.a
+    LEFT JOIN pred_tab t3 ON t2.a IS NOT NULL
+--
+bf6b9fc9819acb66
+== 012
+-- Ensure the IS_NULL qual is reduced to constant-FALSE, since a) it's on a NOT
+-- NULL column, and b) its Var is not nullable by any outer joins
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON t1.a IS NULL
+--
+75f63c4f0c2f78b1
+== 013
+-- Ensure the IS_NULL qual is not reduced to constant-FALSE when the column is
+-- nullable by an outer join
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON t1.a = 1
+    LEFT JOIN pred_tab t3 ON t2.a IS NULL
+--
+778dd95db9f62211
+== 014
+|--
+-- Tests for OR clauses in join clauses
+|--
+
+-- Ensure the OR clause is ignored when an OR branch is provably always true
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON t1.a IS NOT NULL OR t2.b = 1
+--
+437e2126d329e068
+== 015
+-- Ensure the NullTest is not ignored when the column is nullable by an outer
+-- join
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    FULL JOIN pred_tab t2 ON t1.a = t2.a
+    LEFT JOIN pred_tab t3 ON t2.a IS NOT NULL OR t2.b = 1
+--
+9af93a2361765517
+== 016
+-- Ensure the OR clause is reduced to constant-FALSE when all OR branches are
+-- provably false
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON (t1.a IS NULL OR t1.c IS NULL)
+--
+f5607b3d61c0033f
+== 017
+-- Ensure the OR clause is not reduced to constant-FALSE when a column is
+-- made nullable from an outer join
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON t1.a = 1
+    LEFT JOIN pred_tab t3 ON t2.a IS NULL OR t2.c IS NULL
+--
+6711ca50a96aeca5
+== 018
+DROP TABLE pred_tab
+--
+50db853b3815c935
+== 019
+-- Validate we handle IS NULL and IS NOT NULL quals correctly with inheritance
+-- parents.
+CREATE TABLE pred_parent (a int)
+--
+2cbbad942ce5e967
+== 020
+CREATE TABLE pred_child () INHERITS (pred_parent)
+--
+55a5419751f0316b
+== 021
+ALTER TABLE ONLY pred_parent ALTER a SET NOT NULL
+--
+9eecd54d40eb22a2
+== 022
+-- Ensure that the scan on pred_child contains the IS NOT NULL qual.
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_parent WHERE a IS NOT NULL
+--
+21fe39a564682bc9
+== 023
+-- Ensure we only scan pred_child and not pred_parent
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_parent WHERE a IS NULL
+--
+87f30e24570ddc79
+== 024
+ALTER TABLE pred_parent ALTER a DROP NOT NULL
+--
+b09d7330edb58f3e
+== 025
+ALTER TABLE pred_child ALTER a SET NOT NULL
+--
+b04443288eaa6fa2
+== 026
+-- Ensure the IS NOT NULL qual is removed from the pred_child scan.
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_parent WHERE a IS NOT NULL
+--
+21fe39a564682bc9
+== 027
+-- Ensure we only scan pred_parent and not pred_child
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_parent WHERE a IS NULL
+--
+87f30e24570ddc79
+== 028
+DROP TABLE pred_parent, pred_child
+--
+7602fac17d48116a
+== 029
+-- Validate we do not reduce a clone clause to a constant true or false
+CREATE TABLE pred_tab (a int, b int)
+--
+b5a149cfa09ffa4e
+== 030
+CREATE TABLE pred_tab_notnull (a int, b int NOT NULL)
+--
+9fdeb7a3bdf78b20
+== 031
+INSERT INTO pred_tab VALUES (1, 1)
+--
+c2509a0a7116b187
+== 032
+INSERT INTO pred_tab VALUES (2, 2)
+--
+c2509a0a7116b187
+== 033
+INSERT INTO pred_tab_notnull VALUES (2, 2)
+--
+f77a976ac9c0bd7b
+== 034
+INSERT INTO pred_tab_notnull VALUES (3, 3)
+--
+f77a976ac9c0bd7b
+== 035
+ANALYZE pred_tab
+--
+1888cc61b62bc162
+== 036
+ANALYZE pred_tab_notnull
+--
+4c966b7d9f24daf5
+== 037
+-- Ensure the IS_NOT_NULL qual is not reduced to constant true and removed
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON TRUE
+    LEFT JOIN pred_tab_notnull t3 ON t2.a = t3.a
+    LEFT JOIN pred_tab t4 ON t3.b IS NOT NULL
+--
+6137bd21207d9a4a
+== 038
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON TRUE
+    LEFT JOIN pred_tab_notnull t3 ON t2.a = t3.a
+    LEFT JOIN pred_tab t4 ON t3.b IS NOT NULL
+--
+c61ff64f86ec05bd
+== 039
+-- Ensure the IS_NULL qual is not reduced to constant false
+EXPLAIN (COSTS OFF)
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON TRUE
+    LEFT JOIN pred_tab_notnull t3 ON t2.a = t3.a
+    LEFT JOIN pred_tab t4 ON t3.b IS NULL AND t3.a IS NOT NULL
+--
+c6c123458bd21843
+== 040
+SELECT * FROM pred_tab t1
+    LEFT JOIN pred_tab t2 ON TRUE
+    LEFT JOIN pred_tab_notnull t3 ON t2.a = t3.a
+    LEFT JOIN pred_tab t4 ON t3.b IS NULL AND t3.a IS NOT NULL
+--
+e8b041d294842c96
+== 041
+DROP TABLE pred_tab
+--
+50db853b3815c935
+== 042
+DROP TABLE pred_tab_notnull
+--
+a66bdad90b1f297d

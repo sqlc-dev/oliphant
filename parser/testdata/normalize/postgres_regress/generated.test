@@ -1,0 +1,614 @@
+== 001
+-- sanity check of system catalog
+SELECT attrelid, attname, attgenerated FROM pg_attribute WHERE attgenerated NOT IN ('', 's')
+--
+-- sanity check of system catalog
+SELECT attrelid, attname, attgenerated FROM pg_attribute WHERE attgenerated NOT IN ($1, $2)
+== 002
+CREATE TABLE gtest0 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (55) STORED)
+--
+CREATE TABLE gtest0 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (55) STORED)
+== 003
+CREATE TABLE gtest1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED)
+--
+CREATE TABLE gtest1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED)
+== 004
+SELECT table_name, column_name, column_default, is_nullable, is_generated, generation_expression FROM information_schema.columns WHERE table_name LIKE 'gtest_' ORDER BY 1, 2
+--
+SELECT table_name, column_name, column_default, is_nullable, is_generated, generation_expression FROM information_schema.columns WHERE table_name LIKE $1 ORDER BY 1, 2
+== 005
+SELECT table_name, column_name, dependent_column FROM information_schema.column_column_usage ORDER BY 1, 2, 3
+--
+SELECT table_name, column_name, dependent_column FROM information_schema.column_column_usage ORDER BY 1, 2, 3
+== 006
+-- duplicate generated
+CREATE TABLE gtest_err_1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED GENERATED ALWAYS AS (a * 3) STORED)
+--
+-- duplicate generated
+CREATE TABLE gtest_err_1 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED GENERATED ALWAYS AS (a * 3) STORED)
+== 007
+-- references to other generated columns, including self-references
+CREATE TABLE gtest_err_2a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (b * 2) STORED)
+--
+-- references to other generated columns, including self-references
+CREATE TABLE gtest_err_2a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (b * 2) STORED)
+== 008
+CREATE TABLE gtest_err_2b (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED, c int GENERATED ALWAYS AS (b * 3) STORED)
+--
+CREATE TABLE gtest_err_2b (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED, c int GENERATED ALWAYS AS (b * 3) STORED)
+== 009
+-- a whole-row var is a self-reference on steroids, so disallow that too
+CREATE TABLE gtest_err_2c (a int PRIMARY KEY,
+    b int GENERATED ALWAYS AS (num_nulls(gtest_err_2c)) STORED)
+--
+-- a whole-row var is a self-reference on steroids, so disallow that too
+CREATE TABLE gtest_err_2c (a int PRIMARY KEY,
+    b int GENERATED ALWAYS AS (num_nulls(gtest_err_2c)) STORED)
+== 010
+-- invalid reference
+CREATE TABLE gtest_err_3 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (c * 2) STORED)
+--
+-- invalid reference
+CREATE TABLE gtest_err_3 (a int PRIMARY KEY, b int GENERATED ALWAYS AS (c * 2) STORED)
+== 011
+-- generation expression must be immutable
+CREATE TABLE gtest_err_4 (a int PRIMARY KEY, b double precision GENERATED ALWAYS AS (random()) STORED)
+--
+-- generation expression must be immutable
+CREATE TABLE gtest_err_4 (a int PRIMARY KEY, b double precision GENERATED ALWAYS AS (random()) STORED)
+== 012
+-- ... but be sure that the immutability test is accurate
+CREATE TABLE gtest2 (a int, b text GENERATED ALWAYS AS (a || ' sec') STORED)
+--
+-- ... but be sure that the immutability test is accurate
+CREATE TABLE gtest2 (a int, b text GENERATED ALWAYS AS (a || ' sec') STORED)
+== 013
+DROP TABLE gtest2
+--
+DROP TABLE gtest2
+== 014
+-- cannot have default/identity and generated
+CREATE TABLE gtest_err_5a (a int PRIMARY KEY, b int DEFAULT 5 GENERATED ALWAYS AS (a * 2) STORED)
+--
+-- cannot have default/identity and generated
+CREATE TABLE gtest_err_5a (a int PRIMARY KEY, b int DEFAULT 5 GENERATED ALWAYS AS (a * 2) STORED)
+== 015
+CREATE TABLE gtest_err_5b (a int PRIMARY KEY, b int GENERATED ALWAYS AS identity GENERATED ALWAYS AS (a * 2) STORED)
+--
+CREATE TABLE gtest_err_5b (a int PRIMARY KEY, b int GENERATED ALWAYS AS identity GENERATED ALWAYS AS (a * 2) STORED)
+== 016
+-- reference to system column not allowed in generated column
+-- (except tableoid, which we test below)
+CREATE TABLE gtest_err_6a (a int PRIMARY KEY, b bool GENERATED ALWAYS AS (xmin <> 37) STORED)
+--
+-- reference to system column not allowed in generated column
+-- (except tableoid, which we test below)
+CREATE TABLE gtest_err_6a (a int PRIMARY KEY, b bool GENERATED ALWAYS AS (xmin <> 37) STORED)
+== 017
+-- various prohibited constructs
+CREATE TABLE gtest_err_7a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (avg(a)) STORED)
+--
+-- various prohibited constructs
+CREATE TABLE gtest_err_7a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (avg(a)) STORED)
+== 018
+CREATE TABLE gtest_err_7b (a int PRIMARY KEY, b int GENERATED ALWAYS AS (row_number() OVER (ORDER BY a)) STORED)
+--
+CREATE TABLE gtest_err_7b (a int PRIMARY KEY, b int GENERATED ALWAYS AS (row_number() OVER (ORDER BY a)) STORED)
+== 019
+CREATE TABLE gtest_err_7c (a int PRIMARY KEY, b int GENERATED ALWAYS AS ((SELECT a)) STORED)
+--
+CREATE TABLE gtest_err_7c (a int PRIMARY KEY, b int GENERATED ALWAYS AS ((SELECT a)) STORED)
+== 020
+CREATE TABLE gtest_err_7d (a int PRIMARY KEY, b int GENERATED ALWAYS AS (generate_series(1, a)) STORED)
+--
+CREATE TABLE gtest_err_7d (a int PRIMARY KEY, b int GENERATED ALWAYS AS (generate_series(1, a)) STORED)
+== 021
+-- GENERATED BY DEFAULT not allowed
+CREATE TABLE gtest_err_8 (a int PRIMARY KEY, b int GENERATED BY DEFAULT AS (a * 2) STORED)
+--
+ERROR: for a generated column, GENERATED ALWAYS must be specified
+CURSORPOS: 98
+FILENAME: gram.y
+FUNCNAME: base_yyparse
+== 022
+INSERT INTO gtest1 VALUES (1)
+--
+INSERT INTO gtest1 VALUES ($1)
+== 023
+INSERT INTO gtest1 VALUES (2, DEFAULT)
+--
+INSERT INTO gtest1 VALUES ($1, DEFAULT)
+== 024
+-- ok
+INSERT INTO gtest1 VALUES (3, 33)
+--
+-- ok
+INSERT INTO gtest1 VALUES ($1, $2)
+== 025
+-- error
+INSERT INTO gtest1 VALUES (3, 33), (4, 44)
+--
+-- error
+INSERT INTO gtest1 VALUES ($1, $2), ($3, $4)
+== 026
+-- error
+INSERT INTO gtest1 VALUES (3, DEFAULT), (4, 44)
+--
+-- error
+INSERT INTO gtest1 VALUES ($1, DEFAULT), ($2, $3)
+== 027
+-- error
+INSERT INTO gtest1 VALUES (3, 33), (4, DEFAULT)
+--
+-- error
+INSERT INTO gtest1 VALUES ($1, $2), ($3, DEFAULT)
+== 028
+-- error
+INSERT INTO gtest1 VALUES (3, DEFAULT), (4, DEFAULT)
+--
+-- error
+INSERT INTO gtest1 VALUES ($1, DEFAULT), ($2, DEFAULT)
+== 029
+-- ok
+
+SELECT * FROM gtest1 ORDER BY a
+--
+-- ok
+
+SELECT * FROM gtest1 ORDER BY a
+== 030
+DELETE FROM gtest1 WHERE a >= 3
+--
+DELETE FROM gtest1 WHERE a >= $1
+== 031
+UPDATE gtest1 SET b = DEFAULT WHERE a = 1
+--
+UPDATE gtest1 SET b = DEFAULT WHERE a = $1
+== 032
+UPDATE gtest1 SET b = 11 WHERE a = 1
+--
+UPDATE gtest1 SET b = $1 WHERE a = $2
+== 033
+-- error
+
+SELECT * FROM gtest1 ORDER BY a
+--
+-- error
+
+SELECT * FROM gtest1 ORDER BY a
+== 034
+SELECT a, b, b * 2 AS b2 FROM gtest1 ORDER BY a
+--
+SELECT a, b, b * $1 AS b2 FROM gtest1 ORDER BY a
+== 035
+SELECT a, b FROM gtest1 WHERE b = 4 ORDER BY a
+--
+SELECT a, b FROM gtest1 WHERE b = $1 ORDER BY a
+== 036
+-- test that overflow error happens on write
+INSERT INTO gtest1 VALUES (2000000000)
+--
+-- test that overflow error happens on write
+INSERT INTO gtest1 VALUES ($1)
+== 037
+SELECT * FROM gtest1
+--
+SELECT * FROM gtest1
+== 038
+DELETE FROM gtest1 WHERE a = 2000000000
+--
+DELETE FROM gtest1 WHERE a = $1
+== 039
+-- test with joins
+CREATE TABLE gtestx (x int, y int)
+--
+-- test with joins
+CREATE TABLE gtestx (x int, y int)
+== 040
+INSERT INTO gtestx VALUES (11, 1), (22, 2), (33, 3)
+--
+INSERT INTO gtestx VALUES ($1, $2), ($3, $4), ($5, $6)
+== 041
+SELECT * FROM gtestx, gtest1 WHERE gtestx.y = gtest1.a
+--
+SELECT * FROM gtestx, gtest1 WHERE gtestx.y = gtest1.a
+== 042
+DROP TABLE gtestx
+--
+DROP TABLE gtestx
+== 043
+-- test UPDATE/DELETE quals
+SELECT * FROM gtest1 ORDER BY a
+--
+-- test UPDATE/DELETE quals
+SELECT * FROM gtest1 ORDER BY a
+== 044
+UPDATE gtest1 SET a = 3 WHERE b = 4
+--
+UPDATE gtest1 SET a = $1 WHERE b = $2
+== 045
+SELECT * FROM gtest1 ORDER BY a
+--
+SELECT * FROM gtest1 ORDER BY a
+== 046
+DELETE FROM gtest1 WHERE b = 2
+--
+DELETE FROM gtest1 WHERE b = $1
+== 047
+SELECT * FROM gtest1 ORDER BY a
+--
+SELECT * FROM gtest1 ORDER BY a
+== 048
+-- test MERGE
+CREATE TABLE gtestm (
+  id int PRIMARY KEY,
+  f1 int,
+  f2 int,
+  f3 int GENERATED ALWAYS AS (f1 * 2) STORED,
+  f4 int GENERATED ALWAYS AS (f2 * 2) STORED
+)
+--
+-- test MERGE
+CREATE TABLE gtestm (
+  id int PRIMARY KEY,
+  f1 int,
+  f2 int,
+  f3 int GENERATED ALWAYS AS (f1 * 2) STORED,
+  f4 int GENERATED ALWAYS AS (f2 * 2) STORED
+)
+== 049
+INSERT INTO gtestm VALUES (1, 5, 100)
+--
+INSERT INTO gtestm VALUES ($1, $2, $3)
+== 050
+MERGE INTO gtestm t USING (VALUES (1, 10), (2, 20)) v(id, f1) ON t.id = v.id
+  WHEN MATCHED THEN UPDATE SET f1 = v.f1
+  WHEN NOT MATCHED THEN INSERT VALUES (v.id, v.f1, 200)
+--
+MERGE INTO gtestm t USING (VALUES ($1, $2), ($3, $4)) v(id, f1) ON t.id = v.id
+  WHEN MATCHED THEN UPDATE SET f1 = v.f1
+  WHEN NOT MATCHED THEN INSERT VALUES (v.id, v.f1, $5)
+== 051
+SELECT * FROM gtestm ORDER BY id
+--
+SELECT * FROM gtestm ORDER BY id
+== 052
+DROP TABLE gtestm
+--
+DROP TABLE gtestm
+== 053
+-- views
+CREATE VIEW gtest1v AS SELECT * FROM gtest1
+--
+-- views
+CREATE VIEW gtest1v AS SELECT * FROM gtest1
+== 054
+SELECT * FROM gtest1v
+--
+SELECT * FROM gtest1v
+== 055
+INSERT INTO gtest1v VALUES (4, 8)
+--
+INSERT INTO gtest1v VALUES ($1, $2)
+== 056
+-- error
+INSERT INTO gtest1v VALUES (5, DEFAULT)
+--
+-- error
+INSERT INTO gtest1v VALUES ($1, DEFAULT)
+== 057
+-- ok
+INSERT INTO gtest1v VALUES (6, 66), (7, 77)
+--
+-- ok
+INSERT INTO gtest1v VALUES ($1, $2), ($3, $4)
+== 058
+-- error
+INSERT INTO gtest1v VALUES (6, DEFAULT), (7, 77)
+--
+-- error
+INSERT INTO gtest1v VALUES ($1, DEFAULT), ($2, $3)
+== 059
+-- error
+INSERT INTO gtest1v VALUES (6, 66), (7, DEFAULT)
+--
+-- error
+INSERT INTO gtest1v VALUES ($1, $2), ($3, DEFAULT)
+== 060
+-- error
+INSERT INTO gtest1v VALUES (6, DEFAULT), (7, DEFAULT)
+--
+-- error
+INSERT INTO gtest1v VALUES ($1, DEFAULT), ($2, DEFAULT)
+== 061
+-- ok
+
+ALTER VIEW gtest1v ALTER COLUMN b SET DEFAULT 100
+--
+-- ok
+
+ALTER VIEW gtest1v ALTER COLUMN b SET DEFAULT 100
+== 062
+INSERT INTO gtest1v VALUES (8, DEFAULT)
+--
+INSERT INTO gtest1v VALUES ($1, DEFAULT)
+== 063
+-- error
+INSERT INTO gtest1v VALUES (8, DEFAULT), (9, DEFAULT)
+--
+-- error
+INSERT INTO gtest1v VALUES ($1, DEFAULT), ($2, DEFAULT)
+== 064
+-- error
+
+SELECT * FROM gtest1v
+--
+-- error
+
+SELECT * FROM gtest1v
+== 065
+DELETE FROM gtest1v WHERE a >= 5
+--
+DELETE FROM gtest1v WHERE a >= $1
+== 066
+DROP VIEW gtest1v
+--
+DROP VIEW gtest1v
+== 067
+-- CTEs
+WITH foo AS (SELECT * FROM gtest1) SELECT * FROM foo
+--
+-- CTEs
+WITH foo AS (SELECT * FROM gtest1) SELECT * FROM foo
+== 068
+-- inheritance
+CREATE TABLE gtest1_1 () INHERITS (gtest1)
+--
+-- inheritance
+CREATE TABLE gtest1_1 () INHERITS (gtest1)
+== 069
+SELECT * FROM gtest1_1
+--
+SELECT * FROM gtest1_1
+== 070
+INSERT INTO gtest1_1 VALUES (4)
+--
+INSERT INTO gtest1_1 VALUES ($1)
+== 071
+SELECT * FROM gtest1_1
+--
+SELECT * FROM gtest1_1
+== 072
+SELECT * FROM gtest1
+--
+SELECT * FROM gtest1
+== 073
+-- can't have generated column that is a child of normal column
+CREATE TABLE gtest_normal (a int, b int)
+--
+-- can't have generated column that is a child of normal column
+CREATE TABLE gtest_normal (a int, b int)
+== 074
+CREATE TABLE gtest_normal_child (a int, b int GENERATED ALWAYS AS (a * 2) STORED) INHERITS (gtest_normal)
+--
+CREATE TABLE gtest_normal_child (a int, b int GENERATED ALWAYS AS (a * 2) STORED) INHERITS (gtest_normal)
+== 075
+-- error
+CREATE TABLE gtest_normal_child (a int, b int GENERATED ALWAYS AS (a * 2) STORED)
+--
+-- error
+CREATE TABLE gtest_normal_child (a int, b int GENERATED ALWAYS AS (a * 2) STORED)
+== 076
+ALTER TABLE gtest_normal_child INHERIT gtest_normal
+--
+ALTER TABLE gtest_normal_child INHERIT gtest_normal
+== 077
+-- error
+DROP TABLE gtest_normal, gtest_normal_child
+--
+-- error
+DROP TABLE gtest_normal, gtest_normal_child
+== 078
+-- test inheritance mismatches between parent and child
+CREATE TABLE gtestx (x int, b int DEFAULT 10) INHERITS (gtest1)
+--
+-- test inheritance mismatches between parent and child
+CREATE TABLE gtestx (x int, b int DEFAULT 10) INHERITS (gtest1)
+== 079
+-- error
+CREATE TABLE gtestx (x int, b int GENERATED ALWAYS AS IDENTITY) INHERITS (gtest1)
+--
+-- error
+CREATE TABLE gtestx (x int, b int GENERATED ALWAYS AS IDENTITY) INHERITS (gtest1)
+== 080
+-- error
+CREATE TABLE gtestx (x int, b int GENERATED ALWAYS AS (a * 22) STORED) INHERITS (gtest1)
+--
+-- error
+CREATE TABLE gtestx (x int, b int GENERATED ALWAYS AS (a * 22) STORED) INHERITS (gtest1)
+== 081
+-- ok, overrides parent
+
+CREATE TABLE gtestxx_1 (a int NOT NULL, b int)
+--
+-- ok, overrides parent
+
+CREATE TABLE gtestxx_1 (a int NOT NULL, b int)
+== 082
+ALTER TABLE gtestxx_1 INHERIT gtest1
+--
+ALTER TABLE gtestxx_1 INHERIT gtest1
+== 083
+-- error
+CREATE TABLE gtestxx_3 (a int NOT NULL, b int GENERATED ALWAYS AS (a * 2) STORED)
+--
+-- error
+CREATE TABLE gtestxx_3 (a int NOT NULL, b int GENERATED ALWAYS AS (a * 2) STORED)
+== 084
+ALTER TABLE gtestxx_3 INHERIT gtest1
+--
+ALTER TABLE gtestxx_3 INHERIT gtest1
+== 085
+-- ok
+CREATE TABLE gtestxx_4 (b int GENERATED ALWAYS AS (a * 2) STORED, a int NOT NULL)
+--
+-- ok
+CREATE TABLE gtestxx_4 (b int GENERATED ALWAYS AS (a * 2) STORED, a int NOT NULL)
+== 086
+ALTER TABLE gtestxx_4 INHERIT gtest1
+--
+ALTER TABLE gtestxx_4 INHERIT gtest1
+== 087
+-- ok
+
+-- test multiple inheritance mismatches
+CREATE TABLE gtesty (x int, b int DEFAULT 55)
+--
+-- ok
+
+-- test multiple inheritance mismatches
+CREATE TABLE gtesty (x int, b int DEFAULT 55)
+== 088
+CREATE TABLE gtest1_y () INHERITS (gtest0, gtesty)
+--
+CREATE TABLE gtest1_y () INHERITS (gtest0, gtesty)
+== 089
+-- error
+DROP TABLE gtesty
+--
+-- error
+DROP TABLE gtesty
+== 090
+CREATE TABLE gtesty (x int, b int)
+--
+CREATE TABLE gtesty (x int, b int)
+== 091
+CREATE TABLE gtest1_y () INHERITS (gtest1, gtesty)
+--
+CREATE TABLE gtest1_y () INHERITS (gtest1, gtesty)
+== 092
+-- error
+DROP TABLE gtesty
+--
+-- error
+DROP TABLE gtesty
+== 093
+CREATE TABLE gtesty (x int, b int GENERATED ALWAYS AS (x * 22) STORED)
+--
+CREATE TABLE gtesty (x int, b int GENERATED ALWAYS AS (x * 22) STORED)
+== 094
+CREATE TABLE gtest1_y () INHERITS (gtest1, gtesty)
+--
+CREATE TABLE gtest1_y () INHERITS (gtest1, gtesty)
+== 095
+-- error
+CREATE TABLE gtest1_y (b int GENERATED ALWAYS AS (x + 1) STORED) INHERITS (gtest1, gtesty)
+--
+-- error
+CREATE TABLE gtest1_y (b int GENERATED ALWAYS AS (x + 1) STORED) INHERITS (gtest1, gtesty)
+== 096
+-- ok
+
+-- test correct handling of GENERATED column that's only in child
+CREATE TABLE gtestp (f1 int)
+--
+-- ok
+
+-- test correct handling of GENERATED column that's only in child
+CREATE TABLE gtestp (f1 int)
+== 097
+CREATE TABLE gtestc (f2 int GENERATED ALWAYS AS (f1+1) STORED) INHERITS(gtestp)
+--
+CREATE TABLE gtestc (f2 int GENERATED ALWAYS AS (f1+1) STORED) INHERITS(gtestp)
+== 098
+INSERT INTO gtestc values(42)
+--
+INSERT INTO gtestc values($1)
+== 099
+TABLE gtestc
+--
+TABLE gtestc
+== 100
+UPDATE gtestp SET f1 = f1 * 10
+--
+UPDATE gtestp SET f1 = f1 * $1
+== 101
+TABLE gtestc
+--
+TABLE gtestc
+== 102
+DROP TABLE gtestp CASCADE
+--
+DROP TABLE gtestp CASCADE
+== 103
+-- test stored update
+CREATE TABLE gtest3 (a int, b int GENERATED ALWAYS AS (a * 3) STORED)
+--
+-- test stored update
+CREATE TABLE gtest3 (a int, b int GENERATED ALWAYS AS (a * 3) STORED)
+== 104
+INSERT INTO gtest3 (a) VALUES (1), (2), (3), (NULL)
+--
+INSERT INTO gtest3 (a) VALUES ($1), ($2), ($3), ($4)
+== 105
+SELECT * FROM gtest3 ORDER BY a
+--
+SELECT * FROM gtest3 ORDER BY a
+== 106
+UPDATE gtest3 SET a = 22 WHERE a = 2
+--
+UPDATE gtest3 SET a = $1 WHERE a = $2
+== 107
+SELECT * FROM gtest3 ORDER BY a
+--
+SELECT * FROM gtest3 ORDER BY a
+== 108
+CREATE TABLE gtest3a (a text, b text GENERATED ALWAYS AS (a || '+' || a) STORED)
+--
+CREATE TABLE gtest3a (a text, b text GENERATED ALWAYS AS (a || '+' || a) STORED)
+== 109
+INSERT INTO gtest3a (a) VALUES ('a'), ('b'), ('c'), (NULL)
+--
+INSERT INTO gtest3a (a) VALUES ($1), ($2), ($3), ($4)
+== 110
+SELECT * FROM gtest3a ORDER BY a
+--
+SELECT * FROM gtest3a ORDER BY a
+== 111
+UPDATE gtest3a SET a = 'bb' WHERE a = 'b'
+--
+UPDATE gtest3a SET a = $1 WHERE a = $2
+== 112
+SELECT * FROM gtest3a ORDER BY a
+--
+SELECT * FROM gtest3a ORDER BY a
+== 113
+-- COPY
+TRUNCATE gtest1
+--
+-- COPY
+TRUNCATE gtest1
+== 114
+INSERT INTO gtest1 (a) VALUES (1), (2)
+--
+INSERT INTO gtest1 (a) VALUES ($1), ($2)
+== 115
+COPY gtest1 TO stdout
+--
+COPY gtest1 TO stdout
+== 116
+COPY gtest1 (a, b) TO stdout
+--
+COPY gtest1 (a, b) TO stdout
+== 117
+COPY gtest1 FROM stdin
+--
+COPY gtest1 FROM stdin
+== 118
+COPY gtest1 (a, b) FROM stdin
+--
+COPY gtest1 (a, b) FROM stdin
+== 119
+COPY gtest3 (a, b) FROM stdin
+--
+COPY gtest3 (a, b) FROM stdin

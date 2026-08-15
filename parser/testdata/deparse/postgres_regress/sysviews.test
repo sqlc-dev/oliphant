@@ -1,0 +1,154 @@
+== 001
+|--
+-- Test assorted system views
+|--
+-- This test is mainly meant to provide some code coverage for the
+-- set-returning functions that underlie certain system views.
+-- The output of most of these functions is very environment-dependent,
+-- so our ability to test with fixed expected output is pretty limited;
+-- but even a trivial check of count(*) will exercise the normal code path
+-- through the SRF.
+
+select count(*) >= 0 as ok from pg_available_extension_versions
+--
+SELECT count(*) >= 0 AS ok FROM pg_available_extension_versions
+== 002
+select count(*) >= 0 as ok from pg_available_extensions
+--
+SELECT count(*) >= 0 AS ok FROM pg_available_extensions
+== 003
+-- The entire output of pg_backend_memory_contexts is not stable,
+-- we test only the existence and basic condition of TopMemoryContext.
+select name, ident, parent, level, total_bytes >= free_bytes
+  from pg_backend_memory_contexts where level = 0
+--
+SELECT name, ident, parent, level, total_bytes >= free_bytes FROM pg_backend_memory_contexts WHERE level = 0
+== 004
+-- We can exercise some MemoryContext type stats functions.  Most of the
+-- column values are too platform-dependant to display.
+
+-- Ensure stats from the bump allocator look sane.  Bump isn't a commonly
+-- used context, but it is used in tuplesort.c, so open a cursor to keep
+-- the tuplesort alive long enough for us to query the context stats.
+begin
+--
+BEGIN
+== 005
+declare cur cursor for select left(a,10), b
+  from (values(repeat('a', 512 * 1024),1),(repeat('b', 512),2)) v(a,b)
+  order by v.a desc
+--
+DECLARE cur CURSOR FOR SELECT "left"(a, 10), b FROM (VALUES (repeat('a', 512 * 1024), 1), (repeat('b', 512), 2)) v(a, b) ORDER BY v.a DESC
+== 006
+fetch 1 from cur
+--
+FETCH cur
+== 007
+select name, parent, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
+from pg_backend_memory_contexts where name = 'Caller tuples'
+--
+SELECT name, parent, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks FROM pg_backend_memory_contexts WHERE name = 'Caller tuples'
+== 008
+rollback
+--
+ROLLBACK
+== 009
+-- At introduction, pg_config had 23 entries; it may grow
+select count(*) > 20 as ok from pg_config
+--
+SELECT count(*) > 20 AS ok FROM pg_config
+== 010
+-- We expect no cursors in this test; see also portals.sql
+select count(*) = 0 as ok from pg_cursors
+--
+SELECT count(*) = 0 AS ok FROM pg_cursors
+== 011
+select count(*) >= 0 as ok from pg_file_settings
+--
+SELECT count(*) >= 0 AS ok FROM pg_file_settings
+== 012
+-- There will surely be at least one rule, with no errors.
+select count(*) > 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
+  from pg_hba_file_rules
+--
+SELECT count(*) > 0 AS ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err FROM pg_hba_file_rules
+== 013
+-- There may be no rules, and there should be no errors.
+select count(*) >= 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
+  from pg_ident_file_mappings
+--
+SELECT count(*) >= 0 AS ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err FROM pg_ident_file_mappings
+== 014
+-- There will surely be at least one active lock
+select count(*) > 0 as ok from pg_locks
+--
+SELECT count(*) > 0 AS ok FROM pg_locks
+== 015
+-- We expect no prepared statements in this test; see also prepare.sql
+select count(*) = 0 as ok from pg_prepared_statements
+--
+SELECT count(*) = 0 AS ok FROM pg_prepared_statements
+== 016
+-- See also prepared_xacts.sql
+select count(*) >= 0 as ok from pg_prepared_xacts
+--
+SELECT count(*) >= 0 AS ok FROM pg_prepared_xacts
+== 017
+-- There will surely be at least one SLRU cache
+select count(*) > 0 as ok from pg_stat_slru
+--
+SELECT count(*) > 0 AS ok FROM pg_stat_slru
+== 018
+-- There must be only one record
+select count(*) = 1 as ok from pg_stat_wal
+--
+SELECT count(*) = 1 AS ok FROM pg_stat_wal
+== 019
+-- We expect no walreceiver running in this test
+select count(*) = 0 as ok from pg_stat_wal_receiver
+--
+SELECT count(*) = 0 AS ok FROM pg_stat_wal_receiver
+== 020
+-- This is to record the prevailing planner enable_foo settings during
+-- a regression test run.
+select name, setting from pg_settings where name like 'enable%'
+--
+SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%'
+== 021
+-- There are always wait event descriptions for various types.  InjectionPoint
+-- may be present or absent, depending on history since last postmaster start.
+select type, count(*) > 0 as ok FROM pg_wait_events
+  where type <> 'InjectionPoint' group by type order by type COLLATE "C"
+--
+SELECT type, count(*) > 0 AS ok FROM pg_wait_events WHERE type <> 'InjectionPoint' GROUP BY type ORDER BY type COLLATE "C"
+== 022
+-- Test that the pg_timezone_names and pg_timezone_abbrevs views are
+-- more-or-less working.  We can't test their contents in any great detail
+-- without the outputs changing anytime IANA updates the underlying data,
+-- but it seems reasonable to expect at least one entry per major meridian.
+-- (At the time of writing, the actual counts are around 38 because of
+-- zones using fractional GMT offsets, so this is a pretty loose test.)
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_names
+--
+SELECT count(DISTINCT utc_offset) >= 24 AS ok FROM pg_timezone_names
+== 023
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+SELECT count(DISTINCT utc_offset) >= 24 AS ok FROM pg_timezone_abbrevs
+== 024
+-- Let's check the non-default timezone abbreviation sets, too
+set timezone_abbreviations = 'Australia'
+--
+SET timezone_abbreviations TO "Australia"
+== 025
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+SELECT count(DISTINCT utc_offset) >= 24 AS ok FROM pg_timezone_abbrevs
+== 026
+set timezone_abbreviations = 'India'
+--
+SET timezone_abbreviations TO "India"
+== 027
+select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
+--
+SELECT count(DISTINCT utc_offset) >= 24 AS ok FROM pg_timezone_abbrevs

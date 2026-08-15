@@ -1,0 +1,31 @@
+name: regenerate
+
+# Scheduled proof that the committed goldens are reproducible byte-for-byte
+# from the pinned oracle (libpg_query 17-6.2.2 via pg_query_go v6.2.2, cgo).
+# This is the only place cgo ever runs; the main module never links it.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fetch pinned corpora
+        run: |
+          git clone --depth 1 --branch 17-6.2.2 https://github.com/pganalyze/libpg_query /tmp/libpg_query
+          git clone --depth 1 --branch v6.2.2 https://github.com/pganalyze/pg_query_go /tmp/pg_query_go
+      - name: Regenerate goldens (builds the cgo oracle; several minutes)
+        run: |
+          go run ./cmd/regenerate -libpg-query /tmp/libpg_query -pg-query-go /tmp/pg_query_go
+      - name: Goldens are reproducible
+        run: git diff --exit-code -- parser/testdata

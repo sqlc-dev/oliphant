@@ -1,0 +1,169 @@
+== 001
+|--
+-- Test SP-GiST indexes.
+|--
+-- There are other tests to test different SP-GiST opclasses. This is for
+-- testing SP-GiST code itself.
+
+create table spgist_point_tbl(id int4, p point)
+--
+f4d461951e0c283e
+== 002
+create index spgist_point_idx on spgist_point_tbl using spgist(p) with (fillfactor = 75)
+--
+ae78d46516b6d668
+== 003
+-- Test vacuum-root operation. It gets invoked when the root is also a leaf,
+-- i.e. the index is very small.
+insert into spgist_point_tbl (id, p)
+select g, point(g*10, g*10) from generate_series(1, 10) g
+--
+60d4b784589442ac
+== 004
+delete from spgist_point_tbl where id < 5
+--
+ede7c5da302d45f9
+== 005
+vacuum spgist_point_tbl
+--
+a9b0baf69214a32a
+== 006
+-- Insert more data, to make the index a few levels deep.
+insert into spgist_point_tbl (id, p)
+select g,      point(g*10, g*10) from generate_series(1, 10000) g
+--
+60d4b784589442ac
+== 007
+insert into spgist_point_tbl (id, p)
+select g+100000, point(g*10+1, g*10+1) from generate_series(1, 10000) g
+--
+97f7803d11977be3
+== 008
+-- To test vacuum, delete some entries from all over the index.
+delete from spgist_point_tbl where id % 2 = 1
+--
+c5f6576cc60ccc6d
+== 009
+-- And also delete some concentration of values. (SP-GiST doesn't currently
+-- attempt to delete pages even when they become empty, but if it did, this
+-- would exercise it)
+delete from spgist_point_tbl where id < 10000
+--
+ede7c5da302d45f9
+== 010
+vacuum spgist_point_tbl
+--
+a9b0baf69214a32a
+== 011
+-- Test rescan paths (cf. bug #15378)
+-- use box and && rather than point, so that rescan happens when the
+-- traverse stack is non-empty
+
+create table spgist_box_tbl(id serial, b box)
+--
+a61bc0a0ee922f96
+== 012
+insert into spgist_box_tbl(b)
+select box(point(i,j),point(i+s,j+s))
+  from generate_series(1,100,5) i,
+       generate_series(1,100,5) j,
+       generate_series(1,10) s
+--
+a7ec4ef747b8632a
+== 013
+create index spgist_box_idx on spgist_box_tbl using spgist (b)
+--
+6e3287466d678e53
+== 014
+select count(*)
+  from (values (point(5,5)),(point(8,8)),(point(12,12))) v(p)
+ where exists(select * from spgist_box_tbl b where b.b && box(v.p,v.p))
+--
+882cb54e13584c72
+== 015
+-- The point opclass's choose method only uses the spgMatchNode action,
+-- so the other actions are not tested by the above. Create an index using
+-- text opclass, which uses the others actions.
+
+create table spgist_text_tbl(id int4, t text)
+--
+200789a212b537fa
+== 016
+create index spgist_text_idx on spgist_text_tbl using spgist(t)
+--
+a0e7a27dcda84582
+== 017
+insert into spgist_text_tbl (id, t)
+select g, 'f' || repeat('o', 100) || g from generate_series(1, 10000) g
+union all
+select g, 'baaaaaaaaaaaaaar' || g from generate_series(1, 1000) g
+--
+f6d52e5eb9f80742
+== 018
+-- Do a lot of insertions that have to split an existing node. Hopefully
+-- one of these will cause the page to run out of space, causing the inner
+-- tuple to be moved to another page.
+insert into spgist_text_tbl (id, t)
+select -g, 'f' || repeat('o', 100-g) || 'surprise' from generate_series(1, 100) g
+--
+e992baa541d1dece
+== 019
+-- Test out-of-range fillfactor values
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 9)
+--
+6102610b1b979e3a
+== 020
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 101)
+--
+a72579d26ced0ec8
+== 021
+-- Modify fillfactor in existing index
+alter index spgist_point_idx set (fillfactor = 90)
+--
+ed91e80a28242527
+== 022
+reindex index spgist_point_idx
+--
+492b2aa3cf531a59
+== 023
+-- Test index over a domain
+create domain spgist_text as varchar
+--
+85ea606e8bec6fbf
+== 024
+create table spgist_domain_tbl (f1 spgist_text)
+--
+cf75a102eb11657c
+== 025
+create index spgist_domain_idx on spgist_domain_tbl using spgist(f1)
+--
+5097a66247cbf05e
+== 026
+insert into spgist_domain_tbl values('fee'), ('fi'), ('fo'), ('fum')
+--
+fdd98f40e741a5ad
+== 027
+explain (costs off)
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+db28786512601f16
+== 028
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+c5bee76354ce5b7a
+== 029
+-- test an unlogged table, mostly to get coverage of spgistbuildempty
+create unlogged table spgist_unlogged_tbl(id serial, b box)
+--
+4f0a65c439ffd14c
+== 030
+create index spgist_unlogged_idx on spgist_unlogged_tbl using spgist (b)
+--
+6deabeb3e5ef759f
+== 031
+insert into spgist_unlogged_tbl(b)
+select box(point(i,j))
+  from generate_series(1,100,5) i,
+       generate_series(1,10,5) j
+--
+d27d63f851f3ce77

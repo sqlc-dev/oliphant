@@ -1,0 +1,1284 @@
+== 001
+|--
+-- ALTER TABLE ADD COLUMN DEFAULT test
+|--
+
+SET search_path = fast_default
+--
+972eb2e22f47f95c
+== 002
+CREATE SCHEMA fast_default
+--
+90550c3fa7174e08
+== 003
+CREATE TABLE m(id OID)
+--
+1e20d5104f8460fd
+== 004
+INSERT INTO m VALUES (NULL::OID)
+--
+94d6e80610d8b010
+== 005
+CREATE FUNCTION set(tabname name) RETURNS VOID
+AS $$
+BEGIN
+  UPDATE m
+  SET id = (SELECT c.relfilenode
+            FROM pg_class AS c, pg_namespace AS s
+            WHERE c.relname = tabname
+                AND c.relnamespace = s.oid
+                AND s.nspname = 'fast_default');
+END;
+$$ LANGUAGE 'plpgsql'
+--
+fcedfe14e8e46dd4
+== 006
+CREATE FUNCTION comp() RETURNS TEXT
+AS $$
+BEGIN
+  RETURN (SELECT CASE
+               WHEN m.id = c.relfilenode THEN 'Unchanged'
+               ELSE 'Rewritten'
+               END
+           FROM m, pg_class AS c, pg_namespace AS s
+           WHERE c.relname = 't'
+               AND c.relnamespace = s.oid
+               AND s.nspname = 'fast_default');
+END;
+$$ LANGUAGE 'plpgsql'
+--
+fdf8e638e7151f29
+== 007
+CREATE FUNCTION log_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql as
+$func$
+
+declare
+   this_schema text;
+begin
+    select into this_schema relnamespace::regnamespace::text
+    from pg_class
+    where oid = pg_event_trigger_table_rewrite_oid();
+    if this_schema = 'fast_default'
+    then
+        RAISE NOTICE 'rewriting table % for reason %',
+          pg_event_trigger_table_rewrite_oid()::regclass,
+          pg_event_trigger_table_rewrite_reason();
+    end if;
+end;
+$func$
+--
+eb677674800497f2
+== 008
+CREATE TABLE has_volatile AS
+SELECT * FROM generate_series(1,10) id
+--
+a6c07d0b459c9617
+== 009
+CREATE EVENT TRIGGER has_volatile_rewrite
+                  ON table_rewrite
+   EXECUTE PROCEDURE log_rewrite()
+--
+d18eded3d9c8f784
+== 010
+-- only the last of these should trigger a rewrite
+ALTER TABLE has_volatile ADD col1 int
+--
+ec0d235c5428a10a
+== 011
+ALTER TABLE has_volatile ADD col2 int DEFAULT 1
+--
+4d0a1948f702b144
+== 012
+ALTER TABLE has_volatile ADD col3 timestamptz DEFAULT current_timestamp
+--
+5e133d2eb6346157
+== 013
+ALTER TABLE has_volatile ADD col4 int DEFAULT (random() * 10000)::int
+--
+b154e563af3594d9
+== 014
+-- Test a large sample of different datatypes
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY, c_int INT DEFAULT 1)
+--
+35e8e9fabf9f3b5b
+== 015
+SELECT set('t')
+--
+9d30c2af3a0130d3
+== 016
+INSERT INTO T VALUES (1), (2)
+--
+7e11840ee96d5416
+== 017
+ALTER TABLE T ADD COLUMN c_bpchar BPCHAR(5) DEFAULT 'hello',
+              ALTER COLUMN c_int SET DEFAULT 2
+--
+c0103d524fffc2c2
+== 018
+INSERT INTO T VALUES (3), (4)
+--
+7e11840ee96d5416
+== 019
+ALTER TABLE T ADD COLUMN c_text TEXT  DEFAULT 'world',
+              ALTER COLUMN c_bpchar SET DEFAULT 'dog'
+--
+ba8f2b2880e2340e
+== 020
+INSERT INTO T VALUES (5), (6)
+--
+7e11840ee96d5416
+== 021
+ALTER TABLE T ADD COLUMN c_date DATE DEFAULT '2016-06-02',
+              ALTER COLUMN c_text SET DEFAULT 'cat'
+--
+30c459284523a35b
+== 022
+INSERT INTO T VALUES (7), (8)
+--
+7e11840ee96d5416
+== 023
+ALTER TABLE T ADD COLUMN c_timestamp TIMESTAMP DEFAULT '2016-09-01 12:00:00',
+              ADD COLUMN c_timestamp_null TIMESTAMP,
+              ALTER COLUMN c_date SET DEFAULT '2010-01-01'
+--
+684411640d3af660
+== 024
+INSERT INTO T VALUES (9), (10)
+--
+7e11840ee96d5416
+== 025
+ALTER TABLE T ADD COLUMN c_array TEXT[]
+                  DEFAULT '{"This", "is", "the", "real", "world"}',
+              ALTER COLUMN c_timestamp SET DEFAULT '1970-12-31 11:12:13',
+              ALTER COLUMN c_timestamp_null SET DEFAULT '2016-09-29 12:00:00'
+--
+b4194c63db14ee00
+== 026
+INSERT INTO T VALUES (11), (12)
+--
+7e11840ee96d5416
+== 027
+ALTER TABLE T ADD COLUMN c_small SMALLINT DEFAULT -5,
+              ADD COLUMN c_small_null SMALLINT,
+              ALTER COLUMN c_array
+                  SET DEFAULT '{"This", "is", "no", "fantasy"}'
+--
+3836d346fb241b36
+== 028
+INSERT INTO T VALUES (13), (14)
+--
+7e11840ee96d5416
+== 029
+ALTER TABLE T ADD COLUMN c_big BIGINT DEFAULT 180000000000018,
+              ALTER COLUMN c_small SET DEFAULT 9,
+              ALTER COLUMN c_small_null SET DEFAULT 13
+--
+39a4e1aadc61abdd
+== 030
+INSERT INTO T VALUES (15), (16)
+--
+7e11840ee96d5416
+== 031
+ALTER TABLE T ADD COLUMN c_num NUMERIC DEFAULT 1.00000000001,
+              ALTER COLUMN c_big SET DEFAULT -9999999999999999
+--
+12ec2c1c49368de7
+== 032
+INSERT INTO T VALUES (17), (18)
+--
+7e11840ee96d5416
+== 033
+ALTER TABLE T ADD COLUMN c_time TIME DEFAULT '12:00:00',
+              ALTER COLUMN c_num SET DEFAULT 2.000000000000002
+--
+bc40d24a7976abb4
+== 034
+INSERT INTO T VALUES (19), (20)
+--
+7e11840ee96d5416
+== 035
+ALTER TABLE T ADD COLUMN c_interval INTERVAL DEFAULT '1 day',
+              ALTER COLUMN c_time SET DEFAULT '23:59:59'
+--
+a9aa80e71bf3b1fd
+== 036
+INSERT INTO T VALUES (21), (22)
+--
+7e11840ee96d5416
+== 037
+ALTER TABLE T ADD COLUMN c_hugetext TEXT DEFAULT repeat('abcdefg',1000),
+              ALTER COLUMN c_interval SET DEFAULT '3 hours'
+--
+2151b0a366a3492f
+== 038
+INSERT INTO T VALUES (23), (24)
+--
+7e11840ee96d5416
+== 039
+ALTER TABLE T ALTER COLUMN c_interval DROP DEFAULT,
+              ALTER COLUMN c_hugetext SET DEFAULT repeat('poiuyt', 1000)
+--
+ef269d2c7ea7eadd
+== 040
+INSERT INTO T VALUES (25), (26)
+--
+7e11840ee96d5416
+== 041
+ALTER TABLE T ALTER COLUMN c_bpchar    DROP DEFAULT,
+              ALTER COLUMN c_date      DROP DEFAULT,
+              ALTER COLUMN c_text      DROP DEFAULT,
+              ALTER COLUMN c_timestamp DROP DEFAULT,
+              ALTER COLUMN c_array     DROP DEFAULT,
+              ALTER COLUMN c_small     DROP DEFAULT,
+              ALTER COLUMN c_big       DROP DEFAULT,
+              ALTER COLUMN c_num       DROP DEFAULT,
+              ALTER COLUMN c_time      DROP DEFAULT,
+              ALTER COLUMN c_hugetext  DROP DEFAULT
+--
+58d463182060449d
+== 042
+INSERT INTO T VALUES (27), (28)
+--
+7e11840ee96d5416
+== 043
+SELECT pk, c_int, c_bpchar, c_text, c_date, c_timestamp,
+       c_timestamp_null, c_array, c_small, c_small_null,
+       c_big, c_num, c_time, c_interval,
+       c_hugetext = repeat('abcdefg',1000) as c_hugetext_origdef,
+       c_hugetext = repeat('poiuyt', 1000) as c_hugetext_newdef
+FROM T ORDER BY pk
+--
+bad63fbddbb33b98
+== 044
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 045
+DROP TABLE T
+--
+02c6443d097a5792
+== 046
+-- Test expressions in the defaults
+CREATE OR REPLACE FUNCTION foo(a INT) RETURNS TEXT AS $$
+DECLARE res TEXT := '';
+        i INT;
+BEGIN
+  i := 0;
+  WHILE (i < a) LOOP
+    res := res || chr(ascii('a') + i);
+    i := i + 1;
+  END LOOP;
+  RETURN res;
+END; $$ LANGUAGE PLPGSQL STABLE
+--
+e73976d0006b37db
+== 047
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY, c_int INT DEFAULT LENGTH(foo(6)))
+--
+32c339daf8d35509
+== 048
+SELECT set('t')
+--
+9d30c2af3a0130d3
+== 049
+INSERT INTO T VALUES (1), (2)
+--
+7e11840ee96d5416
+== 050
+ALTER TABLE T ADD COLUMN c_bpchar BPCHAR(5) DEFAULT foo(4),
+              ALTER COLUMN c_int SET DEFAULT LENGTH(foo(8))
+--
+1fb4e86f231d1270
+== 051
+INSERT INTO T VALUES (3), (4)
+--
+7e11840ee96d5416
+== 052
+ALTER TABLE T ADD COLUMN c_text TEXT  DEFAULT foo(6),
+              ALTER COLUMN c_bpchar SET DEFAULT foo(3)
+--
+0579cbe3fdb9cf0b
+== 053
+INSERT INTO T VALUES (5), (6)
+--
+7e11840ee96d5416
+== 054
+ALTER TABLE T ADD COLUMN c_date DATE
+                  DEFAULT '2016-06-02'::DATE  + LENGTH(foo(10)),
+              ALTER COLUMN c_text SET DEFAULT foo(12)
+--
+2826382f02775f42
+== 055
+INSERT INTO T VALUES (7), (8)
+--
+7e11840ee96d5416
+== 056
+ALTER TABLE T ADD COLUMN c_timestamp TIMESTAMP
+                  DEFAULT '2016-09-01'::DATE + LENGTH(foo(10)),
+              ALTER COLUMN c_date
+                  SET DEFAULT '2010-01-01'::DATE - LENGTH(foo(4))
+--
+02518439c8cad861
+== 057
+INSERT INTO T VALUES (9), (10)
+--
+7e11840ee96d5416
+== 058
+ALTER TABLE T ADD COLUMN c_array TEXT[]
+                  DEFAULT ('{"This", "is", "' || foo(4) ||
+                           '","the", "real", "world"}')::TEXT[],
+              ALTER COLUMN c_timestamp
+                  SET DEFAULT '1970-12-31'::DATE + LENGTH(foo(30))
+--
+c44f7875d734212d
+== 059
+INSERT INTO T VALUES (11), (12)
+--
+7e11840ee96d5416
+== 060
+ALTER TABLE T ALTER COLUMN c_int DROP DEFAULT,
+              ALTER COLUMN c_array
+                  SET DEFAULT ('{"This", "is", "' || foo(1) ||
+                               '", "fantasy"}')::text[]
+--
+54cf7dcc2398f08c
+== 061
+INSERT INTO T VALUES (13), (14)
+--
+7e11840ee96d5416
+== 062
+ALTER TABLE T ALTER COLUMN c_bpchar    DROP DEFAULT,
+              ALTER COLUMN c_date      DROP DEFAULT,
+              ALTER COLUMN c_text      DROP DEFAULT,
+              ALTER COLUMN c_timestamp DROP DEFAULT,
+              ALTER COLUMN c_array     DROP DEFAULT
+--
+db88c3ee2cbb81ec
+== 063
+INSERT INTO T VALUES (15), (16)
+--
+7e11840ee96d5416
+== 064
+SELECT * FROM T
+--
+b58f9b7bcb0bbfa5
+== 065
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 066
+DROP TABLE T
+--
+02c6443d097a5792
+== 067
+-- Test domains with default value for table rewrite.
+CREATE DOMAIN domain1 AS int DEFAULT 11
+--
+2b8a80d6e263768f
+== 068
+-- constant
+CREATE DOMAIN domain2 AS int DEFAULT random(min=>10, max=>100)
+--
+b7436097b9a30e74
+== 069
+-- volatile
+CREATE DOMAIN domain3 AS text DEFAULT foo(4)
+--
+ad35c988d03566e7
+== 070
+-- stable
+CREATE DOMAIN domain4 AS text[]
+  DEFAULT ('{"This", "is", "' || foo(4) || '","the", "real", "world"}')::TEXT[]
+--
+8cf859e049bcfa7a
+== 071
+CREATE TABLE t2 (a domain1)
+--
+3e82bd4ea8a3d130
+== 072
+INSERT INTO t2 VALUES (1),(2)
+--
+37b3160bea0c45ef
+== 073
+-- no table rewrite
+ALTER TABLE t2 ADD COLUMN b domain1 default 3
+--
+b51118e1386fbfb8
+== 074
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+efff72a1a7b02aa5
+== 075
+-- table rewrite should happen
+ALTER TABLE t2 ADD COLUMN c domain3 default left(random()::text,3)
+--
+9408a4144fb2b0f5
+== 076
+-- no table rewrite
+ALTER TABLE t2 ADD COLUMN d domain4
+--
+367caf725aa795d0
+== 077
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+efff72a1a7b02aa5
+== 078
+-- table rewrite should happen
+ALTER TABLE t2 ADD COLUMN e domain2
+--
+fbe0c22250a8bc35
+== 079
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+efff72a1a7b02aa5
+== 080
+SELECT a, b, length(c) = 3 as c_ok, d, e >= 10 as e_ok FROM t2
+--
+4ac5122344de7c90
+== 081
+DROP TABLE t2
+--
+8a1aae9eb50d046c
+== 082
+DROP DOMAIN domain1
+--
+19dfa2dfbcafdc67
+== 083
+DROP DOMAIN domain2
+--
+767e7808a023828f
+== 084
+DROP DOMAIN domain3
+--
+9d11d5b7c7dd4d30
+== 085
+DROP DOMAIN domain4
+--
+77f29fa4ace90216
+== 086
+DROP FUNCTION foo(INT)
+--
+b9f6b90f6c6a5317
+== 087
+-- Fall back to full rewrite for volatile expressions
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY)
+--
+b738d8e492e4fedf
+== 088
+INSERT INTO T VALUES (1)
+--
+7e11840ee96d5416
+== 089
+SELECT set('t')
+--
+9d30c2af3a0130d3
+== 090
+-- now() is stable, because it returns the transaction timestamp
+ALTER TABLE T ADD COLUMN c1 TIMESTAMP DEFAULT now()
+--
+eb67c11eff570a66
+== 091
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 092
+-- clock_timestamp() is volatile
+ALTER TABLE T ADD COLUMN c2 TIMESTAMP DEFAULT clock_timestamp()
+--
+0a9d1fee1350ec73
+== 093
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 094
+-- check that we notice insertion of a volatile default argument
+CREATE FUNCTION foolme(timestamptz DEFAULT clock_timestamp())
+  RETURNS timestamptz
+  IMMUTABLE AS 'select $1' LANGUAGE sql
+--
+d5d6b4299388ce43
+== 095
+ALTER TABLE T ADD COLUMN c3 timestamptz DEFAULT foolme()
+--
+deb13caef7f0d745
+== 096
+SELECT attname, atthasmissing, attmissingval FROM pg_attribute
+  WHERE attrelid = 't'::regclass AND attnum > 0
+  ORDER BY attnum
+--
+a2cd07ed5704bda8
+== 097
+DROP TABLE T
+--
+02c6443d097a5792
+== 098
+DROP FUNCTION foolme(timestamptz)
+--
+fa022f145d0df772
+== 099
+-- Simple querie
+CREATE TABLE T (pk INT NOT NULL PRIMARY KEY)
+--
+b738d8e492e4fedf
+== 100
+SELECT set('t')
+--
+9d30c2af3a0130d3
+== 101
+INSERT INTO T SELECT * FROM generate_series(1, 10) a
+--
+36afd160f2a1fd01
+== 102
+ALTER TABLE T ADD COLUMN c_bigint BIGINT NOT NULL DEFAULT -1
+--
+eecd9c4eb8b9a1ed
+== 103
+INSERT INTO T SELECT b, b - 10 FROM generate_series(11, 20) a(b)
+--
+48dd4f0d61039a7e
+== 104
+ALTER TABLE T ADD COLUMN c_text TEXT DEFAULT 'hello'
+--
+3be21d6c18fe8fea
+== 105
+INSERT INTO T SELECT b, b - 10, (b + 10)::text FROM generate_series(21, 30) a(b)
+--
+ba90fdc03e61d128
+== 106
+-- WHERE clause
+SELECT c_bigint, c_text FROM T WHERE c_bigint = -1 LIMIT 1
+--
+bfaa08f15f38fe84
+== 107
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT c_bigint, c_text FROM T WHERE c_bigint = -1 LIMIT 1
+--
+ff29b77487ce7afd
+== 108
+SELECT c_bigint, c_text FROM T WHERE c_text = 'hello' LIMIT 1
+--
+45a13ab7a7f780a8
+== 109
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) SELECT c_bigint, c_text FROM T WHERE c_text = 'hello' LIMIT 1
+--
+530b20d1f468a77d
+== 110
+-- COALESCE
+SELECT COALESCE(c_bigint, pk), COALESCE(c_text, pk::text)
+FROM T
+ORDER BY pk LIMIT 10
+--
+c46965fc881e8d09
+== 111
+-- Aggregate function
+SELECT SUM(c_bigint), MAX(c_text COLLATE "C" ), MIN(c_text COLLATE "C") FROM T
+--
+c29c738df9b16486
+== 112
+-- ORDER BY
+SELECT * FROM T ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+7e895bf956cf4b0d
+== 113
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT * FROM T ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+785ea2626eb5951f
+== 114
+-- LIMIT
+SELECT * FROM T WHERE c_bigint > -1 ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+2e58e10fb57b5fd5
+== 115
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT * FROM T WHERE c_bigint > -1 ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+c741d595e6c5fff0
+== 116
+--  DELETE with RETURNING
+DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *
+--
+0ca2a692fb439bf4
+== 117
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *
+--
+38e8c10a064735a7
+== 118
+-- UPDATE
+UPDATE T SET c_text = '"' || c_text || '"'  WHERE pk < 10
+--
+b57dea66865d5636
+== 119
+SELECT * FROM T WHERE c_text LIKE '"%"' ORDER BY PK
+--
+39a989b4d0ee4c9c
+== 120
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 121
+DROP TABLE T
+--
+02c6443d097a5792
+== 122
+-- Combine with other DDL
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY)
+--
+b738d8e492e4fedf
+== 123
+SELECT set('t')
+--
+9d30c2af3a0130d3
+== 124
+INSERT INTO T VALUES (1), (2)
+--
+7e11840ee96d5416
+== 125
+ALTER TABLE T ADD COLUMN c_int INT NOT NULL DEFAULT -1
+--
+a994cc0d47a8ade2
+== 126
+INSERT INTO T VALUES (3), (4)
+--
+7e11840ee96d5416
+== 127
+ALTER TABLE T ADD COLUMN c_text TEXT DEFAULT 'Hello'
+--
+3be21d6c18fe8fea
+== 128
+INSERT INTO T VALUES (5), (6)
+--
+7e11840ee96d5416
+== 129
+ALTER TABLE T ALTER COLUMN c_text SET DEFAULT 'world',
+              ALTER COLUMN c_int  SET DEFAULT 1
+--
+47673cfabdd15871
+== 130
+INSERT INTO T VALUES (7), (8)
+--
+7e11840ee96d5416
+== 131
+SELECT * FROM T ORDER BY pk
+--
+e0752315fd3d6699
+== 132
+-- Add an index
+CREATE INDEX i ON T(c_int, c_text)
+--
+9355ada47f7fe466
+== 133
+SELECT c_text FROM T WHERE c_int = -1
+--
+40d8ff2868e4d1e4
+== 134
+SELECT comp()
+--
+9f21f1f2a3f28a2b
+== 135
+-- query to exercise expand_tuple function
+CREATE TABLE t1 AS
+SELECT 1::int AS a , 2::int AS b
+FROM generate_series(1,20) q
+--
+b32e8897382e128c
+== 136
+ALTER TABLE t1 ADD COLUMN c text
+--
+fe132098eb1d0055
+== 137
+SELECT a,
+       stddev(cast((SELECT sum(1) FROM generate_series(1,20) x) AS float4))
+          OVER (PARTITION BY a,b,c ORDER BY b)
+       AS z
+FROM t1
+--
+80f43715290e305d
+== 138
+DROP TABLE T
+--
+02c6443d097a5792
+== 139
+-- test that we account for missing columns without defaults correctly
+-- in expand_tuple, and that rows are correctly expanded for triggers
+
+CREATE FUNCTION test_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+
+begin
+    raise notice 'old tuple: %', to_json(OLD)::text;
+    if TG_OP = 'DELETE'
+    then
+       return OLD;
+    else
+       return NEW;
+    end if;
+end;
+
+$$
+--
+0b4a1e51e9ec1cc4
+== 140
+-- 2 new columns, both have defaults
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 141
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+bd1d96a1f047eb29
+== 142
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+da163f38288791eb
+== 143
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+a5cbc90efc739be5
+== 144
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 145
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 146
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 147
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 148
+DROP TABLE t
+--
+02c6443d097a5792
+== 149
+-- 2 new columns, first has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 150
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+bd1d96a1f047eb29
+== 151
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+da163f38288791eb
+== 152
+ALTER TABLE t ADD COLUMN y int
+--
+8e162499aeb73012
+== 153
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 154
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 155
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 156
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 157
+DROP TABLE t
+--
+02c6443d097a5792
+== 158
+-- 2 new columns, second has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 159
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+bd1d96a1f047eb29
+== 160
+ALTER TABLE t ADD COLUMN x int
+--
+9b5f896bee1c624c
+== 161
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+a5cbc90efc739be5
+== 162
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 163
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 164
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 165
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 166
+DROP TABLE t
+--
+02c6443d097a5792
+== 167
+-- 2 new columns, neither has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 168
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+bd1d96a1f047eb29
+== 169
+ALTER TABLE t ADD COLUMN x int
+--
+9b5f896bee1c624c
+== 170
+ALTER TABLE t ADD COLUMN y int
+--
+8e162499aeb73012
+== 171
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 172
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 173
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 174
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 175
+DROP TABLE t
+--
+02c6443d097a5792
+== 176
+-- same as last 4 tests but here the last original column has a NULL value
+-- 2 new columns, both have defaults
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 177
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+bd1d96a1f047eb29
+== 178
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+da163f38288791eb
+== 179
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+a5cbc90efc739be5
+== 180
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 181
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 182
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 183
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 184
+DROP TABLE t
+--
+02c6443d097a5792
+== 185
+-- 2 new columns, first has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 186
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+bd1d96a1f047eb29
+== 187
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+da163f38288791eb
+== 188
+ALTER TABLE t ADD COLUMN y int
+--
+8e162499aeb73012
+== 189
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 190
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 191
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 192
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 193
+DROP TABLE t
+--
+02c6443d097a5792
+== 194
+-- 2 new columns, second has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 195
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+bd1d96a1f047eb29
+== 196
+ALTER TABLE t ADD COLUMN x int
+--
+9b5f896bee1c624c
+== 197
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+a5cbc90efc739be5
+== 198
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 199
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 200
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 201
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 202
+DROP TABLE t
+--
+02c6443d097a5792
+== 203
+-- 2 new columns, neither has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+4902f10d18d6db11
+== 204
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+bd1d96a1f047eb29
+== 205
+ALTER TABLE t ADD COLUMN x int
+--
+9b5f896bee1c624c
+== 206
+ALTER TABLE t ADD COLUMN y int
+--
+8e162499aeb73012
+== 207
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+dfd4dca8574f73fa
+== 208
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 209
+UPDATE t SET y = 2
+--
+fb82e27532fbba81
+== 210
+SELECT * FROM t
+--
+b58f9b7bcb0bbfa5
+== 211
+DROP TABLE t
+--
+02c6443d097a5792
+== 212
+-- make sure expanded tuple has correct self pointer
+-- it will be required by the RI trigger doing the cascading delete
+
+CREATE TABLE leader (a int PRIMARY KEY, b int)
+--
+da2735263b736929
+== 213
+CREATE TABLE follower (a int REFERENCES leader ON DELETE CASCADE, b int)
+--
+26c8f2be98f0f1ee
+== 214
+INSERT INTO leader VALUES (1, 1), (2, 2)
+--
+efd2223358d4d6a8
+== 215
+ALTER TABLE leader ADD c int
+--
+301731892204ce85
+== 216
+ALTER TABLE leader DROP c
+--
+02df4d3ccb693b7c
+== 217
+DELETE FROM leader
+--
+ec5751fb940352e9
+== 218
+-- check that ALTER TABLE ... ALTER TYPE does the right thing
+
+CREATE TABLE vtype( a integer)
+--
+7ba5da4df5f3be64
+== 219
+INSERT INTO vtype VALUES (1)
+--
+ed8cb2471830c451
+== 220
+ALTER TABLE vtype ADD COLUMN b DOUBLE PRECISION DEFAULT 0.2
+--
+85a32b93cdc1cd2b
+== 221
+ALTER TABLE vtype ADD COLUMN c BOOLEAN DEFAULT true
+--
+dbefc3ab091a576c
+== 222
+SELECT * FROM vtype
+--
+952cc49a444041dc
+== 223
+ALTER TABLE vtype
+      ALTER b TYPE text USING b::text,
+      ALTER c TYPE text USING c::text
+--
+4120e801d0f9a71e
+== 224
+SELECT * FROM vtype
+--
+952cc49a444041dc
+== 225
+-- also check the case that doesn't rewrite the table
+
+CREATE TABLE vtype2 (a int)
+--
+d98128af6d46b2d4
+== 226
+INSERT INTO vtype2 VALUES (1)
+--
+fff7a046afb8d305
+== 227
+ALTER TABLE vtype2 ADD COLUMN b varchar(10) DEFAULT 'xxx'
+--
+0ee90890452f64c0
+== 228
+ALTER TABLE vtype2 ALTER COLUMN b SET DEFAULT 'yyy'
+--
+7dd4277ade9d27de
+== 229
+INSERT INTO vtype2 VALUES (2)
+--
+fff7a046afb8d305
+== 230
+ALTER TABLE vtype2 ALTER COLUMN b TYPE varchar(20) USING b::varchar(20)
+--
+9733afae8e133c4b
+== 231
+SELECT * FROM vtype2
+--
+cf4c8f5ec17a5fce
+== 232
+-- Ensure that defaults are checked when evaluating whether HOT update
+-- is possible, this was broken for a while:
+-- https://postgr.es/m/20190202133521.ylauh3ckqa7colzj%40alap3.anarazel.de
+BEGIN
+--
+b16b431979fc3e05
+== 233
+CREATE TABLE t()
+--
+1cc1aaa19fb1e544
+== 234
+INSERT INTO t DEFAULT VALUES
+--
+f46435a0ae7fb8e1
+== 235
+ALTER TABLE t ADD COLUMN a int DEFAULT 1
+--
+6bcf5c96d0a7fc44
+== 236
+CREATE INDEX ON t(a)
+--
+759df7cf737eb1e2
+== 237
+-- set column with a default 1 to NULL, due to a bug that wasn't
+-- noticed has heap_getattr buggily returned NULL for default columns
+UPDATE t SET a = NULL
+--
+f88d91914ea4c50b
+== 238
+-- verify that index and non-index scans show the same result
+SET LOCAL enable_seqscan = true
+--
+47651b1ae733ae02
+== 239
+SELECT * FROM t WHERE a IS NULL
+--
+3b122a0267f597b8
+== 240
+SET LOCAL enable_seqscan = false
+--
+47651b1ae733ae02
+== 241
+SELECT * FROM t WHERE a IS NULL
+--
+3b122a0267f597b8
+== 242
+ROLLBACK
+--
+a46081a556fda027
+== 243
+-- verify that a default set on a non-plain table doesn't set a missing
+-- value on the attribute
+CREATE FOREIGN DATA WRAPPER dummy
+--
+40ac5677ed9d61c7
+== 244
+CREATE SERVER s0 FOREIGN DATA WRAPPER dummy
+--
+1e9674dbee4810a5
+== 245
+CREATE FOREIGN TABLE ft1 (c1 integer NOT NULL) SERVER s0
+--
+577edf036c9dc36c
+== 246
+ALTER FOREIGN TABLE ft1 ADD COLUMN c8 integer DEFAULT 0
+--
+25fc8e48681c32ce
+== 247
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE char(10)
+--
+78387bb34e87a7af
+== 248
+SELECT count(*)
+  FROM pg_attribute
+  WHERE attrelid = 'ft1'::regclass AND
+    (attmissingval IS NOT NULL OR atthasmissing)
+--
+cda0aa0149428c7d
+== 249
+-- cleanup
+DROP FOREIGN TABLE ft1
+--
+3fd9c2bb3bb19216
+== 250
+DROP SERVER s0
+--
+d54c582fb8401c67
+== 251
+DROP FOREIGN DATA WRAPPER dummy
+--
+9d5101627ce29dc5
+== 252
+DROP TABLE vtype
+--
+77ec5cc048723946
+== 253
+DROP TABLE vtype2
+--
+e27a1c584f1f4d0b
+== 254
+DROP TABLE follower
+--
+6b55df59fe541193
+== 255
+DROP TABLE leader
+--
+fc0ea3f6e1b8601d
+== 256
+DROP FUNCTION test_trigger()
+--
+bd439614d8f6e662
+== 257
+DROP TABLE t1
+--
+7cef1560e91b5a1f
+== 258
+DROP FUNCTION set(name)
+--
+f613f211b86c4c9c
+== 259
+DROP FUNCTION comp()
+--
+78e2505a776a0e43
+== 260
+DROP TABLE m
+--
+b75e8c44e951644e
+== 261
+DROP TABLE has_volatile
+--
+331511ca48bf5a77
+== 262
+DROP EVENT TRIGGER has_volatile_rewrite
+--
+6f3c517384e3cd37
+== 263
+DROP FUNCTION log_rewrite
+--
+0406bf9e044d3918
+== 264
+DROP SCHEMA fast_default
+--
+f8d9d15e405ad0bb
+== 265
+-- Leave a table with an active fast default in place, for pg_upgrade testing
+set search_path = public
+--
+972eb2e22f47f95c
+== 266
+create table has_fast_default(f1 int)
+--
+ce660d2c05228870
+== 267
+insert into has_fast_default values(1)
+--
+99562f19b67b6b08
+== 268
+alter table has_fast_default add column f2 int default 42
+--
+19b07265c817a4e6
+== 269
+table has_fast_default
+--
+abaa4db7611a361a

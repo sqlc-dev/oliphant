@@ -1,0 +1,291 @@
+== 001
+CREATE TABLE test_tablesample (id int, name text) WITH (fillfactor=10)
+--
+CREATE TABLE test_tablesample (id int, name text) WITH (fillfactor=10)
+== 002
+-- use fillfactor so we don't have to load too much data to get multiple pages
+
+INSERT INTO test_tablesample
+  SELECT i, repeat(i::text, 200) FROM generate_series(0, 9) s(i)
+--
+-- use fillfactor so we don't have to load too much data to get multiple pages
+
+INSERT INTO test_tablesample
+  SELECT i, repeat(i::text, $1) FROM generate_series($2, $3) s(i)
+== 003
+SELECT t.id FROM test_tablesample AS t TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+SELECT t.id FROM test_tablesample AS t TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 004
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (100.0/11) REPEATABLE (0)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1/$2) REPEATABLE ($3)
+== 005
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 006
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (50) REPEATABLE (0)
+--
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI ($1) REPEATABLE ($2)
+== 007
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (5.5) REPEATABLE (0)
+--
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI ($1) REPEATABLE ($2)
+== 008
+-- 100% should give repeatable count results (ie, all rows) in any case
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100)
+--
+-- 100% should give repeatable count results (ie, all rows) in any case
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM ($1)
+== 009
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100) REPEATABLE (1+2)
+--
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2+$3)
+== 010
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM (100) REPEATABLE (0.4)
+--
+SELECT count(*) FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 011
+CREATE VIEW test_tablesample_v1 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (10*2) REPEATABLE (2)
+--
+CREATE VIEW test_tablesample_v1 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (10*2) REPEATABLE (2)
+== 012
+CREATE VIEW test_tablesample_v2 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (99)
+--
+CREATE VIEW test_tablesample_v2 AS
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (99)
+== 013
+-- check a sampled query doesn't affect cursor in progress
+BEGIN
+--
+-- check a sampled query doesn't affect cursor in progress
+BEGIN
+== 014
+DECLARE tablesample_cur SCROLL CURSOR FOR
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+DECLARE tablesample_cur SCROLL CURSOR FOR
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 015
+FETCH FIRST FROM tablesample_cur
+--
+FETCH FIRST FROM tablesample_cur
+== 016
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 017
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 018
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (0)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 019
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 020
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 021
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 022
+FETCH FIRST FROM tablesample_cur
+--
+FETCH FIRST FROM tablesample_cur
+== 023
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 024
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 025
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 026
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 027
+FETCH NEXT FROM tablesample_cur
+--
+FETCH NEXT FROM tablesample_cur
+== 028
+CLOSE tablesample_cur
+--
+CLOSE tablesample_cur
+== 029
+END
+--
+END
+== 030
+EXPLAIN (COSTS OFF)
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (2)
+--
+EXPLAIN (COSTS OFF)
+  SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 031
+EXPLAIN (COSTS OFF)
+  SELECT * FROM test_tablesample_v1
+--
+EXPLAIN (COSTS OFF)
+  SELECT * FROM test_tablesample_v1
+== 032
+-- check inheritance behavior
+explain (costs off)
+  select count(*) from person tablesample bernoulli (100)
+--
+-- check inheritance behavior
+explain (costs off)
+  select count(*) from person tablesample bernoulli ($1)
+== 033
+select count(*) from person tablesample bernoulli (100)
+--
+select count(*) from person tablesample bernoulli ($1)
+== 034
+select count(*) from person
+--
+select count(*) from person
+== 035
+-- check that collations get assigned within the tablesample arguments
+SELECT count(*) FROM test_tablesample TABLESAMPLE bernoulli (('1'::text < '0'::text)::int)
+--
+-- check that collations get assigned within the tablesample arguments
+SELECT count(*) FROM test_tablesample TABLESAMPLE bernoulli (($1::text < $2::text)::int)
+== 036
+-- check behavior during rescans, as well as correct handling of min/max pct
+select * from
+  (values (0),(100)) v(pct),
+  lateral (select count(*) from tenk1 tablesample bernoulli (pct)) ss
+--
+-- check behavior during rescans, as well as correct handling of min/max pct
+select * from
+  (values ($1),($2)) v(pct),
+  lateral (select count(*) from tenk1 tablesample bernoulli (pct)) ss
+== 037
+select * from
+  (values (0),(100)) v(pct),
+  lateral (select count(*) from tenk1 tablesample system (pct)) ss
+--
+select * from
+  (values ($1),($2)) v(pct),
+  lateral (select count(*) from tenk1 tablesample system (pct)) ss
+== 038
+explain (costs off)
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+--
+explain (costs off)
+select pct, count(unique1) from
+  (values ($1),($2)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+== 039
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+--
+select pct, count(unique1) from
+  (values ($1),($2)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct
+== 040
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample system (pct)) ss
+  group by pct
+--
+select pct, count(unique1) from
+  (values ($1),($2)) v(pct),
+  lateral (select * from tenk1 tablesample system (pct)) ss
+  group by pct
+== 041
+-- errors
+SELECT id FROM test_tablesample TABLESAMPLE FOOBAR (1)
+--
+-- errors
+SELECT id FROM test_tablesample TABLESAMPLE FOOBAR ($1)
+== 042
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (NULL)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1)
+== 043
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (50) REPEATABLE (NULL)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1) REPEATABLE ($2)
+== 044
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (-1)
+--
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI ($1)
+== 045
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI (200)
+--
+SELECT id FROM test_tablesample TABLESAMPLE BERNOULLI ($1)
+== 046
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (-1)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1)
+== 047
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM (200)
+--
+SELECT id FROM test_tablesample TABLESAMPLE SYSTEM ($1)
+== 048
+SELECT id FROM test_tablesample_v1 TABLESAMPLE BERNOULLI (1)
+--
+SELECT id FROM test_tablesample_v1 TABLESAMPLE BERNOULLI ($1)
+== 049
+INSERT INTO test_tablesample_v1 VALUES(1)
+--
+INSERT INTO test_tablesample_v1 VALUES($1)
+== 050
+WITH query_select AS (SELECT * FROM test_tablesample)
+SELECT * FROM query_select TABLESAMPLE BERNOULLI (5.5) REPEATABLE (1)
+--
+WITH query_select AS (SELECT * FROM test_tablesample)
+SELECT * FROM query_select TABLESAMPLE BERNOULLI ($1) REPEATABLE ($2)
+== 051
+SELECT q.* FROM (SELECT * FROM test_tablesample) as q TABLESAMPLE BERNOULLI (5)
+--
+ERROR: syntax error at or near "TABLESAMPLE"
+CURSORPOS: 55
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 052
+-- check partitioned tables support tablesample
+create table parted_sample (a int) partition by list (a)
+--
+-- check partitioned tables support tablesample
+create table parted_sample (a int) partition by list (a)
+== 053
+create table parted_sample_1 partition of parted_sample for values in (1)
+--
+create table parted_sample_1 partition of parted_sample for values in (1)
+== 054
+create table parted_sample_2 partition of parted_sample for values in (2)
+--
+create table parted_sample_2 partition of parted_sample for values in (2)
+== 055
+explain (costs off)
+  select * from parted_sample tablesample bernoulli (100)
+--
+explain (costs off)
+  select * from parted_sample tablesample bernoulli ($1)
+== 056
+drop table parted_sample, parted_sample_1, parted_sample_2
+--
+drop table parted_sample, parted_sample_1, parted_sample_2

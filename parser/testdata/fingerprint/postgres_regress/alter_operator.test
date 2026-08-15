@@ -1,0 +1,378 @@
+== 001
+CREATE FUNCTION alter_op_test_fn(boolean, boolean)
+RETURNS boolean AS $$ SELECT NULL::BOOLEAN; $$ LANGUAGE sql IMMUTABLE
+--
+2068c316330650e8
+== 002
+CREATE FUNCTION customcontsel(internal, oid, internal, integer)
+RETURNS float8 AS 'contsel' LANGUAGE internal STABLE STRICT
+--
+802bffa3220c169c
+== 003
+CREATE OPERATOR === (
+    LEFTARG = boolean,
+    RIGHTARG = boolean,
+    PROCEDURE = alter_op_test_fn,
+    COMMUTATOR = ===,
+    NEGATOR = !==,
+    RESTRICT = customcontsel,
+    JOIN = contjoinsel,
+    HASHES, MERGES
+)
+--
+c69a6d644247aefa
+== 004
+SELECT pg_describe_object(refclassid,refobjid,refobjsubid) as ref, deptype
+FROM pg_depend
+WHERE classid = 'pg_operator'::regclass AND
+      objid = '===(bool,bool)'::regoperator
+ORDER BY 1
+--
+349c434d8b7ace6e
+== 005
+|--
+-- Test resetting and setting restrict and join attributes.
+|--
+
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = NONE)
+--
+382b41237c004d76
+== 006
+ALTER OPERATOR === (boolean, boolean) SET (JOIN = NONE)
+--
+2cadb1cbd5d13341
+== 007
+SELECT oprrest, oprjoin FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'boolean'::regtype
+--
+ab76d5471b9b5404
+== 008
+SELECT pg_describe_object(refclassid,refobjid,refobjsubid) as ref, deptype
+FROM pg_depend
+WHERE classid = 'pg_operator'::regclass AND
+      objid = '===(bool,bool)'::regoperator
+ORDER BY 1
+--
+349c434d8b7ace6e
+== 009
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = contsel)
+--
+28710b85826312e5
+== 010
+ALTER OPERATOR === (boolean, boolean) SET (JOIN = contjoinsel)
+--
+66f858e833a8b9b1
+== 011
+SELECT oprrest, oprjoin FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'boolean'::regtype
+--
+ab76d5471b9b5404
+== 012
+SELECT pg_describe_object(refclassid,refobjid,refobjsubid) as ref, deptype
+FROM pg_depend
+WHERE classid = 'pg_operator'::regclass AND
+      objid = '===(bool,bool)'::regoperator
+ORDER BY 1
+--
+349c434d8b7ace6e
+== 013
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = NONE, JOIN = NONE)
+--
+ff0c2121bb5f5804
+== 014
+SELECT oprrest, oprjoin FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'boolean'::regtype
+--
+ab76d5471b9b5404
+== 015
+SELECT pg_describe_object(refclassid,refobjid,refobjsubid) as ref, deptype
+FROM pg_depend
+WHERE classid = 'pg_operator'::regclass AND
+      objid = '===(bool,bool)'::regoperator
+ORDER BY 1
+--
+349c434d8b7ace6e
+== 016
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = customcontsel, JOIN = contjoinsel)
+--
+558b1ba0fe66c3ff
+== 017
+SELECT oprrest, oprjoin FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'boolean'::regtype
+--
+ab76d5471b9b5404
+== 018
+SELECT pg_describe_object(refclassid,refobjid,refobjsubid) as ref, deptype
+FROM pg_depend
+WHERE classid = 'pg_operator'::regclass AND
+      objid = '===(bool,bool)'::regoperator
+ORDER BY 1
+--
+349c434d8b7ace6e
+== 019
+|--
+-- Test invalid options.
+|--
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = non_existent_func)
+--
+93d995f41dcce857
+== 020
+ALTER OPERATOR === (boolean, boolean) SET (JOIN = non_existent_func)
+--
+50c551c3fef1bb7e
+== 021
+-- invalid: non-lowercase quoted identifiers
+ALTER OPERATOR & (bit, bit) SET ("Restrict" = _int_contsel, "Join" = _int_contjoinsel)
+--
+d72f697407dddeb0
+== 022
+|--
+-- Test permission check. Must be owner to ALTER OPERATOR.
+|--
+CREATE USER regress_alter_op_user
+--
+b995728e6d3e91f4
+== 023
+SET SESSION AUTHORIZATION regress_alter_op_user
+--
+532a0ea53df105d9
+== 024
+ALTER OPERATOR === (boolean, boolean) SET (RESTRICT = NONE)
+--
+382b41237c004d76
+== 025
+RESET SESSION AUTHORIZATION
+--
+8a5cf7139a632958
+== 026
+|--
+-- Test setting commutator, negator, merges, and hashes attributes,
+-- which can only be set if not already set
+|--
+
+CREATE FUNCTION alter_op_test_fn_bool_real(boolean, real)
+RETURNS boolean AS $$ SELECT NULL::BOOLEAN; $$ LANGUAGE sql IMMUTABLE
+--
+3e893354d4c822b1
+== 027
+CREATE FUNCTION alter_op_test_fn_real_bool(real, boolean)
+RETURNS boolean AS $$ SELECT NULL::BOOLEAN; $$ LANGUAGE sql IMMUTABLE
+--
+b19b523c76021499
+== 028
+-- operator
+CREATE OPERATOR === (
+    LEFTARG = boolean,
+    RIGHTARG = real,
+    PROCEDURE = alter_op_test_fn_bool_real
+)
+--
+576c74643fc3e493
+== 029
+-- commutator
+CREATE OPERATOR ==== (
+    LEFTARG = real,
+    RIGHTARG = boolean,
+    PROCEDURE = alter_op_test_fn_real_bool
+)
+--
+ab1bd227b5cb31f1
+== 030
+-- negator
+CREATE OPERATOR !==== (
+    LEFTARG = boolean,
+    RIGHTARG = real,
+    PROCEDURE = alter_op_test_fn_bool_real
+)
+--
+5ef9744b6e573a5b
+== 031
+-- No-op setting already false hashes and merges to false works
+ALTER OPERATOR === (boolean, real) SET (MERGES = false)
+--
+9fa051f513b5cdde
+== 032
+ALTER OPERATOR === (boolean, real) SET (HASHES = false)
+--
+fbf6ad4629120617
+== 033
+-- Test setting merges and hashes
+ALTER OPERATOR === (boolean, real) SET (MERGES)
+--
+afbe615710786420
+== 034
+ALTER OPERATOR === (boolean, real) SET (HASHES)
+--
+5a4666b2370b243b
+== 035
+SELECT oprcanmerge, oprcanhash
+FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'real'::regtype
+--
+e5502f263bfbf937
+== 036
+-- Test setting commutator
+ALTER OPERATOR === (boolean, real) SET (COMMUTATOR = ====)
+--
+802b7d9f2cc30c95
+== 037
+-- Check that oprcom has been set on both the operator and commutator,
+-- that they reference each other, and that the operator used is the existing
+-- one we created and not a new shell operator.
+SELECT op.oprname AS operator_name, com.oprname AS commutator_name,
+  com.oprcode AS commutator_func
+  FROM pg_operator op
+  INNER JOIN pg_operator com ON (op.oid = com.oprcom AND op.oprcom = com.oid)
+  WHERE op.oprname = '==='
+  AND op.oprleft = 'boolean'::regtype AND op.oprright = 'real'::regtype
+--
+56c271b67e614151
+== 038
+-- Cannot set self as negator
+ALTER OPERATOR === (boolean, real) SET (NEGATOR = ===)
+--
+376430a0b66bfcaf
+== 039
+-- Test setting negator
+ALTER OPERATOR === (boolean, real) SET (NEGATOR = !====)
+--
+4445dc4900ac8439
+== 040
+-- Check that oprnegate has been set on both the operator and negator,
+-- that they reference each other, and that the operator used is the existing
+-- one we created and not a new shell operator.
+SELECT op.oprname AS operator_name, neg.oprname AS negator_name,
+  neg.oprcode AS negator_func
+  FROM pg_operator op
+  INNER JOIN pg_operator neg ON (op.oid = neg.oprnegate AND op.oprnegate = neg.oid)
+  WHERE op.oprname = '==='
+  AND op.oprleft = 'boolean'::regtype AND op.oprright = 'real'::regtype
+--
+82ef57885dd30b21
+== 041
+-- Test that no-op set succeeds
+ALTER OPERATOR === (boolean, real) SET (NEGATOR = !====)
+--
+4445dc4900ac8439
+== 042
+ALTER OPERATOR === (boolean, real) SET (COMMUTATOR = ====)
+--
+802b7d9f2cc30c95
+== 043
+ALTER OPERATOR === (boolean, real) SET (MERGES)
+--
+afbe615710786420
+== 044
+ALTER OPERATOR === (boolean, real) SET (HASHES)
+--
+5a4666b2370b243b
+== 045
+-- Check that the final state of the operator is as we expect
+SELECT oprcanmerge, oprcanhash,
+       pg_describe_object('pg_operator'::regclass, oprcom, 0) AS commutator,
+       pg_describe_object('pg_operator'::regclass, oprnegate, 0) AS negator
+  FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'real'::regtype
+--
+c3bd9f617564e18b
+== 046
+-- Cannot change commutator, negator, merges, and hashes when already set
+
+CREATE OPERATOR @= (
+    LEFTARG = real,
+    RIGHTARG = boolean,
+    PROCEDURE = alter_op_test_fn_real_bool
+)
+--
+f9f7a411a30eca75
+== 047
+CREATE OPERATOR @!= (
+    LEFTARG = boolean,
+    RIGHTARG = real,
+    PROCEDURE = alter_op_test_fn_bool_real
+)
+--
+5adfee14b61468ef
+== 048
+ALTER OPERATOR === (boolean, real) SET (COMMUTATOR = @=)
+--
+a34fb3cc1d1861d5
+== 049
+ALTER OPERATOR === (boolean, real) SET (NEGATOR = @!=)
+--
+abb1c42be790f05c
+== 050
+ALTER OPERATOR === (boolean, real) SET (MERGES = false)
+--
+9fa051f513b5cdde
+== 051
+ALTER OPERATOR === (boolean, real) SET (HASHES = false)
+--
+fbf6ad4629120617
+== 052
+-- Cannot set an operator that already has a commutator as the commutator
+ALTER OPERATOR @=(real, boolean) SET (COMMUTATOR = ===)
+--
+e25e35f183a0ed6c
+== 053
+-- Cannot set an operator that already has a negator as the negator
+ALTER OPERATOR @!=(boolean, real) SET (NEGATOR = ===)
+--
+bf4d0346e3c39802
+== 054
+-- Check no changes made
+SELECT oprcanmerge, oprcanhash,
+       pg_describe_object('pg_operator'::regclass, oprcom, 0) AS commutator,
+       pg_describe_object('pg_operator'::regclass, oprnegate, 0) AS negator
+  FROM pg_operator WHERE oprname = '==='
+  AND oprleft = 'boolean'::regtype AND oprright = 'real'::regtype
+--
+c3bd9f617564e18b
+== 055
+|--
+-- Clean up
+|--
+
+DROP USER regress_alter_op_user
+--
+6d60e5144c217703
+== 056
+DROP OPERATOR === (boolean, boolean)
+--
+4d31cfdc3182d449
+== 057
+DROP OPERATOR === (boolean, real)
+--
+61b8546f4c1beea2
+== 058
+DROP OPERATOR ==== (real, boolean)
+--
+6ffa1472d436b6c9
+== 059
+DROP OPERATOR !==== (boolean, real)
+--
+7a0913ef57a08259
+== 060
+DROP OPERATOR @= (real, boolean)
+--
+ac519cedb70e6280
+== 061
+DROP OPERATOR @!= (boolean, real)
+--
+61d6d92ac7903ba5
+== 062
+DROP FUNCTION customcontsel(internal, oid, internal, integer)
+--
+22a1cf2398d3b98b
+== 063
+DROP FUNCTION alter_op_test_fn(boolean, boolean)
+--
+6b3188594f1e95c1
+== 064
+DROP FUNCTION alter_op_test_fn_bool_real(boolean, real)
+--
+30a7bf1de2430f51
+== 065
+DROP FUNCTION alter_op_test_fn_real_bool(real, boolean)
+--
+10616c2e22bc1cb8
