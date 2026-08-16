@@ -48,6 +48,12 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_POLICY:
 		p.next()
 		return p.parseCreatePolicyStmt()
+	case ast.Token_PUBLICATION:
+		p.next()
+		return p.parseCreatePublicationStmt()
+	case ast.Token_SUBSCRIPTION:
+		p.next()
+		return p.parseCreateSubscriptionStmt()
 	case ast.Token_AGGREGATE:
 		p.next()
 		return p.parseCreateAggregateStmt(false)

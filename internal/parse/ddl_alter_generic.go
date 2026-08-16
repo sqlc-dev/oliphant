@@ -132,8 +132,36 @@ func (p *parser) roleSpecToRoleId(spec *ast.RoleSpec, loc int32) string {
 // parseAlterDispatch routes a statement beginning with ALTER. The ALTER
 // token is not yet consumed.
 func (p *parser) parseAlterDispatch() *ast.Node {
-	p.expect(ast.Token_ALTER)
+	alterTok := p.expect(ast.Token_ALTER)
 	switch p.kind() {
+	case ast.Token_PUBLICATION:
+		p.next()
+		pubname := p.name()
+		switch p.kind() {
+		case ast.Token_RENAME, ast.Token_OWNER:
+			if n := p.parseAlterGenericTail(ast.ObjectType_OBJECT_PUBLICATION, nStr(pubname), nil, false,
+				tailRename|tailOwner); n != nil {
+				if r := n.GetRenameStmt(); r != nil {
+					r.Object = nStr(pubname)
+				}
+				return n
+			}
+			p.syntaxErrorAt()
+		}
+		return p.parseAlterPublicationStmt(pubname)
+
+	case ast.Token_SUBSCRIPTION:
+		p.next()
+		subname := p.name()
+		switch p.kind() {
+		case ast.Token_RENAME, ast.Token_OWNER:
+			if n := p.parseAlterGenericTail(ast.ObjectType_OBJECT_SUBSCRIPTION, nStr(subname), nil, false,
+				tailRename|tailOwner); n != nil {
+				return n
+			}
+			p.syntaxErrorAt()
+		}
+		return p.parseAlterSubscriptionStmt(subname, alterTok.Start)
 	case ast.Token_AGGREGATE:
 		p.next()
 		obj := p.parseAggregateWithArgtypes()
