@@ -12,7 +12,6 @@ import (
 // its canonical lower-case spelling, an IDENT's Str is the downcased,
 // truncated identifier — in both cases exactly the C production's $$.
 
-
 // isLookaheadMergedToken reports whether tok is one of base_yylex's merged
 // lookahead terminals. They inherit the keyword classification of their
 // first word from the lexer, but the grammar treats them as distinct

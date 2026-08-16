@@ -392,15 +392,18 @@ gate; the corpus harness exists before the first line of the lexer.
 5. **DML.** ✅ *Landed 2026-08-16.* `INSERT` (`ON CONFLICT`, `OVERRIDING`),
    `UPDATE`, `DELETE`, `MERGE`, `RETURNING`, `COPY`, `PREPARE`/`EXECUTE`,
    cursors. See "As-built notes (milestone 5)".
-6. **DDL, part 1.** `CREATE`/`ALTER TABLE` (the second-biggest grammar
-   region: constraints, partitioning, identity, storage options),
-   `CREATE INDEX`, views, sequences, schemas.
-7. **DDL, part 2 + utility.** The long tail of ~150 statement types:
-   functions/procedures, triggers, policies, roles/grants, types/domains,
-   FDWs, publications/subscriptions, `EXPLAIN`/`VACUUM`/`SET`/`SHOW`, event
-   triggers, … `SplitWithParser` and `IsUtilityStmt` fall out here.
+6. **DDL, part 1.** ✅ *Landed 2026-08-16.* `CREATE`/`ALTER TABLE` (the
+   second-biggest grammar region: constraints, partitioning, identity,
+   storage options), `CREATE INDEX`, views, sequences, schemas. See
+   "As-built notes (milestones 6–7)".
+7. **DDL, part 2 + utility.** ✅ *Landed 2026-08-16.* The long tail of ~150
+   statement types: functions/procedures, triggers, policies, roles/grants,
+   types/domains, FDWs, publications/subscriptions,
+   `EXPLAIN`/`VACUUM`/`SET`/`SHOW`, event triggers, … `SplitWithParser` and
+   `IsUtilityStmt` ship here.
    **Gate for 4–7:** 100% of the regress corpus — trees, JSON bytes, error
-   messages, cursor positions.
+   messages, cursor positions — met: the parse suite's todo list is empty
+   (42,970 cases across every tier), as are scan and both split suites.
 8. **Normalize + Fingerprint.** Port `pg_query_normalize.c` (constant
    locations → `$n`, `NormalizeUtility`); generated fingerprint walk + the
    hand-written special cases. **Gate:** all normalize/fingerprint goldens,
@@ -554,6 +557,46 @@ Measured at the pin, where the plan's estimates differ:
   parse todo starts with — or embeds — a statement type from milestones 6-7,
   and the `-summary` classifier shows no tree or error mismatches against
   any implemented statement.
+
+### As-built notes (milestones 6–7)
+
+- Statement dispatch is a family of lookahead routers
+  (`internal/parse/ddl_dispatch.go`, `ddl_alter_generic.go`): each
+  CREATE/ALTER/DROP object-kind arm parses the object reference once, then
+  the following token picks the production, mirroring how the LALR tables
+  keep RenameStmt/AlterObjectSchemaStmt/AlterOwnerStmt/
+  AlterObjectDependsStmt alive alongside each object's own ALTER statement.
+  A shared `parseAlterGenericTail` implements the four generic tails with a
+  per-kind support mask, so `ALTER LANGUAGE x SET SCHEMA` still fails at
+  the token bison would reject.
+- The CreateStmt/CreateAsStmt ambiguity (`CREATE TABLE t (…)` element list
+  vs. `create_as_target` column list) is the one new bounded-backtracking
+  site: the CTAS reading is tried first and commits only when its `AS`
+  arrives, else the position resets and the element list parses.
+- C's zero-valued enums surface as their proto-shifted spellings, which the
+  goldens made explicit: every `AlterTableCmd`/`RenameStmt` carries
+  `behavior: DROP_RESTRICT`, `RenameStmt.relationType` defaults to
+  `OBJECT_ACCESS_METHOD`, and `AlterPublicationStmt.action` to
+  `AP_AddObjects`. Two NIL-vs-empty-list shapes matter: the zero-argument
+  `(*)` aggregate stores a null list element in `DefineStmt.args`, and an
+  empty `BEGIN ATOMIC` body stores `[NIL]`, not `[[]]`.
+- Support-function ereports carry their C call site's funcname
+  (`processCASbits`, `SplitColQualList`, `makeOrderedSetArgs`,
+  `preprocess_pubobj_list`, …), and `ConstraintAttributeSpec`'s own
+  location is always -1 (PG's `YYLLOC_DEFAULT` gives empty productions -1
+  and the left recursion propagates it), so `processCASbits` errors have no
+  cursor position.
+- The `base_yylex`-merged `*_LA` tokens keep their first word's keyword
+  classification in the lexer but are never identifiers in the grammar; the
+  identifier-class helpers reject them (found via `nulls first` in
+  `index_elem`, where `NULLS_LA` must not parse as an opclass name).
+- `makeRangeVarFromAnyName` builds via `makeNode`, so `inh` stays false —
+  unlike `makeRangeVar`'s true — which the CompositeTypeStmt goldens pin.
+- `cmd/difftodo` (debug aid) prints input/want/got for a file's remaining
+  parse todos; it drove the long-tail mismatch hunt to zero.
+- Corpus effect: all 19,787 remaining parse todos graduated, plus the 8
+  `split_parser` cases. The remaining todo suites (deparse, fingerprint,
+  normalize, normalize_utility) belong to milestones 8–9.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 
