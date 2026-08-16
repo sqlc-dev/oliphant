@@ -448,6 +448,7 @@ func (p *parser) parseSetStatisticsValue() *ast.Node {
 // parseAlterColumnCmd handles the ALTER [COLUMN] ColId ... alternatives of
 // alter_table_cmd; ALTER opt_column are consumed.
 func (p *parser) parseAlterColumnCmd() *ast.Node {
+	ctok := p.peek()
 	colname := p.colId()
 	switch p.kind() {
 	case ast.Token_SET:
@@ -500,7 +501,7 @@ func (p *parser) parseAlterColumnCmd() *ast.Node {
 		case ast.Token_DATA_P:
 			p.next()
 			p.expect(ast.Token_TYPE_P)
-			return p.parseAlterColumnType(colname)
+			return p.parseAlterColumnType(colname, ctok.Start)
 		case ast.Token_GENERATED:
 			// alter_identity_column_option: SET GENERATED generated_when
 			return p.parseAlterIdentityOptions(colname, true)
@@ -543,7 +544,7 @@ func (p *parser) parseAlterColumnCmd() *ast.Node {
 		p.syntaxErrorAt()
 	case ast.Token_TYPE_P:
 		p.next()
-		return p.parseAlterColumnType(colname)
+		return p.parseAlterColumnType(colname, ctok.Start)
 	case ast.Token_ADD_P:
 		// ALTER col ADD GENERATED generated_when AS IDENTITY [(seqopts)]
 		p.next()
@@ -578,10 +579,10 @@ func (p *parser) parseAlterColumnCmd() *ast.Node {
 // parseAlterColumnType finishes ALTER [COLUMN] col [SET DATA] TYPE:
 //
 //	Typename opt_collate_clause alter_using
-func (p *parser) parseAlterColumnType(colname string) *ast.Node {
+func (p *parser) parseAlterColumnType(colname string, colLoc int32) *ast.Node {
 	n := newAlterTableCmd(ast.AlterTableType_AT_AlterColumnType)
 	n.Name = colname
-	def := &ast.ColumnDef{Location: -1}
+	def := &ast.ColumnDef{Location: colLoc}
 	def.TypeName = p.parseTypename()
 	if p.kind() == ast.Token_COLLATE {
 		ctok := p.next()
@@ -817,12 +818,13 @@ func (p *parser) parseAlterTypeCmd() *ast.Node {
 	case ast.Token_ALTER:
 		p.next()
 		p.expect(ast.Token_ATTRIBUTE)
+		ctok := p.peek()
 		colname := p.colId()
 		if p.have(ast.Token_SET) {
 			p.expect(ast.Token_DATA_P)
 		}
 		p.expect(ast.Token_TYPE_P)
-		cmd := p.parseAlterColumnType(colname)
+		cmd := p.parseAlterColumnType(colname, ctok.Start)
 		cmd.GetAlterTableCmd().Behavior = p.parseOptDropBehavior()
 		return cmd
 	}
