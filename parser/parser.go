@@ -17,6 +17,7 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/emit"
 	"github.com/sqlc-dev/oliphant/internal/fingerprint"
 	"github.com/sqlc-dev/oliphant/internal/lexer"
+	"github.com/sqlc-dev/oliphant/internal/normalize"
 	"github.com/sqlc-dev/oliphant/internal/parse"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
@@ -106,12 +107,23 @@ func ParsePlPgSqlToJSON(input string) (result string, err error) {
 	return "", errNotImplemented("ParsePlPgSqlToJSON")
 }
 
+// Normalize is pg_query_normalize: constants become $n parameter references.
 func Normalize(input string) (result string, err error) {
-	return "", errNotImplemented("Normalize")
+	out, perr := normalize.Normalize(input, false)
+	if perr != nil {
+		return "", scanErr(perr)
+	}
+	return out, nil
 }
 
+// NormalizeUtility is pg_query_normalize_utility: only utility statements
+// are normalized.
 func NormalizeUtility(input string) (result string, err error) {
-	return "", errNotImplemented("NormalizeUtility")
+	out, perr := normalize.Normalize(input, true)
+	if perr != nil {
+		return "", scanErr(perr)
+	}
+	return out, nil
 }
 
 // SplitWithScanner is pg_query_split.c's pg_query_split_with_scanner: a
