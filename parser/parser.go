@@ -152,8 +152,26 @@ func SplitWithScanner(input string, trimSpace bool) (result []string, err error)
 	}
 }
 
+// SplitWithParser splits on the RawStmt boundaries of a real parse
+// (pg_query_split.c: pg_query_split_with_parser); a zero stmt_len runs to
+// the end of the input.
 func SplitWithParser(input string, trimSpace bool) (result []string, err error) {
-	return nil, errNotImplemented("SplitWithParser")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	for _, raw := range tree.Stmts {
+		end := raw.StmtLocation + raw.StmtLen
+		if raw.StmtLen == 0 {
+			end = int32(len(input))
+		}
+		stmt := input[raw.StmtLocation:end]
+		if trimSpace {
+			stmt = strings.TrimSpace(stmt)
+		}
+		result = append(result, stmt)
+	}
+	return result, nil
 }
 
 func FingerprintToUInt64(input string) (result uint64, err error) {
@@ -170,8 +188,25 @@ func HashXXH3_64(input []byte, seed uint64) (result uint64) {
 	return xxh3.Hash64Seed(input, seed)
 }
 
+// IsUtilityStmt reports, per statement, whether it is a utility statement
+// (pg_query_is_utility_stmt.c: everything except SELECT/INSERT/UPDATE/
+// DELETE/MERGE).
 func IsUtilityStmt(input string) (result []bool, err error) {
-	return nil, errNotImplemented("IsUtilityStmt")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	result = make([]bool, 0, len(tree.Stmts))
+	for _, raw := range tree.Stmts {
+		switch raw.Stmt.Node.(type) {
+		case *ast.Node_SelectStmt, *ast.Node_InsertStmt, *ast.Node_UpdateStmt,
+			*ast.Node_DeleteStmt, *ast.Node_MergeStmt:
+			result = append(result, false)
+		default:
+			result = append(result, true)
+		}
+	}
+	return result, nil
 }
 
 func SummaryToProtobuf(input string, truncateLimit int) ([]byte, error) {
