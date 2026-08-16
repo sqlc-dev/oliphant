@@ -30,6 +30,15 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 		return p.parseCreateCastStmt()
 	case ast.Token_FUNCTION, ast.Token_PROCEDURE:
 		return p.parseCreateFunctionStmt(false)
+	case ast.Token_DOMAIN_P:
+		p.next()
+		return p.parseCreateDomainStmt()
+	case ast.Token_DATABASE:
+		p.next()
+		return p.parseCreatedbStmt()
+	case ast.Token_EXTENSION:
+		p.next()
+		return p.parseCreateExtensionStmt()
 	}
 	if stmt := p.parseCreateStmtFamily(false); stmt != nil {
 		return stmt

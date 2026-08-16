@@ -250,6 +250,10 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 		}
 		p.syntaxErrorAt()
 
+	case ast.Token_EXTENSION:
+		p.next()
+		return p.parseAlterExtensionStmt()
+
 	case ast.Token_FUNCTION, ast.Token_PROCEDURE, ast.Token_ROUTINE:
 		var objtype ast.ObjectType
 		switch p.next().Kind {
