@@ -404,15 +404,19 @@ gate; the corpus harness exists before the first line of the lexer.
    **Gate for 4–7:** 100% of the regress corpus — trees, JSON bytes, error
    messages, cursor positions — met: the parse suite's todo list is empty
    (42,970 cases across every tier), as are scan and both split suites.
-8. **Normalize + Fingerprint.** Port `pg_query_normalize.c` (constant
-   locations → `$n`, `NormalizeUtility`); generated fingerprint walk + the
-   hand-written special cases. **Gate:** all normalize/fingerprint goldens,
-   including the 1.1 MB stress case.
-9. **Deparse.** Port `postgres_deparse.c` (12,220 lines, mechanical
-   node-by-node) targeting the protobuf structs directly. **Gate:** the
-   reference's own roundtrip criterion over its deparse allowlists — parse →
-   deparse → reparse yields an identical tree — plus byte-equality with the
-   oracle's deparse output on the corpus.
+8. **Normalize + Fingerprint.** ✅ *Landed 2026-08-16.* Port
+   `pg_query_normalize.c` (constant locations → `$n`, `NormalizeUtility`);
+   fingerprint walk + the hand-written special cases. **Gate:** all
+   normalize/fingerprint goldens, including the 1.1 MB stress case — met:
+   43,385 fingerprint, 43,254 normalize, and 25 normalize_utility todos
+   graduated. See "As-built notes (milestones 8–9)".
+9. **Deparse.** ✅ *Landed 2026-08-16.* Port `postgres_deparse.c` (12,107
+   lines at the pin, mechanical node-by-node) targeting the protobuf structs
+   directly. **Gate:** byte-equality with the oracle's deparse output on the
+   corpus — met: all 43,352 deparse todos graduated (which subsumes the
+   reference's parse → deparse → reparse roundtrip criterion, since the
+   goldens are the oracle's own deparse output). See "As-built notes
+   (milestones 8–9)".
 10. **Summary.** Port the summary API (classification + smart truncation).
 11. **PL/pgSQL.** Port `pl_gram.y` + `pl_comp` subset + the JSON serializer
     behind `ParsePlPgSqlToJSON`. Deliberately last: self-contained, and the
@@ -597,6 +601,52 @@ Measured at the pin, where the plan's estimates differ:
 - Corpus effect: all 19,787 remaining parse todos graduated, plus the 8
   `split_parser` cases. The remaining todo suites (deparse, fingerprint,
   normalize, normalize_utility) belong to milestones 8–9.
+
+### As-built notes (milestones 8–9)
+
+- The fingerprint walk (`internal/fingerprint`) is descriptor-driven rather
+  than generated per-node code, the same call the JSON emitter made in
+  milestone 4: upstream's `pg_query_fingerprint_defs.c` is generated from
+  the same struct metadata the pinned proto came from, so the descriptor
+  already carries the field set, kinds, and (after an explicit sort) the
+  alphabetical field order. The hand-written parts mirror the upstream
+  generator's tables: skip-nodes and skip-fields, the six sorted-dedup list
+  field names with the listsort cache (the exponential-blowup guard the
+  1.1 MB insert needs), `AEXPR_OP_ANY`/`AEXPR_IN` folding, `RangeVar`
+  digit-stripping and temp-table elision, TypeCast-of-constant elision, the
+  `ResTarget.name`-under-SELECT-targetList rule, and the pre-PG15 legacy
+  value-node field names. The C's per-field XXH3 state snapshot/restore
+  reduces to "elide the field name if the subtree appended zero bytes", so
+  tokens stream into a byte buffer and `internal/xxh3` stays one-shot.
+- Normalize's tree walk is `const_record_walker` backed by a port of PG 17's
+  `raw_expression_tree_walker`; node types that walker does not know stop
+  the subtree walk exactly like the swallowed `elog` upstream. Two
+  bug-compatibility details mattered: constant lengths come from the
+  milestone-3 lexer (the `U&''` trailing-whitespace trim is a no-op because
+  patch-03 token ends already exclude the UESCAPE lookahead), and the
+  location sort is a port of `pg_qsort` itself — the C sort is unstable,
+  and for duplicate locations (a `MultiAssignRef` source walked once per
+  target column) the parameter number a constant gets depends on which
+  duplicate the Bentley–McIlroy partition leaves first
+  (`SET (c,b,a) = ($1, b+$4, DEFAULT) WHERE c = $7`).
+- The deparser's part/group/nesting machinery (built for the pretty-print
+  mode pg_query_go never exposes) still shapes plain output — parts join
+  with single spaces except after `(` or before a part starting with `)` or
+  `;`, part groups fold their major keyword into their first part, and the
+  merge pass runs against the default 80-column limit — so it is ported
+  exactly, while the pretty-print and comment paths themselves are omitted
+  as unreachable. Deparse errors surface via panic/recover standing in for
+  the C `ereport` longjmp; no corpus input triggers one (the goldens'
+  ERROR cases are all parse-stage errors).
+- proto3 cannot represent C's NULL-vs-empty-string distinction; where the
+  deparser branches on it, call sites decided the port (e.g.
+  `deparseOptBooleanOrString`'s NULL guard is dead upstream — every caller
+  passes `strVal` — so `SET x TO ''` must fall through to print `''`).
+- Corpus effect: milestone 8 graduated all 43,385 fingerprint, 43,254
+  normalize, and 25 normalize_utility todos; milestone 9 graduated all
+  43,352 deparse todos. Every suite's todo list is now empty; the remaining
+  unimplemented entry points are `Summary` (milestone 10) and
+  `ParsePlPgSqlToJSON` (milestone 11).
 
 ## Regeneration (the PostgreSQL-upgrade story)
 
