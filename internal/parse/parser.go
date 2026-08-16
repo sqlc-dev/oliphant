@@ -201,7 +201,30 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 	case ast.Token_COPY:
 		return p.parseCopyStmt()
 	case ast.Token_PREPARE:
+		// PREPARE TRANSACTION Sconst is a TransactionStmt; PREPARE name
+		// [(types)] AS is a PrepareStmt ("transaction" can also be a plan
+		// name, so the Sconst decides).
+		if p.kindN(1) == ast.Token_TRANSACTION && p.kindN(2) == ast.Token_SCONST {
+			p.next()
+			return p.parsePrepareTransactionStmt()
+		}
 		return p.parsePrepareStmt()
+	case ast.Token_ABORT_P, ast.Token_START, ast.Token_COMMIT,
+		ast.Token_ROLLBACK, ast.Token_SAVEPOINT, ast.Token_RELEASE,
+		ast.Token_BEGIN_P, ast.Token_END_P:
+		return p.parseTransactionStmt()
+	case ast.Token_NOTIFY:
+		return p.parseNotifyStmt()
+	case ast.Token_LISTEN:
+		return p.parseListenStmt()
+	case ast.Token_UNLISTEN:
+		return p.parseUnlistenStmt()
+	case ast.Token_LOAD:
+		return p.parseLoadStmt()
+	case ast.Token_LOCK_P:
+		return p.parseLockStmt()
+	case ast.Token_TRUNCATE:
+		return p.parseTruncateStmt()
 	case ast.Token_EXECUTE:
 		return p.parseExecuteStmt()
 	case ast.Token_DEALLOCATE:
