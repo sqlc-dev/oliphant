@@ -135,6 +135,10 @@ func (p *parser) parseOptWithReloptions() []*ast.Node {
 			p.next()
 			return p.parseReloptions()
 		}
+		// WITH can only start "WITH reloptions" here; bison shifts it and
+		// fails at the following token.
+		p.next()
+		p.syntaxErrorAt()
 	case ast.Token_WITHOUT:
 		if p.kindN(1) == ast.Token_OIDS {
 			p.next()

@@ -253,7 +253,12 @@ func (p *parser) parseOptRoutineBody() *ast.Node {
 			}
 		}
 		p.next()
-		return nList([]*ast.Node{nList(stmts)})
+		// An empty body stores NIL (a null list element), not an empty List.
+		inner := &ast.Node{}
+		if stmts != nil {
+			inner = nList(stmts)
+		}
+		return nList([]*ast.Node{inner})
 	}
 	return nil
 }

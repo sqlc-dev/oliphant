@@ -512,6 +512,12 @@ func (p *parser) parseAlterColumnCmd() *ast.Node {
 			}
 		}
 		p.syntaxErrorAt()
+	case ast.Token_RESET:
+		p.next()
+		n := newAlterTableCmd(ast.AlterTableType_AT_ResetOptions)
+		n.Name = colname
+		n.Def = nList(p.parseReloptions())
+		return nAlterTableCmd(n)
 	case ast.Token_DROP:
 		p.next()
 		switch {
