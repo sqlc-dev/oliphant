@@ -214,6 +214,30 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseFetchStmt(true)
 	case ast.Token_CLOSE:
 		return p.parseClosePortalStmt()
+	case ast.Token_CALL:
+		return p.parseCallStmt()
+	case ast.Token_CREATE:
+		return p.parseCreateDispatch()
+	case ast.Token_ALTER:
+		return p.parseAlterDispatch()
+	case ast.Token_DROP:
+		return p.parseDropDispatch()
+	case ast.Token_SET:
+		// SET CONSTRAINTS is ConstraintsSetStmt unless "constraints" is
+		// being used as a variable name (generic_set's var_name).
+		if p.kindN(1) == ast.Token_CONSTRAINTS && !p.varNameContinues(2) {
+			p.next()
+			return p.parseConstraintsSetStmt()
+		}
+		return p.parseVariableSetStmt()
+	case ast.Token_RESET:
+		return p.parseVariableResetStmt()
+	case ast.Token_SHOW:
+		return p.parseVariableShowStmt()
+	case ast.Token_CHECKPOINT:
+		return p.parseCheckPointStmt()
+	case ast.Token_DISCARD:
+		return p.parseDiscardStmt()
 	}
 	p.syntaxError(tok)
 	return nil
