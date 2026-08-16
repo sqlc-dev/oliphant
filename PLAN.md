@@ -389,8 +389,9 @@ gate; the corpus harness exists before the first line of the lexer.
    locking clauses. The largest single chunk of work. `ParseToJSON` ships
    here too (the generated-equivalent JSON emitter plus `Parse`/
    `ParseToProtobuf`). See "As-built notes (milestone 4)".
-5. **DML.** `INSERT` (`ON CONFLICT`, `OVERRIDING`), `UPDATE`, `DELETE`,
-   `MERGE`, `RETURNING`, `COPY`, `PREPARE`/`EXECUTE`, cursors.
+5. **DML.** ✅ *Landed 2026-08-16.* `INSERT` (`ON CONFLICT`, `OVERRIDING`),
+   `UPDATE`, `DELETE`, `MERGE`, `RETURNING`, `COPY`, `PREPARE`/`EXECUTE`,
+   cursors. See "As-built notes (milestone 5)".
 6. **DDL, part 1.** `CREATE`/`ALTER TABLE` (the second-biggest grammar
    region: constraints, partitioning, identity, storage options),
    `CREATE INDEX`, views, sequences, schemas.
@@ -524,6 +525,35 @@ Measured at the pin, where the plan's estimates differ:
 - `cmd/difftest` currently ships the interim `-summary`/`-show` failure
   classifier used to drive the milestone; the mutation fuzzer replaces it
   in milestone 12.
+
+### As-built notes (milestone 5)
+
+- The five statements that carry `opt_with_clause` (SELECT, INSERT, UPDATE,
+  DELETE, MERGE) share one entry point: the WITH clause is parsed once and
+  the following head token picks the statement, reproducing how the LALR
+  tables keep all five alternatives alive through the with_clause.
+  `PreparableStmt` (CTE bodies, `COPY (query)`, `PREPARE ... AS`) now
+  accepts the full set.
+- The grammar's unreserved-keyword ambiguities are each resolved by the same
+  single token of lookahead bison uses: FETCH/MOVE direction keywords vs. a
+  cursor named `next`/`prior`/`forward`/…, `DEALLOCATE PREPARE x` vs. a plan
+  named `prepare`, `WHERE CURRENT OF` vs. a column named `current` (OF
+  decides), `insert_rest`'s `'(' column list` vs. a parenthesized SelectStmt
+  (skip-the-parens select-head gate, as in table_ref), and
+  `relation_expr_opt_alias` refusing bare `SET` as an alias (the production
+  outranks SET's `%nonassoc` precedence).
+- COPY's two action ereports ("STDIN/STDOUT not allowed with PROGRAM",
+  "WHERE clause not allowed with COPY TO") reproduce bison's
+  empty-production location rule: `@8` falls back through empty
+  copy_delimiter/opt_using to the file-name token's location.
+- `CREATE TABLE ... AS EXECUTE` is deferred to milestone 6 with the rest of
+  the CREATE TABLE machinery (`OptTemp`, `create_as_target`,
+  `opt_with_data`); plain `EXECUTE name [(params)]` ships now.
+- Corpus effect: 7,337 parse todos and 73 deparse todos (error-path cases,
+  where the golden is the parse error itself) graduated. Every remaining
+  parse todo starts with — or embeds — a statement type from milestones 6-7,
+  and the `-summary` classifier shows no tree or error mismatches against
+  any implemented statement.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 

@@ -130,6 +130,22 @@ func (p *parser) parserYyerror(msg string) {
 	p.fail(p.filter.SyntaxErrorMsg(p.peek(), msg))
 }
 
+// makefuncs.c: makeAlias
+func makeAlias(aliasname string, colnames []*ast.Node) *ast.Alias {
+	return &ast.Alias{Aliasname: aliasname, Colnames: colnames}
+}
+
+// makefuncs.c: makeDefElemExtended
+func makeDefElemExtended(nameSpace, name string, arg *ast.Node, defaction ast.DefElemAction, location int32) *ast.Node {
+	return nDefElem(&ast.DefElem{
+		Defnamespace: nameSpace,
+		Defname:      name,
+		Arg:          arg,
+		Defaction:    defaction,
+		Location:     location,
+	})
+}
+
 // gram.y: makeTypeCast
 func makeTypeCast(arg *ast.Node, typename *ast.TypeName, location int32) *ast.Node {
 	return nTypeCast(&ast.TypeCast{Arg: arg, TypeName: typename, Location: location})

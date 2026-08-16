@@ -172,22 +172,48 @@ func (p *parser) parseToplevel() *ast.ParseResult {
 }
 
 // parseToplevelStmt is toplevel_stmt/stmt: dispatch on the leading token.
-// Milestone 4 implements the SELECT family; everything else reports the
-// syntax error bison would only reach much later, and stays on the todo
-// list until its milestone lands.
+// Milestones 4-5 implement the SELECT family and DML; everything else
+// reports the syntax error bison would only reach much later, and stays on
+// the todo list until its milestone lands.
 func (p *parser) parseToplevelStmt() *ast.Node {
 	tok := p.peek()
 	switch tok.Kind {
 	case ast.Token(';'), 0:
 		// Empty statement: stmt: /*EMPTY*/
 		return nil
-	case ast.Token_SELECT, ast.Token_TABLE, ast.Token_VALUES,
-		ast.Token_WITH, ast.Token_WITH_LA:
+	case ast.Token_SELECT, ast.Token_TABLE, ast.Token_VALUES:
 		// gram.y: SelectStmt: select_no_parens %prec UMINUS
 		return p.parseSelectStmt()
 	case ast.Token('('):
 		// gram.y: SelectStmt: select_with_parens %prec UMINUS
 		return p.parseSelectStmt()
+	case ast.Token_WITH, ast.Token_WITH_LA:
+		// opt_with_clause statements: SELECT/INSERT/UPDATE/DELETE/MERGE
+		return p.parseWithPrefixedStmt()
+	case ast.Token_INSERT:
+		return p.parseInsertStmt(nil)
+	case ast.Token_UPDATE:
+		return p.parseUpdateStmt(nil)
+	case ast.Token_DELETE_P:
+		return p.parseDeleteStmt(nil)
+	case ast.Token_MERGE:
+		return p.parseMergeStmt(nil)
+	case ast.Token_COPY:
+		return p.parseCopyStmt()
+	case ast.Token_PREPARE:
+		return p.parsePrepareStmt()
+	case ast.Token_EXECUTE:
+		return p.parseExecuteStmt()
+	case ast.Token_DEALLOCATE:
+		return p.parseDeallocateStmt()
+	case ast.Token_DECLARE:
+		return p.parseDeclareCursorStmt()
+	case ast.Token_FETCH:
+		return p.parseFetchStmt(false)
+	case ast.Token_MOVE:
+		return p.parseFetchStmt(true)
+	case ast.Token_CLOSE:
+		return p.parseClosePortalStmt()
 	}
 	p.syntaxError(tok)
 	return nil

@@ -235,3 +235,79 @@ func isAIndices(n *ast.Node) bool {
 	_, ok := n.Node.(*ast.Node_AIndices)
 	return ok
 }
+
+func nFloat(s string) *ast.Node {
+	return &ast.Node{Node: &ast.Node_Float{Float: &ast.Float{Fval: s}}}
+}
+
+func nBoolean(b bool) *ast.Node {
+	return &ast.Node{Node: &ast.Node_Boolean{Boolean: &ast.Boolean{Boolval: b}}}
+}
+
+func nTypeName(t *ast.TypeName) *ast.Node {
+	return &ast.Node{Node: &ast.Node_TypeName{TypeName: t}}
+}
+
+func nDefElem(d *ast.DefElem) *ast.Node {
+	return &ast.Node{Node: &ast.Node_DefElem{DefElem: d}}
+}
+
+func nIndexElem(e *ast.IndexElem) *ast.Node {
+	return &ast.Node{Node: &ast.Node_IndexElem{IndexElem: e}}
+}
+
+func nMultiAssignRef(m *ast.MultiAssignRef) *ast.Node {
+	return &ast.Node{Node: &ast.Node_MultiAssignRef{MultiAssignRef: m}}
+}
+
+func nCurrentOfExpr(c *ast.CurrentOfExpr) *ast.Node {
+	return &ast.Node{Node: &ast.Node_CurrentOfExpr{CurrentOfExpr: c}}
+}
+
+func nMergeWhenClause(m *ast.MergeWhenClause) *ast.Node {
+	return &ast.Node{Node: &ast.Node_MergeWhenClause{MergeWhenClause: m}}
+}
+
+func nInsertStmt(s *ast.InsertStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_InsertStmt{InsertStmt: s}}
+}
+
+func nUpdateStmt(s *ast.UpdateStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_UpdateStmt{UpdateStmt: s}}
+}
+
+func nDeleteStmt(s *ast.DeleteStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_DeleteStmt{DeleteStmt: s}}
+}
+
+func nMergeStmt(s *ast.MergeStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_MergeStmt{MergeStmt: s}}
+}
+
+func nCopyStmt(s *ast.CopyStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_CopyStmt{CopyStmt: s}}
+}
+
+func nPrepareStmt(s *ast.PrepareStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_PrepareStmt{PrepareStmt: s}}
+}
+
+func nExecuteStmt(s *ast.ExecuteStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_ExecuteStmt{ExecuteStmt: s}}
+}
+
+func nDeallocateStmt(s *ast.DeallocateStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_DeallocateStmt{DeallocateStmt: s}}
+}
+
+func nDeclareCursorStmt(s *ast.DeclareCursorStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_DeclareCursorStmt{DeclareCursorStmt: s}}
+}
+
+func nFetchStmt(s *ast.FetchStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_FetchStmt{FetchStmt: s}}
+}
+
+func nClosePortalStmt(s *ast.ClosePortalStmt) *ast.Node {
+	return &ast.Node{Node: &ast.Node_ClosePortalStmt{ClosePortalStmt: s}}
+}
