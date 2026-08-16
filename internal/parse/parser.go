@@ -261,6 +261,8 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseCheckPointStmt()
 	case ast.Token_DISCARD:
 		return p.parseDiscardStmt()
+	case ast.Token_REFRESH:
+		return p.parseRefreshMatViewStmt()
 	}
 	p.syntaxError(tok)
 	return nil

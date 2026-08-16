@@ -71,6 +71,10 @@ func (p *parser) parseCreateStmtFamily(schemaElt bool) *ast.Node {
 			p.next()
 			return p.parseCreateTrigStmt(false, true)
 		}
+	case ast.Token_MATERIALIZED:
+		if !schemaElt {
+			return p.parseCreateMatViewStmt(relPersistPermanent)
+		}
 	}
 	return nil
 }
@@ -117,6 +121,11 @@ func (p *parser) parseOptTempHeadedCreate(schemaElt bool) *ast.Node {
 	case ast.Token_RECURSIVE:
 		if p.kindN(1) == ast.Token_VIEW {
 			return p.parseViewStmt(false, persistence)
+		}
+	case ast.Token_MATERIALIZED:
+		// CREATE UNLOGGED MATERIALIZED VIEW (OptNoLog)
+		if persistence == relPersistUnlogged {
+			return p.parseCreateMatViewStmt(persistence)
 		}
 	}
 	p.syntaxErrorAt()
@@ -169,6 +178,9 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 	case ast.Token_GROUP_P:
 		p.next()
 		return p.parseAlterGroupStmt()
+	case ast.Token_SEQUENCE:
+		p.next()
+		return p.parseAlterSeqStmt()
 	}
 	p.syntaxErrorAt()
 	return nil
@@ -202,26 +214,6 @@ const (
 
 // Stubs for productions landing later in milestones 6-7; each fails with
 // the syntax error the dispatcher would otherwise have raised.
-func (p *parser) parseCreateTableOrAs(persistence string) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
-
-func (p *parser) parseIndexStmt() *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
-
-func (p *parser) parseCreateSeqStmt(persistence string) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
-
-func (p *parser) parseViewStmt(orReplace bool, persistence string) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
-
 func (p *parser) parseCreateTrigStmt(orReplace, isConstraint bool) *ast.Node {
 	p.syntaxErrorAt()
 	return nil
