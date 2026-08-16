@@ -380,12 +380,15 @@ gate; the corpus harness exists before the first line of the lexer.
    met: all 43,373 scan cases and all 8 split_scanner cases pass; xxh3 is
    verified against 126 oracle-generated vectors covering every length
    class and seed path. See "As-built notes (milestone 3)".
-4. **Expressions + SELECT.** `a_expr`/`b_expr`/`c_expr` precedence machinery,
-   constants and typecasts, `func_expr` (including `json_*`, `xml*`,
-   aggregate `FILTER`/`WITHIN GROUP`, window functions), `SELECT` end-to-end:
-   target list, `FROM` (joins, `LATERAL`, table functions, `TABLESAMPLE`),
-   grouping sets, set operations, CTEs (`MATERIALIZED`, `SEARCH`/`CYCLE`),
-   `VALUES`, locking clauses. The largest single chunk of work.
+4. **Expressions + SELECT.** ✅ *Landed 2026-08-15.* `a_expr`/`b_expr`/
+   `c_expr` precedence machinery, constants and typecasts, `func_expr`
+   (including `json_*`, `xml*`, aggregate `FILTER`/`WITHIN GROUP`, window
+   functions), `SELECT` end-to-end: target list, `FROM` (joins, `LATERAL`,
+   table functions, `TABLESAMPLE`, `XMLTABLE`, `JSON_TABLE`), grouping
+   sets, set operations, CTEs (`MATERIALIZED`, `SEARCH`/`CYCLE`), `VALUES`,
+   locking clauses. The largest single chunk of work. `ParseToJSON` ships
+   here too (the generated-equivalent JSON emitter plus `Parse`/
+   `ParseToProtobuf`). See "As-built notes (milestone 4)".
 5. **DML.** `INSERT` (`ON CONFLICT`, `OVERRIDING`), `UPDATE`, `DELETE`,
    `MERGE`, `RETURNING`, `COPY`, `PREPARE`/`EXECUTE`, cursors.
 6. **DDL, part 1.** `CREATE`/`ALTER TABLE` (the second-biggest grammar
@@ -478,6 +481,49 @@ Measured at the pin, where the plan's estimates differ:
   rules.
 - `internal/xxh3` implements only `XXH3_64bits_withSeed` (scalar paths),
   the sole entry point the API needs.
+
+### As-built notes (milestone 4)
+
+- The JSON emitter (`internal/emit`) is a protobuf-descriptor-driven walker
+  rather than generated per-node code: the pinned proto was itself generated
+  from the C struct metadata, so field declaration order, `json_name`, and
+  field kinds already encode everything `pg_query_outfuncs_json.c` does. The
+  hand-written special cases (`A_Const`, the five value nodes, `List`
+  variants, `_outToken` escaping, two always-emitted empty-string fields)
+  mirror the reference file. Byte-parity is proven corpus-wide by
+  `internal/emit.TestGoldenRoundTrip`, which protojson-decodes all 42,970
+  tree goldens and re-emits them byte-identically. Generated per-node
+  emitters remain an option for milestone 12 if profiling wants them.
+- The parser (`internal/parse`) reproduces bison's conflict resolution by
+  precedence climbing: left-assoc operators parse their right operand one
+  level up, `%nonassoc` levels error when chained within one climb, and the
+  `%prec` annotations are reproduced at their call sites. Two behaviors
+  worth calling out: `a_expr subquery_Op sub_type` enters the loop at the
+  operator token's own precedence but reduces at `%prec Op` (so
+  `1 = 2 = ANY(...)` fails at the second `=` while `= ANY(...) + 1` binds
+  the `+` outside), and qual-requiring JOINs absorb further joins into
+  their right operand (bison shifts because the rule cannot reduce until
+  its join_qual) while CROSS/NATURAL joins stay left-associative.
+- LALR keeps sub-select and parenthesized-expression paths alive
+  simultaneously; the recursive-descent port uses bounded backtracking
+  (token-position mark/reset) in exactly four places: `(`-headed c_expr /
+  in_expr / table_ref (select_with_parens trials, pre-gated by a
+  skip-the-parens lookahead for a SELECT/VALUES/TABLE/WITH head), and the
+  OVERLAY/SUBSTRING/JSON_OBJECT special-vs-generic argument forms.
+- The `NOT_LA`/`WITH_LA`/`FORMAT_LA` merges arrive pre-applied from the
+  milestone-3 filter; grammar errors report through the same
+  scanner_yyerror path the C stack uses (`base_yyerror` → `parser_yyerror`
+  → `scanner_yyerror`), so syntax errors carry `scan.l` error data and the
+  merged tokens report only their first word, exactly as parser.c's
+  hold-char poke arranges.
+- Corpus effect: 16,300+ parse cases came off the todo list. Every
+  remaining parse todo either starts with a statement type from milestones
+  5-7 or embeds one (DML inside CTEs); the only pure-SELECT stragglers are
+  negative cases whose error texts come from those same unimplemented
+  productions.
+- `cmd/difftest` currently ships the interim `-summary`/`-show` failure
+  classifier used to drive the milestone; the mutation fuzzer replaces it
+  in milestone 12.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 

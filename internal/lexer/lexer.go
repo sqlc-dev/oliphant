@@ -61,6 +61,9 @@ func New(input string) *Scanner {
 	return &Scanner{input: input}
 }
 
+// Input returns the input string as scanned (truncated at any NUL byte).
+func (s *Scanner) Input() string { return s.input }
+
 // Character classes from scan.l's named patterns.
 
 // scan.l: space
