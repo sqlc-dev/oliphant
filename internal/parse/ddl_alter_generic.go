@@ -355,11 +355,12 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 			}
 			names := p.anyName()
 			p.expect(ast.Token_USING)
-			obj := nList(append([]*ast.Node{nStr(p.name())}, names...))
+			amname := p.name()
+			obj := nList(append([]*ast.Node{nStr(amname)}, names...))
 			if isFamily {
 				switch p.kind() {
 				case ast.Token_ADD_P, ast.Token_DROP:
-					return p.parseAlterOpFamilyStmt(obj)
+					return p.parseAlterOpFamilyStmtImpl(names, amname)
 				}
 			}
 			if n := p.parseAlterGenericTail(objtype, obj, nil, false,
@@ -857,12 +858,7 @@ func (p *parser) parseOperatorDefArg() *ast.Node {
 	return nTypeName(p.parseFuncType())
 }
 
-// Stubs for statements arriving in later milestone-7 batches.
-func (p *parser) parseAlterOpFamilyStmt(obj *ast.Node) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
-
+// Stub for the text-search configuration batch.
 func (p *parser) parseAlterTSConfigurationStmt(names []*ast.Node) *ast.Node {
 	p.syntaxErrorAt()
 	return nil

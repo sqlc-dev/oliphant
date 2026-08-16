@@ -48,6 +48,60 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_POLICY:
 		p.next()
 		return p.parseCreatePolicyStmt()
+	case ast.Token_AGGREGATE:
+		p.next()
+		return p.parseCreateAggregateStmt(false)
+	case ast.Token_OPERATOR:
+		p.next()
+		return p.parseCreateOperatorStmt()
+	case ast.Token_TYPE_P:
+		p.next()
+		return p.parseCreateTypeStmt()
+	case ast.Token_STATISTICS:
+		p.next()
+		return p.parseCreateStatsStmt()
+	case ast.Token_COLLATION:
+		// gram.y: DefineStmt COLLATION arms
+		p.next()
+		n := &ast.DefineStmt{Kind: ast.ObjectType_OBJECT_COLLATION}
+		if p.have(ast.Token_IF_P) {
+			p.expect(ast.Token_NOT)
+			p.expect(ast.Token_EXISTS)
+			n.IfNotExists = true
+		}
+		n.Defnames = p.anyName()
+		if ftok := p.peek(); ftok.Kind == ast.Token_FROM {
+			p.next()
+			ntok := p.peek()
+			n.Definition = []*ast.Node{makeDefElem("from", nList(p.anyName()), ntok.Start)}
+		} else {
+			n.Definition = p.parseDefinition()
+		}
+		return nDefineStmt(n)
+	case ast.Token_TEXT_P:
+		if p.kindN(1) == ast.Token_SEARCH {
+			p.next()
+			p.next()
+			var kind ast.ObjectType
+			switch p.kind() {
+			case ast.Token_PARSER:
+				kind = ast.ObjectType_OBJECT_TSPARSER
+			case ast.Token_DICTIONARY:
+				kind = ast.ObjectType_OBJECT_TSDICTIONARY
+			case ast.Token_TEMPLATE:
+				kind = ast.ObjectType_OBJECT_TSTEMPLATE
+			case ast.Token_CONFIGURATION:
+				kind = ast.ObjectType_OBJECT_TSCONFIGURATION
+			default:
+				p.syntaxErrorAt()
+			}
+			p.next()
+			return nDefineStmt(&ast.DefineStmt{
+				Kind:       kind,
+				Defnames:   p.anyName(),
+				Definition: p.parseDefinition(),
+			})
+		}
 	case ast.Token_ACCESS:
 		if p.kindN(1) == ast.Token_METHOD {
 			p.next()
@@ -143,6 +197,9 @@ func (p *parser) parseCreateOrReplace(schemaElt bool) *ast.Node {
 		}
 	case ast.Token_FUNCTION, ast.Token_PROCEDURE:
 		return p.parseCreateFunctionStmt(true)
+	case ast.Token_AGGREGATE:
+		p.next()
+		return p.parseCreateAggregateStmt(true)
 	}
 	p.syntaxErrorAt()
 	return nil
