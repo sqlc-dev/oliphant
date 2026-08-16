@@ -201,7 +201,30 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 	case ast.Token_COPY:
 		return p.parseCopyStmt()
 	case ast.Token_PREPARE:
+		// PREPARE TRANSACTION Sconst is a TransactionStmt; PREPARE name
+		// [(types)] AS is a PrepareStmt ("transaction" can also be a plan
+		// name, so the Sconst decides).
+		if p.kindN(1) == ast.Token_TRANSACTION && p.kindN(2) == ast.Token_SCONST {
+			p.next()
+			return p.parsePrepareTransactionStmt()
+		}
 		return p.parsePrepareStmt()
+	case ast.Token_ABORT_P, ast.Token_START, ast.Token_COMMIT,
+		ast.Token_ROLLBACK, ast.Token_SAVEPOINT, ast.Token_RELEASE,
+		ast.Token_BEGIN_P, ast.Token_END_P:
+		return p.parseTransactionStmt()
+	case ast.Token_NOTIFY:
+		return p.parseNotifyStmt()
+	case ast.Token_LISTEN:
+		return p.parseListenStmt()
+	case ast.Token_UNLISTEN:
+		return p.parseUnlistenStmt()
+	case ast.Token_LOAD:
+		return p.parseLoadStmt()
+	case ast.Token_LOCK_P:
+		return p.parseLockStmt()
+	case ast.Token_TRUNCATE:
+		return p.parseTruncateStmt()
 	case ast.Token_EXECUTE:
 		return p.parseExecuteStmt()
 	case ast.Token_DEALLOCATE:
@@ -214,6 +237,69 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseFetchStmt(true)
 	case ast.Token_CLOSE:
 		return p.parseClosePortalStmt()
+	case ast.Token_CALL:
+		return p.parseCallStmt()
+	case ast.Token_CREATE:
+		return p.parseCreateDispatch()
+	case ast.Token_ALTER:
+		return p.parseAlterDispatch()
+	case ast.Token_DROP:
+		return p.parseDropDispatch()
+	case ast.Token_SET:
+		// SET CONSTRAINTS is ConstraintsSetStmt unless "constraints" is
+		// being used as a variable name (generic_set's var_name).
+		if p.kindN(1) == ast.Token_CONSTRAINTS && !p.varNameContinues(2) {
+			p.next()
+			return p.parseConstraintsSetStmt()
+		}
+		return p.parseVariableSetStmt()
+	case ast.Token_RESET:
+		return p.parseVariableResetStmt()
+	case ast.Token_SHOW:
+		return p.parseVariableShowStmt()
+	case ast.Token_CHECKPOINT:
+		return p.parseCheckPointStmt()
+	case ast.Token_DISCARD:
+		return p.parseDiscardStmt()
+	case ast.Token_REFRESH:
+		return p.parseRefreshMatViewStmt()
+	case ast.Token_COMMENT:
+		return p.parseCommentStmt()
+	case ast.Token_CLUSTER:
+		return p.parseClusterStmt()
+	case ast.Token_VACUUM:
+		return p.parseVacuumStmt()
+	case ast.Token_ANALYZE, ast.Token_ANALYSE:
+		return p.parseAnalyzeStmt()
+	case ast.Token_EXPLAIN:
+		return p.parseExplainStmt()
+	case ast.Token_REINDEX:
+		return p.parseReindexStmt()
+	case ast.Token_DO:
+		return p.parseDoStmt()
+	case ast.Token_GRANT:
+		return p.parseGrantStmt()
+	case ast.Token_REVOKE:
+		return p.parseRevokeStmt()
+	case ast.Token_IMPORT_P:
+		return p.parseImportForeignSchemaStmt()
+	case ast.Token_SECURITY:
+		if p.kindN(1) == ast.Token_LABEL {
+			p.next()
+			p.next()
+			return p.parseSecLabelStmt()
+		}
+	case ast.Token_REASSIGN:
+		// gram.y: ReassignOwnedStmt
+		p.next()
+		p.expect(ast.Token_OWNED)
+		p.expect(ast.Token_BY)
+		roles := p.parseRoleList()
+		p.expect(ast.Token_TO)
+		return &ast.Node{Node: &ast.Node_ReassignOwnedStmt{ReassignOwnedStmt: &ast.ReassignOwnedStmt{
+			Roles:   roles,
+			Newrole: p.parseRoleSpec(),
+		}}}
 	}
 	p.syntaxError(tok)
 	return nil

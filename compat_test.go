@@ -43,10 +43,6 @@ func TestNotImplementedErrors(t *testing.T) {
 	check("Fingerprint", err)
 	_, err = pg_query.FingerprintToUInt64("SELECT 1")
 	check("FingerprintToUInt64", err)
-	_, err = pg_query.SplitWithParser("SELECT 1", false)
-	check("SplitWithParser", err)
-	_, err = pg_query.IsUtilityStmt("SELECT 1")
-	check("IsUtilityStmt", err)
 	_, err = pg_query.ParsePlPgSqlToJSON("SELECT 1")
 	check("ParsePlPgSqlToJSON", err)
 	_, err = pg_query.Summary("SELECT 1", 0)
@@ -86,6 +82,35 @@ func TestScanTokens(t *testing.T) {
 		if g.Start != e.start || g.End != e.end || g.Token != e.token || g.KeywordKind != e.keywordKind {
 			t.Errorf("token %d = (%d %d %v %v), want (%d %d %v %v)",
 				i, g.Start, g.End, g.Token, g.KeywordKind, e.start, e.end, e.token, e.keywordKind)
+		}
+	}
+}
+
+// TestSplitWithParser mirrors pg_query_go's parser-based split tests.
+func TestSplitWithParser(t *testing.T) {
+	stmts, err := pg_query.SplitWithParser("CREATE RULE x AS ON SELECT TO tbl DO (SELECT 1; SELECT 2); SELECT 3", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"CREATE RULE x AS ON SELECT TO tbl DO (SELECT 1; SELECT 2)", "SELECT 3"}
+	if len(stmts) != len(want) || stmts[0] != want[0] || stmts[1] != want[1] {
+		t.Fatalf("SplitWithParser = %q, want %q", stmts, want)
+	}
+}
+
+// TestIsUtilityStmt pins the statement classification split.
+func TestIsUtilityStmt(t *testing.T) {
+	got, err := pg_query.IsUtilityStmt("SELECT 1; VACUUM; INSERT INTO t VALUES (1); CREATE TABLE t (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{false, true, false, true}
+	if len(got) != len(want) {
+		t.Fatalf("IsUtilityStmt returned %d results, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("IsUtilityStmt[%d] = %v, want %v", i, got[i], want[i])
 		}
 	}
 }

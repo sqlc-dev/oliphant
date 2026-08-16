@@ -120,9 +120,14 @@ func (p *parser) parseKeywordTypename(constForm bool) *ast.TypeName {
 		t.Location = tok.Start
 		return t
 	case ast.Token_DOUBLE_P:
-		// DOUBLE_P PRECISION
+		// DOUBLE_P PRECISION; a bare "double" is a GenericType name (the
+		// keyword is unreserved and PRECISION is what commits the Numeric
+		// reading).
+		if p.kindN(1) != ast.Token_PRECISION {
+			return nil
+		}
 		p.next()
-		p.expect(ast.Token_PRECISION)
+		p.next()
 		t := SystemTypeName("float8")
 		t.Location = tok.Start
 		return t

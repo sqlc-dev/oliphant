@@ -12,9 +12,25 @@ import (
 // its canonical lower-case spelling, an IDENT's Str is the downcased,
 // truncated identifier — in both cases exactly the C production's $$.
 
+// isLookaheadMergedToken reports whether tok is one of base_yylex's merged
+// lookahead terminals. They inherit the keyword classification of their
+// first word from the lexer, but the grammar treats them as distinct
+// terminals that can never be identifiers.
+func isLookaheadMergedToken(tok lexer.Token) bool {
+	switch tok.Kind {
+	case ast.Token_NOT_LA, ast.Token_NULLS_LA, ast.Token_WITH_LA,
+		ast.Token_WITHOUT_LA, ast.Token_FORMAT_LA:
+		return true
+	}
+	return false
+}
+
 // isColIdToken reports whether tok can begin ColId:
 // gram.y: ColId: IDENT | unreserved_keyword | col_name_keyword
 func isColIdToken(tok lexer.Token) bool {
+	if isLookaheadMergedToken(tok) {
+		return false
+	}
 	switch tok.KeywordKind {
 	case ast.KeywordKind_NO_KEYWORD:
 		return tok.Kind == ast.Token_IDENT
@@ -27,6 +43,9 @@ func isColIdToken(tok lexer.Token) bool {
 // isTypeFunctionNameToken:
 // gram.y: type_function_name: IDENT | unreserved_keyword | type_func_name_keyword
 func isTypeFunctionNameToken(tok lexer.Token) bool {
+	if isLookaheadMergedToken(tok) {
+		return false
+	}
 	switch tok.KeywordKind {
 	case ast.KeywordKind_NO_KEYWORD:
 		return tok.Kind == ast.Token_IDENT
@@ -40,6 +59,9 @@ func isTypeFunctionNameToken(tok lexer.Token) bool {
 // gram.y: NonReservedWord: IDENT | unreserved_keyword | col_name_keyword |
 // type_func_name_keyword
 func isNonReservedWordToken(tok lexer.Token) bool {
+	if isLookaheadMergedToken(tok) {
+		return false
+	}
 	switch tok.KeywordKind {
 	case ast.KeywordKind_NO_KEYWORD:
 		return tok.Kind == ast.Token_IDENT
@@ -54,6 +76,9 @@ func isNonReservedWordToken(tok lexer.Token) bool {
 // gram.y: ColLabel: IDENT | unreserved_keyword | col_name_keyword |
 // type_func_name_keyword | reserved_keyword
 func isColLabelToken(tok lexer.Token) bool {
+	if isLookaheadMergedToken(tok) {
+		return false
+	}
 	if tok.KeywordKind != ast.KeywordKind_NO_KEYWORD {
 		return true
 	}
@@ -63,6 +88,9 @@ func isColLabelToken(tok lexer.Token) bool {
 // isBareColLabelToken:
 // gram.y: BareColLabel: IDENT | bare_label_keyword
 func isBareColLabelToken(tok lexer.Token) bool {
+	if isLookaheadMergedToken(tok) {
+		return false
+	}
 	if tok.Kind == ast.Token_IDENT && tok.KeywordKind == ast.KeywordKind_NO_KEYWORD {
 		return true
 	}

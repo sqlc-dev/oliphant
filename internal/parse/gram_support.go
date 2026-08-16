@@ -298,9 +298,13 @@ func makeSetOp(op ast.SetOperation, all bool, larg, rarg *ast.Node) *ast.Node {
 	})
 }
 
-// gram.y: makeRangeVarFromAnyName
+// gram.y: makeRangeVarFromAnyName — makeNode leaves inh false, unlike
+// makeRangeVar.
 func (p *parser) makeRangeVarFromAnyName(names []*ast.Node, position int32) *ast.RangeVar {
-	r := makeRangeVar("", "", position)
+	r := &ast.RangeVar{
+		Relpersistence: relPersistPermanent,
+		Location:       position,
+	}
 	switch len(names) {
 	case 1:
 		r.Relname = asString(names[0]).Sval
