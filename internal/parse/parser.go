@@ -281,6 +281,8 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseGrantStmt()
 	case ast.Token_REVOKE:
 		return p.parseRevokeStmt()
+	case ast.Token_IMPORT_P:
+		return p.parseImportForeignSchemaStmt()
 	case ast.Token_SECURITY:
 		if p.kindN(1) == ast.Token_LABEL {
 			p.next()

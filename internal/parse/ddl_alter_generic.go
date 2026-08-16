@@ -415,7 +415,9 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 
 	case ast.Token_ROLE, ast.Token_USER:
 		if p.kindN(1) == ast.Token_MAPPING {
-			break // AlterUserMappingStmt (FDW batch)
+			p.next()
+			p.next()
+			return p.parseAlterUserMappingStmt()
 		}
 		p.next()
 		if p.kind() == ast.Token_ALL {
@@ -501,6 +503,19 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 			return n
 		}
 		p.syntaxErrorAt()
+
+	case ast.Token_SERVER:
+		p.next()
+		name := p.name()
+		switch p.kind() {
+		case ast.Token_RENAME, ast.Token_OWNER:
+			if n := p.parseAlterGenericTail(ast.ObjectType_OBJECT_FOREIGN_SERVER, nStr(name), nil, false,
+				tailRename|tailOwner); n != nil {
+				return n
+			}
+			p.syntaxErrorAt()
+		}
+		return p.parseAlterForeignServerStmt(name)
 
 	case ast.Token_SCHEMA:
 		p.next()
@@ -654,12 +669,26 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 			return p.parseAlterTableStmt(ast.ObjectType_OBJECT_MATVIEW, false, true)
 		}
 	case ast.Token_FOREIGN:
-		if p.kindN(1) == ast.Token_TABLE {
+		switch p.kindN(1) {
+		case ast.Token_TABLE:
 			p.next()
 			p.next()
 			return p.parseAlterTableStmt(ast.ObjectType_OBJECT_FOREIGN_TABLE, true, false)
+		case ast.Token_DATA_P:
+			p.next()
+			p.next()
+			p.expect(ast.Token_WRAPPER)
+			name := p.name()
+			switch p.kind() {
+			case ast.Token_RENAME, ast.Token_OWNER:
+				if n := p.parseAlterGenericTail(ast.ObjectType_OBJECT_FDW, nStr(name), nil, false,
+					tailRename|tailOwner); n != nil {
+					return n
+				}
+				p.syntaxErrorAt()
+			}
+			return p.parseAlterFdwStmt(name)
 		}
-		break // ALTER FOREIGN DATA WRAPPER (FDW batch)
 
 	case ast.Token_SEQUENCE:
 		p.next()

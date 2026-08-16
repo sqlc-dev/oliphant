@@ -17,7 +17,9 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 		return p.parseCreateRoleStmt(ast.RoleStmtType_ROLESTMT_ROLE)
 	case ast.Token_USER:
 		if p.kindN(1) == ast.Token_MAPPING {
-			break // CreateUserMappingStmt (milestone 7)
+			p.next()
+			p.next()
+			return p.parseCreateUserMappingStmt()
 		}
 		return p.parseCreateRoleStmt(ast.RoleStmtType_ROLESTMT_USER)
 	case ast.Token_GROUP_P:
@@ -51,6 +53,21 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_PUBLICATION:
 		p.next()
 		return p.parseCreatePublicationStmt()
+	case ast.Token_FOREIGN:
+		switch p.kindN(1) {
+		case ast.Token_DATA_P:
+			p.next()
+			p.next()
+			p.expect(ast.Token_WRAPPER)
+			return p.parseCreateFdwStmt()
+		case ast.Token_TABLE:
+			p.next()
+			p.next()
+			return p.parseCreateForeignTableStmt()
+		}
+	case ast.Token_SERVER:
+		p.next()
+		return p.parseCreateForeignServerStmt()
 	case ast.Token_SUBSCRIPTION:
 		p.next()
 		return p.parseCreateSubscriptionStmt()
