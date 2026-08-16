@@ -265,6 +265,18 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseRefreshMatViewStmt()
 	case ast.Token_COMMENT:
 		return p.parseCommentStmt()
+	case ast.Token_CLUSTER:
+		return p.parseClusterStmt()
+	case ast.Token_VACUUM:
+		return p.parseVacuumStmt()
+	case ast.Token_ANALYZE, ast.Token_ANALYSE:
+		return p.parseAnalyzeStmt()
+	case ast.Token_EXPLAIN:
+		return p.parseExplainStmt()
+	case ast.Token_REINDEX:
+		return p.parseReindexStmt()
+	case ast.Token_DO:
+		return p.parseDoStmt()
 	case ast.Token_SECURITY:
 		if p.kindN(1) == ast.Token_LABEL {
 			p.next()

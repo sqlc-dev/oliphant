@@ -25,6 +25,9 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_SCHEMA:
 		p.next()
 		return p.parseCreateSchemaStmt()
+	case ast.Token_CAST:
+		p.next()
+		return p.parseCreateCastStmt()
 	}
 	if stmt := p.parseCreateStmtFamily(false); stmt != nil {
 		return stmt
