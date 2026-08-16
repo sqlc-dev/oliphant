@@ -343,23 +343,23 @@ func (p *parser) parseColQualList() ([]*ast.Node, *ast.CollateClause) {
 			c.Location = tok.Start
 			constraints = append(constraints, nConstraint(c))
 		case ast.Token_NOT:
-			switch p.kindN(1) {
-			case ast.Token_NULL_P:
-				p.next()
-				p.next()
+			// bison always shifts NOT here (nothing else in the follow set
+			// starts with it), so a bad token after NOT is reported at that
+			// token, not at NOT.
+			p.next()
+			switch {
+			case p.have(ast.Token_NULL_P):
 				constraints = append(constraints, nConstraint(&ast.Constraint{
 					Contype:  ast.ConstrType_CONSTR_NOTNULL,
 					Location: tok.Start,
 				}))
-			case ast.Token_DEFERRABLE:
-				p.next()
-				p.next()
+			case p.have(ast.Token_DEFERRABLE):
 				constraints = append(constraints, nConstraint(&ast.Constraint{
 					Contype:  ast.ConstrType_CONSTR_ATTR_NOT_DEFERRABLE,
 					Location: tok.Start,
 				}))
 			default:
-				return constraints, coll
+				p.syntaxErrorAt()
 			}
 		case ast.Token_DEFERRABLE:
 			p.next()

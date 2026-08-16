@@ -709,6 +709,9 @@ func (p *parser) startsFunctionCallAhead() bool {
 		ast.Token_CURRENT_CATALOG, ast.Token_CURRENT_SCHEMA, ast.Token_CAST,
 		ast.Token_SYSTEM_USER:
 		return true
+	case ast.Token_COLLATION:
+		// COLLATION FOR '(' a_expr ')'
+		return p.kindN(1) == ast.Token_FOR
 	}
 	// Scan past the (possibly dotted) name: name ('.' attr)* '('.
 	i := 1

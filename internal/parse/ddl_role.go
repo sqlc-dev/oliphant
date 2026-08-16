@@ -261,15 +261,16 @@ func (p *parser) parseAlterGroupStmtRest(role *ast.RoleSpec) *ast.Node {
 	default:
 		p.syntaxErrorAt()
 	}
-	utok := p.expect(ast.Token_USER)
+	p.expect(ast.Token_USER)
+	// gram.y gives the DefElem @6 — the role_list's location.
+	ltok := p.peek()
 	n := &ast.AlterRoleStmt{
 		Role:   role,
 		Action: action,
 		Options: []*ast.Node{
-			makeDefElem("rolemembers", nList(p.parseRoleList()), utok.End),
+			makeDefElem("rolemembers", nList(p.parseRoleList()), ltok.Start),
 		},
 	}
-	// gram.y gives the DefElem @6 — the role_list's location.
 	return &ast.Node{Node: &ast.Node_AlterRoleStmt{AlterRoleStmt: n}}
 }
 
