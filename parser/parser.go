@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/sqlc-dev/oliphant/ast"
+	"github.com/sqlc-dev/oliphant/internal/deparse"
 	"github.com/sqlc-dev/oliphant/internal/emit"
 	"github.com/sqlc-dev/oliphant/internal/fingerprint"
 	"github.com/sqlc-dev/oliphant/internal/lexer"
@@ -99,8 +100,20 @@ func ParseToProtobuf(input string) ([]byte, error) {
 	return proto.Marshal(tree)
 }
 
+// DeparseFromProtobuf is pg_query_deparse_protobuf: decode the tree and
+// render it back to SQL, statements joined with "; ".
 func DeparseFromProtobuf(input []byte) (result string, err error) {
-	return "", errNotImplemented("DeparseFromProtobuf")
+	tree := &ast.ParseResult{}
+	if err := proto.Unmarshal(input, tree); err != nil {
+		return "", err
+	}
+	out, derr := deparse.Deparse(tree)
+	if derr != nil {
+		// The C path surfaces elog messages as PgQueryError; only Message is
+		// populated meaningfully here (deparse errors carry no cursor).
+		return "", &Error{Message: derr.Error()}
+	}
+	return out, nil
 }
 
 func ParsePlPgSqlToJSON(input string) (result string, err error) {
