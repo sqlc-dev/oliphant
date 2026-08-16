@@ -697,11 +697,9 @@ func (p *parser) parseFuncName(tok lexer.Token) []*ast.Node {
 // relation) starts here: a name possibly dotted, followed by '('.
 func (p *parser) startsFunctionCallAhead() bool {
 	tok := p.peek()
-	if !isColIdToken(tok) && !isTypeFunctionNameToken(tok) {
-		return false
-	}
 	// Keywords with special function syntax are func_tables too
-	// (func_expr_common_subexpr in func_expr_windowless).
+	// (func_expr_common_subexpr in func_expr_windowless); several are
+	// reserved, so this check must run before the identifier gate.
 	switch tok.Kind {
 	case ast.Token_CURRENT_DATE, ast.Token_CURRENT_TIME, ast.Token_CURRENT_TIMESTAMP,
 		ast.Token_LOCALTIME, ast.Token_LOCALTIMESTAMP, ast.Token_CURRENT_ROLE,
@@ -712,6 +710,9 @@ func (p *parser) startsFunctionCallAhead() bool {
 	case ast.Token_COLLATION:
 		// COLLATION FOR '(' a_expr ')'
 		return p.kindN(1) == ast.Token_FOR
+	}
+	if !isColIdToken(tok) && !isTypeFunctionNameToken(tok) {
+		return false
 	}
 	// Scan past the (possibly dotted) name: name ('.' attr)* '('.
 	i := 1

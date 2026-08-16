@@ -1025,14 +1025,18 @@ func (p *parser) parseFrameExtent() *ast.WindowDef {
 func (p *parser) parseFrameBound() *ast.WindowDef {
 	switch p.kind() {
 	case ast.Token_UNBOUNDED:
-		p.next()
-		switch {
-		case p.have(ast.Token_PRECEDING):
+		// UNBOUNDED commits only when PRECEDING/FOLLOWING follows directly;
+		// otherwise it's an ordinary identifier in the offset expression.
+		switch p.kindN(1) {
+		case ast.Token_PRECEDING:
+			p.next()
+			p.next()
 			return &ast.WindowDef{FrameOptions: frameOptionStartUnboundedPreceding}
-		case p.have(ast.Token_FOLLOWING):
+		case ast.Token_FOLLOWING:
+			p.next()
+			p.next()
 			return &ast.WindowDef{FrameOptions: frameOptionStartUnboundedFollowing}
 		}
-		p.syntaxErrorAt()
 	case ast.Token_CURRENT_P:
 		if p.kindN(1) == ast.Token_ROW {
 			p.next()
