@@ -1170,18 +1170,6 @@ func (p *parser) parseCreateSeqStmt(persistence string) *ast.Node {
 	return &ast.Node{Node: &ast.Node_CreateSeqStmt{CreateSeqStmt: n}}
 }
 
-// parseAlterSeqStmt is gram.y's AlterSeqStmt; ALTER SEQUENCE consumed.
-func (p *parser) parseAlterSeqStmt() *ast.Node {
-	n := &ast.AlterSeqStmt{}
-	if p.have(ast.Token_IF_P) {
-		p.expect(ast.Token_EXISTS)
-		n.MissingOk = true
-	}
-	n.Sequence = p.parseQualifiedName()
-	n.Options = p.parseSeqOptList()
-	return &ast.Node{Node: &ast.Node_AlterSeqStmt{AlterSeqStmt: n}}
-}
-
 // seqOptElemStarts reports whether the lookahead begins a SeqOptElem.
 func (p *parser) seqOptElemStarts() bool {
 	switch p.kind() {

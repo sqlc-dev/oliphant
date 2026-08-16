@@ -178,9 +178,53 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 	case ast.Token_GROUP_P:
 		p.next()
 		return p.parseAlterGroupStmt()
-	case ast.Token_SEQUENCE:
+	case ast.Token_TABLE:
 		p.next()
-		return p.parseAlterSeqStmt()
+		return p.parseAlterTableStmt(ast.ObjectType_OBJECT_TABLE, true, true)
+	case ast.Token_INDEX:
+		p.next()
+		return p.parseAlterTableStmt(ast.ObjectType_OBJECT_INDEX, false, true)
+	case ast.Token_VIEW:
+		p.next()
+		return p.parseAlterTableStmt(ast.ObjectType_OBJECT_VIEW, false, false)
+	case ast.Token_MATERIALIZED:
+		if p.kindN(1) == ast.Token_VIEW {
+			p.next()
+			p.next()
+			return p.parseAlterTableStmt(ast.ObjectType_OBJECT_MATVIEW, false, true)
+		}
+	case ast.Token_FOREIGN:
+		if p.kindN(1) == ast.Token_TABLE {
+			p.next()
+			p.next()
+			return p.parseAlterTableStmt(ast.ObjectType_OBJECT_FOREIGN_TABLE, true, false)
+		}
+	case ast.Token_SEQUENCE:
+		// AlterSeqStmt (SeqOptList) and AlterTableStmt (alter_table_cmds)
+		// share the prefix through the sequence name; the next token picks
+		// the production, exactly as the LALR tables do.
+		p.next()
+		missingOk := false
+		if p.have(ast.Token_IF_P) {
+			p.expect(ast.Token_EXISTS)
+			missingOk = true
+		}
+		rel := p.parseQualifiedName()
+		if p.seqOptElemStarts() {
+			n := &ast.AlterSeqStmt{Sequence: rel, MissingOk: missingOk}
+			n.Options = p.parseSeqOptList()
+			return &ast.Node{Node: &ast.Node_AlterSeqStmt{AlterSeqStmt: n}}
+		}
+		n := &ast.AlterTableStmt{
+			Objtype:   ast.ObjectType_OBJECT_SEQUENCE,
+			Relation:  rel,
+			MissingOk: missingOk,
+		}
+		n.Cmds = p.parseAlterTableCmds()
+		return &ast.Node{Node: &ast.Node_AlterTableStmt{AlterTableStmt: n}}
+	case ast.Token_TYPE_P:
+		p.next()
+		return p.parseAlterTypeDispatch()
 	}
 	p.syntaxErrorAt()
 	return nil
