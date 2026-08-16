@@ -39,6 +39,22 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_EXTENSION:
 		p.next()
 		return p.parseCreateExtensionStmt()
+	case ast.Token_EVENT:
+		if p.kindN(1) == ast.Token_TRIGGER {
+			p.next()
+			p.next()
+			return p.parseCreateEventTrigStmt()
+		}
+	case ast.Token_ASSERTION:
+		// gram.y: CreateAssertionStmt always errors (no position).
+		p.next()
+		p.anyName()
+		p.expect(ast.Token_CHECK)
+		p.expect(ast.Token('('))
+		p.parseAExpr(0)
+		p.expect(ast.Token(')'))
+		p.parseConstraintAttributeSpec()
+		p.ereport("base_yyparse", "CREATE ASSERTION is not yet implemented", -1)
 	}
 	if stmt := p.parseCreateStmtFamily(false); stmt != nil {
 		return stmt
@@ -400,13 +416,6 @@ const (
 	relPersistTemp      = "t"
 	relPersistUnlogged  = "u"
 )
-
-// Stubs for productions landing later in milestones 6-7; each fails with
-// the syntax error the dispatcher would otherwise have raised.
-func (p *parser) parseCreateTrigStmt(orReplace, isConstraint bool) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}
 
 func (p *parser) parseGrantStmt() *ast.Node {
 	p.syntaxErrorAt()
