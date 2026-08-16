@@ -1,6 +1,6 @@
 // difftodo prints input, expected, and actual output for the still-failing
-// todo cases of parse-suite .test files. Debug aid for the corpus loop; not
-// part of the public tooling.
+// todo cases of a .test file (any suite; the suite is inferred from the
+// path). Debug aid for the corpus loop; not part of the public tooling.
 package main
 
 import (
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	pg_query "github.com/sqlc-dev/oliphant"
 	"github.com/sqlc-dev/oliphant/internal/testfile"
@@ -19,6 +20,13 @@ func main() {
 	limit := 5
 	if len(os.Args) > 2 {
 		limit, _ = strconv.Atoi(os.Args[2])
+	}
+	suite := "parse"
+	for _, s := range []string{"parse", "scan", "normalize", "normalize_utility",
+		"fingerprint", "deparse", "split_scanner", "split_parser"} {
+		if strings.Contains(path, "/"+s+"/") {
+			suite = s
+		}
 	}
 	cases, err := testfile.Read(path)
 	if err != nil {
@@ -37,21 +45,7 @@ func main() {
 		if !todo[c.Name] {
 			continue
 		}
-		got, perr := pg_query.ParseToJSON(c.Input)
-		if perr != nil {
-			var pe *parser.Error
-			if errors.As(perr, &pe) {
-				got = testfile.RenderError(testfile.ErrorExpectation{
-					Message:   pe.Message,
-					Cursorpos: pe.Cursorpos,
-					Filename:  pe.Filename,
-					Funcname:  pe.Funcname,
-					Context:   pe.Context,
-				})
-			} else {
-				got = "UNIMPLEMENTED: " + perr.Error()
-			}
-		}
+		got := evaluate(suite, c.Input)
 		if got == c.Expected {
 			continue
 		}
@@ -61,4 +55,42 @@ func main() {
 			break
 		}
 	}
+	fmt.Printf("(%d todo cases in file)\n", len(meta.Todo))
+}
+
+func evaluate(suite, input string) string {
+	var out string
+	var err error
+	switch suite {
+	case "parse":
+		out, err = pg_query.ParseToJSON(input)
+	case "normalize":
+		out, err = pg_query.Normalize(input)
+	case "normalize_utility":
+		out, err = pg_query.NormalizeUtility(input)
+	case "fingerprint":
+		out, err = pg_query.Fingerprint(input)
+	case "deparse":
+		var tree *pg_query.ParseResult
+		tree, err = pg_query.Parse(input)
+		if err == nil {
+			out, err = pg_query.Deparse(tree)
+		}
+	default:
+		panic("difftodo: unsupported suite " + suite)
+	}
+	if err != nil {
+		var pe *parser.Error
+		if errors.As(err, &pe) {
+			return testfile.RenderError(testfile.ErrorExpectation{
+				Message:   pe.Message,
+				Cursorpos: pe.Cursorpos,
+				Filename:  pe.Filename,
+				Funcname:  pe.Funcname,
+				Context:   pe.Context,
+			})
+		}
+		return "UNIMPLEMENTED: " + err.Error()
+	}
+	return out
 }

@@ -33,9 +33,7 @@ func TestNotImplementedErrors(t *testing.T) {
 		}
 	}
 
-	_, err := pg_query.Deparse(&pg_query.ParseResult{})
-	check("Deparse", err)
-	_, err = pg_query.ParsePlPgSqlToJSON("SELECT 1")
+	_, err := pg_query.ParsePlPgSqlToJSON("SELECT 1")
 	check("ParsePlPgSqlToJSON", err)
 	_, err = pg_query.Summary("SELECT 1", 0)
 	check("Summary", err)
