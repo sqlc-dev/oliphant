@@ -53,6 +53,57 @@ func (p *parser) parseAlterTableStmt(objtype ast.ObjectType, relExpr, allowMoveA
 	} else {
 		n.Relation = p.parseQualifiedName()
 	}
+
+	// The RENAME / SET SCHEMA / DEPENDS ON EXTENSION productions share this
+	// prefix (RenameStmt, AlterObjectSchemaStmt, AlterObjectDependsStmt).
+	switch p.kind() {
+	case ast.Token_RENAME:
+		p.next()
+		r := newRenameStmt(objtype)
+		r.Relation = n.Relation
+		r.MissingOk = n.MissingOk
+		switch {
+		case p.have(ast.Token_TO):
+			r.Newname = p.name()
+		case objtype == ast.ObjectType_OBJECT_TABLE && p.kind() == ast.Token_CONSTRAINT:
+			p.next()
+			r.RenameType = ast.ObjectType_OBJECT_TABCONSTRAINT
+			r.Subname = p.name()
+			p.expect(ast.Token_TO)
+			r.Newname = p.name()
+		default:
+			// RENAME [COLUMN] name TO name (not available for INDEX or
+			// SEQUENCE).
+			if objtype == ast.ObjectType_OBJECT_INDEX ||
+				objtype == ast.ObjectType_OBJECT_SEQUENCE {
+				p.syntaxErrorAt()
+			}
+			p.have(ast.Token_COLUMN)
+			r.RenameType = ast.ObjectType_OBJECT_COLUMN
+			r.RelationType = objtype
+			r.Subname = p.name()
+			p.expect(ast.Token_TO)
+			r.Newname = p.name()
+		}
+		return nRenameStmt(r)
+	case ast.Token_SET:
+		if p.kindN(1) == ast.Token_SCHEMA && objtype != ast.ObjectType_OBJECT_INDEX {
+			p.next()
+			p.next()
+			return nAlterObjectSchemaStmt(&ast.AlterObjectSchemaStmt{
+				ObjectType: objtype,
+				Relation:   n.Relation,
+				MissingOk:  n.MissingOk,
+				Newschema:  p.name(),
+			})
+		}
+	case ast.Token_DEPENDS, ast.Token_NO:
+		if objtype == ast.ObjectType_OBJECT_INDEX || objtype == ast.ObjectType_OBJECT_MATVIEW {
+			if d := p.parseAlterGenericTail(objtype, nil, n.Relation, false, tailDepends); d != nil {
+				return d
+			}
+		}
+	}
 	n.Cmds = p.parseAlterTableCmds()
 	return &ast.Node{Node: &ast.Node_AlterTableStmt{AlterTableStmt: n}}
 }
@@ -666,9 +717,80 @@ func (p *parser) parseAlterTypeDispatch() *ast.Node {
 			}
 			return &ast.Node{Node: &ast.Node_AlterTableStmt{AlterTableStmt: n}}
 		}
+		if p.kind() == ast.Token_ADD_P && p.kindN(1) == ast.Token_VALUE_P {
+			return p.parseAlterEnumStmt(names)
+		}
+		if p.kind() == ast.Token_DROP && p.kindN(1) == ast.Token_VALUE_P {
+			// gram.y: AlterEnumStmt's DROP VALUE arm always errors.
+			dtok := p.next()
+			p.next()
+			p.sconst()
+			p.ereport("base_yyparse", "dropping an enum value is not implemented", dtok.Start)
+		}
+	case ast.Token_RENAME:
+		switch p.kindN(1) {
+		case ast.Token_ATTRIBUTE:
+			// RenameStmt: ALTER TYPE_P any_name RENAME ATTRIBUTE ...
+			p.next()
+			p.next()
+			r := newRenameStmt(ast.ObjectType_OBJECT_ATTRIBUTE)
+			r.RelationType = ast.ObjectType_OBJECT_TYPE
+			r.Relation = p.makeRangeVarFromAnyName(names, ntok.Start)
+			r.Subname = p.name()
+			p.expect(ast.Token_TO)
+			r.Newname = p.name()
+			r.Behavior = p.parseOptDropBehavior()
+			return nRenameStmt(r)
+		case ast.Token_VALUE_P:
+			return p.parseAlterEnumStmt(names)
+		}
+	case ast.Token_SET:
+		if p.kindN(1) == ast.Token('(') {
+			// gram.y: AlterTypeStmt: ALTER TYPE_P any_name SET '(' ... ')'
+			p.next()
+			p.next()
+			n := &ast.AlterTypeStmt{TypeName: names}
+			n.Options = p.parseOperatorDefList()
+			p.expect(ast.Token(')'))
+			return &ast.Node{Node: &ast.Node_AlterTypeStmt{AlterTypeStmt: n}}
+		}
+	}
+	if n := p.parseAlterGenericTail(ast.ObjectType_OBJECT_TYPE, nList(names), nil, false,
+		tailRename|tailSchema|tailOwner); n != nil {
+		return n
 	}
 	p.syntaxErrorAt()
 	return nil
+}
+
+// parseAlterEnumStmt is gram.y's AlterEnumStmt; ALTER TYPE_P any_name
+// consumed, lookahead at ADD VALUE or RENAME VALUE.
+func (p *parser) parseAlterEnumStmt(names []*ast.Node) *ast.Node {
+	n := &ast.AlterEnumStmt{TypeName: names}
+	if p.have(ast.Token_ADD_P) {
+		p.expect(ast.Token_VALUE_P)
+		if p.have(ast.Token_IF_P) {
+			p.expect(ast.Token_NOT)
+			p.expect(ast.Token_EXISTS)
+			n.SkipIfNewValExists = true
+		}
+		n.NewVal = p.sconst()
+		n.NewValIsAfter = true
+		switch {
+		case p.have(ast.Token_BEFORE):
+			n.NewValNeighbor = p.sconst()
+			n.NewValIsAfter = false
+		case p.have(ast.Token_AFTER):
+			n.NewValNeighbor = p.sconst()
+		}
+		return &ast.Node{Node: &ast.Node_AlterEnumStmt{AlterEnumStmt: n}}
+	}
+	p.expect(ast.Token_RENAME)
+	p.expect(ast.Token_VALUE_P)
+	n.OldVal = p.sconst()
+	p.expect(ast.Token_TO)
+	n.NewVal = p.sconst()
+	return &ast.Node{Node: &ast.Node_AlterEnumStmt{AlterEnumStmt: n}}
 }
 
 // parseAlterTypeCmd is gram.y's alter_type_cmd.

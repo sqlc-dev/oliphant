@@ -224,24 +224,9 @@ func (p *parser) parseRoleElem(create bool) *ast.Node {
 	return nil
 }
 
-// parseAlterRoleStmt is gram.y's AlterRoleStmt and AlterRoleSetStmt; ALTER
-// and ROLE/USER have been consumed.
-func (p *parser) parseAlterRoleStmt() *ast.Node {
-	// AlterRoleSetStmt admits ALL where AlterRoleStmt needs a RoleSpec.
-	var role *ast.RoleSpec
-	if !p.have(ast.Token_ALL) {
-		role = p.parseRoleSpec()
-	} else {
-		// ALTER ROLE ALL only exists in the Set variant.
-		n := &ast.AlterRoleSetStmt{}
-		if p.have(ast.Token_IN_P) {
-			p.expect(ast.Token_DATABASE)
-			n.Database = p.name()
-		}
-		n.Setstmt = p.parseSetResetClause()
-		return &ast.Node{Node: &ast.Node_AlterRoleSetStmt{AlterRoleSetStmt: n}}
-	}
-
+// parseAlterRoleStmtRest is gram.y's AlterRoleStmt and AlterRoleSetStmt
+// with ALTER ROLE/USER RoleSpec already consumed.
+func (p *parser) parseAlterRoleStmtRest(role *ast.RoleSpec) *ast.Node {
 	// IN DATABASE / SET / RESET pick AlterRoleSetStmt.
 	switch p.kind() {
 	case ast.Token_IN_P:
@@ -262,11 +247,9 @@ func (p *parser) parseAlterRoleStmt() *ast.Node {
 	return &ast.Node{Node: &ast.Node_AlterRoleStmt{AlterRoleStmt: n}}
 }
 
-// parseAlterGroupStmt is gram.y's AlterGroupStmt; ALTER GROUP_P consumed.
-func (p *parser) parseAlterGroupStmt() *ast.Node {
-	role := p.parseRoleSpec()
-	// ALTER GROUP RoleSpec RENAME TO ... is a RenameStmt; handled by the
-	// caller before dispatching here.
+// parseAlterGroupStmtRest is gram.y's AlterGroupStmt with ALTER GROUP_P
+// RoleSpec already consumed.
+func (p *parser) parseAlterGroupStmtRest(role *ast.RoleSpec) *ast.Node {
 	var action int32
 	switch p.kind() {
 	case ast.Token_ADD_P:
