@@ -263,6 +263,25 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseDiscardStmt()
 	case ast.Token_REFRESH:
 		return p.parseRefreshMatViewStmt()
+	case ast.Token_COMMENT:
+		return p.parseCommentStmt()
+	case ast.Token_SECURITY:
+		if p.kindN(1) == ast.Token_LABEL {
+			p.next()
+			p.next()
+			return p.parseSecLabelStmt()
+		}
+	case ast.Token_REASSIGN:
+		// gram.y: ReassignOwnedStmt
+		p.next()
+		p.expect(ast.Token_OWNED)
+		p.expect(ast.Token_BY)
+		roles := p.parseRoleList()
+		p.expect(ast.Token_TO)
+		return &ast.Node{Node: &ast.Node_ReassignOwnedStmt{ReassignOwnedStmt: &ast.ReassignOwnedStmt{
+			Roles:   roles,
+			Newrole: p.parseRoleSpec(),
+		}}}
 	}
 	p.syntaxError(tok)
 	return nil

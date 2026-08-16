@@ -230,8 +230,9 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 	return nil
 }
 
-// parseDropDispatch routes a statement beginning with DROP. The DROP token
-// is not yet consumed.
+// parseDropDispatch routes a statement beginning with DROP: DropStmt and
+// the specialized Drop*/Remove* productions. The DROP token is not yet
+// consumed.
 func (p *parser) parseDropDispatch() *ast.Node {
 	p.expect(ast.Token_DROP)
 	switch p.kind() {
@@ -240,13 +241,207 @@ func (p *parser) parseDropDispatch() *ast.Node {
 		return p.parseDropRoleStmt()
 	case ast.Token_USER:
 		if p.kindN(1) == ast.Token_MAPPING {
-			break // DropUserMappingStmt (milestone 7)
+			// gram.y: DropUserMappingStmt
+			p.next()
+			p.next()
+			n := &ast.DropUserMappingStmt{MissingOk: p.parseDropIfExists()}
+			p.expect(ast.Token_FOR)
+			n.User = p.parseAuthIdent()
+			p.expect(ast.Token_SERVER)
+			n.Servername = p.name()
+			return &ast.Node{Node: &ast.Node_DropUserMappingStmt{DropUserMappingStmt: n}}
 		}
 		p.next()
 		return p.parseDropRoleStmt()
+
+	case ast.Token_TYPE_P:
+		// gram.y: DropStmt: DROP TYPE_P type_name_list
+		p.next()
+		n := newDropStmt(ast.ObjectType_OBJECT_TYPE)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseTypeNameList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+	case ast.Token_DOMAIN_P:
+		p.next()
+		n := newDropStmt(ast.ObjectType_OBJECT_DOMAIN)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseTypeNameList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_INDEX:
+		if p.kindN(1) == ast.Token_CONCURRENTLY {
+			p.next()
+			p.next()
+			n := newDropStmt(ast.ObjectType_OBJECT_INDEX)
+			n.Concurrent = true
+			n.MissingOk = p.parseDropIfExists()
+			n.Objects = p.parseAnyNameList()
+			n.Behavior = p.parseOptDropBehavior()
+			return nDropStmt(n)
+		}
+
+	case ast.Token_FUNCTION, ast.Token_PROCEDURE, ast.Token_ROUTINE:
+		// gram.y: RemoveFuncStmt
+		var objtype ast.ObjectType
+		switch p.next().Kind {
+		case ast.Token_FUNCTION:
+			objtype = ast.ObjectType_OBJECT_FUNCTION
+		case ast.Token_PROCEDURE:
+			objtype = ast.ObjectType_OBJECT_PROCEDURE
+		default:
+			objtype = ast.ObjectType_OBJECT_ROUTINE
+		}
+		n := newDropStmt(objtype)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseFunctionWithArgtypesList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_AGGREGATE:
+		// gram.y: RemoveAggrStmt
+		p.next()
+		n := newDropStmt(ast.ObjectType_OBJECT_AGGREGATE)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseAggregateWithArgtypesList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_OPERATOR:
+		p.next()
+		switch p.kind() {
+		case ast.Token_CLASS, ast.Token_FAMILY:
+			// gram.y: DropOpClassStmt / DropOpFamilyStmt
+			objtype := ast.ObjectType_OBJECT_OPCLASS
+			if p.next().Kind == ast.Token_FAMILY {
+				objtype = ast.ObjectType_OBJECT_OPFAMILY
+			}
+			n := newDropStmt(objtype)
+			n.MissingOk = p.parseDropIfExists()
+			names := p.anyName()
+			p.expect(ast.Token_USING)
+			n.Objects = []*ast.Node{nList(append([]*ast.Node{nStr(p.name())}, names...))}
+			n.Behavior = p.parseOptDropBehavior()
+			return nDropStmt(n)
+		}
+		// gram.y: RemoveOperStmt
+		n := newDropStmt(ast.ObjectType_OBJECT_OPERATOR)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseOperatorWithArgtypesList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_CAST:
+		// gram.y: DropCastStmt
+		p.next()
+		n := newDropStmt(ast.ObjectType_OBJECT_CAST)
+		n.MissingOk = p.parseDropIfExists()
+		p.expect(ast.Token('('))
+		from := p.parseTypename()
+		p.expect(ast.Token_AS)
+		to := p.parseTypename()
+		p.expect(ast.Token(')'))
+		n.Objects = []*ast.Node{nList([]*ast.Node{nTypeName(from), nTypeName(to)})}
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_TRANSFORM:
+		// gram.y: DropTransformStmt
+		p.next()
+		n := newDropStmt(ast.ObjectType_OBJECT_TRANSFORM)
+		n.MissingOk = p.parseDropIfExists()
+		p.expect(ast.Token_FOR)
+		t := p.parseTypename()
+		p.expect(ast.Token_LANGUAGE)
+		n.Objects = []*ast.Node{nList([]*ast.Node{nTypeName(t), nStr(p.name())})}
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+
+	case ast.Token_OWNED:
+		// gram.y: DropOwnedStmt
+		p.next()
+		p.expect(ast.Token_BY)
+		n := &ast.DropOwnedStmt{Roles: p.parseRoleList()}
+		n.Behavior = p.parseOptDropBehavior()
+		return &ast.Node{Node: &ast.Node_DropOwnedStmt{DropOwnedStmt: n}}
+
+	case ast.Token_TABLESPACE:
+		// gram.y: DropTableSpaceStmt
+		p.next()
+		n := &ast.DropTableSpaceStmt{MissingOk: p.parseDropIfExists()}
+		n.Tablespacename = p.name()
+		return &ast.Node{Node: &ast.Node_DropTableSpaceStmt{DropTableSpaceStmt: n}}
+
+	case ast.Token_SUBSCRIPTION:
+		// gram.y: DropSubscriptionStmt
+		p.next()
+		n := &ast.DropSubscriptionStmt{MissingOk: p.parseDropIfExists()}
+		n.Subname = p.name()
+		n.Behavior = p.parseOptDropBehavior()
+		return &ast.Node{Node: &ast.Node_DropSubscriptionStmt{DropSubscriptionStmt: n}}
+
+	case ast.Token_DATABASE:
+		// gram.y: DropdbStmt
+		p.next()
+		n := &ast.DropdbStmt{MissingOk: p.parseDropIfExists()}
+		n.Dbname = p.name()
+		if p.kind() == ast.Token_WITH || p.kind() == ast.Token_WITH_LA || p.kind() == ast.Token('(') {
+			p.parseOptWith()
+			p.expect(ast.Token('('))
+			for {
+				ftok := p.expect(ast.Token_FORCE)
+				n.Options = append(n.Options, makeDefElem("force", nil, ftok.Start))
+				if !p.have(ast.Token(',')) {
+					break
+				}
+			}
+			p.expect(ast.Token(')'))
+		}
+		return &ast.Node{Node: &ast.Node_DropdbStmt{DropdbStmt: n}}
+	}
+
+	// gram.y: DropStmt: DROP object_type_name_on_any_name name ON any_name
+	if t, ok := p.tryObjectTypeNameOnAnyName(); ok {
+		n := newDropStmt(t)
+		n.MissingOk = p.parseDropIfExists()
+		name := p.name()
+		p.expect(ast.Token_ON)
+		names := p.anyName()
+		n.Objects = []*ast.Node{nList(append(names, nStr(name)))}
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+	}
+	// gram.y: DropStmt: DROP object_type_any_name any_name_list
+	if t, ok := p.tryObjectTypeAnyName(); ok {
+		n := newDropStmt(t)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.parseAnyNameList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
+	}
+	// gram.y: DropStmt: DROP drop_type_name name_list
+	if t, ok := p.tryDropTypeName(); ok {
+		n := newDropStmt(t)
+		n.MissingOk = p.parseDropIfExists()
+		n.Objects = p.nameList()
+		n.Behavior = p.parseOptDropBehavior()
+		return nDropStmt(n)
 	}
 	p.syntaxErrorAt()
 	return nil
+}
+
+// parseAuthIdent is gram.y's auth_ident: RoleSpec | USER.
+func (p *parser) parseAuthIdent() *ast.RoleSpec {
+	if p.kind() == ast.Token_USER {
+		tok := p.next()
+		return &ast.RoleSpec{
+			Roletype: ast.RoleSpecType_ROLESPEC_CURRENT_USER,
+			Location: tok.Start,
+		}
+	}
+	return p.parseRoleSpec()
 }
 
 // RangeVar.relpersistence values (pg_class.h: RELPERSISTENCE_*).
