@@ -15,6 +15,7 @@ import (
 
 	"github.com/sqlc-dev/oliphant/ast"
 	"github.com/sqlc-dev/oliphant/internal/emit"
+	"github.com/sqlc-dev/oliphant/internal/fingerprint"
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 	"github.com/sqlc-dev/oliphant/internal/parse"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
@@ -174,12 +175,24 @@ func SplitWithParser(input string, trimSpace bool) (result []string, err error) 
 	return result, nil
 }
 
+// FingerprintToUInt64 is pg_query_fingerprint: parse, then hash the raw tree
+// (version-3 fingerprint).
 func FingerprintToUInt64(input string) (result uint64, err error) {
-	return 0, errNotImplemented("FingerprintToUInt64")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return 0, scanErr(perr)
+	}
+	return fingerprint.Tree(tree), nil
 }
 
+// FingerprintToHexStr renders the fingerprint the way the C implementation
+// prints XXH64_canonical_t: big-endian, zero-padded hex.
 func FingerprintToHexStr(input string) (result string, err error) {
-	return "", errNotImplemented("FingerprintToHexStr")
+	fp, err := FingerprintToUInt64(input)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%016x", fp), nil
 }
 
 // HashXXH3_64 runs the XXH3 hash function (64-bit variant) on the given
