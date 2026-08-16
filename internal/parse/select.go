@@ -40,7 +40,13 @@ func (p *parser) parseSelectNoParens() *ast.Node {
 	if p.kind() == ast.Token_WITH || p.kind() == ast.Token_WITH_LA {
 		with = p.parseWithClause()
 	}
+	return p.parseSelectNoParensRest(with)
+}
 
+// parseSelectNoParensRest continues select_no_parens after opt_with_clause;
+// split out so the WITH-prefixed statement dispatch can hand over a
+// with_clause it already consumed.
+func (p *parser) parseSelectNoParensRest(with *ast.WithClause) *ast.Node {
 	sel := p.parseSelectClause(0)
 
 	var sort []*ast.Node
@@ -294,13 +300,22 @@ func (p *parser) parseCommonTableExpr() *ast.Node {
 	return nCommonTableExpr(cte)
 }
 
-// parsePreparableStmt is gram.y's PreparableStmt, restricted to the
-// statement types implemented so far.
+// parsePreparableStmt is gram.y's PreparableStmt:
+// SelectStmt | InsertStmt | UpdateStmt | DeleteStmt | MergeStmt.
 func (p *parser) parsePreparableStmt() *ast.Node {
 	switch p.kind() {
-	case ast.Token_SELECT, ast.Token_TABLE, ast.Token_VALUES,
-		ast.Token_WITH, ast.Token_WITH_LA, ast.Token('('):
+	case ast.Token_SELECT, ast.Token_TABLE, ast.Token_VALUES, ast.Token('('):
 		return p.parseSelectStmt()
+	case ast.Token_WITH, ast.Token_WITH_LA:
+		return p.parseWithPrefixedStmt()
+	case ast.Token_INSERT:
+		return p.parseInsertStmt(nil)
+	case ast.Token_UPDATE:
+		return p.parseUpdateStmt(nil)
+	case ast.Token_DELETE_P:
+		return p.parseDeleteStmt(nil)
+	case ast.Token_MERGE:
+		return p.parseMergeStmt(nil)
 	}
 	p.syntaxErrorAt()
 	return nil
