@@ -45,6 +45,15 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 			p.next()
 			return p.parseCreateEventTrigStmt()
 		}
+	case ast.Token_POLICY:
+		p.next()
+		return p.parseCreatePolicyStmt()
+	case ast.Token_ACCESS:
+		if p.kindN(1) == ast.Token_METHOD {
+			p.next()
+			p.next()
+			return p.parseCreateAmStmt()
+		}
 	case ast.Token_ASSERTION:
 		// gram.y: CreateAssertionStmt always errors (no position).
 		p.next()
@@ -417,7 +426,3 @@ const (
 	relPersistUnlogged  = "u"
 )
 
-func (p *parser) parseGrantStmt() *ast.Node {
-	p.syntaxErrorAt()
-	return nil
-}

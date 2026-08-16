@@ -254,6 +254,39 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 		p.next()
 		return p.parseAlterExtensionStmt()
 
+	case ast.Token_DEFAULT:
+		if p.kindN(1) == ast.Token_PRIVILEGES {
+			p.next()
+			p.next()
+			return p.parseAlterDefaultPrivilegesStmt()
+		}
+
+	case ast.Token_POLICY:
+		p.next()
+		missingOk := false
+		if p.have(ast.Token_IF_P) {
+			p.expect(ast.Token_EXISTS)
+			missingOk = true
+		}
+		name := p.name()
+		p.expect(ast.Token_ON)
+		rel := p.parseQualifiedName()
+		if p.kind() == ast.Token_RENAME {
+			p.next()
+			p.expect(ast.Token_TO)
+			r := newRenameStmt(ast.ObjectType_OBJECT_POLICY)
+			r.Relation = rel
+			r.Subname = name
+			r.MissingOk = missingOk
+			r.Newname = p.name()
+			return nRenameStmt(r)
+		}
+		if missingOk {
+			// Only the RENAME form allows IF EXISTS.
+			p.syntaxErrorAt()
+		}
+		return p.parseAlterPolicyStmt(name, rel)
+
 	case ast.Token_FUNCTION, ast.Token_PROCEDURE, ast.Token_ROUTINE:
 		var objtype ast.ObjectType
 		switch p.next().Kind {

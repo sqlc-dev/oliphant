@@ -277,6 +277,10 @@ func (p *parser) parseToplevelStmt() *ast.Node {
 		return p.parseReindexStmt()
 	case ast.Token_DO:
 		return p.parseDoStmt()
+	case ast.Token_GRANT:
+		return p.parseGrantStmt()
+	case ast.Token_REVOKE:
+		return p.parseRevokeStmt()
 	case ast.Token_SECURITY:
 		if p.kindN(1) == ast.Token_LABEL {
 			p.next()
