@@ -336,6 +336,7 @@ func (p *parser) parseOptSchemaEltList() []*ast.Node {
 // alternatives: CreateStmt, IndexStmt, CreateSeqStmt, CreateTrigStmt,
 // ViewStmt.
 func (p *parser) parseCreateSchemaElt() *ast.Node {
+	p.expect(ast.Token_CREATE)
 	stmt := p.parseCreateStmtFamily(true)
 	if stmt == nil {
 		p.syntaxErrorAt()

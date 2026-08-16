@@ -27,7 +27,11 @@ func (p *parser) parseCreatePublicationStmt() *ast.Node {
 // parseAlterPublicationStmt handles ALTER PUBLICATION name ...; the name's
 // tail (RENAME/OWNER) is resolved by the caller.
 func (p *parser) parseAlterPublicationStmt(name string) *ast.Node {
-	n := &ast.AlterPublicationStmt{Pubname: name}
+	// C's zero-valued action is AP_AddObjects.
+	n := &ast.AlterPublicationStmt{
+		Pubname: name,
+		Action:  ast.AlterPublicationAction_AP_AddObjects,
+	}
 	switch {
 	case p.have(ast.Token_SET):
 		if p.kind() == ast.Token('(') {
