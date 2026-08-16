@@ -332,7 +332,7 @@ func (p *parser) parseColQualList() ([]*ast.Node, *ast.CollateClause) {
 			c := &ast.CollateClause{Collname: p.anyName(), Location: tok.Start}
 			// gram.y: SplitColQualList
 			if coll != nil {
-				p.ereport("base_yyparse", "multiple COLLATE clauses not allowed", c.Location)
+				p.ereport("SplitColQualList", "multiple COLLATE clauses not allowed", c.Location)
 			}
 			coll = c
 		case ast.Token_CONSTRAINT:
@@ -727,6 +727,9 @@ const (
 // the accumulated CAS bits and the location of the spec (its first token,
 // or -1 when empty).
 func (p *parser) parseConstraintAttributeSpec() (int, int32) {
+	// The spec nonterminal's own location is always -1: PG's YYLLOC_DEFAULT
+	// assigns empty productions -1 and the left recursion propagates it, so
+	// processCASbits never reports a cursor position.
 	spec := 0
 	loc := int32(-1)
 	for {
@@ -783,9 +786,6 @@ func (p *parser) parseConstraintAttributeSpec() (int, int32) {
 			p.ereport("base_yyparse", "conflicting constraint properties", tok.Start)
 		}
 		spec = newspec
-		if loc < 0 {
-			loc = tok.Start
-		}
 	}
 }
 
@@ -797,7 +797,7 @@ func (p *parser) processCASbits(casBits int, loc int32, constrType string,
 		if deferrable != nil {
 			*deferrable = true
 		} else {
-			p.ereport("base_yyparse",
+			p.ereport("processCASbits",
 				fmt.Sprintf("%s constraints cannot be marked DEFERRABLE", constrType), loc)
 		}
 	}
@@ -805,7 +805,7 @@ func (p *parser) processCASbits(casBits int, loc int32, constrType string,
 		if initdeferred != nil {
 			*initdeferred = true
 		} else {
-			p.ereport("base_yyparse",
+			p.ereport("processCASbits",
 				fmt.Sprintf("%s constraints cannot be marked DEFERRABLE", constrType), loc)
 		}
 	}
@@ -813,7 +813,7 @@ func (p *parser) processCASbits(casBits int, loc int32, constrType string,
 		if notValid != nil {
 			*notValid = true
 		} else {
-			p.ereport("base_yyparse",
+			p.ereport("processCASbits",
 				fmt.Sprintf("%s constraints cannot be marked NOT VALID", constrType), loc)
 		}
 	}
@@ -821,7 +821,7 @@ func (p *parser) processCASbits(casBits int, loc int32, constrType string,
 		if noInherit != nil {
 			*noInherit = true
 		} else {
-			p.ereport("base_yyparse",
+			p.ereport("processCASbits",
 				fmt.Sprintf("%s constraints cannot be marked NO INHERIT", constrType), loc)
 		}
 	}
@@ -990,7 +990,7 @@ func (p *parser) parseOptPartitionSpec() *ast.PartitionSpec {
 	case strEqualsFold(strategy, "hash"):
 		n.Strategy = ast.PartitionStrategy_PARTITION_STRATEGY_HASH
 	default:
-		p.fail(p.filter.ParserError("base_yyparse",
+		p.fail(p.filter.ParserError("parsePartitionStrategy",
 			fmt.Sprintf("unrecognized partitioning strategy %q", strategy), -1))
 		_ = stok
 	}

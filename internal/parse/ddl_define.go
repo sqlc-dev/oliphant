@@ -39,7 +39,13 @@ func (p *parser) parseCreateAggregateStmt(replace bool) *ast.Node {
 		return nDefineStmt(n)
 	}
 	params, ndirect := p.parseAggrArgs()
-	n.Args = []*ast.Node{nList(params), nInteger(ndirect)}
+	// The zero-argument '(*)' form stores NIL — a null list element — not
+	// an empty List node.
+	argsNode := &ast.Node{}
+	if params != nil {
+		argsNode = nList(params)
+	}
+	n.Args = []*ast.Node{argsNode, nInteger(ndirect)}
 	n.Definition = p.parseDefinition()
 	return nDefineStmt(n)
 }

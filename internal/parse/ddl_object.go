@@ -238,7 +238,7 @@ func (p *parser) makeOrderedSetArgs(direct, ordered []*ast.Node, orderedLoc int3
 		if len(ordered) != 1 ||
 			firsto.Mode != ast.FunctionParameterMode_FUNC_PARAM_VARIADIC ||
 			!typeNamesEqual(lastd.ArgType, firsto.ArgType) {
-			p.ereport("base_yyparse",
+			p.ereport("makeOrderedSetArgs",
 				"an ordered-set aggregate with a VARIADIC direct argument must have one VARIADIC aggregated argument of the same data type",
 				firsto.ArgType.GetLocation())
 		}

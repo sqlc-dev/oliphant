@@ -56,7 +56,7 @@ func (p *parser) parseCreateFunctionStmt(replace bool) *ast.Node {
 					ast.FunctionParameterMode_FUNC_PARAM_IN,
 					ast.FunctionParameterMode_FUNC_PARAM_VARIADIC:
 				default:
-					p.ereport("base_yyparse", "OUT and INOUT arguments aren't allowed in TABLE functions", -1)
+					p.ereport("mergeTableFuncParameters", "OUT and INOUT arguments aren't allowed in TABLE functions", -1)
 				}
 			}
 			n.Parameters = append(n.Parameters, cols...)

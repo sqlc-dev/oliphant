@@ -189,7 +189,7 @@ func (p *parser) preprocessPubobjList(list []*ast.Node) {
 	}
 	first := list[0].GetPublicationObjSpec()
 	if first.Pubobjtype == ast.PublicationObjSpecType_PUBLICATIONOBJ_CONTINUATION {
-		p.ereport("base_yyparse", "invalid publication object list", first.Location)
+		p.ereport("preprocess_pubobj_list", "invalid publication object list", first.Location)
 	}
 	prev := ast.PublicationObjSpecType_PUBLICATIONOBJ_CONTINUATION
 	for _, item := range list {
@@ -200,7 +200,7 @@ func (p *parser) preprocessPubobjList(list []*ast.Node) {
 		switch obj.Pubobjtype {
 		case ast.PublicationObjSpecType_PUBLICATIONOBJ_TABLE:
 			if obj.Name == "" && obj.Pubtable == nil {
-				p.ereport("base_yyparse", "invalid table name", obj.Location)
+				p.ereport("preprocess_pubobj_list", "invalid table name", obj.Location)
 			}
 			if obj.Name != "" {
 				obj.Pubtable = &ast.PublicationTable{
@@ -211,10 +211,10 @@ func (p *parser) preprocessPubobjList(list []*ast.Node) {
 		case ast.PublicationObjSpecType_PUBLICATIONOBJ_TABLES_IN_SCHEMA,
 			ast.PublicationObjSpecType_PUBLICATIONOBJ_TABLES_IN_CUR_SCHEMA:
 			if obj.Pubtable != nil && obj.Pubtable.WhereClause != nil {
-				p.ereport("base_yyparse", "WHERE clause not allowed for schema", obj.Location)
+				p.ereport("preprocess_pubobj_list", "WHERE clause not allowed for schema", obj.Location)
 			}
 			if obj.Pubtable != nil && obj.Pubtable.Columns != nil {
-				p.ereport("base_yyparse", "column specification not allowed for schema", obj.Location)
+				p.ereport("preprocess_pubobj_list", "column specification not allowed for schema", obj.Location)
 			}
 			switch {
 			case obj.Name != "":
@@ -222,7 +222,7 @@ func (p *parser) preprocessPubobjList(list []*ast.Node) {
 			case obj.Pubtable == nil:
 				obj.Pubobjtype = ast.PublicationObjSpecType_PUBLICATIONOBJ_TABLES_IN_CUR_SCHEMA
 			default:
-				p.ereport("base_yyparse", "invalid schema name", obj.Location)
+				p.ereport("preprocess_pubobj_list", "invalid schema name", obj.Location)
 			}
 		}
 		prev = obj.Pubobjtype
