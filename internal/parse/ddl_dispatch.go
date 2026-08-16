@@ -28,6 +28,8 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 	case ast.Token_CAST:
 		p.next()
 		return p.parseCreateCastStmt()
+	case ast.Token_FUNCTION, ast.Token_PROCEDURE:
+		return p.parseCreateFunctionStmt(false)
 	}
 	if stmt := p.parseCreateStmtFamily(false); stmt != nil {
 		return stmt
@@ -105,6 +107,8 @@ func (p *parser) parseCreateOrReplace(schemaElt bool) *ast.Node {
 			p.next()
 			return p.parseCreateTrigStmt(true, true)
 		}
+	case ast.Token_FUNCTION, ast.Token_PROCEDURE:
+		return p.parseCreateFunctionStmt(true)
 	}
 	p.syntaxErrorAt()
 	return nil
@@ -228,6 +232,18 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 	case ast.Token_TYPE_P:
 		p.next()
 		return p.parseAlterTypeDispatch()
+	case ast.Token_FUNCTION, ast.Token_PROCEDURE, ast.Token_ROUTINE:
+		var objtype ast.ObjectType
+		switch p.next().Kind {
+		case ast.Token_FUNCTION:
+			objtype = ast.ObjectType_OBJECT_FUNCTION
+		case ast.Token_PROCEDURE:
+			objtype = ast.ObjectType_OBJECT_PROCEDURE
+		default:
+			objtype = ast.ObjectType_OBJECT_ROUTINE
+		}
+		fn := p.parseFunctionWithArgtypes().GetObjectWithArgs()
+		return p.parseAlterFunctionStmt(objtype, fn)
 	}
 	p.syntaxErrorAt()
 	return nil
