@@ -131,6 +131,26 @@ func (p *parser) parseCreateDispatch() *ast.Node {
 			p.next()
 			return p.parseCreateAmStmt()
 		}
+	case ast.Token_RULE:
+		p.next()
+		return p.parseRuleStmt(false)
+	case ast.Token_TRUSTED, ast.Token_PROCEDURAL, ast.Token_LANGUAGE:
+		return p.parseCreatePLangStmt(false)
+	case ast.Token_TABLESPACE:
+		p.next()
+		return p.parseCreateTableSpaceStmt()
+	case ast.Token_CONVERSION_P:
+		p.next()
+		return p.parseCreateConversionStmt(false)
+	case ast.Token_DEFAULT:
+		if p.kindN(1) == ast.Token_CONVERSION_P {
+			p.next()
+			p.next()
+			return p.parseCreateConversionStmt(true)
+		}
+	case ast.Token_TRANSFORM:
+		p.next()
+		return p.parseCreateTransformStmt(false)
 	case ast.Token_ASSERTION:
 		// gram.y: CreateAssertionStmt always errors (no position).
 		p.next()
@@ -223,6 +243,14 @@ func (p *parser) parseCreateOrReplace(schemaElt bool) *ast.Node {
 	case ast.Token_AGGREGATE:
 		p.next()
 		return p.parseCreateAggregateStmt(true)
+	case ast.Token_RULE:
+		p.next()
+		return p.parseRuleStmt(true)
+	case ast.Token_TRUSTED, ast.Token_PROCEDURAL, ast.Token_LANGUAGE:
+		return p.parseCreatePLangStmt(true)
+	case ast.Token_TRANSFORM:
+		p.next()
+		return p.parseCreateTransformStmt(true)
 	}
 	p.syntaxErrorAt()
 	return nil

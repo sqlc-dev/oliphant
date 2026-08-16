@@ -915,8 +915,60 @@ func (p *parser) parseOperatorDefArg() *ast.Node {
 	return nTypeName(p.parseFuncType())
 }
 
-// Stub for the text-search configuration batch.
+// parseAlterTSConfigurationStmt is gram.y's AlterTSConfigurationStmt;
+// ALTER TEXT SEARCH CONFIGURATION any_name consumed.
 func (p *parser) parseAlterTSConfigurationStmt(names []*ast.Node) *ast.Node {
-	p.syntaxErrorAt()
-	return nil
+	n := &ast.AlterTSConfigurationStmt{Cfgname: names}
+	anyWith := func() {
+		if !p.have(ast.Token_WITH) && !p.have(ast.Token_WITH_LA) {
+			p.syntaxErrorAt()
+		}
+	}
+	switch {
+	case p.have(ast.Token_ADD_P):
+		p.expect(ast.Token_MAPPING)
+		p.expect(ast.Token_FOR)
+		n.Kind = ast.AlterTSConfigType_ALTER_TSCONFIG_ADD_MAPPING
+		n.Tokentype = p.nameList()
+		anyWith()
+		n.Dicts = p.parseAnyNameList()
+	case p.have(ast.Token_ALTER):
+		p.expect(ast.Token_MAPPING)
+		switch {
+		case p.have(ast.Token_FOR):
+			n.Tokentype = p.nameList()
+			if p.have(ast.Token_REPLACE) {
+				n.Kind = ast.AlterTSConfigType_ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN
+				n.Replace = true
+				old := nList(p.anyName())
+				anyWith()
+				n.Dicts = []*ast.Node{old, nList(p.anyName())}
+			} else {
+				n.Kind = ast.AlterTSConfigType_ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN
+				n.Override = true
+				anyWith()
+				n.Dicts = p.parseAnyNameList()
+			}
+		case p.have(ast.Token_REPLACE):
+			n.Kind = ast.AlterTSConfigType_ALTER_TSCONFIG_REPLACE_DICT
+			n.Replace = true
+			old := nList(p.anyName())
+			anyWith()
+			n.Dicts = []*ast.Node{old, nList(p.anyName())}
+		default:
+			p.syntaxErrorAt()
+		}
+	case p.have(ast.Token_DROP):
+		p.expect(ast.Token_MAPPING)
+		n.Kind = ast.AlterTSConfigType_ALTER_TSCONFIG_DROP_MAPPING
+		if p.have(ast.Token_IF_P) {
+			p.expect(ast.Token_EXISTS)
+			n.MissingOk = true
+		}
+		p.expect(ast.Token_FOR)
+		n.Tokentype = p.nameList()
+	default:
+		p.syntaxErrorAt()
+	}
+	return &ast.Node{Node: &ast.Node_AlterTsconfigurationStmt{AlterTsconfigurationStmt: n}}
 }
