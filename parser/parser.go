@@ -28,7 +28,7 @@ import (
 
 // pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 17.7, libpg_query
 // 17-6.2.2), reported in ScanResult.Version and ParseResult.Version.
-const pgVersionNum = 170007
+const pgVersionNum = 180004
 
 // scanErr converts a lexer error into the public Error, mirroring
 // pg_query_scan.c's PG_CATCH block (Lineno is a C source line number

@@ -23,7 +23,7 @@ type Keyword struct {
 	BareLabel bool
 }
 
-// Keywords holds all 491 keywords of the pinned grammar, keyed by their
+// Keywords holds all 494 keywords of the pinned grammar, keyed by their
 // lower-case SQL spelling.
 var Keywords = map[string]Keyword{
 	"abort":             {Name: "abort", Token: "ABORT_P", Category: Unreserved, BareLabel: true},
@@ -154,6 +154,7 @@ var Keywords = map[string]Keyword{
 	"encoding":          {Name: "encoding", Token: "ENCODING", Category: Unreserved, BareLabel: true},
 	"encrypted":         {Name: "encrypted", Token: "ENCRYPTED", Category: Unreserved, BareLabel: true},
 	"end":               {Name: "end", Token: "END_P", Category: Reserved, BareLabel: true},
+	"enforced":          {Name: "enforced", Token: "ENFORCED", Category: Unreserved, BareLabel: true},
 	"enum":              {Name: "enum", Token: "ENUM_P", Category: Unreserved, BareLabel: true},
 	"error":             {Name: "error", Token: "ERROR_P", Category: Unreserved, BareLabel: true},
 	"escape":            {Name: "escape", Token: "ESCAPE", Category: Unreserved, BareLabel: true},
@@ -308,6 +309,7 @@ var Keywords = map[string]Keyword{
 	"nulls":             {Name: "nulls", Token: "NULLS_P", Category: Unreserved, BareLabel: true},
 	"numeric":           {Name: "numeric", Token: "NUMERIC", Category: ColName, BareLabel: true},
 	"object":            {Name: "object", Token: "OBJECT_P", Category: Unreserved, BareLabel: true},
+	"objects":           {Name: "objects", Token: "OBJECTS_P", Category: Unreserved, BareLabel: true},
 	"of":                {Name: "of", Token: "OF", Category: Unreserved, BareLabel: true},
 	"off":               {Name: "off", Token: "OFF", Category: Unreserved, BareLabel: true},
 	"offset":            {Name: "offset", Token: "OFFSET", Category: Reserved, BareLabel: false},
@@ -339,6 +341,7 @@ var Keywords = map[string]Keyword{
 	"passing":           {Name: "passing", Token: "PASSING", Category: Unreserved, BareLabel: true},
 	"password":          {Name: "password", Token: "PASSWORD", Category: Unreserved, BareLabel: true},
 	"path":              {Name: "path", Token: "PATH", Category: Unreserved, BareLabel: true},
+	"period":            {Name: "period", Token: "PERIOD", Category: Unreserved, BareLabel: true},
 	"placing":           {Name: "placing", Token: "PLACING", Category: Reserved, BareLabel: true},
 	"plan":              {Name: "plan", Token: "PLAN", Category: Unreserved, BareLabel: true},
 	"plans":             {Name: "plans", Token: "PLANS", Category: Unreserved, BareLabel: true},
@@ -363,7 +366,6 @@ var Keywords = map[string]Keyword{
 	"read":              {Name: "read", Token: "READ", Category: Unreserved, BareLabel: true},
 	"real":              {Name: "real", Token: "REAL", Category: ColName, BareLabel: true},
 	"reassign":          {Name: "reassign", Token: "REASSIGN", Category: Unreserved, BareLabel: true},
-	"recheck":           {Name: "recheck", Token: "RECHECK", Category: Unreserved, BareLabel: true},
 	"recursive":         {Name: "recursive", Token: "RECURSIVE", Category: Unreserved, BareLabel: true},
 	"ref":               {Name: "ref", Token: "REF_P", Category: Unreserved, BareLabel: true},
 	"references":        {Name: "references", Token: "REFERENCES", Category: Reserved, BareLabel: true},
@@ -491,6 +493,7 @@ var Keywords = map[string]Keyword{
 	"version":           {Name: "version", Token: "VERSION_P", Category: Unreserved, BareLabel: true},
 	"view":              {Name: "view", Token: "VIEW", Category: Unreserved, BareLabel: true},
 	"views":             {Name: "views", Token: "VIEWS", Category: Unreserved, BareLabel: true},
+	"virtual":           {Name: "virtual", Token: "VIRTUAL", Category: Unreserved, BareLabel: true},
 	"volatile":          {Name: "volatile", Token: "VOLATILE", Category: Unreserved, BareLabel: true},
 	"when":              {Name: "when", Token: "WHEN", Category: Reserved, BareLabel: true},
 	"where":             {Name: "where", Token: "WHERE", Category: Reserved, BareLabel: false},

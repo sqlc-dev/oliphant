@@ -205,8 +205,6 @@ func deparseAlterTableCmd(st *state, alter_table_cmd *ast.AlterTableCmd, ctx nod
 		st.appendString("ALTER COLUMN ")
 		options = "DROP EXPRESSION"
 		trailing_missing_ok = true
-	case ast.AlterTableType_AT_CheckNotNull: /* check column is already marked not null */
-		// Not present in raw parser output
 	case ast.AlterTableType_AT_SetStatistics: /* alter column set statistics */
 		st.appendString("ALTER COLUMN ")
 		options = "SET STATISTICS"

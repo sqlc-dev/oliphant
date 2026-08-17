@@ -27,8 +27,8 @@ func TestScanTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Version != 170007 {
-		t.Fatalf("ScanResult.Version = %d, want 170007", result.Version)
+	if result.Version != 180004 {
+		t.Fatalf("ScanResult.Version = %d, want 180004", result.Version)
 	}
 	type tok struct {
 		start, end  int32

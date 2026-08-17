@@ -854,13 +854,35 @@ func deparseInsertStmt(st *state, insert_stmt *ast.InsertStmt) {
 		st.appendChar(' ')
 	}
 
-	if len(insert_stmt.ReturningList) > 0 {
-		st.appendPartGroup("RETURNING", partIndentAndMerge)
-		deparseTargetList(st, insert_stmt.ReturningList)
+	if insert_stmt.ReturningClause != nil {
+		deparseReturningClause(st, insert_stmt.ReturningClause)
 	}
 
 	st.removeTrailingSpace()
 	st.decreaseNestingLevel(parent_level)
+}
+
+// "returning_clause" and "returning_option" in gram.y
+func deparseReturningClause(st *state, returning_clause *ast.ReturningClause) {
+	st.appendPartGroup("RETURNING", partIndentAndMerge)
+	if len(returning_clause.Options) > 0 {
+		st.appendString("WITH (")
+		for i, item := range returning_clause.Options {
+			opt := item.GetReturningOption()
+			switch opt.Option {
+			case ast.ReturningOptionKind_RETURNING_OPTION_OLD:
+				st.appendString("OLD AS ")
+			case ast.ReturningOptionKind_RETURNING_OPTION_NEW:
+				st.appendString("NEW AS ")
+			}
+			deparseColId(st, opt.Value)
+			if i < len(returning_clause.Options)-1 {
+				st.appendString(", ")
+			}
+		}
+		st.appendString(") ")
+	}
+	deparseTargetList(st, returning_clause.Exprs)
 }
 
 func deparseInferClause(st *state, infer_clause *ast.InferClause) {
@@ -934,9 +956,8 @@ func deparseUpdateStmt(st *state, update_stmt *ast.UpdateStmt) {
 	deparseFromClause(st, update_stmt.FromClause)
 	deparseWhereOrCurrentClause(st, update_stmt.WhereClause)
 
-	if len(update_stmt.ReturningList) > 0 {
-		st.appendPartGroup("RETURNING", partIndentAndMerge)
-		deparseTargetList(st, update_stmt.ReturningList)
+	if update_stmt.ReturningClause != nil {
+		deparseReturningClause(st, update_stmt.ReturningClause)
 	}
 
 	st.removeTrailingSpace()
@@ -1021,9 +1042,8 @@ func deparseMergeStmt(st *state, merge_stmt *ast.MergeStmt) {
 		}
 	}
 
-	if len(merge_stmt.ReturningList) > 0 {
-		st.appendPartGroup("RETURNING", partIndentAndMerge)
-		deparseTargetList(st, merge_stmt.ReturningList)
+	if merge_stmt.ReturningClause != nil {
+		deparseReturningClause(st, merge_stmt.ReturningClause)
 	}
 
 	st.decreaseNestingLevel(parent_level)
@@ -1050,9 +1070,8 @@ func deparseDeleteStmt(st *state, delete_stmt *ast.DeleteStmt) {
 
 	deparseWhereOrCurrentClause(st, delete_stmt.WhereClause)
 
-	if len(delete_stmt.ReturningList) > 0 {
-		st.appendPartGroup("RETURNING", partIndentAndMerge)
-		deparseTargetList(st, delete_stmt.ReturningList)
+	if delete_stmt.ReturningClause != nil {
+		deparseReturningClause(st, delete_stmt.ReturningClause)
 	}
 
 	st.removeTrailingSpace()

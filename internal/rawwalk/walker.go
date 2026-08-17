@@ -105,7 +105,7 @@ func WalkChildren(item any, cb func(any) bool) bool {
 	case *ast.JsonFormat, *ast.SetToDefault, *ast.CurrentOfExpr,
 		*ast.SQLValueFunction, *ast.Integer, *ast.Float, *ast.Boolean,
 		*ast.String, *ast.BitString, *ast.ParamRef, *ast.A_Const, *ast.A_Star,
-		*ast.MergeSupportFunc:
+		*ast.MergeSupportFunc, *ast.ReturningOption:
 		// primitive node types with no subnodes
 		return false
 	case *ast.Alias:
@@ -178,18 +178,20 @@ func WalkChildren(item any, cb func(any) bool) bool {
 		return w(v.Rel, v.ViewQuery)
 	case *ast.InsertStmt:
 		return w(v.Relation, wl(v.Cols), v.SelectStmt, v.OnConflictClause,
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.DeleteStmt:
 		return w(v.Relation, wl(v.UsingClause), v.WhereClause,
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.UpdateStmt:
 		return w(v.Relation, wl(v.TargetList), v.WhereClause, wl(v.FromClause),
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.MergeStmt:
 		return w(v.Relation, v.SourceRelation, v.JoinCondition,
-			wl(v.MergeWhenClauses), wl(v.ReturningList), v.WithClause)
+			wl(v.MergeWhenClauses), v.ReturningClause, v.WithClause)
 	case *ast.MergeWhenClause:
 		return w(v.Condition, wl(v.TargetList), wl(v.Values))
+	case *ast.ReturningClause:
+		return w(wl(v.Options), wl(v.Exprs))
 	case *ast.SelectStmt:
 		return w(wl(v.DistinctClause), v.IntoClause, wl(v.TargetList),
 			wl(v.FromClause), v.WhereClause, wl(v.GroupClause), v.HavingClause,
