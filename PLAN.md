@@ -36,11 +36,13 @@ behind a small hand-written API layer, with **11 patches** applied to upstream
 PostgreSQL before extraction.
 
 Initial pin: **libpg_query `17-6.2.2` (PostgreSQL 17.7)** — the exact tag
-pg_query_go v6.2.2 ships today and the version sqlc builds against
-(`ParseResult.Version == 170007`). libpg_query's main branch is already on
-PostgreSQL 18.4; the plan treats "advance the pin" as a first-class workflow
-(§ Regeneration) rather than targeting a moving version now. When pg_query_go
-cuts a PG 18 major, oliphant re-pins and re-derives its goldens.
+pg_query_go v6.2.2 ships and the version sqlc builds against at the time.
+*(The pin advanced on 2026-08-17: the current pin is **libpg_query `18.0.0`
+(PostgreSQL 18.4)**, `ParseResult.Version == 180004`, via the § Regeneration
+workflow. No pg_query_go release ships libpg_query 18 yet, so the oracle
+builds pg_query_go's wrapper against the 18.0.0 sources locally — see
+`oracle/update-pg-query-go.sh`.)* The plan treats "advance the pin" as a
+first-class workflow (§ Regeneration) rather than targeting a moving version.
 
 Two consequences of the patches matter and are easy to miss:
 

@@ -1,4 +1,4 @@
-// raw_expression_tree_walker (src/backend/nodes/nodeFuncs.c, PostgreSQL 17)
+// raw_expression_tree_walker (src/backend/nodes/nodeFuncs.c, PostgreSQL 18)
 // ported over the protobuf tree. Every WALK(child) goes back through
 // state.walk, so the const_record_walker interceptions (A_Const, ParamRef,
 // TypeName, SelectStmt, DefElem, …) apply at every level, exactly as the C

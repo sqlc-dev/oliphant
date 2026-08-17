@@ -1,7 +1,7 @@
 # oliphant development guide
 
 Pure Go port of pg_query_go. Read `PLAN.md` first — it is the contract.
-Pin: libpg_query **17-6.2.2** (PostgreSQL 17.7, patched). No cgo anywhere in
+Pin: libpg_query **18.0.0** (PostgreSQL 18.4, patched). No cgo anywhere in
 the main module; the only module allowed to link pg_query_go (cgo) is
 `oracle/`, and only `cmd/regenerate`/`cmd/difftest` ever run it.
 

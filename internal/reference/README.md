@@ -18,6 +18,8 @@ Provenance — PostgreSQL **18.4** source tarball with libpg_query
 | `pl_reserved_kwlist.h` | `src/pl/plpgsql/src/pl_reserved_kwlist.h` | none (copied from libpg_query's `src/postgres/include/`) |
 | `pl_unreserved_kwlist.h` | `src/pl/plpgsql/src/pl_unreserved_kwlist.h` | none (same) |
 | `plerrcodes.h` | generated from `src/backend/utils/errcodes.txt` | none (copied from libpg_query's `src/postgres/include/`) |
+| `pg_query_pg_type.c` | libpg_query `src/include/pg_query_pg_type.c` | none (the mini pg_type catalog the mocked syscache serves; generator input for `internal/plpgsql/tables.go`) |
+| `pg_type_d.h` | `src/include/catalog/pg_type_d.h` | none (copied from libpg_query's extracted includes; resolves the OID macros in `pg_query_pg_type.c`) |
 
 oliphant ports **patched** PostgreSQL, never vanilla: `$1` parameter references
 are legal in more grammar positions, the lexer tracks token end offsets and

@@ -1,8 +1,8 @@
 // Command regenerate derives every golden in parser/testdata from the pinned
-// oracle (libpg_query 17-6.2.2 via pg_query_go v6.2.2, cgo). It is the only
+// oracle (libpg_query 18.0.0 via pg_query_go v6.2.2, cgo). It is the only
 // writer of that tree; expected outputs are NEVER edited by hand.
 //
-//	go run ./cmd/regenerate -libpg-query <checkout@17-6.2.2> -pg-query-go <checkout@v6.2.2>
+//	go run ./cmd/regenerate -libpg-query <checkout@18.0.0> -pg-query-go <checkout@v6.2.2>
 //
 // Corpus tiers extracted:
 //
@@ -34,7 +34,7 @@ import (
 var stats struct{ files, cases int }
 
 func main() {
-	libpgQuery := flag.String("libpg-query", "", "path to a libpg_query checkout at tag 17-6.2.2")
+	libpgQuery := flag.String("libpg-query", "", "path to a libpg_query checkout at tag 18.0.0")
 	pgQueryGo := flag.String("pg-query-go", "", "path to a pg_query_go checkout at tag v6.2.2")
 	oracleBin := flag.String("oracle", "", "prebuilt oracle binary (default: go build ./oracle)")
 	out := flag.String("out", "parser/testdata", "output corpus root")

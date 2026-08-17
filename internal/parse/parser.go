@@ -1,5 +1,5 @@
 // Package parse is the hand-written recursive-descent port of the pinned
-// grammar (internal/reference/gram.y, libpg_query 17-6.2.2). One parse*
+// grammar (internal/reference/gram.y, libpg_query 18.0.0). One parse*
 // method per production, each with an attribution comment naming the gram.y
 // rule it implements; the support functions at the bottom of gram.y live in
 // gram_support.go with the same names.

@@ -1,6 +1,6 @@
 // Package fingerprint computes libpg_query's version-3 query fingerprints
 // (pg_query_fingerprint.c + the generated pg_query_fingerprint_defs.c /
-// pg_query_fingerprint_conds.c at the pinned 17-6.2.2).
+// pg_query_fingerprint_conds.c at the pinned 18.0.0).
 //
 // Like the JSON emitter (internal/emit), the per-node walk is driven by
 // protobuf reflection rather than generated per-node code: the upstream defs

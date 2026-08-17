@@ -1,4 +1,4 @@
-// Ported from postgres_deparse.c (libpg_query 17-6.2.2).
+// Ported from postgres_deparse.c (libpg_query 18.0.0).
 // DO, functions/procedures, roles, GRANT, transactions, views, policies.
 package deparse
 

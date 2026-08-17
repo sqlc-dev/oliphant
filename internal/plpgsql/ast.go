@@ -1,5 +1,5 @@
 // Package plpgsql is the hand-written port of libpg_query's PL/pgSQL support
-// as pinned at 17-6.2.2: pl_gram.y + pl_scanner.c (patched, see
+// as pinned at 18.0.0: pl_gram.y + pl_scanner.c (patched, see
 // internal/reference/), the pl_comp.c / pl_funcs.c subset libpg_query
 // extracts (including its mocks — parse_datatype and friends do not consult
 // the catalogs), pg_query_json_plpgsql.c, and the pg_query_parse_plpgsql.c

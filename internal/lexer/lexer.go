@@ -1,5 +1,5 @@
 // Package lexer is a hand-written port of PostgreSQL's scanner as patched
-// and pinned by libpg_query 17-6.2.2 (internal/reference/scan.l), plus the
+// and pinned by libpg_query 18.0.0 (internal/reference/scan.l), plus the
 // base_yylex token-merge filter from internal/reference/parser.c.
 //
 // The scanner is byte-oriented and eager-capable but pull-based: each call

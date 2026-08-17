@@ -1,5 +1,5 @@
 // Package deparse ports libpg_query's postgres_deparse.c at the pinned
-// 17-6.2.2, targeting the protobuf structs directly.
+// 18.0.0, targeting the protobuf structs directly.
 //
 // This file is the deparser state machinery: nesting levels, part groups and
 // parts (postgres_deparse.c's DeparseState). The machinery exists for the
@@ -325,7 +325,7 @@ func Deparse(tree *ast.ParseResult) (result string, err error) {
 }
 
 // DeparseWithEmpties is Deparse with the parser's present-but-empty string
-// set: the C deparser distinguishes COMMENT/SECURITY LABEL ... IS '' (a
+// set: the C deparser distinguishes COMMENT/SECURITY LABEL ... IS ” (a
 // non-NULL empty string) from IS NULL, which proto3 collapses. Only callers
 // that re-parsed the input themselves (the summary truncation) can supply
 // the set; trees received over the API deparse as the protobuf round-trip

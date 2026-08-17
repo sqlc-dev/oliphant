@@ -1,4 +1,4 @@
-// Package normalize ports pg_query_normalize.c at the pinned 17-6.2.2:
+// Package normalize ports pg_query_normalize.c at the pinned 18.0.0:
 // constants in the query text are replaced with $n parameter references,
 // numbered in tree-walk order after the highest existing $n.
 //
@@ -6,7 +6,7 @@
 // tree with special cases for constant-bearing utility statements and for
 // SELECT (GROUP BY entries are matched against target-list entries by
 // fingerprint so both get the same parameter numbers), falling through to
-// PostgreSQL 17's raw_expression_tree_walker for everything else. Node types
+// PostgreSQL 18's raw_expression_tree_walker for everything else. Node types
 // that walker does not know abort the walk of that subtree — upstream's
 // elog(ERROR) is caught per-node and swallowed — which this port reproduces
 // by returning early for unsupported types (walker.go).

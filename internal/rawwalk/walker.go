@@ -1,5 +1,5 @@
 // Package rawwalk is raw_expression_tree_walker (src/backend/nodes/
-// nodeFuncs.c, PostgreSQL 17) over the protobuf tree, gated exactly as
+// nodeFuncs.c, PostgreSQL 18) over the protobuf tree, gated exactly as
 // pg_query_raw_tree_walker_supports allows: node types outside the walker's
 // switch return false without descending. It drives the summary walks and
 // the PL/pgSQL driver's statement collection.
@@ -54,7 +54,7 @@ func IsNil(item any) bool {
 }
 
 // walkChildren is raw_expression_tree_walker_impl (src/backend/nodes/
-// nodeFuncs.c, PostgreSQL 17) gated exactly as pg_query_raw_tree_walker_supports
+// nodeFuncs.c, PostgreSQL 18) gated exactly as pg_query_raw_tree_walker_supports
 // allows: node types outside the walker's switch return false without
 // descending (the summary C files check the gate before calling the walker;
 // folding it into the default arm is equivalent). Child order is the C

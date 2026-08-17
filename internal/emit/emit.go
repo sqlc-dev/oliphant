@@ -1,6 +1,6 @@
 // Package emit renders parse trees as JSON with byte-parity to libpg_query's
 // hand-rolled C emitter (pg_query_outfuncs_json.c + pg_query_json_helper.c at
-// the pinned 17-6.2.2).
+// the pinned 18.0.0).
 //
 // The C emitter is generated from the same struct metadata the pinned
 // pg_query.proto was generated from, so the proto descriptor carries
@@ -312,7 +312,6 @@ func emitToken(b *strings.Builder, s string) {
 	}
 	b.WriteByte('"')
 }
-
 
 func boolStr(v bool) string {
 	if v {
