@@ -35,8 +35,6 @@ func TestNotImplementedErrors(t *testing.T) {
 
 	_, err := pg_query.ParsePlPgSqlToJSON("SELECT 1")
 	check("ParsePlPgSqlToJSON", err)
-	_, err = pg_query.Summary("SELECT 1", 0)
-	check("Summary", err)
 }
 
 // TestScanTokens pins one token stream end-to-end through the public Scan

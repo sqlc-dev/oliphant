@@ -332,6 +332,11 @@ func Deparse(tree *ast.ParseResult) (result string, err error) {
 	return string(out), nil
 }
 
+// QuoteIdentifier exposes quoteIdentifier to the other internal packages
+// that need ruleutils.c's quote_identifier (the summary walk renders table
+// names with it).
+func QuoteIdentifier(ident string) string { return quoteIdentifier(ident) }
+
 // quoteIdentifier is ruleutils.c's quote_identifier (quote_all_identifiers
 // is always false in libpg_query).
 func quoteIdentifier(ident string) string {

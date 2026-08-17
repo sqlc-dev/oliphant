@@ -8,6 +8,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 	"github.com/sqlc-dev/oliphant/internal/normalize"
 	"github.com/sqlc-dev/oliphant/internal/parse"
+	"github.com/sqlc-dev/oliphant/internal/summary"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
 
@@ -247,6 +249,25 @@ func IsUtilityStmt(input string) (result []bool, err error) {
 	return result, nil
 }
 
+// SummaryToProtobuf is pg_query_summary: parse, walk for tables/aliases/
+// CTEs/functions/filter columns/statement types, and — unless truncateLimit
+// is -1 — produce the smart-truncated query text.
 func SummaryToProtobuf(input string, truncateLimit int) ([]byte, error) {
-	return nil, errNotImplemented("SummaryToProtobuf")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	res, serr := summary.Summarize(tree, truncateLimit)
+	if serr != nil {
+		var se *summary.Error
+		if errors.As(serr, &se) {
+			return nil, &Error{
+				Message:  se.Message,
+				Filename: se.Filename,
+				Funcname: se.Funcname,
+			}
+		}
+		return nil, &Error{Message: serr.Error()}
+	}
+	return proto.Marshal(res)
 }
