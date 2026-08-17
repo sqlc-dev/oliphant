@@ -1,0 +1,395 @@
+== 001
+-- from http://www.depesz.com/index.php/2010/04/19/getting-unique-elements/
+
+CREATE TEMP TABLE articles (
+    id int CONSTRAINT articles_pkey PRIMARY KEY,
+    keywords text,
+    title text UNIQUE NOT NULL,
+    body text UNIQUE,
+    created date
+)
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: CreateStmt
+== 002
+CREATE TEMP TABLE articles_in_category (
+    article_id int,
+    category_id int,
+    changed date,
+    PRIMARY KEY (article_id, category_id)
+)
+--
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=DDL
+STMT: CreateStmt
+== 003
+-- test functional dependencies based on primary keys/unique constraints
+
+-- base tables
+
+-- group by primary key (OK)
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: SelectStmt
+== 004
+-- group by unique not null (fail/todo)
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY title
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: SelectStmt
+== 005
+-- group by unique nullable (fail)
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY body
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: SelectStmt
+== 006
+-- group by something else (fail)
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY keywords
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: SelectStmt
+== 007
+-- multiple tables
+
+-- group by primary key (OK)
+SELECT a.id, a.keywords, a.title, a.body, a.created
+FROM articles AS a, articles_in_category AS aic
+WHERE a.id = aic.article_id AND aic.category_id in (14,62,70,53,138)
+GROUP BY a.id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="a" column="id"
+FILTER: schema="" table="aic" column="article_id"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 008
+-- group by something else (fail)
+SELECT a.id, a.keywords, a.title, a.body, a.created
+FROM articles AS a, articles_in_category AS aic
+WHERE a.id = aic.article_id AND aic.category_id in (14,62,70,53,138)
+GROUP BY aic.article_id, aic.category_id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="a" column="id"
+FILTER: schema="" table="aic" column="article_id"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 009
+-- JOIN syntax
+
+-- group by left table's primary key (OK)
+SELECT a.id, a.keywords, a.title, a.body, a.created
+FROM articles AS a JOIN articles_in_category AS aic ON a.id = aic.article_id
+WHERE aic.category_id in (14,62,70,53,138)
+GROUP BY a.id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 010
+-- group by something else (fail)
+SELECT a.id, a.keywords, a.title, a.body, a.created
+FROM articles AS a JOIN articles_in_category AS aic ON a.id = aic.article_id
+WHERE aic.category_id in (14,62,70,53,138)
+GROUP BY aic.article_id, aic.category_id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 011
+-- group by right table's (composite) primary key (OK)
+SELECT aic.changed
+FROM articles AS a JOIN articles_in_category AS aic ON a.id = aic.article_id
+WHERE aic.category_id in (14,62,70,53,138)
+GROUP BY aic.category_id, aic.article_id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 012
+-- group by right table's partial primary key (fail)
+SELECT aic.changed
+FROM articles AS a JOIN articles_in_category AS aic ON a.id = aic.article_id
+WHERE aic.category_id in (14,62,70,53,138)
+GROUP BY aic.article_id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="aic" column="category_id"
+STMT: SelectStmt
+== 013
+-- example from documentation
+
+CREATE TEMP TABLE products (product_id int, name text, price numeric)
+--
+TABLE: name="products" schema="" table="products" ctx=DDL
+STMT: CreateStmt
+== 014
+CREATE TEMP TABLE sales (product_id int, units int)
+--
+TABLE: name="sales" schema="" table="sales" ctx=DDL
+STMT: CreateStmt
+== 015
+-- OK
+SELECT product_id, p.name, (sum(s.units) * p.price) AS sales
+    FROM products p LEFT JOIN sales s USING (product_id)
+    GROUP BY product_id, p.name, p.price
+--
+TABLE: name="products" schema="" table="products" ctx=Select
+TABLE: name="sales" schema="" table="sales" ctx=Select
+ALIAS: "p"="products"
+ALIAS: "s"="sales"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 016
+-- fail
+SELECT product_id, p.name, (sum(s.units) * p.price) AS sales
+    FROM products p LEFT JOIN sales s USING (product_id)
+    GROUP BY product_id
+--
+TABLE: name="products" schema="" table="products" ctx=Select
+TABLE: name="sales" schema="" table="sales" ctx=Select
+ALIAS: "p"="products"
+ALIAS: "s"="sales"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 017
+ALTER TABLE products ADD PRIMARY KEY (product_id)
+--
+TABLE: name="products" schema="" table="products" ctx=DDL
+STMT: AlterTableStmt
+== 018
+-- OK now
+SELECT product_id, p.name, (sum(s.units) * p.price) AS sales
+    FROM products p LEFT JOIN sales s USING (product_id)
+    GROUP BY product_id
+--
+TABLE: name="products" schema="" table="products" ctx=Select
+TABLE: name="sales" schema="" table="sales" ctx=Select
+ALIAS: "p"="products"
+ALIAS: "s"="sales"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 019
+-- Drupal example, http://drupal.org/node/555530
+
+CREATE TEMP TABLE node (
+    nid SERIAL,
+    vid integer NOT NULL default '0',
+    type varchar(32) NOT NULL default '',
+    title varchar(128) NOT NULL default '',
+    uid integer NOT NULL default '0',
+    status integer NOT NULL default '1',
+    created integer NOT NULL default '0',
+    -- snip
+    PRIMARY KEY (nid, vid)
+)
+--
+TABLE: name="node" schema="" table="node" ctx=DDL
+STMT: CreateStmt
+== 020
+CREATE TEMP TABLE users (
+    uid integer NOT NULL default '0',
+    name varchar(60) NOT NULL default '',
+    pass varchar(32) NOT NULL default '',
+    -- snip
+    PRIMARY KEY (uid),
+    UNIQUE (name)
+)
+--
+TABLE: name="users" schema="" table="users" ctx=DDL
+STMT: CreateStmt
+== 021
+-- OK
+SELECT u.uid, u.name FROM node n
+INNER JOIN users u ON u.uid = n.uid
+WHERE n.type = 'blog' AND n.status = 1
+GROUP BY u.uid, u.name
+--
+TABLE: name="node" schema="" table="node" ctx=Select
+TABLE: name="users" schema="" table="users" ctx=Select
+ALIAS: "n"="node"
+ALIAS: "u"="users"
+FILTER: schema="" table="n" column="type"
+FILTER: schema="" table="n" column="status"
+STMT: SelectStmt
+== 022
+-- OK
+SELECT u.uid, u.name FROM node n
+INNER JOIN users u ON u.uid = n.uid
+WHERE n.type = 'blog' AND n.status = 1
+GROUP BY u.uid
+--
+TABLE: name="node" schema="" table="node" ctx=Select
+TABLE: name="users" schema="" table="users" ctx=Select
+ALIAS: "n"="node"
+ALIAS: "u"="users"
+FILTER: schema="" table="n" column="type"
+FILTER: schema="" table="n" column="status"
+STMT: SelectStmt
+== 023
+-- Check views and dependencies
+
+-- fail
+CREATE TEMP VIEW fdv1 AS
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY body
+--
+TABLE: name="fdv1" schema="" table="fdv1" ctx=DDL
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 024
+-- OK
+CREATE TEMP VIEW fdv1 AS
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY id
+--
+TABLE: name="fdv1" schema="" table="fdv1" ctx=DDL
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 025
+-- fail
+ALTER TABLE articles DROP CONSTRAINT articles_pkey RESTRICT
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: AlterTableStmt
+== 026
+DROP VIEW fdv1
+--
+STMT: DropStmt
+== 027
+-- multiple dependencies
+CREATE TEMP VIEW fdv2 AS
+SELECT a.id, a.keywords, a.title, aic.category_id, aic.changed
+FROM articles AS a JOIN articles_in_category AS aic ON a.id = aic.article_id
+WHERE aic.category_id in (14,62,70,53,138)
+GROUP BY a.id, aic.category_id, aic.article_id
+--
+TABLE: name="fdv2" schema="" table="fdv2" ctx=DDL
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=Select
+ALIAS: "a"="articles"
+ALIAS: "aic"="articles_in_category"
+FILTER: schema="" table="aic" column="category_id"
+STMT: ViewStmt
+STMT: SelectStmt
+== 028
+ALTER TABLE articles DROP CONSTRAINT articles_pkey RESTRICT
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: AlterTableStmt
+== 029
+-- fail
+ALTER TABLE articles_in_category DROP CONSTRAINT articles_in_category_pkey RESTRICT
+--
+TABLE: name="articles_in_category" schema="" table="articles_in_category" ctx=DDL
+STMT: AlterTableStmt
+== 030
+--fail
+
+DROP VIEW fdv2
+--
+STMT: DropStmt
+== 031
+-- nested queries
+
+CREATE TEMP VIEW fdv3 AS
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY id
+UNION
+SELECT id, keywords, title, body, created
+FROM articles
+GROUP BY id
+--
+TABLE: name="fdv3" schema="" table="fdv3" ctx=DDL
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 032
+ALTER TABLE articles DROP CONSTRAINT articles_pkey RESTRICT
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: AlterTableStmt
+== 033
+-- fail
+
+DROP VIEW fdv3
+--
+STMT: DropStmt
+== 034
+CREATE TEMP VIEW fdv4 AS
+SELECT * FROM articles WHERE title IN (SELECT title FROM articles GROUP BY id)
+--
+TABLE: name="fdv4" schema="" table="fdv4" ctx=DDL
+TABLE: name="articles" schema="" table="articles" ctx=Select
+TABLE: name="articles" schema="" table="articles" ctx=Select
+FILTER: schema="" table="" column="title"
+STMT: ViewStmt
+STMT: SelectStmt
+== 035
+ALTER TABLE articles DROP CONSTRAINT articles_pkey RESTRICT
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: AlterTableStmt
+== 036
+-- fail
+
+DROP VIEW fdv4
+--
+STMT: DropStmt
+== 037
+-- prepared query plans: this results in failure on reuse
+
+PREPARE foo AS
+  SELECT id, keywords, title, body, created
+  FROM articles
+  GROUP BY id
+--
+TABLE: name="articles" schema="" table="articles" ctx=Select
+STMT: PrepareStmt
+STMT: SelectStmt
+== 038
+EXECUTE foo
+--
+STMT: ExecuteStmt
+== 039
+ALTER TABLE articles DROP CONSTRAINT articles_pkey RESTRICT
+--
+TABLE: name="articles" schema="" table="articles" ctx=DDL
+STMT: AlterTableStmt
+== 040
+EXECUTE foo
+--
+STMT: ExecuteStmt

@@ -1,0 +1,164 @@
+== 001
+|--
+-- Tests for plpgsql's handling of "simple" expressions
+|--
+
+-- Check that changes to an inline-able function are handled correctly
+create function simplesql(int) returns int language sql
+as 'select $1'
+--
+783ef15990c552ff
+== 002
+create function simplecaller() returns int language plpgsql
+as $$
+declare
+  sum int := 0;
+begin
+  for n in 1..10 loop
+    sum := sum + simplesql(n);
+    if n = 5 then
+      create or replace function simplesql(int) returns int language sql
+      as 'select $1 + 100';
+    end if;
+  end loop;
+  return sum;
+end$$
+--
+d8872044e04b8a81
+== 003
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 004
+-- Check that changes in search path are dealt with correctly
+create schema simple1
+--
+d031bf9fd3fa1db9
+== 005
+create function simple1.simpletarget(int) returns int language plpgsql
+as $$begin return $1; end$$
+--
+9e6421a8d6d3ec20
+== 006
+create function simpletarget(int) returns int language plpgsql
+as $$begin return $1 + 100; end$$
+--
+d34839c95f66568a
+== 007
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare
+  sum int := 0;
+begin
+  for n in 1..10 loop
+    sum := sum + simpletarget(n);
+    if n = 5 then
+      set local search_path = 'simple1';
+    end if;
+  end loop;
+  return sum;
+end$$
+--
+2cf6983ca6dd1c57
+== 008
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 009
+-- try it with non-volatile functions, too
+alter function simple1.simpletarget(int) immutable
+--
+67cd42590375fd8d
+== 010
+alter function simpletarget(int) immutable
+--
+b4073d41bf67acdf
+== 011
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 012
+-- make sure flushing local caches changes nothing
+
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 013
+-- Check case where first attempt to determine if it's simple fails
+
+create function simplesql() returns int language sql
+as $$select 1 / 0$$
+--
+622a52bb06b85a4d
+== 014
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare x int;
+begin
+  select simplesql() into x;
+  return x;
+end$$
+--
+2cf6983ca6dd1c57
+== 015
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 016
+-- division by zero occurs during simple-expr check
+
+create or replace function simplesql() returns int language sql
+as $$select 2 + 2$$
+--
+14234346f0950c33
+== 017
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 018
+-- Check case where called function changes from non-SRF to SRF (bug #18497)
+
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare x int;
+begin
+  x := simplesql();
+  return x;
+end$$
+--
+2cf6983ca6dd1c57
+== 019
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 020
+drop function simplesql()
+--
+708466fde18d7326
+== 021
+create function simplesql() returns setof int language sql
+as $$select 22 + 22$$
+--
+491d881dd0d40368
+== 022
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 023
+select simplecaller()
+--
+a95148bc1c9c7d17
+== 024
+-- Check handling of simple expression in a scrollable cursor (bug #18859)
+
+do $$
+declare
+ p_CurData refcursor;
+ val int;
+begin
+ open p_CurData scroll for select 42;
+ fetch p_CurData into val;
+ raise notice 'val = %', val;
+end; $$
+--
+f936eab75b8c1b90

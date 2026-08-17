@@ -1,0 +1,985 @@
+== 001
+|--
+-- CREATE_FUNCTION_SQL
+|--
+-- Assorted tests using SQL-language functions
+|--
+
+-- All objects made in this test are in temp_func_test schema
+
+CREATE USER regress_unpriv_user
+--
+STMT: CreateRoleStmt
+== 002
+CREATE SCHEMA temp_func_test
+--
+STMT: CreateSchemaStmt
+== 003
+GRANT ALL ON SCHEMA temp_func_test TO public
+--
+STMT: GrantStmt
+== 004
+SET search_path TO temp_func_test, public
+--
+STMT: VariableSetStmt
+== 005
+|--
+-- Make sanity checks on the pg_proc entries created by CREATE FUNCTION
+|--
+
+|--
+-- ARGUMENT and RETURN TYPES
+|--
+CREATE FUNCTION functest_A_1(text, date) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 = ''abcd'' AND $2 > ''2001-01-01'''
+--
+FUNCTION: name="functest_a_1" function="functest_a_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 006
+CREATE FUNCTION functest_A_2(text[]) RETURNS int LANGUAGE 'sql'
+       AS 'SELECT $1[1]::int'
+--
+FUNCTION: name="functest_a_2" function="functest_a_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 007
+CREATE FUNCTION functest_A_3() RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT false'
+--
+FUNCTION: name="functest_a_3" function="functest_a_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 008
+SELECT proname, prorettype::regtype, proargtypes::regtype[] FROM pg_proc
+       WHERE oid in ('functest_A_1'::regproc,
+                     'functest_A_2'::regproc,
+                     'functest_A_3'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 009
+SELECT functest_A_1('abcd', '2020-01-01')
+--
+FUNCTION: name="functest_a_1" function="functest_a_1" schema="" ctx=Call
+STMT: SelectStmt
+== 010
+SELECT functest_A_2(ARRAY['1', '2', '3'])
+--
+FUNCTION: name="functest_a_2" function="functest_a_2" schema="" ctx=Call
+STMT: SelectStmt
+== 011
+SELECT functest_A_3()
+--
+FUNCTION: name="functest_a_3" function="functest_a_3" schema="" ctx=Call
+STMT: SelectStmt
+== 012
+|--
+-- IMMUTABLE | STABLE | VOLATILE
+|--
+CREATE FUNCTION functest_B_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 0'
+--
+FUNCTION: name="functest_b_1" function="functest_b_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 013
+CREATE FUNCTION functest_B_2(int) RETURNS bool LANGUAGE 'sql'
+       IMMUTABLE AS 'SELECT $1 > 0'
+--
+FUNCTION: name="functest_b_2" function="functest_b_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 014
+CREATE FUNCTION functest_B_3(int) RETURNS bool LANGUAGE 'sql'
+       STABLE AS 'SELECT $1 = 0'
+--
+FUNCTION: name="functest_b_3" function="functest_b_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 015
+CREATE FUNCTION functest_B_4(int) RETURNS bool LANGUAGE 'sql'
+       VOLATILE AS 'SELECT $1 < 0'
+--
+FUNCTION: name="functest_b_4" function="functest_b_4" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 016
+SELECT proname, provolatile FROM pg_proc
+       WHERE oid in ('functest_B_1'::regproc,
+                     'functest_B_2'::regproc,
+                     'functest_B_3'::regproc,
+		     'functest_B_4'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 017
+ALTER FUNCTION functest_B_2(int) VOLATILE
+--
+STMT: AlterFunctionStmt
+== 018
+ALTER FUNCTION functest_B_3(int) COST 100
+--
+STMT: AlterFunctionStmt
+== 019
+-- unrelated change, no effect
+SELECT proname, provolatile FROM pg_proc
+       WHERE oid in ('functest_B_1'::regproc,
+                     'functest_B_2'::regproc,
+                     'functest_B_3'::regproc,
+		     'functest_B_4'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 020
+|--
+-- SECURITY DEFINER | INVOKER
+|--
+CREATE FUNCTION functest_C_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 0'
+--
+FUNCTION: name="functest_c_1" function="functest_c_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 021
+CREATE FUNCTION functest_C_2(int) RETURNS bool LANGUAGE 'sql'
+       SECURITY DEFINER AS 'SELECT $1 = 0'
+--
+FUNCTION: name="functest_c_2" function="functest_c_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 022
+CREATE FUNCTION functest_C_3(int) RETURNS bool LANGUAGE 'sql'
+       SECURITY INVOKER AS 'SELECT $1 < 0'
+--
+FUNCTION: name="functest_c_3" function="functest_c_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 023
+SELECT proname, prosecdef FROM pg_proc
+       WHERE oid in ('functest_C_1'::regproc,
+                     'functest_C_2'::regproc,
+                     'functest_C_3'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 024
+ALTER FUNCTION functest_C_1(int) IMMUTABLE
+--
+STMT: AlterFunctionStmt
+== 025
+-- unrelated change, no effect
+ALTER FUNCTION functest_C_2(int) SECURITY INVOKER
+--
+STMT: AlterFunctionStmt
+== 026
+ALTER FUNCTION functest_C_3(int) SECURITY DEFINER
+--
+STMT: AlterFunctionStmt
+== 027
+SELECT proname, prosecdef FROM pg_proc
+       WHERE oid in ('functest_C_1'::regproc,
+                     'functest_C_2'::regproc,
+                     'functest_C_3'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 028
+|--
+-- LEAKPROOF
+|--
+CREATE FUNCTION functest_E_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 100'
+--
+FUNCTION: name="functest_e_1" function="functest_e_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 029
+CREATE FUNCTION functest_E_2(int) RETURNS bool LANGUAGE 'sql'
+       LEAKPROOF AS 'SELECT $1 > 100'
+--
+FUNCTION: name="functest_e_2" function="functest_e_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 030
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 031
+ALTER FUNCTION functest_E_1(int) LEAKPROOF
+--
+STMT: AlterFunctionStmt
+== 032
+ALTER FUNCTION functest_E_2(int) STABLE
+--
+STMT: AlterFunctionStmt
+== 033
+-- unrelated change, no effect
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 034
+ALTER FUNCTION functest_E_2(int) NOT LEAKPROOF
+--
+STMT: AlterFunctionStmt
+== 035
+-- remove leakproof attribute
+SELECT proname, proleakproof FROM pg_proc
+       WHERE oid in ('functest_E_1'::regproc,
+                     'functest_E_2'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 036
+-- it takes superuser privilege to turn on leakproof, but not to turn off
+ALTER FUNCTION functest_E_1(int) OWNER TO regress_unpriv_user
+--
+STMT: AlterOwnerStmt
+== 037
+ALTER FUNCTION functest_E_2(int) OWNER TO regress_unpriv_user
+--
+STMT: AlterOwnerStmt
+== 038
+SET SESSION AUTHORIZATION regress_unpriv_user
+--
+STMT: VariableSetStmt
+== 039
+SET search_path TO temp_func_test, public
+--
+STMT: VariableSetStmt
+== 040
+ALTER FUNCTION functest_E_1(int) NOT LEAKPROOF
+--
+STMT: AlterFunctionStmt
+== 041
+ALTER FUNCTION functest_E_2(int) LEAKPROOF
+--
+STMT: AlterFunctionStmt
+== 042
+CREATE FUNCTION functest_E_3(int) RETURNS bool LANGUAGE 'sql'
+       LEAKPROOF AS 'SELECT $1 < 200'
+--
+FUNCTION: name="functest_e_3" function="functest_e_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 043
+-- fail
+
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 044
+|--
+-- CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT
+|--
+CREATE FUNCTION functest_F_1(int) RETURNS bool LANGUAGE 'sql'
+       AS 'SELECT $1 > 50'
+--
+FUNCTION: name="functest_f_1" function="functest_f_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 045
+CREATE FUNCTION functest_F_2(int) RETURNS bool LANGUAGE 'sql'
+       CALLED ON NULL INPUT AS 'SELECT $1 = 50'
+--
+FUNCTION: name="functest_f_2" function="functest_f_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 046
+CREATE FUNCTION functest_F_3(int) RETURNS bool LANGUAGE 'sql'
+       RETURNS NULL ON NULL INPUT AS 'SELECT $1 < 50'
+--
+FUNCTION: name="functest_f_3" function="functest_f_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 047
+CREATE FUNCTION functest_F_4(int) RETURNS bool LANGUAGE 'sql'
+       STRICT AS 'SELECT $1 = 50'
+--
+FUNCTION: name="functest_f_4" function="functest_f_4" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 048
+SELECT proname, proisstrict FROM pg_proc
+       WHERE oid in ('functest_F_1'::regproc,
+                     'functest_F_2'::regproc,
+                     'functest_F_3'::regproc,
+                     'functest_F_4'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 049
+ALTER FUNCTION functest_F_1(int) IMMUTABLE
+--
+STMT: AlterFunctionStmt
+== 050
+-- unrelated change, no effect
+ALTER FUNCTION functest_F_2(int) STRICT
+--
+STMT: AlterFunctionStmt
+== 051
+ALTER FUNCTION functest_F_3(int) CALLED ON NULL INPUT
+--
+STMT: AlterFunctionStmt
+== 052
+SELECT proname, proisstrict FROM pg_proc
+       WHERE oid in ('functest_F_1'::regproc,
+                     'functest_F_2'::regproc,
+                     'functest_F_3'::regproc,
+                     'functest_F_4'::regproc) ORDER BY proname
+--
+TABLE: name="pg_proc" schema="" table="pg_proc" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 053
+-- pg_get_functiondef tests
+
+SELECT pg_get_functiondef('functest_A_1'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+SELECT pg_get_functiondef('functest_B_3'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 055
+SELECT pg_get_functiondef('functest_C_3'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 056
+SELECT pg_get_functiondef('functest_F_2'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 057
+|--
+-- SQL-standard body
+|--
+CREATE FUNCTION functest_S_1(a text, b date) RETURNS boolean
+    LANGUAGE SQL
+    RETURN a = 'abcd' AND b > '2001-01-01'
+--
+FUNCTION: name="functest_s_1" function="functest_s_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 058
+CREATE FUNCTION functest_S_2(a text[]) RETURNS int
+    RETURN a[1]::int
+--
+FUNCTION: name="functest_s_2" function="functest_s_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 059
+CREATE FUNCTION functest_S_3() RETURNS boolean
+    RETURN false
+--
+FUNCTION: name="functest_s_3" function="functest_s_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 060
+CREATE FUNCTION functest_S_3a() RETURNS boolean
+    BEGIN ATOMIC
+--
+ERROR: syntax error at end of input
+CURSORPOS: 65
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 061
+RETURN false
+--
+ERROR: syntax error at or near "RETURN"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 062
+END
+--
+STMT: TransactionStmt
+== 063
+CREATE FUNCTION functest_S_10(a text, b date) RETURNS boolean
+    LANGUAGE SQL
+    BEGIN ATOMIC
+        SELECT a = 'abcd' AND b > '2001-01-01'
+--
+ERROR: syntax error at end of input
+CURSORPOS: 143
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 064
+END
+--
+STMT: TransactionStmt
+== 065
+CREATE FUNCTION functest_S_13() RETURNS boolean
+    BEGIN ATOMIC
+        SELECT 1
+--
+ERROR: syntax error at end of input
+CURSORPOS: 82
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 066
+SELECT false
+--
+STMT: SelectStmt
+== 067
+END
+--
+STMT: TransactionStmt
+== 068
+-- check display of function arguments in sub-SELECT
+CREATE TABLE functest1 (i int)
+--
+TABLE: name="functest1" schema="" table="functest1" ctx=DDL
+STMT: CreateStmt
+== 069
+CREATE FUNCTION functest_S_16(a int, b int) RETURNS void
+    LANGUAGE SQL
+    BEGIN ATOMIC
+        INSERT INTO functest1 SELECT a + $2
+--
+ERROR: syntax error at end of input
+CURSORPOS: 135
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 070
+END
+--
+STMT: TransactionStmt
+== 071
+-- error: duplicate function body
+CREATE FUNCTION functest_S_xxx(x int) RETURNS int
+    LANGUAGE SQL
+    AS $$ SELECT x * 2 $$
+    RETURN x * 3
+--
+FUNCTION: name="functest_s_xxx" function="functest_s_xxx" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 072
+-- polymorphic arguments not allowed in this form
+CREATE FUNCTION functest_S_xx(x anyarray) RETURNS anyelement
+    LANGUAGE SQL
+    RETURN x[1]
+--
+FUNCTION: name="functest_s_xx" function="functest_s_xx" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 073
+-- check reporting of parse-analysis errors
+CREATE FUNCTION functest_S_xx(x date) RETURNS boolean
+    LANGUAGE SQL
+    RETURN x > 1
+--
+FUNCTION: name="functest_s_xx" function="functest_s_xx" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 074
+-- tricky parsing
+CREATE FUNCTION functest_S_15(x int) RETURNS boolean
+LANGUAGE SQL
+BEGIN ATOMIC
+    select case when x % 2 = 0 then true else false end
+--
+ERROR: syntax error at end of input
+CURSORPOS: 153
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 075
+END
+--
+STMT: TransactionStmt
+== 076
+SELECT functest_S_1('abcd', '2020-01-01')
+--
+FUNCTION: name="functest_s_1" function="functest_s_1" schema="" ctx=Call
+STMT: SelectStmt
+== 077
+SELECT functest_S_2(ARRAY['1', '2', '3'])
+--
+FUNCTION: name="functest_s_2" function="functest_s_2" schema="" ctx=Call
+STMT: SelectStmt
+== 078
+SELECT functest_S_3()
+--
+FUNCTION: name="functest_s_3" function="functest_s_3" schema="" ctx=Call
+STMT: SelectStmt
+== 079
+SELECT functest_S_10('abcd', '2020-01-01')
+--
+FUNCTION: name="functest_s_10" function="functest_s_10" schema="" ctx=Call
+STMT: SelectStmt
+== 080
+SELECT functest_S_13()
+--
+FUNCTION: name="functest_s_13" function="functest_s_13" schema="" ctx=Call
+STMT: SelectStmt
+== 081
+SELECT pg_get_functiondef('functest_S_1'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 082
+SELECT pg_get_functiondef('functest_S_2'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 083
+SELECT pg_get_functiondef('functest_S_3'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 084
+SELECT pg_get_functiondef('functest_S_3a'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 085
+SELECT pg_get_functiondef('functest_S_10'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 086
+SELECT pg_get_functiondef('functest_S_13'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 087
+SELECT pg_get_functiondef('functest_S_15'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 088
+SELECT pg_get_functiondef('functest_S_16'::regproc)
+--
+FUNCTION: name="pg_get_functiondef" function="pg_get_functiondef" schema="" ctx=Call
+STMT: SelectStmt
+== 089
+DROP TABLE functest1 CASCADE
+--
+TABLE: name="functest1" schema="" table="functest1" ctx=DDL
+STMT: DropStmt
+== 090
+-- test with views
+CREATE TABLE functest3 (a int)
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DDL
+STMT: CreateStmt
+== 091
+INSERT INTO functest3 VALUES (1), (2)
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 092
+CREATE VIEW functestv3 AS SELECT * FROM functest3
+--
+TABLE: name="functestv3" schema="" table="functestv3" ctx=DDL
+TABLE: name="functest3" schema="" table="functest3" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 093
+CREATE FUNCTION functest_S_14() RETURNS bigint
+    RETURN (SELECT count(*) FROM functestv3)
+--
+FUNCTION: name="functest_s_14" function="functest_s_14" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 094
+SELECT functest_S_14()
+--
+FUNCTION: name="functest_s_14" function="functest_s_14" schema="" ctx=Call
+STMT: SelectStmt
+== 095
+DROP TABLE functest3 CASCADE
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DDL
+STMT: DropStmt
+== 096
+-- information_schema tests
+
+CREATE FUNCTION functest_IS_1(a int, b int default 1, c text default 'foo')
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1 + $2'
+--
+FUNCTION: name="functest_is_1" function="functest_is_1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 097
+CREATE FUNCTION functest_IS_2(out a int, b int default 1)
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1'
+--
+FUNCTION: name="functest_is_2" function="functest_is_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 098
+CREATE FUNCTION functest_IS_3(a int default 1, out b int)
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT $1'
+--
+FUNCTION: name="functest_is_3" function="functest_is_3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 099
+SELECT routine_name, ordinal_position, parameter_name, parameter_default
+    FROM information_schema.parameters JOIN information_schema.routines USING (specific_schema, specific_name)
+    WHERE routine_schema = 'temp_func_test' AND routine_name ~ '^functest_is_'
+    ORDER BY 1, 2
+--
+TABLE: name="information_schema.parameters" schema="information_schema" table="parameters" ctx=Select
+TABLE: name="information_schema.routines" schema="information_schema" table="routines" ctx=Select
+FILTER: schema="" table="" column="routine_schema"
+FILTER: schema="" table="" column="routine_name"
+STMT: SelectStmt
+== 100
+DROP FUNCTION functest_IS_1(int, int, text), functest_IS_2(int), functest_IS_3(int)
+--
+FUNCTION: name="functest_is_1" function="functest_is_1" schema="" ctx=DDL
+STMT: DropStmt
+== 101
+-- routine usage views
+
+CREATE FUNCTION functest_IS_4a() RETURNS int LANGUAGE SQL AS 'SELECT 1'
+--
+FUNCTION: name="functest_is_4a" function="functest_is_4a" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 102
+CREATE FUNCTION functest_IS_4b(x int DEFAULT functest_IS_4a()) RETURNS int LANGUAGE SQL AS 'SELECT x'
+--
+FUNCTION: name="functest_is_4b" function="functest_is_4b" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 103
+CREATE SEQUENCE functest1
+--
+STMT: CreateSeqStmt
+== 104
+CREATE FUNCTION functest_IS_5(x int DEFAULT nextval('functest1'))
+    RETURNS int
+    LANGUAGE SQL
+    AS 'SELECT x'
+--
+FUNCTION: name="functest_is_5" function="functest_is_5" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 105
+CREATE FUNCTION functest_IS_6()
+    RETURNS int
+    LANGUAGE SQL
+    RETURN nextval('functest1')
+--
+FUNCTION: name="functest_is_6" function="functest_is_6" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 106
+CREATE TABLE functest2 (a int, b int)
+--
+TABLE: name="functest2" schema="" table="functest2" ctx=DDL
+STMT: CreateStmt
+== 107
+CREATE FUNCTION functest_IS_7()
+    RETURNS int
+    LANGUAGE SQL
+    RETURN (SELECT count(a) FROM functest2)
+--
+FUNCTION: name="functest_is_7" function="functest_is_7" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 108
+SELECT r0.routine_name, r1.routine_name
+  FROM information_schema.routine_routine_usage rru
+       JOIN information_schema.routines r0 ON r0.specific_name = rru.specific_name
+       JOIN information_schema.routines r1 ON r1.specific_name = rru.routine_name
+  WHERE r0.routine_schema = 'temp_func_test' AND
+        r1.routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+TABLE: name="information_schema.routine_routine_usage" schema="information_schema" table="routine_routine_usage" ctx=Select
+TABLE: name="information_schema.routines" schema="information_schema" table="routines" ctx=Select
+TABLE: name="information_schema.routines" schema="information_schema" table="routines" ctx=Select
+ALIAS: "r0"="information_schema.routines"
+ALIAS: "r1"="information_schema.routines"
+ALIAS: "rru"="information_schema.routine_routine_usage"
+FILTER: schema="" table="r0" column="routine_schema"
+FILTER: schema="" table="r1" column="routine_schema"
+STMT: SelectStmt
+== 109
+SELECT routine_name, sequence_name FROM information_schema.routine_sequence_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+TABLE: name="information_schema.routine_sequence_usage" schema="information_schema" table="routine_sequence_usage" ctx=Select
+FILTER: schema="" table="" column="routine_schema"
+STMT: SelectStmt
+== 110
+SELECT routine_name, table_name, column_name FROM information_schema.routine_column_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+TABLE: name="information_schema.routine_column_usage" schema="information_schema" table="routine_column_usage" ctx=Select
+FILTER: schema="" table="" column="routine_schema"
+STMT: SelectStmt
+== 111
+SELECT routine_name, table_name FROM information_schema.routine_table_usage
+  WHERE routine_schema = 'temp_func_test'
+  ORDER BY 1, 2
+--
+TABLE: name="information_schema.routine_table_usage" schema="information_schema" table="routine_table_usage" ctx=Select
+FILTER: schema="" table="" column="routine_schema"
+STMT: SelectStmt
+== 112
+DROP FUNCTION functest_IS_4a CASCADE
+--
+FUNCTION: name="functest_is_4a" function="functest_is_4a" schema="" ctx=DDL
+STMT: DropStmt
+== 113
+DROP SEQUENCE functest1 CASCADE
+--
+STMT: DropStmt
+== 114
+DROP TABLE functest2 CASCADE
+--
+TABLE: name="functest2" schema="" table="functest2" ctx=DDL
+STMT: DropStmt
+== 115
+-- overload
+CREATE FUNCTION functest_B_2(bigint) RETURNS bool LANGUAGE 'sql'
+       IMMUTABLE AS 'SELECT $1 > 0'
+--
+FUNCTION: name="functest_b_2" function="functest_b_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 116
+DROP FUNCTION functest_b_1
+--
+FUNCTION: name="functest_b_1" function="functest_b_1" schema="" ctx=DDL
+STMT: DropStmt
+== 117
+DROP FUNCTION functest_b_1
+--
+FUNCTION: name="functest_b_1" function="functest_b_1" schema="" ctx=DDL
+STMT: DropStmt
+== 118
+-- error, not found
+DROP FUNCTION functest_b_2
+--
+FUNCTION: name="functest_b_2" function="functest_b_2" schema="" ctx=DDL
+STMT: DropStmt
+== 119
+-- error, ambiguous
+
+
+-- CREATE OR REPLACE tests
+
+CREATE FUNCTION functest1(a int) RETURNS int LANGUAGE SQL AS 'SELECT $1'
+--
+FUNCTION: name="functest1" function="functest1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 120
+CREATE OR REPLACE FUNCTION functest1(a int) RETURNS int LANGUAGE SQL WINDOW AS 'SELECT $1'
+--
+FUNCTION: name="functest1" function="functest1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 121
+CREATE OR REPLACE PROCEDURE functest1(a int) LANGUAGE SQL AS 'SELECT $1'
+--
+FUNCTION: name="functest1" function="functest1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 122
+DROP FUNCTION functest1(a int)
+--
+FUNCTION: name="functest1" function="functest1" schema="" ctx=DDL
+STMT: DropStmt
+== 123
+-- inlining of set-returning functions
+
+CREATE TABLE functest3 (a int)
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DDL
+STMT: CreateStmt
+== 124
+INSERT INTO functest3 VALUES (1), (2), (3)
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 125
+CREATE FUNCTION functest_sri1() RETURNS SETOF int
+LANGUAGE SQL
+STABLE
+AS '
+    SELECT * FROM functest3;
+'
+--
+FUNCTION: name="functest_sri1" function="functest_sri1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 126
+SELECT * FROM functest_sri1()
+--
+FUNCTION: name="functest_sri1" function="functest_sri1" schema="" ctx=Call
+STMT: SelectStmt
+== 127
+EXPLAIN (verbose, costs off) SELECT * FROM functest_sri1()
+--
+FUNCTION: name="functest_sri1" function="functest_sri1" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 128
+CREATE FUNCTION functest_sri2() RETURNS SETOF int
+LANGUAGE SQL
+STABLE
+BEGIN ATOMIC
+    SELECT * FROM functest3
+--
+ERROR: syntax error at end of input
+CURSORPOS: 111
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 129
+END
+--
+STMT: TransactionStmt
+== 130
+SELECT * FROM functest_sri2()
+--
+FUNCTION: name="functest_sri2" function="functest_sri2" schema="" ctx=Call
+STMT: SelectStmt
+== 131
+EXPLAIN (verbose, costs off) SELECT * FROM functest_sri2()
+--
+FUNCTION: name="functest_sri2" function="functest_sri2" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 132
+DROP TABLE functest3 CASCADE
+--
+TABLE: name="functest3" schema="" table="functest3" ctx=DDL
+STMT: DropStmt
+== 133
+-- Check behavior of VOID-returning SQL functions
+
+CREATE FUNCTION voidtest1(a int) RETURNS VOID LANGUAGE SQL AS
+$$ SELECT a + 1 $$
+--
+FUNCTION: name="voidtest1" function="voidtest1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 134
+SELECT voidtest1(42)
+--
+FUNCTION: name="voidtest1" function="voidtest1" schema="" ctx=Call
+STMT: SelectStmt
+== 135
+CREATE FUNCTION voidtest2(a int, b int) RETURNS VOID LANGUAGE SQL AS
+$$ SELECT voidtest1(a + b) $$
+--
+FUNCTION: name="voidtest2" function="voidtest2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 136
+SELECT voidtest2(11,22)
+--
+FUNCTION: name="voidtest2" function="voidtest2" schema="" ctx=Call
+STMT: SelectStmt
+== 137
+-- currently, we can inline voidtest2 but not voidtest1
+EXPLAIN (verbose, costs off) SELECT voidtest2(11,22)
+--
+FUNCTION: name="voidtest2" function="voidtest2" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 138
+CREATE TEMP TABLE sometable(f1 int)
+--
+TABLE: name="sometable" schema="" table="sometable" ctx=DDL
+STMT: CreateStmt
+== 139
+CREATE FUNCTION voidtest3(a int) RETURNS VOID LANGUAGE SQL AS
+$$ INSERT INTO sometable VALUES(a + 1) $$
+--
+FUNCTION: name="voidtest3" function="voidtest3" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 140
+SELECT voidtest3(17)
+--
+FUNCTION: name="voidtest3" function="voidtest3" schema="" ctx=Call
+STMT: SelectStmt
+== 141
+CREATE FUNCTION voidtest4(a int) RETURNS VOID LANGUAGE SQL AS
+$$ INSERT INTO sometable VALUES(a - 1) RETURNING f1 $$
+--
+FUNCTION: name="voidtest4" function="voidtest4" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 142
+SELECT voidtest4(39)
+--
+FUNCTION: name="voidtest4" function="voidtest4" schema="" ctx=Call
+STMT: SelectStmt
+== 143
+TABLE sometable
+--
+TABLE: name="sometable" schema="" table="sometable" ctx=Select
+STMT: SelectStmt
+== 144
+CREATE FUNCTION voidtest5(a int) RETURNS SETOF VOID LANGUAGE SQL AS
+$$ SELECT generate_series(1, a) $$ STABLE
+--
+FUNCTION: name="voidtest5" function="voidtest5" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 145
+SELECT * FROM voidtest5(3)
+--
+FUNCTION: name="voidtest5" function="voidtest5" schema="" ctx=Call
+STMT: SelectStmt
+== 146
+-- Regression tests for bugs:
+
+-- Check that arguments that are R/W expanded datums aren't corrupted by
+-- multiple uses.  This test knows that array_append() returns a R/W datum
+-- and will modify a R/W array input in-place.  We use SETOF to prevent
+-- inlining of the SQL function.
+CREATE FUNCTION double_append(anyarray, anyelement) RETURNS SETOF anyarray
+LANGUAGE SQL IMMUTABLE AS
+$$ SELECT array_append($1, $2) || array_append($1, $2) $$
+--
+FUNCTION: name="double_append" function="double_append" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 147
+SELECT double_append(array_append(ARRAY[q1], q2), q3)
+  FROM (VALUES(1,2,3), (4,5,6)) v(q1,q2,q3)
+--
+FUNCTION: name="double_append" function="double_append" schema="" ctx=Call
+FUNCTION: name="array_append" function="array_append" schema="" ctx=Call
+STMT: SelectStmt
+== 148
+-- Things that shouldn't work:
+
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT ''not an integer'';'
+--
+FUNCTION: name="test1" function="test1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 149
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'not even SQL'
+--
+FUNCTION: name="test1" function="test1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 150
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT 1, 2, 3;'
+--
+FUNCTION: name="test1" function="test1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 151
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'SELECT $2;'
+--
+FUNCTION: name="test1" function="test1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 152
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS 'a', 'b'
+--
+FUNCTION: name="test1" function="test1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 153
+-- Cleanup
+DROP SCHEMA temp_func_test CASCADE
+--
+STMT: DropStmt
+== 154
+DROP USER regress_unpriv_user
+--
+STMT: DropRoleStmt
+== 155
+RESET search_path
+--
+STMT: VariableSetStmt

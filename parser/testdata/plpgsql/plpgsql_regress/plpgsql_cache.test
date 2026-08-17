@@ -1,0 +1,87 @@
+== 001
+|--
+-- Cache-behavior-dependent test cases
+|--
+-- These tests logically belong in plpgsql_record.sql, and perhaps someday
+-- can be merged back into it.  For now, however, their results are different
+-- depending on debug_discard_caches, so we must have two expected-output
+-- files to cover both cases.  To minimize the maintenance effort resulting
+-- from that, this file should contain only tests that do have different
+-- results under debug_discard_caches.
+|--
+
+-- check behavior with changes of a named rowtype
+create table c_mutable(f1 int, f2 text)
+--
+[]
+== 002
+create function c_sillyaddone(int) returns int language plpgsql as
+$$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+ERROR: "r.f1" is not a known variable
+FILENAME: pl_gram.y
+FUNCNAME: cword_is_not_variable
+CONTEXT: "compilation of PL/pgSQL function \"c_sillyaddone\" near line 1"
+== 003
+select c_sillyaddone(42)
+--
+[]
+== 004
+alter table c_mutable drop column f1
+--
+[]
+== 005
+alter table c_mutable add column f1 float8
+--
+[]
+== 006
+-- currently, this fails due to cached plan for "r.f1 + 1" expression
+-- (but if debug_discard_caches is on, it will succeed)
+select c_sillyaddone(42)
+--
+[]
+== 007
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+[]
+== 008
+select c_sillyaddone(42)
+--
+[]
+== 009
+-- check behavior with changes in a record rowtype
+create function show_result_type(text) returns text language plpgsql as
+$$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"text"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"r","dno":2,"lineno":3}},{"PLpgSQL_var":{"refname":"t","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"text"}}}},{"PLpgSQL_recfield":{"fieldname":"a","recparentno":2}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"t","varno":3}]}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_dynexecute":{"lineno":6,"query":{"PLpgSQL_expr":{"query":"$1","parseMode":2}},"into":true,"target":{"PLpgSQL_rec":{"refname":"r","dno":2,"lineno":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":7,"sqlstmt":{"PLpgSQL_expr":{"query":"select pg_typeof(r.a)","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"t","varno":3}]}}}},{"PLpgSQL_stmt_return":{"lineno":8,"expr":{"PLpgSQL_expr":{"query":"format('type %s value %s', t, r.a::text)","parseMode":2}}}}]}}}}
+]
+== 010
+select show_result_type('select 1 as a')
+--
+[]
+== 011
+-- currently this fails due to cached plan for pg_typeof expression
+-- (but if debug_discard_caches is on, it will succeed)
+select show_result_type('select 2.0 as a')
+--
+[]
+== 012
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+[]
+== 013
+select show_result_type('select 2.0 as a')
+--
+[]

@@ -1,0 +1,239 @@
+== 001
+|--
+-- Test SP-GiST indexes.
+|--
+-- There are other tests to test different SP-GiST opclasses. This is for
+-- testing SP-GiST code itself.
+
+create table spgist_point_tbl(id int4, p point)
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: CreateStmt
+== 002
+create index spgist_point_idx on spgist_point_tbl using spgist(p) with (fillfactor = 75)
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 003
+-- Test vacuum-root operation. It gets invoked when the root is also a leaf,
+-- i.e. the index is very small.
+insert into spgist_point_tbl (id, p)
+select g, point(g*10, g*10) from generate_series(1, 10) g
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 004
+delete from spgist_point_tbl where id < 5
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+STMT: DeleteStmt
+== 005
+vacuum spgist_point_tbl
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: VacuumStmt
+== 006
+-- Insert more data, to make the index a few levels deep.
+insert into spgist_point_tbl (id, p)
+select g,      point(g*10, g*10) from generate_series(1, 10000) g
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 007
+insert into spgist_point_tbl (id, p)
+select g+100000, point(g*10+1, g*10+1) from generate_series(1, 10000) g
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 008
+-- To test vacuum, delete some entries from all over the index.
+delete from spgist_point_tbl where id % 2 = 1
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+STMT: DeleteStmt
+== 009
+-- And also delete some concentration of values. (SP-GiST doesn't currently
+-- attempt to delete pages even when they become empty, but if it did, this
+-- would exercise it)
+delete from spgist_point_tbl where id < 10000
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DML
+STMT: DeleteStmt
+== 010
+vacuum spgist_point_tbl
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: VacuumStmt
+== 011
+-- Test rescan paths (cf. bug #15378)
+-- use box and && rather than point, so that rescan happens when the
+-- traverse stack is non-empty
+
+create table spgist_box_tbl(id serial, b box)
+--
+TABLE: name="spgist_box_tbl" schema="" table="spgist_box_tbl" ctx=DDL
+STMT: CreateStmt
+== 012
+insert into spgist_box_tbl(b)
+select box(point(i,j),point(i+s,j+s))
+  from generate_series(1,100,5) i,
+       generate_series(1,100,5) j,
+       generate_series(1,10) s
+--
+TABLE: name="spgist_box_tbl" schema="" table="spgist_box_tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 013
+create index spgist_box_idx on spgist_box_tbl using spgist (b)
+--
+TABLE: name="spgist_box_tbl" schema="" table="spgist_box_tbl" ctx=DDL
+STMT: IndexStmt
+== 014
+select count(*)
+  from (values (point(5,5)),(point(8,8)),(point(12,12))) v(p)
+ where exists(select * from spgist_box_tbl b where b.b && box(v.p,v.p))
+--
+TABLE: name="spgist_box_tbl" schema="" table="spgist_box_tbl" ctx=Select
+ALIAS: "b"="spgist_box_tbl"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FILTER: schema="" table="b" column="b"
+FILTER: schema="" table="v" column="p"
+FILTER: schema="" table="v" column="p"
+STMT: SelectStmt
+== 015
+-- The point opclass's choose method only uses the spgMatchNode action,
+-- so the other actions are not tested by the above. Create an index using
+-- text opclass, which uses the others actions.
+
+create table spgist_text_tbl(id int4, t text)
+--
+TABLE: name="spgist_text_tbl" schema="" table="spgist_text_tbl" ctx=DDL
+STMT: CreateStmt
+== 016
+create index spgist_text_idx on spgist_text_tbl using spgist(t)
+--
+TABLE: name="spgist_text_tbl" schema="" table="spgist_text_tbl" ctx=DDL
+STMT: IndexStmt
+== 017
+insert into spgist_text_tbl (id, t)
+select g, 'f' || repeat('o', 100) || g from generate_series(1, 10000) g
+union all
+select g, 'baaaaaaaaaaaaaar' || g from generate_series(1, 1000) g
+--
+TABLE: name="spgist_text_tbl" schema="" table="spgist_text_tbl" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 018
+-- Do a lot of insertions that have to split an existing node. Hopefully
+-- one of these will cause the page to run out of space, causing the inner
+-- tuple to be moved to another page.
+insert into spgist_text_tbl (id, t)
+select -g, 'f' || repeat('o', 100-g) || 'surprise' from generate_series(1, 100) g
+--
+TABLE: name="spgist_text_tbl" schema="" table="spgist_text_tbl" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+-- Test out-of-range fillfactor values
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 9)
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 020
+create index spgist_point_idx2 on spgist_point_tbl using spgist(p) with (fillfactor = 101)
+--
+TABLE: name="spgist_point_tbl" schema="" table="spgist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 021
+-- Modify fillfactor in existing index
+alter index spgist_point_idx set (fillfactor = 90)
+--
+STMT: AlterTableStmt
+== 022
+reindex index spgist_point_idx
+--
+STMT: ReindexStmt
+== 023
+-- Test index over a domain
+create domain spgist_text as varchar
+--
+STMT: CreateDomainStmt
+== 024
+create table spgist_domain_tbl (f1 spgist_text)
+--
+TABLE: name="spgist_domain_tbl" schema="" table="spgist_domain_tbl" ctx=DDL
+STMT: CreateStmt
+== 025
+create index spgist_domain_idx on spgist_domain_tbl using spgist(f1)
+--
+TABLE: name="spgist_domain_tbl" schema="" table="spgist_domain_tbl" ctx=DDL
+STMT: IndexStmt
+== 026
+insert into spgist_domain_tbl values('fee'), ('fi'), ('fo'), ('fum')
+--
+TABLE: name="spgist_domain_tbl" schema="" table="spgist_domain_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 027
+explain (costs off)
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+TABLE: name="spgist_domain_tbl" schema="" table="spgist_domain_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 028
+select * from spgist_domain_tbl where f1 = 'fo'
+--
+TABLE: name="spgist_domain_tbl" schema="" table="spgist_domain_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 029
+-- test an unlogged table, mostly to get coverage of spgistbuildempty
+create unlogged table spgist_unlogged_tbl(id serial, b box)
+--
+TABLE: name="spgist_unlogged_tbl" schema="" table="spgist_unlogged_tbl" ctx=DDL
+STMT: CreateStmt
+== 030
+create index spgist_unlogged_idx on spgist_unlogged_tbl using spgist (b)
+--
+TABLE: name="spgist_unlogged_tbl" schema="" table="spgist_unlogged_tbl" ctx=DDL
+STMT: IndexStmt
+== 031
+insert into spgist_unlogged_tbl(b)
+select box(point(i,j))
+  from generate_series(1,100,5) i,
+       generate_series(1,10,5) j
+--
+TABLE: name="spgist_unlogged_tbl" schema="" table="spgist_unlogged_tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt

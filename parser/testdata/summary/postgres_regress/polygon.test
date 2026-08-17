@@ -1,0 +1,444 @@
+== 001
+|--
+-- POLYGON
+|--
+-- polygon logic
+|--
+
+CREATE TABLE POLYGON_TBL(f1 polygon)
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DDL
+STMT: CreateStmt
+== 002
+INSERT INTO POLYGON_TBL(f1) VALUES ('(2.0,0.0),(2.0,4.0),(0.0,0.0)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 003
+INSERT INTO POLYGON_TBL(f1) VALUES ('(3.0,1.0),(3.0,3.0),(1.0,0.0)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 004
+INSERT INTO POLYGON_TBL(f1) VALUES ('(1,2),(3,4),(5,6),(7,8)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+INSERT INTO POLYGON_TBL(f1) VALUES ('(7,8),(5,6),(3,4),(1,2)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 006
+-- Reverse
+INSERT INTO POLYGON_TBL(f1) VALUES ('(1,2),(7,8),(5,6),(3,-4)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 007
+-- degenerate polygons
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0,0.0)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 008
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0,1.0),(0.0,1.0)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 009
+-- bad polygon input strings
+INSERT INTO POLYGON_TBL(f1) VALUES ('0.0')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 010
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0 0.0')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 011
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0,1,2)')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 012
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0,1,2,3')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 013
+INSERT INTO POLYGON_TBL(f1) VALUES ('asdf')
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 014
+SELECT * FROM POLYGON_TBL
+--
+TABLE: name="polygon_tbl" schema="" table="polygon_tbl" ctx=Select
+STMT: SelectStmt
+== 015
+|--
+-- Test the SP-GiST index
+|--
+
+CREATE TABLE quad_poly_tbl (id int, p polygon)
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=DDL
+STMT: CreateStmt
+== 016
+INSERT INTO quad_poly_tbl
+	SELECT (x - 1) * 100 + y, polygon(circle(point(x * 10, y * 10), 1 + (x + y) % 10))
+	FROM generate_series(1, 100) x,
+		 generate_series(1, 100) y
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=DML
+FUNCTION: name="polygon" function="polygon" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+INSERT INTO quad_poly_tbl
+	SELECT i, polygon '((200, 300),(210, 310),(230, 290))'
+	FROM generate_series(10001, 11000) AS i
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 018
+INSERT INTO quad_poly_tbl
+	VALUES
+		(11001, NULL),
+		(11002, NULL),
+		(11003, NULL)
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+CREATE INDEX quad_poly_tbl_idx ON quad_poly_tbl USING spgist(p)
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=DDL
+STMT: IndexStmt
+== 020
+-- get reference results for ORDER BY distance from seq scan
+SET enable_seqscan = ON
+--
+STMT: VariableSetStmt
+== 021
+SET enable_indexscan = OFF
+--
+STMT: VariableSetStmt
+== 022
+SET enable_bitmapscan = OFF
+--
+STMT: VariableSetStmt
+== 023
+CREATE TEMP TABLE quad_poly_tbl_ord_seq2 AS
+SELECT rank() OVER (ORDER BY p <-> point '123,456') n, p <-> point '123,456' dist, id
+FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl_ord_seq2" schema="" table="quad_poly_tbl_ord_seq2" ctx=DDL
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 024
+-- check results from index scan
+SET enable_seqscan = OFF
+--
+STMT: VariableSetStmt
+== 025
+SET enable_indexscan = OFF
+--
+STMT: VariableSetStmt
+== 026
+SET enable_bitmapscan = ON
+--
+STMT: VariableSetStmt
+== 027
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p << polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 028
+SELECT count(*) FROM quad_poly_tbl WHERE p << polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 029
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p &< polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 030
+SELECT count(*) FROM quad_poly_tbl WHERE p &< polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 031
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p && polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 032
+SELECT count(*) FROM quad_poly_tbl WHERE p && polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 033
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p &> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 034
+SELECT count(*) FROM quad_poly_tbl WHERE p &> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 035
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p >> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 036
+SELECT count(*) FROM quad_poly_tbl WHERE p >> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 037
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p <<| polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 038
+SELECT count(*) FROM quad_poly_tbl WHERE p <<| polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 039
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p &<| polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 040
+SELECT count(*) FROM quad_poly_tbl WHERE p &<| polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 041
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p |&> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 042
+SELECT count(*) FROM quad_poly_tbl WHERE p |&> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 043
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p |>> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 044
+SELECT count(*) FROM quad_poly_tbl WHERE p |>> polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 045
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 046
+SELECT count(*) FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 047
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p @> polygon '((340,550),(343,552),(341,553))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 048
+SELECT count(*) FROM quad_poly_tbl WHERE p @> polygon '((340,550),(343,552),(341,553))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 049
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM quad_poly_tbl WHERE p ~= polygon '((200, 300),(210, 310),(230, 290))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 050
+SELECT count(*) FROM quad_poly_tbl WHERE p ~= polygon '((200, 300),(210, 310),(230, 290))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 051
+-- test ORDER BY distance
+SET enable_indexscan = ON
+--
+STMT: VariableSetStmt
+== 052
+SET enable_bitmapscan = OFF
+--
+STMT: VariableSetStmt
+== 053
+EXPLAIN (COSTS OFF)
+SELECT rank() OVER (ORDER BY p <-> point '123,456') n, p <-> point '123,456' dist, id
+FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 054
+CREATE TEMP TABLE quad_poly_tbl_ord_idx2 AS
+SELECT rank() OVER (ORDER BY p <-> point '123,456') n, p <-> point '123,456' dist, id
+FROM quad_poly_tbl WHERE p <@ polygon '((300,300),(400,600),(600,500),(700,200))'
+--
+TABLE: name="quad_poly_tbl_ord_idx2" schema="" table="quad_poly_tbl_ord_idx2" ctx=DDL
+TABLE: name="quad_poly_tbl" schema="" table="quad_poly_tbl" ctx=Select
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 055
+SELECT *
+FROM quad_poly_tbl_ord_seq2 seq FULL JOIN quad_poly_tbl_ord_idx2 idx
+	ON seq.n = idx.n AND seq.id = idx.id AND
+		(seq.dist = idx.dist OR seq.dist IS NULL AND idx.dist IS NULL)
+WHERE seq.id IS NULL OR idx.id IS NULL
+--
+TABLE: name="quad_poly_tbl_ord_seq2" schema="" table="quad_poly_tbl_ord_seq2" ctx=Select
+TABLE: name="quad_poly_tbl_ord_idx2" schema="" table="quad_poly_tbl_ord_idx2" ctx=Select
+ALIAS: "idx"="quad_poly_tbl_ord_idx2"
+ALIAS: "seq"="quad_poly_tbl_ord_seq2"
+FILTER: schema="" table="seq" column="id"
+FILTER: schema="" table="idx" column="id"
+STMT: SelectStmt
+== 056
+RESET enable_seqscan
+--
+STMT: VariableSetStmt
+== 057
+RESET enable_indexscan
+--
+STMT: VariableSetStmt
+== 058
+RESET enable_bitmapscan
+--
+STMT: VariableSetStmt
+== 059
+-- test non-error-throwing API for some core types
+SELECT pg_input_is_valid('(2.0,0.8,0.1)', 'polygon')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 060
+SELECT * FROM pg_input_error_info('(2.0,0.8,0.1)', 'polygon')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 061
+SELECT pg_input_is_valid('(2.0,xyz)', 'polygon')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 062
+SELECT * FROM pg_input_error_info('(2.0,xyz)', 'polygon')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt

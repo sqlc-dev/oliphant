@@ -1,0 +1,659 @@
+== 001
+-- only use parallelism when explicitly intending to do so
+SET max_parallel_maintenance_workers = 0
+--
+STMT: VariableSetStmt
+== 002
+SET max_parallel_workers = 0
+--
+STMT: VariableSetStmt
+== 003
+-- A table with contents that, when sorted, triggers abbreviated
+-- key aborts. One easy way to achieve that is to use uuids that all
+-- have the same prefix, as abbreviated keys for uuids just use the
+-- first sizeof(Datum) bytes.
+CREATE TEMP TABLE abbrev_abort_uuids (
+    id serial not null,
+    abort_increasing uuid,
+    abort_decreasing uuid,
+    noabort_increasing uuid,
+    noabort_decreasing uuid)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DDL
+STMT: CreateStmt
+== 004
+INSERT INTO abbrev_abort_uuids (abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing)
+    SELECT
+        ('00000000-0000-0000-0000-'||to_char(g.i, '000000000000FM'))::uuid abort_increasing,
+        ('00000000-0000-0000-0000-'||to_char(20000 - g.i, '000000000000FM'))::uuid abort_decreasing,
+        (to_char(g.i % 10009, '00000000FM')||'-0000-0000-0000-'||to_char(g.i, '000000000000FM'))::uuid noabort_increasing,
+        (to_char(((20000 - g.i) % 10009), '00000000FM')||'-0000-0000-0000-'||to_char(20000 - g.i, '000000000000FM'))::uuid noabort_decreasing
+    FROM generate_series(0, 20000, 1) g(i)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+-- and a few NULLs
+INSERT INTO abbrev_abort_uuids(id) VALUES(0)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 006
+INSERT INTO abbrev_abort_uuids DEFAULT VALUES
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DML
+STMT: InsertStmt
+== 007
+INSERT INTO abbrev_abort_uuids DEFAULT VALUES
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DML
+STMT: InsertStmt
+== 008
+-- add just a few duplicates
+INSERT INTO abbrev_abort_uuids (abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing)
+    SELECT abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+    FROM abbrev_abort_uuids
+    WHERE (id < 10 OR id > 19990) AND id % 3 = 0 AND abort_increasing is not null
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DML
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="abort_increasing"
+STMT: InsertStmt
+STMT: SelectStmt
+== 009
+----
+-- Check sort node uses of tuplesort wrt. abbreviated keys
+----
+
+-- plain sort triggering abbreviated abort
+SELECT abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_increasing OFFSET 20000 - 4
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 010
+SELECT abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_decreasing NULLS FIRST OFFSET 20000 - 4
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 011
+-- plain sort not triggering abbreviated abort
+SELECT noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_increasing OFFSET 20000 - 4
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 012
+SELECT noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing NULLS FIRST OFFSET 20000 - 4
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 013
+-- bounded sort (disables abbreviated keys)
+SELECT abort_increasing, noabort_increasing FROM abbrev_abort_uuids ORDER BY abort_increasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 014
+SELECT abort_increasing, noabort_increasing FROM abbrev_abort_uuids ORDER BY noabort_increasing NULLS FIRST LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 015
+----
+-- Check index creation uses of tuplesort wrt. abbreviated keys
+----
+
+-- index creation using abbreviated keys successfully
+CREATE INDEX abbrev_abort_uuids__noabort_increasing_idx ON abbrev_abort_uuids (noabort_increasing)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DDL
+STMT: IndexStmt
+== 016
+CREATE INDEX abbrev_abort_uuids__noabort_decreasing_idx ON abbrev_abort_uuids (noabort_decreasing)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DDL
+STMT: IndexStmt
+== 017
+-- verify
+EXPLAIN (COSTS OFF)
+SELECT id, noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_increasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 018
+SELECT id, noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_increasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 019
+EXPLAIN (COSTS OFF)
+SELECT id, noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 020
+SELECT id, noabort_increasing, noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 021
+-- index creation using abbreviated keys, hitting abort
+CREATE INDEX abbrev_abort_uuids__abort_increasing_idx ON abbrev_abort_uuids (abort_increasing)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DDL
+STMT: IndexStmt
+== 022
+CREATE INDEX abbrev_abort_uuids__abort_decreasing_idx ON abbrev_abort_uuids (abort_decreasing)
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=DDL
+STMT: IndexStmt
+== 023
+-- verify
+EXPLAIN (COSTS OFF)
+SELECT id, abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_increasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 024
+SELECT id, abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_increasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 025
+EXPLAIN (COSTS OFF)
+SELECT id, abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_decreasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 026
+SELECT id, abort_increasing, abort_decreasing FROM abbrev_abort_uuids ORDER BY abort_decreasing LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 027
+----
+-- Check CLUSTER uses of tuplesort wrt. abbreviated keys
+----
+
+-- when aborting, increasing order
+BEGIN
+--
+STMT: TransactionStmt
+== 028
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 029
+CLUSTER abbrev_abort_uuids USING abbrev_abort_uuids__abort_increasing_idx
+--
+STMT: ClusterStmt
+== 030
+-- head
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 031
+-- tail
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid DESC LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 032
+ROLLBACK
+--
+STMT: TransactionStmt
+== 033
+-- when aborting, decreasing order
+BEGIN
+--
+STMT: TransactionStmt
+== 034
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 035
+CLUSTER abbrev_abort_uuids USING abbrev_abort_uuids__abort_decreasing_idx
+--
+STMT: ClusterStmt
+== 036
+-- head
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 037
+-- tail
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid DESC LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 038
+ROLLBACK
+--
+STMT: TransactionStmt
+== 039
+-- when not aborting, increasing order
+BEGIN
+--
+STMT: TransactionStmt
+== 040
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 041
+CLUSTER abbrev_abort_uuids USING abbrev_abort_uuids__noabort_increasing_idx
+--
+STMT: ClusterStmt
+== 042
+-- head
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 043
+-- tail
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid DESC LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 044
+ROLLBACK
+--
+STMT: TransactionStmt
+== 045
+-- when no aborting, decreasing order
+BEGIN
+--
+STMT: TransactionStmt
+== 046
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 047
+CLUSTER abbrev_abort_uuids USING abbrev_abort_uuids__noabort_decreasing_idx
+--
+STMT: ClusterStmt
+== 048
+-- head
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 049
+-- tail
+SELECT id, abort_increasing, abort_decreasing, noabort_increasing, noabort_decreasing
+FROM abbrev_abort_uuids
+ORDER BY ctid DESC LIMIT 5
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+STMT: SelectStmt
+== 050
+ROLLBACK
+--
+STMT: TransactionStmt
+== 051
+----
+-- test sorting of large datums VALUES
+----
+
+-- Ensure the order is correct and values look intact
+SELECT LEFT(a,10),b FROM
+    (VALUES(REPEAT('a', 512 * 1024),1),(REPEAT('b', 512 * 1024),2)) v(a,b)
+ORDER BY v.a DESC
+--
+FUNCTION: name="left" function="left" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: SelectStmt
+== 052
+----
+-- test forward and backward scans for in-memory and disk based tuplesort
+----
+
+-- in-memory
+BEGIN
+--
+STMT: TransactionStmt
+== 053
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 054
+-- unfortunately can't show analyze output confirming sort method,
+-- the memory used output wouldn't be stable
+EXPLAIN (COSTS OFF) DECLARE c SCROLL CURSOR FOR SELECT noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing
+--
+STMT: ExplainStmt
+STMT: DeclareCursorStmt
+== 055
+DECLARE c SCROLL CURSOR FOR SELECT noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing
+--
+STMT: DeclareCursorStmt
+== 056
+-- first and second
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 057
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 058
+-- scroll beyond beginning
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 059
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 060
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 061
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 062
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 063
+-- scroll beyond end
+FETCH LAST FROM c
+--
+STMT: FetchStmt
+== 064
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 065
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 066
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 067
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 068
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 069
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 070
+COMMIT
+--
+STMT: TransactionStmt
+== 071
+-- disk based
+BEGIN
+--
+STMT: TransactionStmt
+== 072
+SET LOCAL enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 073
+SET LOCAL work_mem = '100kB'
+--
+STMT: VariableSetStmt
+== 074
+-- unfortunately can't show analyze output confirming sort method,
+-- the memory used output wouldn't be stable
+EXPLAIN (COSTS OFF) DECLARE c SCROLL CURSOR FOR SELECT noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing
+--
+STMT: ExplainStmt
+STMT: DeclareCursorStmt
+== 075
+DECLARE c SCROLL CURSOR FOR SELECT noabort_decreasing FROM abbrev_abort_uuids ORDER BY noabort_decreasing
+--
+STMT: DeclareCursorStmt
+== 076
+-- first and second
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 077
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 078
+-- scroll beyond beginning
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 079
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 080
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 081
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 082
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 083
+-- scroll beyond end
+FETCH LAST FROM c
+--
+STMT: FetchStmt
+== 084
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 085
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 086
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 087
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 088
+FETCH BACKWARD FROM c
+--
+STMT: FetchStmt
+== 089
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+== 090
+COMMIT
+--
+STMT: TransactionStmt
+== 091
+----
+-- test tuplesort using both in-memory and disk sort
+---
+
+-- memory based
+SELECT
+    -- fixed-width by-value datum
+    (array_agg(id ORDER BY id DESC NULLS FIRST))[0:5],
+    -- fixed-width by-ref datum
+    (array_agg(abort_increasing ORDER BY abort_increasing DESC NULLS LAST))[0:5],
+    -- variable-width datum
+    (array_agg(id::text ORDER BY id::text DESC NULLS LAST))[0:5],
+    -- fixed width by-value datum tuplesort
+    percentile_disc(0.99) WITHIN GROUP (ORDER BY id),
+    -- ensure state is shared
+    percentile_disc(0.01) WITHIN GROUP (ORDER BY id),
+    -- fixed width by-ref datum tuplesort
+    percentile_disc(0.8) WITHIN GROUP (ORDER BY abort_increasing),
+    -- variable width by-ref datum tuplesort
+    percentile_disc(0.2) WITHIN GROUP (ORDER BY id::text),
+    -- multi-column tuplesort
+    rank('00000000-0000-0000-0000-000000000000', '2', '2') WITHIN GROUP (ORDER BY noabort_increasing, id, id::text)
+FROM (
+    SELECT * FROM abbrev_abort_uuids
+    UNION ALL
+    SELECT NULL, NULL, NULL, NULL, NULL) s
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+STMT: SelectStmt
+== 092
+-- disk based (see also above)
+BEGIN
+--
+STMT: TransactionStmt
+== 093
+SET LOCAL work_mem = '100kB'
+--
+STMT: VariableSetStmt
+== 094
+SELECT
+    (array_agg(id ORDER BY id DESC NULLS FIRST))[0:5],
+    (array_agg(abort_increasing ORDER BY abort_increasing DESC NULLS LAST))[0:5],
+    (array_agg(id::text ORDER BY id::text DESC NULLS LAST))[0:5],
+    percentile_disc(0.99) WITHIN GROUP (ORDER BY id),
+    percentile_disc(0.01) WITHIN GROUP (ORDER BY id),
+    percentile_disc(0.8) WITHIN GROUP (ORDER BY abort_increasing),
+    percentile_disc(0.2) WITHIN GROUP (ORDER BY id::text),
+    rank('00000000-0000-0000-0000-000000000000', '2', '2') WITHIN GROUP (ORDER BY noabort_increasing, id, id::text)
+FROM (
+    SELECT * FROM abbrev_abort_uuids
+    UNION ALL
+    SELECT NULL, NULL, NULL, NULL, NULL) s
+--
+TABLE: name="abbrev_abort_uuids" schema="" table="abbrev_abort_uuids" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+STMT: SelectStmt
+== 095
+ROLLBACK
+--
+STMT: TransactionStmt
+== 096
+----
+-- test tuplesort mark/restore
+---
+
+CREATE TEMP TABLE test_mark_restore(col1 int, col2 int, col12 int)
+--
+TABLE: name="test_mark_restore" schema="" table="test_mark_restore" ctx=DDL
+STMT: CreateStmt
+== 097
+-- need a few duplicates for mark/restore to matter
+INSERT INTO test_mark_restore(col1, col2, col12)
+   SELECT a.i, b.i, a.i * b.i FROM generate_series(1, 500) a(i), generate_series(1, 5) b(i)
+--
+TABLE: name="test_mark_restore" schema="" table="test_mark_restore" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 098
+BEGIN
+--
+STMT: TransactionStmt
+== 099
+SET LOCAL enable_nestloop = off
+--
+STMT: VariableSetStmt
+== 100
+SET LOCAL enable_hashjoin = off
+--
+STMT: VariableSetStmt
+== 101
+SET LOCAL enable_material = off
+--
+STMT: VariableSetStmt
+== 102
+-- set query into variable once, to avoid repetition of the fairly long query
+SELECT $$
+    SELECT col12, count(distinct a.col1), count(distinct a.col2), count(distinct b.col1), count(distinct b.col2), count(*)
+    FROM test_mark_restore a
+        JOIN test_mark_restore b USING(col12)
+    GROUP BY 1
+    HAVING count(*) > 1
+    ORDER BY 2 DESC, 1 DESC, 3 DESC, 4 DESC, 5 DESC, 6 DESC
+    LIMIT 10
+$$ AS qry
+--
+STMT: SelectStmt
+== 103
+-- test mark/restore with in-memory sorts
+EXPLAIN (COSTS OFF) :qry
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 104
+-- test mark/restore with on-disk sorts
+SET LOCAL work_mem = '100kB'
+--
+STMT: VariableSetStmt
+== 105
+EXPLAIN (COSTS OFF) :qry
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 106
+COMMIT
+--
+STMT: TransactionStmt

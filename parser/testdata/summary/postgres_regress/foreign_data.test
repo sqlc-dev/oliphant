@@ -1,0 +1,2652 @@
+== 001
+|--
+-- Test foreign-data wrapper and server management.
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION test_fdw_handler()
+    RETURNS fdw_handler
+    AS :'regresslib', 'test_fdw_handler'
+    LANGUAGE C
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 202
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+-- Clean up in case a prior regression run failed
+
+-- Suppress NOTICE messages when roles don't exist
+SET client_min_messages TO 'warning'
+--
+STMT: VariableSetStmt
+== 003
+DROP ROLE IF EXISTS regress_foreign_data_user, regress_test_role, regress_test_role2, regress_test_role_super, regress_test_indirect, regress_unprivileged_role
+--
+STMT: DropRoleStmt
+== 004
+RESET client_min_messages
+--
+STMT: VariableSetStmt
+== 005
+CREATE ROLE regress_foreign_data_user LOGIN SUPERUSER
+--
+STMT: CreateRoleStmt
+== 006
+SET SESSION AUTHORIZATION 'regress_foreign_data_user'
+--
+STMT: VariableSetStmt
+== 007
+CREATE ROLE regress_test_role
+--
+STMT: CreateRoleStmt
+== 008
+CREATE ROLE regress_test_role2
+--
+STMT: CreateRoleStmt
+== 009
+CREATE ROLE regress_test_role_super SUPERUSER
+--
+STMT: CreateRoleStmt
+== 010
+CREATE ROLE regress_test_indirect
+--
+STMT: CreateRoleStmt
+== 011
+CREATE ROLE regress_unprivileged_role
+--
+STMT: CreateRoleStmt
+== 012
+CREATE FOREIGN DATA WRAPPER dummy
+--
+STMT: CreateFdwStmt
+== 013
+COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless'
+--
+STMT: CommentStmt
+== 014
+CREATE FOREIGN DATA WRAPPER postgresql VALIDATOR postgresql_fdw_validator
+--
+STMT: CreateFdwStmt
+== 015
+-- At this point we should have 2 built-in wrappers and no servers.
+SELECT fdwname, fdwhandler::regproc, fdwvalidator::regproc, fdwoptions FROM pg_foreign_data_wrapper ORDER BY 1, 2, 3
+--
+TABLE: name="pg_foreign_data_wrapper" schema="" table="pg_foreign_data_wrapper" ctx=Select
+STMT: SelectStmt
+== 016
+SELECT srvname, srvoptions FROM pg_foreign_server
+--
+TABLE: name="pg_foreign_server" schema="" table="pg_foreign_server" ctx=Select
+STMT: SelectStmt
+== 017
+SELECT * FROM pg_user_mapping
+--
+TABLE: name="pg_user_mapping" schema="" table="pg_user_mapping" ctx=Select
+STMT: SelectStmt
+== 018
+-- CREATE FOREIGN DATA WRAPPER
+CREATE FOREIGN DATA WRAPPER foo VALIDATOR bar
+--
+STMT: CreateFdwStmt
+== 019
+-- ERROR
+CREATE FOREIGN DATA WRAPPER foo
+--
+STMT: CreateFdwStmt
+== 020
+CREATE FOREIGN DATA WRAPPER foo
+--
+STMT: CreateFdwStmt
+== 021
+-- duplicate
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 022
+CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1')
+--
+STMT: CreateFdwStmt
+== 023
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 024
+CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', testing '2')
+--
+STMT: CreateFdwStmt
+== 025
+-- ERROR
+CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', another '2')
+--
+STMT: CreateFdwStmt
+== 026
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 027
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 028
+CREATE FOREIGN DATA WRAPPER foo
+--
+STMT: CreateFdwStmt
+== 029
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 030
+CREATE FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator
+--
+STMT: CreateFdwStmt
+== 031
+-- HANDLER related checks
+CREATE FUNCTION invalid_fdw_handler() RETURNS int LANGUAGE SQL AS 'SELECT 1;'
+--
+FUNCTION: name="invalid_fdw_handler" function="invalid_fdw_handler" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 032
+CREATE FOREIGN DATA WRAPPER test_fdw HANDLER invalid_fdw_handler
+--
+STMT: CreateFdwStmt
+== 033
+-- ERROR
+CREATE FOREIGN DATA WRAPPER test_fdw HANDLER test_fdw_handler HANDLER invalid_fdw_handler
+--
+STMT: CreateFdwStmt
+== 034
+-- ERROR
+CREATE FOREIGN DATA WRAPPER test_fdw HANDLER test_fdw_handler
+--
+STMT: CreateFdwStmt
+== 035
+DROP FOREIGN DATA WRAPPER test_fdw
+--
+STMT: DropStmt
+== 036
+-- ALTER FOREIGN DATA WRAPPER
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (nonexistent 'fdw')
+--
+STMT: AlterFdwStmt
+== 037
+-- ERROR
+
+ALTER FOREIGN DATA WRAPPER foo
+--
+ERROR: syntax error at end of input
+CURSORPOS: 41
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 038
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo VALIDATOR bar
+--
+STMT: AlterFdwStmt
+== 039
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo NO VALIDATOR
+--
+STMT: AlterFdwStmt
+== 040
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (a '1', b '2')
+--
+STMT: AlterFdwStmt
+== 041
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (SET c '4')
+--
+STMT: AlterFdwStmt
+== 042
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (DROP c)
+--
+STMT: AlterFdwStmt
+== 043
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD x '1', DROP x)
+--
+STMT: AlterFdwStmt
+== 044
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (DROP a, SET b '3', ADD c '4')
+--
+STMT: AlterFdwStmt
+== 045
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (a '2')
+--
+STMT: AlterFdwStmt
+== 046
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (b '4')
+--
+STMT: AlterFdwStmt
+== 047
+-- ERROR
+
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 048
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5')
+--
+STMT: AlterFdwStmt
+== 049
+-- ERROR
+SET ROLE regress_test_role_super
+--
+STMT: VariableSetStmt
+== 050
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5')
+--
+STMT: AlterFdwStmt
+== 051
+ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_test_role
+--
+STMT: AlterOwnerStmt
+== 052
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_test_role_super
+--
+STMT: AlterOwnerStmt
+== 053
+ALTER ROLE regress_test_role_super NOSUPERUSER
+--
+STMT: AlterRoleStmt
+== 054
+SET ROLE regress_test_role_super
+--
+STMT: VariableSetStmt
+== 055
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD e '6')
+--
+STMT: AlterFdwStmt
+== 056
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 057
+ALTER FOREIGN DATA WRAPPER foo RENAME TO foo1
+--
+STMT: RenameStmt
+== 058
+ALTER FOREIGN DATA WRAPPER foo1 RENAME TO foo
+--
+STMT: RenameStmt
+== 059
+-- HANDLER related checks
+ALTER FOREIGN DATA WRAPPER foo HANDLER invalid_fdw_handler
+--
+STMT: AlterFdwStmt
+== 060
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo HANDLER test_fdw_handler HANDLER anything
+--
+STMT: AlterFdwStmt
+== 061
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo HANDLER test_fdw_handler
+--
+STMT: AlterFdwStmt
+== 062
+DROP FUNCTION invalid_fdw_handler()
+--
+FUNCTION: name="invalid_fdw_handler" function="invalid_fdw_handler" schema="" ctx=DDL
+STMT: DropStmt
+== 063
+-- DROP FOREIGN DATA WRAPPER
+DROP FOREIGN DATA WRAPPER nonexistent
+--
+STMT: DropStmt
+== 064
+-- ERROR
+DROP FOREIGN DATA WRAPPER IF EXISTS nonexistent
+--
+STMT: DropStmt
+== 065
+DROP ROLE regress_test_role_super
+--
+STMT: DropRoleStmt
+== 066
+-- ERROR
+SET ROLE regress_test_role_super
+--
+STMT: VariableSetStmt
+== 067
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 068
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 069
+DROP ROLE regress_test_role_super
+--
+STMT: DropRoleStmt
+== 070
+CREATE FOREIGN DATA WRAPPER foo
+--
+STMT: CreateFdwStmt
+== 071
+CREATE SERVER s1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 072
+COMMENT ON SERVER s1 IS 'foreign server'
+--
+STMT: CommentStmt
+== 073
+CREATE USER MAPPING FOR current_user SERVER s1
+--
+STMT: CreateUserMappingStmt
+== 074
+CREATE USER MAPPING FOR current_user SERVER s1
+--
+STMT: CreateUserMappingStmt
+== 075
+-- ERROR
+CREATE USER MAPPING IF NOT EXISTS FOR current_user SERVER s1
+--
+STMT: CreateUserMappingStmt
+== 076
+-- NOTICE
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 077
+-- ERROR
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 078
+DROP FOREIGN DATA WRAPPER foo CASCADE
+--
+STMT: DropStmt
+== 079
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 080
+DROP FOREIGN DATA WRAPPER foo CASCADE
+--
+STMT: DropStmt
+== 081
+-- exercise CREATE SERVER
+CREATE SERVER s1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 082
+-- ERROR
+CREATE FOREIGN DATA WRAPPER foo OPTIONS ("test wrapper" 'true')
+--
+STMT: CreateFdwStmt
+== 083
+CREATE SERVER s1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 084
+CREATE SERVER s1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 085
+-- ERROR
+CREATE SERVER IF NOT EXISTS s1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 086
+-- No ERROR, just NOTICE
+CREATE SERVER s2 FOREIGN DATA WRAPPER foo OPTIONS (host 'a', dbname 'b')
+--
+STMT: CreateForeignServerStmt
+== 087
+CREATE SERVER s3 TYPE 'oracle' FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 088
+CREATE SERVER s4 TYPE 'oracle' FOREIGN DATA WRAPPER foo OPTIONS (host 'a', dbname 'b')
+--
+STMT: CreateForeignServerStmt
+== 089
+CREATE SERVER s5 VERSION '15.0' FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 090
+CREATE SERVER s6 VERSION '16.0' FOREIGN DATA WRAPPER foo OPTIONS (host 'a', dbname 'b')
+--
+STMT: CreateForeignServerStmt
+== 091
+CREATE SERVER s7 TYPE 'oracle' VERSION '17.0' FOREIGN DATA WRAPPER foo OPTIONS (host 'a', dbname 'b')
+--
+STMT: CreateForeignServerStmt
+== 092
+CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (foo '1')
+--
+STMT: CreateForeignServerStmt
+== 093
+-- ERROR
+CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (host 'localhost', dbname 's8db')
+--
+STMT: CreateForeignServerStmt
+== 094
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 095
+CREATE SERVER t1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 096
+-- ERROR: no usage on FDW
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 097
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role
+--
+STMT: GrantStmt
+== 098
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 099
+CREATE SERVER t1 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 100
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 101
+REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM regress_test_role
+--
+STMT: GrantStmt
+== 102
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect
+--
+STMT: GrantStmt
+== 103
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 104
+CREATE SERVER t2 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 105
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 106
+GRANT regress_test_indirect TO regress_test_role
+--
+STMT: GrantRoleStmt
+== 107
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 108
+CREATE SERVER t2 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 109
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 110
+REVOKE regress_test_indirect FROM regress_test_role
+--
+STMT: GrantRoleStmt
+== 111
+-- ALTER SERVER
+ALTER SERVER s0
+--
+ERROR: syntax error at end of input
+CURSORPOS: 32
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 112
+-- ERROR
+ALTER SERVER s0 OPTIONS (a '1')
+--
+STMT: AlterForeignServerStmt
+== 113
+-- ERROR
+ALTER SERVER s1 VERSION '1.0' OPTIONS (servername 's1')
+--
+STMT: AlterForeignServerStmt
+== 114
+ALTER SERVER s2 VERSION '1.1'
+--
+STMT: AlterForeignServerStmt
+== 115
+ALTER SERVER s3 OPTIONS ("tns name" 'orcl', port '1521')
+--
+STMT: AlterForeignServerStmt
+== 116
+GRANT USAGE ON FOREIGN SERVER s1 TO regress_test_role
+--
+STMT: GrantStmt
+== 117
+GRANT USAGE ON FOREIGN SERVER s6 TO regress_test_role2 WITH GRANT OPTION
+--
+STMT: GrantStmt
+== 118
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 119
+ALTER SERVER s1 VERSION '1.1'
+--
+STMT: AlterForeignServerStmt
+== 120
+-- ERROR
+ALTER SERVER s1 OWNER TO regress_test_role
+--
+STMT: AlterOwnerStmt
+== 121
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 122
+ALTER SERVER s1 OWNER TO regress_test_role
+--
+STMT: AlterOwnerStmt
+== 123
+GRANT regress_test_role2 TO regress_test_role
+--
+STMT: GrantRoleStmt
+== 124
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 125
+ALTER SERVER s1 VERSION '1.1'
+--
+STMT: AlterForeignServerStmt
+== 126
+ALTER SERVER s1 OWNER TO regress_test_role2
+--
+STMT: AlterOwnerStmt
+== 127
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 128
+ALTER SERVER s8 OPTIONS (foo '1')
+--
+STMT: AlterForeignServerStmt
+== 129
+-- ERROR option validation
+ALTER SERVER s8 OPTIONS (connect_timeout '30', SET dbname 'db1', DROP host)
+--
+STMT: AlterForeignServerStmt
+== 130
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 131
+ALTER SERVER s1 OWNER TO regress_test_indirect
+--
+STMT: AlterOwnerStmt
+== 132
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 133
+GRANT regress_test_indirect TO regress_test_role
+--
+STMT: GrantRoleStmt
+== 134
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 135
+ALTER SERVER s1 OWNER TO regress_test_indirect
+--
+STMT: AlterOwnerStmt
+== 136
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 137
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect
+--
+STMT: GrantStmt
+== 138
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 139
+ALTER SERVER s1 OWNER TO regress_test_indirect
+--
+STMT: AlterOwnerStmt
+== 140
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 141
+DROP ROLE regress_test_indirect
+--
+STMT: DropRoleStmt
+== 142
+-- ERROR
+
+ALTER SERVER s8 RENAME to s8new
+--
+STMT: RenameStmt
+== 143
+ALTER SERVER s8new RENAME to s8
+--
+STMT: RenameStmt
+== 144
+-- DROP SERVER
+DROP SERVER nonexistent
+--
+STMT: DropStmt
+== 145
+-- ERROR
+DROP SERVER IF EXISTS nonexistent
+--
+STMT: DropStmt
+== 146
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 147
+DROP SERVER s2
+--
+STMT: DropStmt
+== 148
+-- ERROR
+DROP SERVER s1
+--
+STMT: DropStmt
+== 149
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 150
+ALTER SERVER s2 OWNER TO regress_test_role
+--
+STMT: AlterOwnerStmt
+== 151
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 152
+DROP SERVER s2
+--
+STMT: DropStmt
+== 153
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 154
+CREATE USER MAPPING FOR current_user SERVER s3
+--
+STMT: CreateUserMappingStmt
+== 155
+DROP SERVER s3
+--
+STMT: DropStmt
+== 156
+-- ERROR
+DROP SERVER s3 CASCADE
+--
+STMT: DropStmt
+== 157
+-- CREATE USER MAPPING
+CREATE USER MAPPING FOR regress_test_missing_role SERVER s1
+--
+STMT: CreateUserMappingStmt
+== 158
+-- ERROR
+CREATE USER MAPPING FOR current_user SERVER s1
+--
+STMT: CreateUserMappingStmt
+== 159
+-- ERROR
+CREATE USER MAPPING FOR current_user SERVER s4
+--
+STMT: CreateUserMappingStmt
+== 160
+CREATE USER MAPPING FOR user SERVER s4
+--
+STMT: CreateUserMappingStmt
+== 161
+-- ERROR duplicate
+CREATE USER MAPPING FOR public SERVER s4 OPTIONS ("this mapping" 'is public')
+--
+STMT: CreateUserMappingStmt
+== 162
+CREATE USER MAPPING FOR user SERVER s8 OPTIONS (username 'test', password 'secret')
+--
+STMT: CreateUserMappingStmt
+== 163
+-- ERROR
+CREATE USER MAPPING FOR user SERVER s8 OPTIONS (user 'test', password 'secret')
+--
+STMT: CreateUserMappingStmt
+== 164
+ALTER SERVER s5 OWNER TO regress_test_role
+--
+STMT: AlterOwnerStmt
+== 165
+ALTER SERVER s6 OWNER TO regress_test_indirect
+--
+STMT: AlterOwnerStmt
+== 166
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 167
+CREATE USER MAPPING FOR current_user SERVER s5
+--
+STMT: CreateUserMappingStmt
+== 168
+CREATE USER MAPPING FOR current_user SERVER s6 OPTIONS (username 'test')
+--
+STMT: CreateUserMappingStmt
+== 169
+CREATE USER MAPPING FOR current_user SERVER s7
+--
+STMT: CreateUserMappingStmt
+== 170
+-- ERROR
+CREATE USER MAPPING FOR public SERVER s8
+--
+STMT: CreateUserMappingStmt
+== 171
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 172
+ALTER SERVER t1 OWNER TO regress_test_indirect
+--
+STMT: AlterOwnerStmt
+== 173
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 174
+CREATE USER MAPPING FOR current_user SERVER t1 OPTIONS (username 'bob', password 'boo')
+--
+STMT: CreateUserMappingStmt
+== 175
+CREATE USER MAPPING FOR public SERVER t1
+--
+STMT: CreateUserMappingStmt
+== 176
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 177
+-- ALTER USER MAPPING
+ALTER USER MAPPING FOR regress_test_missing_role SERVER s4 OPTIONS (gotcha 'true')
+--
+STMT: AlterUserMappingStmt
+== 178
+-- ERROR
+ALTER USER MAPPING FOR user SERVER ss4 OPTIONS (gotcha 'true')
+--
+STMT: AlterUserMappingStmt
+== 179
+-- ERROR
+ALTER USER MAPPING FOR public SERVER s5 OPTIONS (gotcha 'true')
+--
+STMT: AlterUserMappingStmt
+== 180
+-- ERROR
+ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (username 'test')
+--
+STMT: AlterUserMappingStmt
+== 181
+-- ERROR
+ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (DROP user, SET password 'public')
+--
+STMT: AlterUserMappingStmt
+== 182
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 183
+ALTER USER MAPPING FOR current_user SERVER s5 OPTIONS (ADD modified '1')
+--
+STMT: AlterUserMappingStmt
+== 184
+ALTER USER MAPPING FOR public SERVER s4 OPTIONS (ADD modified '1')
+--
+STMT: AlterUserMappingStmt
+== 185
+-- ERROR
+ALTER USER MAPPING FOR public SERVER t1 OPTIONS (ADD modified '1')
+--
+STMT: AlterUserMappingStmt
+== 186
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 187
+-- DROP USER MAPPING
+DROP USER MAPPING FOR regress_test_missing_role SERVER s4
+--
+STMT: DropUserMappingStmt
+== 188
+-- ERROR
+DROP USER MAPPING FOR user SERVER ss4
+--
+STMT: DropUserMappingStmt
+== 189
+DROP USER MAPPING FOR public SERVER s7
+--
+STMT: DropUserMappingStmt
+== 190
+-- ERROR
+DROP USER MAPPING IF EXISTS FOR regress_test_missing_role SERVER s4
+--
+STMT: DropUserMappingStmt
+== 191
+DROP USER MAPPING IF EXISTS FOR user SERVER ss4
+--
+STMT: DropUserMappingStmt
+== 192
+DROP USER MAPPING IF EXISTS FOR public SERVER s7
+--
+STMT: DropUserMappingStmt
+== 193
+CREATE USER MAPPING FOR public SERVER s8
+--
+STMT: CreateUserMappingStmt
+== 194
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 195
+DROP USER MAPPING FOR public SERVER s8
+--
+STMT: DropUserMappingStmt
+== 196
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 197
+DROP SERVER s7
+--
+STMT: DropStmt
+== 198
+-- CREATE FOREIGN TABLE
+CREATE SCHEMA foreign_schema
+--
+STMT: CreateSchemaStmt
+== 199
+CREATE SERVER s0 FOREIGN DATA WRAPPER dummy
+--
+STMT: CreateForeignServerStmt
+== 200
+CREATE FOREIGN TABLE ft1 ()
+--
+ERROR: syntax error at end of input
+CURSORPOS: 28
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 201
+-- ERROR
+CREATE FOREIGN TABLE ft1 () SERVER no_server
+--
+STMT: CreateForeignTableStmt
+== 202
+-- ERROR
+CREATE FOREIGN TABLE ft1 (
+	c1 integer OPTIONS ("param 1" 'val1') PRIMARY KEY,
+	c2 text OPTIONS (param2 'val2', param3 'val3'),
+	c3 date
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 203
+-- ERROR
+CREATE TABLE ref_table (id integer PRIMARY KEY)
+--
+TABLE: name="ref_table" schema="" table="ref_table" ctx=DDL
+STMT: CreateStmt
+== 204
+CREATE FOREIGN TABLE ft1 (
+	c1 integer OPTIONS ("param 1" 'val1') REFERENCES ref_table (id),
+	c2 text OPTIONS (param2 'val2', param3 'val3'),
+	c3 date
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 205
+-- ERROR
+DROP TABLE ref_table
+--
+TABLE: name="ref_table" schema="" table="ref_table" ctx=DDL
+STMT: DropStmt
+== 206
+CREATE FOREIGN TABLE ft1 (
+	c1 integer OPTIONS ("param 1" 'val1') NOT NULL,
+	c2 text OPTIONS (param2 'val2', param3 'val3'),
+	c3 date,
+	UNIQUE (c3)
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 207
+-- ERROR
+CREATE FOREIGN TABLE ft1 (
+	c1 integer OPTIONS ("param 1" 'val1') NOT NULL,
+	c2 text OPTIONS (param2 'val2', param3 'val3') CHECK (c2 <> ''),
+	c3 date,
+	CHECK (c3 BETWEEN '1994-01-01'::date AND '1994-01-31'::date)
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 208
+COMMENT ON FOREIGN TABLE ft1 IS 'ft1'
+--
+STMT: CommentStmt
+== 209
+COMMENT ON COLUMN ft1.c1 IS 'ft1.c1'
+--
+STMT: CommentStmt
+== 210
+CREATE INDEX id_ft1_c2 ON ft1 (c2)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: IndexStmt
+== 211
+-- ERROR
+SELECT * FROM ft1
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=Select
+STMT: SelectStmt
+== 212
+-- ERROR
+EXPLAIN SELECT * FROM ft1
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 213
+-- ERROR
+
+CREATE TABLE lt1 (a INT) PARTITION BY RANGE (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: CreateStmt
+== 214
+CREATE FOREIGN TABLE ft_part1
+  PARTITION OF lt1 FOR VALUES FROM (0) TO (1000) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 215
+CREATE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 216
+-- skips partition
+CREATE UNIQUE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 217
+-- ERROR
+ALTER TABLE lt1 ADD PRIMARY KEY (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 218
+-- ERROR
+DROP TABLE lt1
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: DropStmt
+== 219
+CREATE TABLE lt1 (a INT) PARTITION BY RANGE (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: CreateStmt
+== 220
+CREATE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 221
+CREATE FOREIGN TABLE ft_part1
+  PARTITION OF lt1 FOR VALUES FROM (0) TO (1000) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 222
+CREATE FOREIGN TABLE ft_part2 (a INT) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 223
+ALTER TABLE lt1 ATTACH PARTITION ft_part2 FOR VALUES FROM (1000) TO (2000)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 224
+DROP FOREIGN TABLE ft_part1, ft_part2
+--
+STMT: DropStmt
+== 225
+CREATE UNIQUE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 226
+ALTER TABLE lt1 ADD PRIMARY KEY (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 227
+CREATE FOREIGN TABLE ft_part1
+  PARTITION OF lt1 FOR VALUES FROM (0) TO (1000) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 228
+-- ERROR
+CREATE FOREIGN TABLE ft_part2 (a INT NOT NULL) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 229
+ALTER TABLE lt1 ATTACH PARTITION ft_part2
+  FOR VALUES FROM (1000) TO (2000)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 230
+-- ERROR
+DROP TABLE lt1
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: DropStmt
+== 231
+DROP FOREIGN TABLE ft_part2
+--
+STMT: DropStmt
+== 232
+CREATE TABLE lt1 (a INT) PARTITION BY RANGE (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: CreateStmt
+== 233
+CREATE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 234
+CREATE TABLE lt1_part1
+  PARTITION OF lt1 FOR VALUES FROM (0) TO (1000)
+  PARTITION BY RANGE (a)
+--
+TABLE: name="lt1_part1" schema="" table="lt1_part1" ctx=DDL
+STMT: CreateStmt
+== 235
+CREATE FOREIGN TABLE ft_part_1_1
+  PARTITION OF lt1_part1 FOR VALUES FROM (0) TO (100) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 236
+CREATE FOREIGN TABLE ft_part_1_2 (a INT) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 237
+ALTER TABLE lt1_part1 ATTACH PARTITION ft_part_1_2 FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="lt1_part1" schema="" table="lt1_part1" ctx=DDL
+STMT: AlterTableStmt
+== 238
+CREATE UNIQUE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 239
+ALTER TABLE lt1 ADD PRIMARY KEY (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 240
+DROP FOREIGN TABLE ft_part_1_1, ft_part_1_2
+--
+STMT: DropStmt
+== 241
+CREATE UNIQUE INDEX ON lt1 (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: IndexStmt
+== 242
+ALTER TABLE lt1 ADD PRIMARY KEY (a)
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: AlterTableStmt
+== 243
+CREATE FOREIGN TABLE ft_part_1_1
+  PARTITION OF lt1_part1 FOR VALUES FROM (0) TO (100) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 244
+CREATE FOREIGN TABLE ft_part_1_2 (a INT NOT NULL) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 245
+ALTER TABLE lt1_part1 ATTACH PARTITION ft_part_1_2 FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="lt1_part1" schema="" table="lt1_part1" ctx=DDL
+STMT: AlterTableStmt
+== 246
+DROP TABLE lt1
+--
+TABLE: name="lt1" schema="" table="lt1" ctx=DDL
+STMT: DropStmt
+== 247
+DROP FOREIGN TABLE ft_part_1_2
+--
+STMT: DropStmt
+== 248
+-- ALTER FOREIGN TABLE
+COMMENT ON FOREIGN TABLE ft1 IS 'foreign table'
+--
+STMT: CommentStmt
+== 249
+COMMENT ON FOREIGN TABLE ft1 IS NULL
+--
+STMT: CommentStmt
+== 250
+COMMENT ON COLUMN ft1.c1 IS 'foreign column'
+--
+STMT: CommentStmt
+== 251
+COMMENT ON COLUMN ft1.c1 IS NULL
+--
+STMT: CommentStmt
+== 252
+ALTER FOREIGN TABLE ft1 ADD COLUMN c4 integer
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 253
+ALTER FOREIGN TABLE ft1 ADD COLUMN c5 integer DEFAULT 0
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 254
+ALTER FOREIGN TABLE ft1 ADD COLUMN c6 integer
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 255
+ALTER FOREIGN TABLE ft1 ADD COLUMN c7 integer NOT NULL
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 256
+ALTER FOREIGN TABLE ft1 ADD COLUMN c8 integer
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 257
+ALTER FOREIGN TABLE ft1 ADD COLUMN c9 integer
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 258
+ALTER FOREIGN TABLE ft1 ADD COLUMN c10 integer OPTIONS (p1 'v1')
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 259
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c4 SET DEFAULT 0
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 260
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c5 DROP DEFAULT
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 261
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c6 SET NOT NULL
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 262
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c7 DROP NOT NULL
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 263
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE char(10) USING '0'
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 264
+-- ERROR
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE char(10)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 265
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 SET DATA TYPE text
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 266
+ALTER FOREIGN TABLE ft1 ALTER COLUMN xmin OPTIONS (ADD p1 'v1')
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 267
+-- ERROR
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c7 OPTIONS (ADD p1 'v1', ADD p2 'v2'),
+                        ALTER COLUMN c8 OPTIONS (ADD p1 'v1', ADD p2 'v2')
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 268
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 OPTIONS (SET p2 'V2', DROP p1)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 269
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c1 SET STATISTICS 10000
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 270
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c1 SET (n_distinct = 100)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 271
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 SET STATISTICS -1
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 272
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 SET STORAGE PLAIN
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 273
+-- can't change the column type if it's used elsewhere
+CREATE TABLE use_ft1_column_type (x ft1)
+--
+TABLE: name="use_ft1_column_type" schema="" table="use_ft1_column_type" ctx=DDL
+STMT: CreateStmt
+== 274
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 SET DATA TYPE integer
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 275
+-- ERROR
+DROP TABLE use_ft1_column_type
+--
+TABLE: name="use_ft1_column_type" schema="" table="use_ft1_column_type" ctx=DDL
+STMT: DropStmt
+== 276
+ALTER FOREIGN TABLE ft1 ADD PRIMARY KEY (c7)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 277
+-- ERROR
+ALTER FOREIGN TABLE ft1 ADD CONSTRAINT ft1_c9_check CHECK (c9 < 0) NOT VALID
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 278
+ALTER FOREIGN TABLE ft1 ALTER CONSTRAINT ft1_c9_check DEFERRABLE
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 279
+-- ERROR
+ALTER FOREIGN TABLE ft1 DROP CONSTRAINT ft1_c9_check
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 280
+ALTER FOREIGN TABLE ft1 DROP CONSTRAINT no_const
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 281
+-- ERROR
+ALTER FOREIGN TABLE ft1 DROP CONSTRAINT IF EXISTS no_const
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 282
+ALTER FOREIGN TABLE ft1 OWNER TO regress_test_role
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 283
+ALTER FOREIGN TABLE ft1 OPTIONS (DROP delimiter, SET quote '~', ADD escape '@')
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 284
+ALTER FOREIGN TABLE ft1 DROP COLUMN no_column
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 285
+-- ERROR
+ALTER FOREIGN TABLE ft1 DROP COLUMN IF EXISTS no_column
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 286
+ALTER FOREIGN TABLE ft1 DROP COLUMN c9
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 287
+ALTER FOREIGN TABLE ft1 ADD COLUMN c11 serial
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 288
+ALTER FOREIGN TABLE ft1 SET SCHEMA foreign_schema
+--
+STMT: AlterObjectSchemaStmt
+== 289
+ALTER FOREIGN TABLE ft1 SET TABLESPACE ts
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 290
+-- ERROR
+ALTER SEQUENCE foreign_schema.ft1_c11_seq SET SCHEMA public
+--
+STMT: AlterObjectSchemaStmt
+== 291
+-- ERROR
+ALTER FOREIGN TABLE foreign_schema.ft1 RENAME c1 TO foreign_column_1
+--
+STMT: RenameStmt
+== 292
+ALTER FOREIGN TABLE foreign_schema.ft1 RENAME TO foreign_table_1
+--
+STMT: RenameStmt
+== 293
+-- alter noexisting table
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c4 integer
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 294
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c6 integer
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 295
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c7 integer NOT NULL
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 296
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c8 integer
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 297
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c9 integer
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 298
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ADD COLUMN c10 integer OPTIONS (p1 'v1')
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 299
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c6 SET NOT NULL
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 300
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c7 DROP NOT NULL
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 301
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c8 TYPE char(10)
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 302
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c8 SET DATA TYPE text
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 303
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c7 OPTIONS (ADD p1 'v1', ADD p2 'v2'),
+                        ALTER COLUMN c8 OPTIONS (ADD p1 'v1', ADD p2 'v2')
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 304
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 ALTER COLUMN c8 OPTIONS (SET p2 'V2', DROP p1)
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 305
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 DROP CONSTRAINT IF EXISTS no_const
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 306
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 DROP CONSTRAINT ft1_c1_check
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 307
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 OWNER TO regress_test_role
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 308
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 OPTIONS (DROP delimiter, SET quote '~', ADD escape '@')
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 309
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 DROP COLUMN IF EXISTS no_column
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 310
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 DROP COLUMN c9
+--
+TABLE: name="doesnt_exist_ft1" schema="" table="doesnt_exist_ft1" ctx=DDL
+STMT: AlterTableStmt
+== 311
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 SET SCHEMA foreign_schema
+--
+STMT: AlterObjectSchemaStmt
+== 312
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 RENAME c1 TO foreign_column_1
+--
+STMT: RenameStmt
+== 313
+ALTER FOREIGN TABLE IF EXISTS doesnt_exist_ft1 RENAME TO foreign_table_1
+--
+STMT: RenameStmt
+== 314
+-- Information schema
+
+SELECT * FROM information_schema.foreign_data_wrappers ORDER BY 1, 2
+--
+TABLE: name="information_schema.foreign_data_wrappers" schema="information_schema" table="foreign_data_wrappers" ctx=Select
+STMT: SelectStmt
+== 315
+SELECT * FROM information_schema.foreign_data_wrapper_options ORDER BY 1, 2, 3
+--
+TABLE: name="information_schema.foreign_data_wrapper_options" schema="information_schema" table="foreign_data_wrapper_options" ctx=Select
+STMT: SelectStmt
+== 316
+SELECT * FROM information_schema.foreign_servers ORDER BY 1, 2
+--
+TABLE: name="information_schema.foreign_servers" schema="information_schema" table="foreign_servers" ctx=Select
+STMT: SelectStmt
+== 317
+SELECT * FROM information_schema.foreign_server_options ORDER BY 1, 2, 3
+--
+TABLE: name="information_schema.foreign_server_options" schema="information_schema" table="foreign_server_options" ctx=Select
+STMT: SelectStmt
+== 318
+SELECT * FROM information_schema.user_mappings ORDER BY lower(authorization_identifier), 2, 3
+--
+TABLE: name="information_schema.user_mappings" schema="information_schema" table="user_mappings" ctx=Select
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 319
+SELECT * FROM information_schema.user_mapping_options ORDER BY lower(authorization_identifier), 2, 3, 4
+--
+TABLE: name="information_schema.user_mapping_options" schema="information_schema" table="user_mapping_options" ctx=Select
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 320
+SELECT * FROM information_schema.usage_privileges WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5
+--
+TABLE: name="information_schema.usage_privileges" schema="information_schema" table="usage_privileges" ctx=Select
+FILTER: schema="" table="" column="object_type"
+FILTER: schema="" table="" column="object_name"
+STMT: SelectStmt
+== 321
+SELECT * FROM information_schema.role_usage_grants WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5
+--
+TABLE: name="information_schema.role_usage_grants" schema="information_schema" table="role_usage_grants" ctx=Select
+FILTER: schema="" table="" column="object_type"
+FILTER: schema="" table="" column="object_name"
+STMT: SelectStmt
+== 322
+SELECT * FROM information_schema.foreign_tables ORDER BY 1, 2, 3
+--
+TABLE: name="information_schema.foreign_tables" schema="information_schema" table="foreign_tables" ctx=Select
+STMT: SelectStmt
+== 323
+SELECT * FROM information_schema.foreign_table_options ORDER BY 1, 2, 3, 4
+--
+TABLE: name="information_schema.foreign_table_options" schema="information_schema" table="foreign_table_options" ctx=Select
+STMT: SelectStmt
+== 324
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 325
+SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4
+--
+TABLE: name="information_schema.user_mapping_options" schema="information_schema" table="user_mapping_options" ctx=Select
+STMT: SelectStmt
+== 326
+SELECT * FROM information_schema.usage_privileges WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5
+--
+TABLE: name="information_schema.usage_privileges" schema="information_schema" table="usage_privileges" ctx=Select
+FILTER: schema="" table="" column="object_type"
+FILTER: schema="" table="" column="object_name"
+STMT: SelectStmt
+== 327
+SELECT * FROM information_schema.role_usage_grants WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5
+--
+TABLE: name="information_schema.role_usage_grants" schema="information_schema" table="role_usage_grants" ctx=Select
+FILTER: schema="" table="" column="object_type"
+FILTER: schema="" table="" column="object_name"
+STMT: SelectStmt
+== 328
+DROP USER MAPPING FOR current_user SERVER t1
+--
+STMT: DropUserMappingStmt
+== 329
+SET ROLE regress_test_role2
+--
+STMT: VariableSetStmt
+== 330
+SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4
+--
+TABLE: name="information_schema.user_mapping_options" schema="information_schema" table="user_mapping_options" ctx=Select
+STMT: SelectStmt
+== 331
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 332
+-- has_foreign_data_wrapper_privilege
+SELECT has_foreign_data_wrapper_privilege('regress_test_role',
+    (SELECT oid FROM pg_foreign_data_wrapper WHERE fdwname='foo'), 'USAGE')
+--
+TABLE: name="pg_foreign_data_wrapper" schema="" table="pg_foreign_data_wrapper" ctx=Select
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="fdwname"
+STMT: SelectStmt
+== 333
+SELECT has_foreign_data_wrapper_privilege('regress_test_role', 'foo', 'USAGE')
+--
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 334
+SELECT has_foreign_data_wrapper_privilege(
+    (SELECT oid FROM pg_roles WHERE rolname='regress_test_role'),
+    (SELECT oid FROM pg_foreign_data_wrapper WHERE fdwname='foo'), 'USAGE')
+--
+TABLE: name="pg_roles" schema="" table="pg_roles" ctx=Select
+TABLE: name="pg_foreign_data_wrapper" schema="" table="pg_foreign_data_wrapper" ctx=Select
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="rolname"
+FILTER: schema="" table="" column="fdwname"
+STMT: SelectStmt
+== 335
+SELECT has_foreign_data_wrapper_privilege(
+    (SELECT oid FROM pg_foreign_data_wrapper WHERE fdwname='foo'), 'USAGE')
+--
+TABLE: name="pg_foreign_data_wrapper" schema="" table="pg_foreign_data_wrapper" ctx=Select
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="fdwname"
+STMT: SelectStmt
+== 336
+SELECT has_foreign_data_wrapper_privilege(
+    (SELECT oid FROM pg_roles WHERE rolname='regress_test_role'), 'foo', 'USAGE')
+--
+TABLE: name="pg_roles" schema="" table="pg_roles" ctx=Select
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="rolname"
+STMT: SelectStmt
+== 337
+SELECT has_foreign_data_wrapper_privilege('foo', 'USAGE')
+--
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 338
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role
+--
+STMT: GrantStmt
+== 339
+SELECT has_foreign_data_wrapper_privilege('regress_test_role', 'foo', 'USAGE')
+--
+FUNCTION: name="has_foreign_data_wrapper_privilege" function="has_foreign_data_wrapper_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 340
+-- has_server_privilege
+SELECT has_server_privilege('regress_test_role',
+    (SELECT oid FROM pg_foreign_server WHERE srvname='s8'), 'USAGE')
+--
+TABLE: name="pg_foreign_server" schema="" table="pg_foreign_server" ctx=Select
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="srvname"
+STMT: SelectStmt
+== 341
+SELECT has_server_privilege('regress_test_role', 's8', 'USAGE')
+--
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 342
+SELECT has_server_privilege(
+    (SELECT oid FROM pg_roles WHERE rolname='regress_test_role'),
+    (SELECT oid FROM pg_foreign_server WHERE srvname='s8'), 'USAGE')
+--
+TABLE: name="pg_roles" schema="" table="pg_roles" ctx=Select
+TABLE: name="pg_foreign_server" schema="" table="pg_foreign_server" ctx=Select
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="rolname"
+FILTER: schema="" table="" column="srvname"
+STMT: SelectStmt
+== 343
+SELECT has_server_privilege(
+    (SELECT oid FROM pg_foreign_server WHERE srvname='s8'), 'USAGE')
+--
+TABLE: name="pg_foreign_server" schema="" table="pg_foreign_server" ctx=Select
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="srvname"
+STMT: SelectStmt
+== 344
+SELECT has_server_privilege(
+    (SELECT oid FROM pg_roles WHERE rolname='regress_test_role'), 's8', 'USAGE')
+--
+TABLE: name="pg_roles" schema="" table="pg_roles" ctx=Select
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+FILTER: schema="" table="" column="rolname"
+STMT: SelectStmt
+== 345
+SELECT has_server_privilege('s8', 'USAGE')
+--
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 346
+GRANT USAGE ON FOREIGN SERVER s8 TO regress_test_role
+--
+STMT: GrantStmt
+== 347
+SELECT has_server_privilege('regress_test_role', 's8', 'USAGE')
+--
+FUNCTION: name="has_server_privilege" function="has_server_privilege" schema="" ctx=Call
+STMT: SelectStmt
+== 348
+REVOKE USAGE ON FOREIGN SERVER s8 FROM regress_test_role
+--
+STMT: GrantStmt
+== 349
+GRANT USAGE ON FOREIGN SERVER s4 TO regress_test_role
+--
+STMT: GrantStmt
+== 350
+DROP USER MAPPING FOR public SERVER s4
+--
+STMT: DropUserMappingStmt
+== 351
+ALTER SERVER s6 OPTIONS (DROP host, DROP dbname)
+--
+STMT: AlterForeignServerStmt
+== 352
+ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (DROP username)
+--
+STMT: AlterUserMappingStmt
+== 353
+ALTER FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator
+--
+STMT: AlterFdwStmt
+== 354
+-- Privileges
+SET ROLE regress_unprivileged_role
+--
+STMT: VariableSetStmt
+== 355
+CREATE FOREIGN DATA WRAPPER foobar
+--
+STMT: CreateFdwStmt
+== 356
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true')
+--
+STMT: AlterFdwStmt
+== 357
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_unprivileged_role
+--
+STMT: AlterOwnerStmt
+== 358
+-- ERROR
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 359
+-- ERROR
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role
+--
+STMT: GrantStmt
+== 360
+-- ERROR
+CREATE SERVER s9 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 361
+-- ERROR
+ALTER SERVER s4 VERSION '0.5'
+--
+STMT: AlterForeignServerStmt
+== 362
+-- ERROR
+ALTER SERVER s4 OWNER TO regress_unprivileged_role
+--
+STMT: AlterOwnerStmt
+== 363
+-- ERROR
+DROP SERVER s4
+--
+STMT: DropStmt
+== 364
+-- ERROR
+GRANT USAGE ON FOREIGN SERVER s4 TO regress_test_role
+--
+STMT: GrantStmt
+== 365
+-- ERROR
+CREATE USER MAPPING FOR public SERVER s4
+--
+STMT: CreateUserMappingStmt
+== 366
+-- ERROR
+ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (gotcha 'true')
+--
+STMT: AlterUserMappingStmt
+== 367
+-- ERROR
+DROP USER MAPPING FOR regress_test_role SERVER s6
+--
+STMT: DropUserMappingStmt
+== 368
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 369
+GRANT USAGE ON FOREIGN DATA WRAPPER postgresql TO regress_unprivileged_role
+--
+STMT: GrantStmt
+== 370
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_unprivileged_role WITH GRANT OPTION
+--
+STMT: GrantStmt
+== 371
+SET ROLE regress_unprivileged_role
+--
+STMT: VariableSetStmt
+== 372
+CREATE FOREIGN DATA WRAPPER foobar
+--
+STMT: CreateFdwStmt
+== 373
+-- ERROR
+ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true')
+--
+STMT: AlterFdwStmt
+== 374
+-- ERROR
+DROP FOREIGN DATA WRAPPER foo
+--
+STMT: DropStmt
+== 375
+-- ERROR
+GRANT USAGE ON FOREIGN DATA WRAPPER postgresql TO regress_test_role
+--
+STMT: GrantStmt
+== 376
+-- WARNING
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role
+--
+STMT: GrantStmt
+== 377
+CREATE SERVER s9 FOREIGN DATA WRAPPER postgresql
+--
+STMT: CreateForeignServerStmt
+== 378
+ALTER SERVER s6 VERSION '0.5'
+--
+STMT: AlterForeignServerStmt
+== 379
+-- ERROR
+DROP SERVER s6
+--
+STMT: DropStmt
+== 380
+-- ERROR
+GRANT USAGE ON FOREIGN SERVER s6 TO regress_test_role
+--
+STMT: GrantStmt
+== 381
+-- ERROR
+GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role
+--
+STMT: GrantStmt
+== 382
+CREATE USER MAPPING FOR public SERVER s6
+--
+STMT: CreateUserMappingStmt
+== 383
+-- ERROR
+CREATE USER MAPPING FOR public SERVER s9
+--
+STMT: CreateUserMappingStmt
+== 384
+ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (gotcha 'true')
+--
+STMT: AlterUserMappingStmt
+== 385
+-- ERROR
+DROP USER MAPPING FOR regress_test_role SERVER s6
+--
+STMT: DropUserMappingStmt
+== 386
+-- ERROR
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 387
+REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM regress_unprivileged_role
+--
+STMT: GrantStmt
+== 388
+-- ERROR
+REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM regress_unprivileged_role CASCADE
+--
+STMT: GrantStmt
+== 389
+SET ROLE regress_unprivileged_role
+--
+STMT: VariableSetStmt
+== 390
+GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role
+--
+STMT: GrantStmt
+== 391
+-- ERROR
+CREATE SERVER s10 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 392
+-- ERROR
+ALTER SERVER s9 VERSION '1.1'
+--
+STMT: AlterForeignServerStmt
+== 393
+GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role
+--
+STMT: GrantStmt
+== 394
+CREATE USER MAPPING FOR current_user SERVER s9
+--
+STMT: CreateUserMappingStmt
+== 395
+DROP SERVER s9 CASCADE
+--
+STMT: DropStmt
+== 396
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 397
+CREATE SERVER s9 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 398
+GRANT USAGE ON FOREIGN SERVER s9 TO regress_unprivileged_role
+--
+STMT: GrantStmt
+== 399
+SET ROLE regress_unprivileged_role
+--
+STMT: VariableSetStmt
+== 400
+ALTER SERVER s9 VERSION '1.2'
+--
+STMT: AlterForeignServerStmt
+== 401
+-- ERROR
+GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role
+--
+STMT: GrantStmt
+== 402
+-- WARNING
+CREATE USER MAPPING FOR current_user SERVER s9
+--
+STMT: CreateUserMappingStmt
+== 403
+DROP SERVER s9 CASCADE
+--
+STMT: DropStmt
+== 404
+-- ERROR
+
+-- Check visibility of user mapping data
+SET ROLE regress_test_role
+--
+STMT: VariableSetStmt
+== 405
+CREATE SERVER s10 FOREIGN DATA WRAPPER foo
+--
+STMT: CreateForeignServerStmt
+== 406
+CREATE USER MAPPING FOR public SERVER s10 OPTIONS (user 'secret')
+--
+STMT: CreateUserMappingStmt
+== 407
+CREATE USER MAPPING FOR regress_unprivileged_role SERVER s10 OPTIONS (user 'secret')
+--
+STMT: CreateUserMappingStmt
+== 408
+-- owner of server can see some option fields
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 409
+-- superuser can see all option fields
+-- unprivileged user cannot see any option field
+SET ROLE regress_unprivileged_role
+--
+STMT: VariableSetStmt
+== 410
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 411
+DROP SERVER s10 CASCADE
+--
+STMT: DropStmt
+== 412
+-- Triggers
+CREATE FUNCTION dummy_trigger() RETURNS TRIGGER AS $$
+  BEGIN
+    RETURN NULL;
+  END
+$$ language plpgsql
+--
+FUNCTION: name="dummy_trigger" function="dummy_trigger" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 413
+CREATE TRIGGER trigtest_before_stmt BEFORE INSERT OR UPDATE OR DELETE
+ON foreign_schema.foreign_table_1
+FOR EACH STATEMENT
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 414
+CREATE TRIGGER trigtest_after_stmt AFTER INSERT OR UPDATE OR DELETE
+ON foreign_schema.foreign_table_1
+FOR EACH STATEMENT
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 415
+CREATE TRIGGER trigtest_after_stmt_tt AFTER INSERT OR UPDATE OR DELETE -- ERROR
+ON foreign_schema.foreign_table_1
+REFERENCING NEW TABLE AS new_table
+FOR EACH STATEMENT
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 416
+CREATE TRIGGER trigtest_before_row BEFORE INSERT OR UPDATE OR DELETE
+ON foreign_schema.foreign_table_1
+FOR EACH ROW
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 417
+CREATE TRIGGER trigtest_after_row AFTER INSERT OR UPDATE OR DELETE
+ON foreign_schema.foreign_table_1
+FOR EACH ROW
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 418
+CREATE CONSTRAINT TRIGGER trigtest_constraint AFTER INSERT OR UPDATE OR DELETE
+ON foreign_schema.foreign_table_1
+FOR EACH ROW
+EXECUTE PROCEDURE dummy_trigger()
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: CreateTrigStmt
+== 419
+ALTER FOREIGN TABLE foreign_schema.foreign_table_1
+	DISABLE TRIGGER trigtest_before_stmt
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: AlterTableStmt
+== 420
+ALTER FOREIGN TABLE foreign_schema.foreign_table_1
+	ENABLE TRIGGER trigtest_before_stmt
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: AlterTableStmt
+== 421
+DROP TRIGGER trigtest_before_stmt ON foreign_schema.foreign_table_1
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: DropStmt
+== 422
+DROP TRIGGER trigtest_before_row ON foreign_schema.foreign_table_1
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: DropStmt
+== 423
+DROP TRIGGER trigtest_after_stmt ON foreign_schema.foreign_table_1
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: DropStmt
+== 424
+DROP TRIGGER trigtest_after_row ON foreign_schema.foreign_table_1
+--
+TABLE: name="foreign_schema.foreign_table_1" schema="foreign_schema" table="foreign_table_1" ctx=DDL
+STMT: DropStmt
+== 425
+DROP FUNCTION dummy_trigger()
+--
+FUNCTION: name="dummy_trigger" function="dummy_trigger" schema="" ctx=DDL
+STMT: DropStmt
+== 426
+-- Table inheritance
+CREATE TABLE fd_pt1 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+)
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: CreateStmt
+== 427
+CREATE FOREIGN TABLE ft2 () INHERITS (fd_pt1)
+  SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 428
+DROP FOREIGN TABLE ft2
+--
+STMT: DropStmt
+== 429
+CREATE FOREIGN TABLE ft2 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 430
+ALTER FOREIGN TABLE ft2 INHERIT fd_pt1
+--
+TABLE: name="ft2" schema="" table="ft2" ctx=DDL
+STMT: AlterTableStmt
+== 431
+CREATE TABLE ct3() INHERITS(ft2)
+--
+TABLE: name="ct3" schema="" table="ct3" ctx=DDL
+STMT: CreateStmt
+== 432
+CREATE FOREIGN TABLE ft3 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+) INHERITS(ft2)
+  SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 433
+-- add attributes recursively
+ALTER TABLE fd_pt1 ADD COLUMN c4 integer
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 434
+ALTER TABLE fd_pt1 ADD COLUMN c5 integer DEFAULT 0
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 435
+ALTER TABLE fd_pt1 ADD COLUMN c6 integer
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 436
+ALTER TABLE fd_pt1 ADD COLUMN c7 integer NOT NULL
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 437
+ALTER TABLE fd_pt1 ADD COLUMN c8 integer
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 438
+-- alter attributes recursively
+ALTER TABLE fd_pt1 ALTER COLUMN c4 SET DEFAULT 0
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 439
+ALTER TABLE fd_pt1 ALTER COLUMN c5 DROP DEFAULT
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 440
+ALTER TABLE fd_pt1 ALTER COLUMN c6 SET NOT NULL
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 441
+ALTER TABLE fd_pt1 ALTER COLUMN c7 DROP NOT NULL
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 442
+ALTER TABLE fd_pt1 ALTER COLUMN c8 TYPE char(10) USING '0'
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 443
+-- ERROR
+ALTER TABLE fd_pt1 ALTER COLUMN c8 TYPE char(10)
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 444
+ALTER TABLE fd_pt1 ALTER COLUMN c8 SET DATA TYPE text
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 445
+ALTER TABLE fd_pt1 ALTER COLUMN c1 SET STATISTICS 10000
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 446
+ALTER TABLE fd_pt1 ALTER COLUMN c1 SET (n_distinct = 100)
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 447
+ALTER TABLE fd_pt1 ALTER COLUMN c8 SET STATISTICS -1
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 448
+ALTER TABLE fd_pt1 ALTER COLUMN c8 SET STORAGE EXTERNAL
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 449
+-- drop attributes recursively
+ALTER TABLE fd_pt1 DROP COLUMN c4
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 450
+ALTER TABLE fd_pt1 DROP COLUMN c5
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 451
+ALTER TABLE fd_pt1 DROP COLUMN c6
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 452
+ALTER TABLE fd_pt1 DROP COLUMN c7
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 453
+ALTER TABLE fd_pt1 DROP COLUMN c8
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 454
+-- add constraints recursively
+ALTER TABLE fd_pt1 ADD CONSTRAINT fd_pt1chk1 CHECK (c1 > 0) NO INHERIT
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 455
+ALTER TABLE fd_pt1 ADD CONSTRAINT fd_pt1chk2 CHECK (c2 <> '')
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 456
+-- connoinherit should be true for NO INHERIT constraint
+SELECT relname, conname, contype, conislocal, coninhcount, connoinherit
+  FROM pg_class AS pc JOIN pg_constraint AS pgc ON (conrelid = pc.oid)
+  WHERE pc.relname = 'fd_pt1'
+  ORDER BY 1,2
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "pc"="pg_class"
+ALIAS: "pgc"="pg_constraint"
+FILTER: schema="" table="pc" column="relname"
+STMT: SelectStmt
+== 457
+-- child does not inherit NO INHERIT constraints
+DROP FOREIGN TABLE ft2
+--
+STMT: DropStmt
+== 458
+-- ERROR
+DROP FOREIGN TABLE ft2 CASCADE
+--
+STMT: DropStmt
+== 459
+CREATE FOREIGN TABLE ft2 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 460
+-- child must have parent's INHERIT constraints
+ALTER FOREIGN TABLE ft2 INHERIT fd_pt1
+--
+TABLE: name="ft2" schema="" table="ft2" ctx=DDL
+STMT: AlterTableStmt
+== 461
+-- ERROR
+ALTER FOREIGN TABLE ft2 ADD CONSTRAINT fd_pt1chk2 CHECK (c2 <> '')
+--
+TABLE: name="ft2" schema="" table="ft2" ctx=DDL
+STMT: AlterTableStmt
+== 462
+ALTER FOREIGN TABLE ft2 INHERIT fd_pt1
+--
+TABLE: name="ft2" schema="" table="ft2" ctx=DDL
+STMT: AlterTableStmt
+== 463
+-- child does not inherit NO INHERIT constraints
+
+-- drop constraints recursively
+ALTER TABLE fd_pt1 DROP CONSTRAINT fd_pt1chk1 CASCADE
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 464
+ALTER TABLE fd_pt1 DROP CONSTRAINT fd_pt1chk2 CASCADE
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 465
+-- NOT VALID case
+INSERT INTO fd_pt1 VALUES (1, 'fd_pt1'::text, '1994-01-01'::date)
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 466
+ALTER TABLE fd_pt1 ADD CONSTRAINT fd_pt1chk3 CHECK (c2 <> '') NOT VALID
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 467
+-- VALIDATE CONSTRAINT need do nothing on foreign tables
+ALTER TABLE fd_pt1 VALIDATE CONSTRAINT fd_pt1chk3
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: AlterTableStmt
+== 468
+-- changes name of an attribute recursively
+ALTER TABLE fd_pt1 RENAME COLUMN c1 TO f1
+--
+STMT: RenameStmt
+== 469
+ALTER TABLE fd_pt1 RENAME COLUMN c2 TO f2
+--
+STMT: RenameStmt
+== 470
+ALTER TABLE fd_pt1 RENAME COLUMN c3 TO f3
+--
+STMT: RenameStmt
+== 471
+-- changes name of a constraint recursively
+ALTER TABLE fd_pt1 RENAME CONSTRAINT fd_pt1chk3 TO f2_check
+--
+STMT: RenameStmt
+== 472
+DROP TABLE fd_pt1 CASCADE
+--
+TABLE: name="fd_pt1" schema="" table="fd_pt1" ctx=DDL
+STMT: DropStmt
+== 473
+-- IMPORT FOREIGN SCHEMA
+IMPORT FOREIGN SCHEMA s1 FROM SERVER s9 INTO public
+--
+STMT: ImportForeignSchemaStmt
+== 474
+-- ERROR
+IMPORT FOREIGN SCHEMA s1 LIMIT TO (t1) FROM SERVER s9 INTO public
+--
+STMT: ImportForeignSchemaStmt
+== 475
+--ERROR
+IMPORT FOREIGN SCHEMA s1 EXCEPT (t1) FROM SERVER s9 INTO public
+--
+STMT: ImportForeignSchemaStmt
+== 476
+-- ERROR
+IMPORT FOREIGN SCHEMA s1 EXCEPT (t1, t2) FROM SERVER s9 INTO public
+OPTIONS (option1 'value1', option2 'value2')
+--
+STMT: ImportForeignSchemaStmt
+== 477
+-- ERROR
+
+-- DROP FOREIGN TABLE
+DROP FOREIGN TABLE no_table
+--
+STMT: DropStmt
+== 478
+-- ERROR
+DROP FOREIGN TABLE IF EXISTS no_table
+--
+STMT: DropStmt
+== 479
+DROP FOREIGN TABLE foreign_schema.foreign_table_1
+--
+STMT: DropStmt
+== 480
+-- REASSIGN OWNED/DROP OWNED of foreign objects
+REASSIGN OWNED BY regress_test_role TO regress_test_role2
+--
+STMT: ReassignOwnedStmt
+== 481
+DROP OWNED BY regress_test_role2
+--
+STMT: DropOwnedStmt
+== 482
+DROP OWNED BY regress_test_role2 CASCADE
+--
+STMT: DropOwnedStmt
+== 483
+-- Foreign partition DDL stuff
+CREATE TABLE fd_pt2 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+) PARTITION BY LIST (c1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: CreateStmt
+== 484
+CREATE FOREIGN TABLE fd_pt2_1 PARTITION OF fd_pt2 FOR VALUES IN (1)
+  SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 485
+-- partition cannot have additional columns
+DROP FOREIGN TABLE fd_pt2_1
+--
+STMT: DropStmt
+== 486
+CREATE FOREIGN TABLE fd_pt2_1 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date,
+	c4 char
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 487
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 488
+-- ERROR
+
+DROP FOREIGN TABLE fd_pt2_1
+--
+STMT: DropStmt
+== 489
+CREATE FOREIGN TABLE fd_pt2_1 (
+	c1 integer NOT NULL,
+	c2 text,
+	c3 date
+) SERVER s0 OPTIONS (delimiter ',', quote '"', "be quoted" 'value')
+--
+STMT: CreateForeignTableStmt
+== 490
+-- no attach partition validation occurs for foreign tables
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 491
+-- cannot add column to a partition
+ALTER TABLE fd_pt2_1 ADD c4 char
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 492
+-- ok to have a partition's own constraints though
+ALTER TABLE fd_pt2_1 ALTER c3 SET NOT NULL
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 493
+ALTER TABLE fd_pt2_1 ADD CONSTRAINT p21chk CHECK (c2 <> '')
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 494
+-- cannot drop inherited NOT NULL constraint from a partition
+ALTER TABLE fd_pt2_1 ALTER c1 DROP NOT NULL
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 495
+-- partition must have parent's constraints
+ALTER TABLE fd_pt2 DETACH PARTITION fd_pt2_1
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 496
+ALTER TABLE fd_pt2 ALTER c2 SET NOT NULL
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 497
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 498
+-- ERROR
+ALTER FOREIGN TABLE fd_pt2_1 ALTER c2 SET NOT NULL
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 499
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 500
+ALTER TABLE fd_pt2 DETACH PARTITION fd_pt2_1
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 501
+ALTER TABLE fd_pt2 ADD CONSTRAINT fd_pt2chk1 CHECK (c1 > 0)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 502
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 503
+-- ERROR
+ALTER FOREIGN TABLE fd_pt2_1 ADD CONSTRAINT fd_pt2chk1 CHECK (c1 > 0)
+--
+TABLE: name="fd_pt2_1" schema="" table="fd_pt2_1" ctx=DDL
+STMT: AlterTableStmt
+== 504
+ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1)
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: AlterTableStmt
+== 505
+DROP FOREIGN TABLE fd_pt2_1
+--
+STMT: DropStmt
+== 506
+DROP TABLE fd_pt2
+--
+TABLE: name="fd_pt2" schema="" table="fd_pt2" ctx=DDL
+STMT: DropStmt
+== 507
+-- foreign table cannot be part of partition tree made of temporary
+-- relations.
+CREATE TEMP TABLE temp_parted (a int) PARTITION BY LIST (a)
+--
+TABLE: name="temp_parted" schema="" table="temp_parted" ctx=DDL
+STMT: CreateStmt
+== 508
+CREATE FOREIGN TABLE foreign_part PARTITION OF temp_parted DEFAULT
+  SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 509
+-- ERROR
+CREATE FOREIGN TABLE foreign_part (a int) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 510
+ALTER TABLE temp_parted ATTACH PARTITION foreign_part DEFAULT
+--
+TABLE: name="temp_parted" schema="" table="temp_parted" ctx=DDL
+STMT: AlterTableStmt
+== 511
+-- ERROR
+DROP FOREIGN TABLE foreign_part
+--
+STMT: DropStmt
+== 512
+DROP TABLE temp_parted
+--
+TABLE: name="temp_parted" schema="" table="temp_parted" ctx=DDL
+STMT: DropStmt
+== 513
+-- Cleanup
+DROP SCHEMA foreign_schema CASCADE
+--
+STMT: DropStmt
+== 514
+DROP ROLE regress_test_role
+--
+STMT: DropRoleStmt
+== 515
+-- ERROR
+DROP SERVER t1 CASCADE
+--
+STMT: DropStmt
+== 516
+DROP USER MAPPING FOR regress_test_role SERVER s6
+--
+STMT: DropUserMappingStmt
+== 517
+DROP FOREIGN DATA WRAPPER foo CASCADE
+--
+STMT: DropStmt
+== 518
+DROP SERVER s8 CASCADE
+--
+STMT: DropStmt
+== 519
+DROP ROLE regress_test_indirect
+--
+STMT: DropRoleStmt
+== 520
+DROP ROLE regress_test_role
+--
+STMT: DropRoleStmt
+== 521
+DROP ROLE regress_unprivileged_role
+--
+STMT: DropRoleStmt
+== 522
+-- ERROR
+REVOKE ALL ON FOREIGN DATA WRAPPER postgresql FROM regress_unprivileged_role
+--
+STMT: GrantStmt
+== 523
+DROP ROLE regress_unprivileged_role
+--
+STMT: DropRoleStmt
+== 524
+DROP ROLE regress_test_role2
+--
+STMT: DropRoleStmt
+== 525
+DROP FOREIGN DATA WRAPPER postgresql CASCADE
+--
+STMT: DropStmt
+== 526
+DROP FOREIGN DATA WRAPPER dummy CASCADE
+--
+STMT: DropStmt
+== 527
+DROP ROLE regress_foreign_data_user
+--
+STMT: DropRoleStmt
+== 528
+-- At this point we should have no wrappers, no servers, and no mappings.
+SELECT fdwname, fdwhandler, fdwvalidator, fdwoptions FROM pg_foreign_data_wrapper
+--
+TABLE: name="pg_foreign_data_wrapper" schema="" table="pg_foreign_data_wrapper" ctx=Select
+STMT: SelectStmt
+== 529
+SELECT srvname, srvoptions FROM pg_foreign_server
+--
+TABLE: name="pg_foreign_server" schema="" table="pg_foreign_server" ctx=Select
+STMT: SelectStmt
+== 530
+SELECT * FROM pg_user_mapping
+--
+TABLE: name="pg_user_mapping" schema="" table="pg_user_mapping" ctx=Select
+STMT: SelectStmt

@@ -1,0 +1,559 @@
+== 001
+|--
+-- Tests to exercise the plan caching/invalidation mechanism
+|--
+
+CREATE TEMP TABLE pcachetest AS SELECT * FROM int8_tbl
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=DDL
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 002
+-- create and use a cached plan
+PREPARE prepstmt AS SELECT * FROM pcachetest
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=Select
+STMT: PrepareStmt
+STMT: SelectStmt
+== 003
+EXECUTE prepstmt
+--
+STMT: ExecuteStmt
+== 004
+-- and one with parameters
+PREPARE prepstmt2(bigint) AS SELECT * FROM pcachetest WHERE q1 = $1
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: PrepareStmt
+STMT: SelectStmt
+== 005
+EXECUTE prepstmt2(123)
+--
+STMT: ExecuteStmt
+== 006
+-- invalidate the plans and see what happens
+DROP TABLE pcachetest
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=DDL
+STMT: DropStmt
+== 007
+EXECUTE prepstmt
+--
+STMT: ExecuteStmt
+== 008
+EXECUTE prepstmt2(123)
+--
+STMT: ExecuteStmt
+== 009
+-- recreate the temp table (this demonstrates that the raw plan is
+-- purely textual and doesn't depend on OIDs, for instance)
+CREATE TEMP TABLE pcachetest AS SELECT * FROM int8_tbl ORDER BY 2
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=DDL
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 010
+EXECUTE prepstmt
+--
+STMT: ExecuteStmt
+== 011
+EXECUTE prepstmt2(123)
+--
+STMT: ExecuteStmt
+== 012
+-- prepared statements should prevent change in output tupdesc,
+-- since clients probably aren't expecting that to change on the fly
+ALTER TABLE pcachetest ADD COLUMN q3 bigint
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=DDL
+STMT: AlterTableStmt
+== 013
+EXECUTE prepstmt
+--
+STMT: ExecuteStmt
+== 014
+EXECUTE prepstmt2(123)
+--
+STMT: ExecuteStmt
+== 015
+-- but we're nice guys and will let you undo your mistake
+ALTER TABLE pcachetest DROP COLUMN q3
+--
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=DDL
+STMT: AlterTableStmt
+== 016
+EXECUTE prepstmt
+--
+STMT: ExecuteStmt
+== 017
+EXECUTE prepstmt2(123)
+--
+STMT: ExecuteStmt
+== 018
+-- Try it with a view, which isn't directly used in the resulting plan
+-- but should trigger invalidation anyway
+CREATE TEMP VIEW pcacheview AS
+  SELECT * FROM pcachetest
+--
+TABLE: name="pcacheview" schema="" table="pcacheview" ctx=DDL
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 019
+PREPARE vprep AS SELECT * FROM pcacheview
+--
+TABLE: name="pcacheview" schema="" table="pcacheview" ctx=Select
+STMT: PrepareStmt
+STMT: SelectStmt
+== 020
+EXECUTE vprep
+--
+STMT: ExecuteStmt
+== 021
+CREATE OR REPLACE TEMP VIEW pcacheview AS
+  SELECT q1, q2/2 AS q2 FROM pcachetest
+--
+TABLE: name="pcacheview" schema="" table="pcacheview" ctx=DDL
+TABLE: name="pcachetest" schema="" table="pcachetest" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 022
+EXECUTE vprep
+--
+STMT: ExecuteStmt
+== 023
+-- Check basic SPI plan invalidation
+
+create function cache_test(int) returns int as $$
+declare total int;
+begin
+	create temp table t1(f1 int);
+	insert into t1 values($1);
+	insert into t1 values(11);
+	insert into t1 values(12);
+	insert into t1 values(13);
+	select sum(f1) into total from t1;
+	drop table t1;
+	return total;
+end
+$$ language plpgsql
+--
+FUNCTION: name="cache_test" function="cache_test" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 024
+select cache_test(1)
+--
+FUNCTION: name="cache_test" function="cache_test" schema="" ctx=Call
+STMT: SelectStmt
+== 025
+select cache_test(2)
+--
+FUNCTION: name="cache_test" function="cache_test" schema="" ctx=Call
+STMT: SelectStmt
+== 026
+select cache_test(3)
+--
+FUNCTION: name="cache_test" function="cache_test" schema="" ctx=Call
+STMT: SelectStmt
+== 027
+-- Check invalidation of plpgsql "simple expression"
+
+create temp view v1 as
+  select 2+2 as f1
+--
+TABLE: name="v1" schema="" table="v1" ctx=DDL
+STMT: ViewStmt
+STMT: SelectStmt
+== 028
+create function cache_test_2() returns int as $$
+begin
+	return f1 from v1;
+end$$ language plpgsql
+--
+FUNCTION: name="cache_test_2" function="cache_test_2" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 029
+select cache_test_2()
+--
+FUNCTION: name="cache_test_2" function="cache_test_2" schema="" ctx=Call
+STMT: SelectStmt
+== 030
+create or replace temp view v1 as
+  select 2+2+4 as f1
+--
+TABLE: name="v1" schema="" table="v1" ctx=DDL
+STMT: ViewStmt
+STMT: SelectStmt
+== 031
+select cache_test_2()
+--
+FUNCTION: name="cache_test_2" function="cache_test_2" schema="" ctx=Call
+STMT: SelectStmt
+== 032
+create or replace temp view v1 as
+  select 2+2+4+(select max(unique1) from tenk1) as f1
+--
+TABLE: name="v1" schema="" table="v1" ctx=DDL
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ViewStmt
+STMT: SelectStmt
+== 033
+select cache_test_2()
+--
+FUNCTION: name="cache_test_2" function="cache_test_2" schema="" ctx=Call
+STMT: SelectStmt
+== 034
+--- Check that change of search_path is honored when re-using cached plan
+
+create schema s1
+  create table abc (f1 int)
+--
+STMT: CreateSchemaStmt
+== 035
+create schema s2
+  create table abc (f1 int)
+--
+STMT: CreateSchemaStmt
+== 036
+insert into s1.abc values(123)
+--
+TABLE: name="s1.abc" schema="s1" table="abc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 037
+insert into s2.abc values(456)
+--
+TABLE: name="s2.abc" schema="s2" table="abc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 038
+set search_path = s1
+--
+STMT: VariableSetStmt
+== 039
+prepare p1 as select f1 from abc
+--
+TABLE: name="abc" schema="" table="abc" ctx=Select
+STMT: PrepareStmt
+STMT: SelectStmt
+== 040
+execute p1
+--
+STMT: ExecuteStmt
+== 041
+set search_path = s2
+--
+STMT: VariableSetStmt
+== 042
+select f1 from abc
+--
+TABLE: name="abc" schema="" table="abc" ctx=Select
+STMT: SelectStmt
+== 043
+execute p1
+--
+STMT: ExecuteStmt
+== 044
+alter table s1.abc add column f2 float8
+--
+TABLE: name="s1.abc" schema="s1" table="abc" ctx=DDL
+STMT: AlterTableStmt
+== 045
+-- force replan
+
+execute p1
+--
+STMT: ExecuteStmt
+== 046
+drop schema s1 cascade
+--
+STMT: DropStmt
+== 047
+drop schema s2 cascade
+--
+STMT: DropStmt
+== 048
+reset search_path
+--
+STMT: VariableSetStmt
+== 049
+-- Check that invalidation deals with regclass constants
+
+create temp sequence seq
+--
+STMT: CreateSeqStmt
+== 050
+prepare p2 as select nextval('seq')
+--
+FUNCTION: name="nextval" function="nextval" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 051
+execute p2
+--
+STMT: ExecuteStmt
+== 052
+drop sequence seq
+--
+STMT: DropStmt
+== 053
+create temp sequence seq
+--
+STMT: CreateSeqStmt
+== 054
+execute p2
+--
+STMT: ExecuteStmt
+== 055
+-- Check DDL via SPI, immediately followed by SPI plan re-use
+-- (bug in original coding)
+
+create function cachebug() returns void as $$
+declare r int;
+begin
+  drop table if exists temptable cascade;
+  create temp table temptable as select * from generate_series(1,3) as f1;
+  create temp view vv as select * from temptable;
+  for r in select * from vv loop
+    raise notice '%', r;
+  end loop;
+end$$ language plpgsql
+--
+FUNCTION: name="cachebug" function="cachebug" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 056
+select cachebug()
+--
+FUNCTION: name="cachebug" function="cachebug" schema="" ctx=Call
+STMT: SelectStmt
+== 057
+select cachebug()
+--
+FUNCTION: name="cachebug" function="cachebug" schema="" ctx=Call
+STMT: SelectStmt
+== 058
+-- Check that addition or removal of any partition is correctly dealt with by
+-- default partition table when it is being used in prepared statement.
+create table pc_list_parted (a int) partition by list(a)
+--
+TABLE: name="pc_list_parted" schema="" table="pc_list_parted" ctx=DDL
+STMT: CreateStmt
+== 059
+create table pc_list_part_null partition of pc_list_parted for values in (null)
+--
+TABLE: name="pc_list_part_null" schema="" table="pc_list_part_null" ctx=DDL
+STMT: CreateStmt
+== 060
+create table pc_list_part_1 partition of pc_list_parted for values in (1)
+--
+TABLE: name="pc_list_part_1" schema="" table="pc_list_part_1" ctx=DDL
+STMT: CreateStmt
+== 061
+create table pc_list_part_def partition of pc_list_parted default
+--
+TABLE: name="pc_list_part_def" schema="" table="pc_list_part_def" ctx=DDL
+STMT: CreateStmt
+== 062
+prepare pstmt_def_insert (int) as insert into pc_list_part_def values($1)
+--
+TABLE: name="pc_list_part_def" schema="" table="pc_list_part_def" ctx=DML
+STMT: PrepareStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+-- should fail
+execute pstmt_def_insert(null)
+--
+STMT: ExecuteStmt
+== 064
+execute pstmt_def_insert(1)
+--
+STMT: ExecuteStmt
+== 065
+create table pc_list_part_2 partition of pc_list_parted for values in (2)
+--
+TABLE: name="pc_list_part_2" schema="" table="pc_list_part_2" ctx=DDL
+STMT: CreateStmt
+== 066
+execute pstmt_def_insert(2)
+--
+STMT: ExecuteStmt
+== 067
+alter table pc_list_parted detach partition pc_list_part_null
+--
+TABLE: name="pc_list_parted" schema="" table="pc_list_parted" ctx=DDL
+STMT: AlterTableStmt
+== 068
+-- should be ok
+execute pstmt_def_insert(null)
+--
+STMT: ExecuteStmt
+== 069
+drop table pc_list_part_1
+--
+TABLE: name="pc_list_part_1" schema="" table="pc_list_part_1" ctx=DDL
+STMT: DropStmt
+== 070
+-- should be ok
+execute pstmt_def_insert(1)
+--
+STMT: ExecuteStmt
+== 071
+drop table pc_list_parted, pc_list_part_null
+--
+TABLE: name="pc_list_parted" schema="" table="pc_list_parted" ctx=DDL
+TABLE: name="pc_list_part_null" schema="" table="pc_list_part_null" ctx=DDL
+STMT: DropStmt
+== 072
+deallocate pstmt_def_insert
+--
+STMT: DeallocateStmt
+== 073
+-- Test plan_cache_mode
+
+create table test_mode (a int)
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=DDL
+STMT: CreateStmt
+== 074
+insert into test_mode select 1 from generate_series(1,1000) union all select 2
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 075
+create index on test_mode (a)
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=DDL
+STMT: IndexStmt
+== 076
+analyze test_mode
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=DDL
+STMT: VacuumStmt
+== 077
+prepare test_mode_pp (int) as select count(*) from test_mode where a = $1
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: PrepareStmt
+STMT: SelectStmt
+== 078
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 079
+-- up to 5 executions, custom plan is used
+set plan_cache_mode to auto
+--
+STMT: VariableSetStmt
+== 080
+explain (costs off) execute test_mode_pp(2)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 081
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 082
+-- force generic plan
+set plan_cache_mode to force_generic_plan
+--
+STMT: VariableSetStmt
+== 083
+explain (costs off) execute test_mode_pp(2)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 084
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 085
+-- get to generic plan by 5 executions
+set plan_cache_mode to auto
+--
+STMT: VariableSetStmt
+== 086
+execute test_mode_pp(1)
+--
+STMT: ExecuteStmt
+== 087
+-- 1x
+execute test_mode_pp(1)
+--
+STMT: ExecuteStmt
+== 088
+-- 2x
+execute test_mode_pp(1)
+--
+STMT: ExecuteStmt
+== 089
+-- 3x
+execute test_mode_pp(1)
+--
+STMT: ExecuteStmt
+== 090
+-- 4x
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 091
+execute test_mode_pp(1)
+--
+STMT: ExecuteStmt
+== 092
+-- 5x
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 093
+-- we should now get a really bad plan
+explain (costs off) execute test_mode_pp(2)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 094
+-- but we can force a custom plan
+set plan_cache_mode to force_custom_plan
+--
+STMT: VariableSetStmt
+== 095
+explain (costs off) execute test_mode_pp(2)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 096
+select name, generic_plans, custom_plans from pg_prepared_statements
+  where  name = 'test_mode_pp'
+--
+TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+== 097
+drop table test_mode
+--
+TABLE: name="test_mode" schema="" table="test_mode" ctx=DDL
+STMT: DropStmt

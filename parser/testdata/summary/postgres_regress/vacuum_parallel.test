@@ -1,0 +1,110 @@
+== 001
+SET max_parallel_maintenance_workers TO 4
+--
+STMT: VariableSetStmt
+== 002
+SET min_parallel_index_scan_size TO '128kB'
+--
+STMT: VariableSetStmt
+== 003
+-- Bug #17245: Make sure that we don't totally fail to VACUUM individual indexes that
+-- happen to be below min_parallel_index_scan_size during parallel VACUUM:
+CREATE TABLE parallel_vacuum_table (a int) WITH (autovacuum_enabled = off)
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DDL
+STMT: CreateStmt
+== 004
+INSERT INTO parallel_vacuum_table SELECT i from generate_series(1, 10000) i
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+-- Parallel VACUUM will never be used unless there are at least two indexes
+-- that exceed min_parallel_index_scan_size.  Create two such indexes, and
+-- a third index that is smaller than min_parallel_index_scan_size.
+CREATE INDEX regular_sized_index ON parallel_vacuum_table(a)
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DDL
+STMT: IndexStmt
+== 006
+CREATE INDEX typically_sized_index ON parallel_vacuum_table(a)
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DDL
+STMT: IndexStmt
+== 007
+-- Note: vacuum_in_leader_small_index can apply deduplication, making it ~3x
+-- smaller than the other indexes
+CREATE INDEX vacuum_in_leader_small_index ON parallel_vacuum_table((1))
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DDL
+STMT: IndexStmt
+== 008
+-- Verify (as best we can) that the cost model for parallel VACUUM
+-- will make our VACUUM run in parallel, while always leaving it up to the
+-- parallel leader to handle the vacuum_in_leader_small_index index:
+SELECT EXISTS (
+SELECT 1
+FROM pg_class
+WHERE oid = 'vacuum_in_leader_small_index'::regclass AND
+  pg_relation_size(oid) <
+  pg_size_bytes(current_setting('min_parallel_index_scan_size'))
+) as leader_will_handle_small_index
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+FUNCTION: name="pg_size_bytes" function="pg_size_bytes" schema="" ctx=Call
+FUNCTION: name="current_setting" function="current_setting" schema="" ctx=Call
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+FUNCTION: name="pg_size_bytes" function="pg_size_bytes" schema="" ctx=Call
+FUNCTION: name="current_setting" function="current_setting" schema="" ctx=Call
+FILTER: schema="" table="" column="oid"
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 009
+SELECT count(*) as trigger_parallel_vacuum_nindexes
+FROM pg_class
+WHERE oid in ('regular_sized_index'::regclass, 'typically_sized_index'::regclass) AND
+  pg_relation_size(oid) >=
+  pg_size_bytes(current_setting('min_parallel_index_scan_size'))
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+FUNCTION: name="pg_size_bytes" function="pg_size_bytes" schema="" ctx=Call
+FUNCTION: name="current_setting" function="current_setting" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+FUNCTION: name="pg_size_bytes" function="pg_size_bytes" schema="" ctx=Call
+FUNCTION: name="current_setting" function="current_setting" schema="" ctx=Call
+FILTER: schema="" table="" column="oid"
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 010
+-- Parallel VACUUM with B-Tree page deletions, ambulkdelete calls:
+DELETE FROM parallel_vacuum_table
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DML
+STMT: DeleteStmt
+== 011
+VACUUM (PARALLEL 4, INDEX_CLEANUP ON) parallel_vacuum_table
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DDL
+STMT: VacuumStmt
+== 012
+-- Since vacuum_in_leader_small_index uses deduplication, we expect an
+-- assertion failure with bug #17245 (in the absence of bugfix):
+INSERT INTO parallel_vacuum_table SELECT i FROM generate_series(1, 10000) i
+--
+TABLE: name="parallel_vacuum_table" schema="" table="parallel_vacuum_table" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 013
+RESET max_parallel_maintenance_workers
+--
+STMT: VariableSetStmt
+== 014
+RESET min_parallel_index_scan_size
+--
+STMT: VariableSetStmt

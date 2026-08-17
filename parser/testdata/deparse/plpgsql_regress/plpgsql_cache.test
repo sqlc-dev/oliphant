@@ -1,0 +1,91 @@
+== 001
+|--
+-- Cache-behavior-dependent test cases
+|--
+-- These tests logically belong in plpgsql_record.sql, and perhaps someday
+-- can be merged back into it.  For now, however, their results are different
+-- depending on debug_discard_caches, so we must have two expected-output
+-- files to cover both cases.  To minimize the maintenance effort resulting
+-- from that, this file should contain only tests that do have different
+-- results under debug_discard_caches.
+|--
+
+-- check behavior with changes of a named rowtype
+create table c_mutable(f1 int, f2 text)
+--
+CREATE TABLE c_mutable (f1 int, f2 text)
+== 002
+create function c_sillyaddone(int) returns int language plpgsql as
+$$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+CREATE FUNCTION c_sillyaddone(int) RETURNS int LANGUAGE plpgsql AS $$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+== 003
+select c_sillyaddone(42)
+--
+SELECT c_sillyaddone(42)
+== 004
+alter table c_mutable drop column f1
+--
+ALTER TABLE c_mutable DROP f1
+== 005
+alter table c_mutable add column f1 float8
+--
+ALTER TABLE c_mutable ADD COLUMN f1 float8
+== 006
+-- currently, this fails due to cached plan for "r.f1 + 1" expression
+-- (but if debug_discard_caches is on, it will succeed)
+select c_sillyaddone(42)
+--
+SELECT c_sillyaddone(42)
+== 007
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+DISCARD PLANS
+== 008
+select c_sillyaddone(42)
+--
+SELECT c_sillyaddone(42)
+== 009
+-- check behavior with changes in a record rowtype
+create function show_result_type(text) returns text language plpgsql as
+$$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+--
+CREATE FUNCTION show_result_type(text) RETURNS text LANGUAGE plpgsql AS $$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+== 010
+select show_result_type('select 1 as a')
+--
+SELECT show_result_type('select 1 as a')
+== 011
+-- currently this fails due to cached plan for pg_typeof expression
+-- (but if debug_discard_caches is on, it will succeed)
+select show_result_type('select 2.0 as a')
+--
+SELECT show_result_type('select 2.0 as a')
+== 012
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+DISCARD PLANS
+== 013
+select show_result_type('select 2.0 as a')
+--
+SELECT show_result_type('select 2.0 as a')

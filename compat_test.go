@@ -19,26 +19,6 @@ func skipUnlessImplemented(t *testing.T) {
 	}
 }
 
-// TestNotImplementedErrors pins the milestone-1 API contract: every entry
-// point exists with pg_query_go's exact signature and fails loudly (not
-// silently) until its milestone lands.
-func TestNotImplementedErrors(t *testing.T) {
-	check := func(name string, err error) {
-		t.Helper()
-		if err == nil {
-			t.Fatalf("%s: expected a not-implemented error, got nil", name)
-		}
-		if !strings.Contains(err.Error(), "not implemented") {
-			t.Fatalf("%s: unexpected error %q", name, err)
-		}
-	}
-
-	_, err := pg_query.ParsePlPgSqlToJSON("SELECT 1")
-	check("ParsePlPgSqlToJSON", err)
-	_, err = pg_query.Summary("SELECT 1", 0)
-	check("Summary", err)
-}
-
 // TestScanTokens pins one token stream end-to-end through the public Scan
 // API (pg_query_go's TestScan is a smoke test; the corpus goldens carry the
 // exhaustive coverage).

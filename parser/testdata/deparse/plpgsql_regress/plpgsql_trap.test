@@ -1,0 +1,395 @@
+== 001
+|--
+-- Test error trapping
+|--
+
+create function trap_zero_divide(int) returns int as $$
+declare x int;
+	sx smallint;
+begin
+	begin	-- start a subtransaction
+		raise notice 'should see this';
+		x := 100 / $1;
+		raise notice 'should see this only if % <> 0', $1;
+		sx := $1;
+		raise notice 'should see this only if % fits in smallint', $1;
+		if $1 < 0 then
+			raise exception '% is less than zero', $1;
+		end if;
+	exception
+		when division_by_zero then
+			raise notice 'caught division_by_zero';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE then
+			raise notice 'caught numeric_value_out_of_range';
+			x := -2;
+	end;
+	return x;
+end$$ language plpgsql
+--
+CREATE FUNCTION trap_zero_divide(int) RETURNS int AS $$
+declare x int;
+	sx smallint;
+begin
+	begin	-- start a subtransaction
+		raise notice 'should see this';
+		x := 100 / $1;
+		raise notice 'should see this only if % <> 0', $1;
+		sx := $1;
+		raise notice 'should see this only if % fits in smallint', $1;
+		if $1 < 0 then
+			raise exception '% is less than zero', $1;
+		end if;
+	exception
+		when division_by_zero then
+			raise notice 'caught division_by_zero';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE then
+			raise notice 'caught numeric_value_out_of_range';
+			x := -2;
+	end;
+	return x;
+end$$ LANGUAGE plpgsql
+== 002
+select trap_zero_divide(50)
+--
+SELECT trap_zero_divide(50)
+== 003
+select trap_zero_divide(0)
+--
+SELECT trap_zero_divide(0)
+== 004
+select trap_zero_divide(100000)
+--
+SELECT trap_zero_divide(100000)
+== 005
+select trap_zero_divide(-100)
+--
+SELECT trap_zero_divide(-100)
+== 006
+create table match_source as
+  select x as id, x*10 as data, x/10 as ten from generate_series(1,100) x
+--
+CREATE TABLE match_source AS SELECT x AS id, x * 10 AS data, x / 10 AS ten FROM generate_series(1, 100) x
+== 007
+create function trap_matching_test(int) returns int as $$
+declare x int;
+	sx smallint;
+	y int;
+begin
+	begin	-- start a subtransaction
+		x := 100 / $1;
+		sx := $1;
+		select into y data from match_source where id =
+			(select id from match_source b where ten = $1);
+	exception
+		when data_exception then  -- category match
+			raise notice 'caught data_exception';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE OR CARDINALITY_VIOLATION then
+			raise notice 'caught numeric_value_out_of_range or cardinality_violation';
+			x := -2;
+	end;
+	return x;
+end$$ language plpgsql
+--
+CREATE FUNCTION trap_matching_test(int) RETURNS int AS $$
+declare x int;
+	sx smallint;
+	y int;
+begin
+	begin	-- start a subtransaction
+		x := 100 / $1;
+		sx := $1;
+		select into y data from match_source where id =
+			(select id from match_source b where ten = $1);
+	exception
+		when data_exception then  -- category match
+			raise notice 'caught data_exception';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE OR CARDINALITY_VIOLATION then
+			raise notice 'caught numeric_value_out_of_range or cardinality_violation';
+			x := -2;
+	end;
+	return x;
+end$$ LANGUAGE plpgsql
+== 008
+select trap_matching_test(50)
+--
+SELECT trap_matching_test(50)
+== 009
+select trap_matching_test(0)
+--
+SELECT trap_matching_test(0)
+== 010
+select trap_matching_test(100000)
+--
+SELECT trap_matching_test(100000)
+== 011
+select trap_matching_test(1)
+--
+SELECT trap_matching_test(1)
+== 012
+create temp table foo (f1 int)
+--
+CREATE TEMPORARY TABLE foo (f1 int)
+== 013
+create function subxact_rollback_semantics() returns int as $$
+declare x int;
+begin
+  x := 1;
+  insert into foo values(x);
+  begin
+    x := x + 1;
+    insert into foo values(x);
+    raise exception 'inner';
+  exception
+    when others then
+      x := x * 10;
+  end;
+  insert into foo values(x);
+  return x;
+end$$ language plpgsql
+--
+CREATE FUNCTION subxact_rollback_semantics() RETURNS int AS $$
+declare x int;
+begin
+  x := 1;
+  insert into foo values(x);
+  begin
+    x := x + 1;
+    insert into foo values(x);
+    raise exception 'inner';
+  exception
+    when others then
+      x := x * 10;
+  end;
+  insert into foo values(x);
+  return x;
+end$$ LANGUAGE plpgsql
+== 014
+select subxact_rollback_semantics()
+--
+SELECT subxact_rollback_semantics()
+== 015
+select * from foo
+--
+SELECT * FROM foo
+== 016
+drop table foo
+--
+DROP TABLE foo
+== 017
+create function trap_timeout() returns void as $$
+begin
+  declare x int;
+  begin
+    -- we assume this will take longer than 1 second:
+    select count(*) into x from generate_series(1, 1_000_000_000_000);
+  exception
+    when others then
+      raise notice 'caught others?';
+    when query_canceled then
+      raise notice 'nyeah nyeah, can''t stop me';
+  end;
+  -- Abort transaction to abandon the statement_timeout setting.  Otherwise,
+  -- the next top-level statement would be vulnerable to the timeout.
+  raise exception 'end of function';
+end$$ language plpgsql
+--
+CREATE FUNCTION trap_timeout() RETURNS void AS $$
+begin
+  declare x int;
+  begin
+    -- we assume this will take longer than 1 second:
+    select count(*) into x from generate_series(1, 1_000_000_000_000);
+  exception
+    when others then
+      raise notice 'caught others?';
+    when query_canceled then
+      raise notice 'nyeah nyeah, can''t stop me';
+  end;
+  -- Abort transaction to abandon the statement_timeout setting.  Otherwise,
+  -- the next top-level statement would be vulnerable to the timeout.
+  raise exception 'end of function';
+end$$ LANGUAGE plpgsql
+== 018
+begin
+--
+BEGIN
+== 019
+set statement_timeout to 1000
+--
+SET statement_timeout TO 1000
+== 020
+select trap_timeout()
+--
+SELECT trap_timeout()
+== 021
+rollback
+--
+ROLLBACK
+== 022
+-- Test for pass-by-ref values being stored in proper context
+create function test_variable_storage() returns text as $$
+declare x text;
+begin
+  x := '1234';
+  begin
+    x := x || '5678';
+    -- force error inside subtransaction SPI context
+    perform trap_zero_divide(-100);
+  exception
+    when others then
+      x := x || '9012';
+  end;
+  return x;
+end$$ language plpgsql
+--
+CREATE FUNCTION test_variable_storage() RETURNS text AS $$
+declare x text;
+begin
+  x := '1234';
+  begin
+    x := x || '5678';
+    -- force error inside subtransaction SPI context
+    perform trap_zero_divide(-100);
+  exception
+    when others then
+      x := x || '9012';
+  end;
+  return x;
+end$$ LANGUAGE plpgsql
+== 023
+select test_variable_storage()
+--
+SELECT test_variable_storage()
+== 024
+|--
+-- test foreign key error trapping
+|--
+
+create temp table root(f1 int primary key)
+--
+CREATE TEMPORARY TABLE root (f1 int PRIMARY KEY)
+== 025
+create temp table leaf(f1 int references root deferrable)
+--
+CREATE TEMPORARY TABLE leaf (f1 int REFERENCES root DEFERRABLE)
+== 026
+insert into root values(1)
+--
+INSERT INTO root VALUES (1)
+== 027
+insert into leaf values(1)
+--
+INSERT INTO leaf VALUES (1)
+== 028
+insert into leaf values(2)
+--
+INSERT INTO leaf VALUES (2)
+== 029
+-- fails
+
+create function trap_foreign_key(int) returns int as $$
+begin
+	begin	-- start a subtransaction
+		insert into leaf values($1);
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql
+--
+CREATE FUNCTION trap_foreign_key(int) RETURNS int AS $$
+begin
+	begin	-- start a subtransaction
+		insert into leaf values($1);
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ LANGUAGE plpgsql
+== 030
+create function trap_foreign_key_2() returns int as $$
+begin
+	begin	-- start a subtransaction
+		set constraints all immediate;
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql
+--
+CREATE FUNCTION trap_foreign_key_2() RETURNS int AS $$
+begin
+	begin	-- start a subtransaction
+		set constraints all immediate;
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ LANGUAGE plpgsql
+== 031
+select trap_foreign_key(1)
+--
+SELECT trap_foreign_key(1)
+== 032
+select trap_foreign_key(2)
+--
+SELECT trap_foreign_key(2)
+== 033
+-- detects FK violation
+
+begin
+--
+BEGIN
+== 034
+set constraints all deferred
+--
+SET CONSTRAINTS ALL DEFERRED
+== 035
+select trap_foreign_key(2)
+--
+SELECT trap_foreign_key(2)
+== 036
+-- should not detect FK violation
+  savepoint x
+--
+SAVEPOINT x
+== 037
+set constraints all immediate
+--
+SET CONSTRAINTS ALL IMMEDIATE
+== 038
+-- fails
+  rollback to x
+--
+ROLLBACK TO SAVEPOINT x
+== 039
+select trap_foreign_key_2()
+--
+SELECT trap_foreign_key_2()
+== 040
+-- detects FK violation
+commit
+--
+COMMIT
+== 041
+-- still fails
+
+drop function trap_foreign_key(int)
+--
+DROP FUNCTION trap_foreign_key(int)
+== 042
+drop function trap_foreign_key_2()
+--
+DROP FUNCTION trap_foreign_key_2()

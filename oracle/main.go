@@ -25,6 +25,9 @@ type req struct {
 	Op        string `json:"op"`
 	SQL       string `json:"sql"`
 	TrimSpace bool   `json:"trim_space,omitempty"`
+	// TruncateLimit is the summary op's truncation limit; nil means -1
+	// (no truncation), matching pg_query.Summary's convention.
+	TruncateLimit *int `json:"truncate_limit,omitempty"`
 }
 
 type oracleError struct {
@@ -43,10 +46,43 @@ type token struct {
 }
 
 type res struct {
-	Text   *string      `json:"text,omitempty"`
-	Stmts  []string     `json:"stmts,omitempty"`
-	Tokens []token      `json:"tokens,omitempty"`
-	Err    *oracleError `json:"error,omitempty"`
+	Text    *string      `json:"text,omitempty"`
+	Stmts   []string     `json:"stmts,omitempty"`
+	Tokens  []token      `json:"tokens,omitempty"`
+	Summary *summaryRes  `json:"summary,omitempty"`
+	Err     *oracleError `json:"error,omitempty"`
+}
+
+// summaryRes mirrors SummaryResult field-for-field, with Context enums
+// rendered as their protobuf value names.
+type summaryTable struct {
+	Name       string `json:"name"`
+	SchemaName string `json:"schema_name"`
+	TableName  string `json:"table_name"`
+	Context    string `json:"context"`
+}
+
+type summaryFunction struct {
+	Name         string `json:"name"`
+	FunctionName string `json:"function_name"`
+	SchemaName   string `json:"schema_name"`
+	Context      string `json:"context"`
+}
+
+type summaryFilterColumn struct {
+	SchemaName string `json:"schema_name"`
+	TableName  string `json:"table_name"`
+	Column     string `json:"column"`
+}
+
+type summaryRes struct {
+	Tables         []summaryTable        `json:"tables"`
+	Aliases        map[string]string     `json:"aliases"`
+	CteNames       []string              `json:"cte_names"`
+	Functions      []summaryFunction     `json:"functions"`
+	FilterColumns  []summaryFilterColumn `json:"filter_columns"`
+	StatementTypes []string              `json:"statement_types"`
+	TruncatedQuery string                `json:"truncated_query"`
 }
 
 func main() {
@@ -131,6 +167,51 @@ func handle(r req) res {
 			return errRes(err)
 		}
 		return res{Stmts: emptyNotNil(stmts)}
+	case "summary":
+		limit := -1
+		if r.TruncateLimit != nil {
+			limit = *r.TruncateLimit
+		}
+		sr, err := pg_query.Summary(r.SQL, limit)
+		if err != nil {
+			return errRes(err)
+		}
+		out := &summaryRes{
+			Aliases:        sr.Aliases,
+			CteNames:       sr.CteNames,
+			StatementTypes: sr.StatementTypes,
+			TruncatedQuery: sr.TruncatedQuery,
+		}
+		for _, t := range sr.Tables {
+			out.Tables = append(out.Tables, summaryTable{
+				Name:       t.Name,
+				SchemaName: t.SchemaName,
+				TableName:  t.TableName,
+				Context:    t.Context.String(),
+			})
+		}
+		for _, f := range sr.Functions {
+			out.Functions = append(out.Functions, summaryFunction{
+				Name:         f.Name,
+				FunctionName: f.FunctionName,
+				SchemaName:   f.SchemaName,
+				Context:      f.Context.String(),
+			})
+		}
+		for _, f := range sr.FilterColumns {
+			out.FilterColumns = append(out.FilterColumns, summaryFilterColumn{
+				SchemaName: f.SchemaName,
+				TableName:  f.TableName,
+				Column:     f.Column,
+			})
+		}
+		return res{Summary: out}
+	case "parse_plpgsql":
+		out, err := pg_query.ParsePlPgSqlToJSON(r.SQL)
+		if err != nil {
+			return errRes(err)
+		}
+		return res{Text: &out}
 	default:
 		return res{Err: &oracleError{Message: "unknown op " + r.Op}}
 	}

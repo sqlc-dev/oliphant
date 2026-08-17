@@ -1,0 +1,862 @@
+== 001
+/*
+ * 1.test CREATE INDEX
+ *
+ * Deliberately avoid dropping objects in this section, to get some pg_dump
+ * coverage.
+ */
+
+-- Regular index with included columns
+CREATE TABLE tbl_include_reg (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_reg" schema="" table="tbl_include_reg" ctx=DDL
+STMT: CreateStmt
+== 002
+INSERT INTO tbl_include_reg SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_reg" schema="" table="tbl_include_reg" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 003
+CREATE INDEX tbl_include_reg_idx ON tbl_include_reg (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_reg" schema="" table="tbl_include_reg" ctx=DDL
+STMT: IndexStmt
+== 004
+-- duplicate column is pretty pointless, but we allow it anyway
+CREATE INDEX ON tbl_include_reg (c1, c2) INCLUDE (c1, c3)
+--
+TABLE: name="tbl_include_reg" schema="" table="tbl_include_reg" ctx=DDL
+STMT: IndexStmt
+== 005
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_reg'::regclass ORDER BY c.relname
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="i" column="indrelid"
+STMT: SelectStmt
+== 006
+-- Unique index and unique constraint
+CREATE TABLE tbl_include_unique1 (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_unique1" schema="" table="tbl_include_unique1" ctx=DDL
+STMT: CreateStmt
+== 007
+INSERT INTO tbl_include_unique1 SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_unique1" schema="" table="tbl_include_unique1" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 008
+CREATE UNIQUE INDEX tbl_include_unique1_idx_unique ON tbl_include_unique1 using btree (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_unique1" schema="" table="tbl_include_unique1" ctx=DDL
+STMT: IndexStmt
+== 009
+ALTER TABLE tbl_include_unique1 add UNIQUE USING INDEX tbl_include_unique1_idx_unique
+--
+TABLE: name="tbl_include_unique1" schema="" table="tbl_include_unique1" ctx=DDL
+STMT: AlterTableStmt
+== 010
+ALTER TABLE tbl_include_unique1 add UNIQUE (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_unique1" schema="" table="tbl_include_unique1" ctx=DDL
+STMT: AlterTableStmt
+== 011
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_unique1'::regclass ORDER BY c.relname
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="i" column="indrelid"
+STMT: SelectStmt
+== 012
+-- Unique index and unique constraint. Both must fail.
+CREATE TABLE tbl_include_unique2 (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_unique2" schema="" table="tbl_include_unique2" ctx=DDL
+STMT: CreateStmt
+== 013
+INSERT INTO tbl_include_unique2 SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_unique2" schema="" table="tbl_include_unique2" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 014
+CREATE UNIQUE INDEX tbl_include_unique2_idx_unique ON tbl_include_unique2 using btree (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_unique2" schema="" table="tbl_include_unique2" ctx=DDL
+STMT: IndexStmt
+== 015
+ALTER TABLE tbl_include_unique2 add UNIQUE (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_unique2" schema="" table="tbl_include_unique2" ctx=DDL
+STMT: AlterTableStmt
+== 016
+-- PK constraint
+CREATE TABLE tbl_include_pk (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_pk" schema="" table="tbl_include_pk" ctx=DDL
+STMT: CreateStmt
+== 017
+INSERT INTO tbl_include_pk SELECT 1, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_pk" schema="" table="tbl_include_pk" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 018
+ALTER TABLE tbl_include_pk add PRIMARY KEY (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_pk" schema="" table="tbl_include_pk" ctx=DDL
+STMT: AlterTableStmt
+== 019
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_pk'::regclass ORDER BY c.relname
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="i" column="indrelid"
+STMT: SelectStmt
+== 020
+CREATE TABLE tbl_include_box (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_box" schema="" table="tbl_include_box" ctx=DDL
+STMT: CreateStmt
+== 021
+INSERT INTO tbl_include_box SELECT 1, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_box" schema="" table="tbl_include_box" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 022
+CREATE UNIQUE INDEX tbl_include_box_idx_unique ON tbl_include_box using btree (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_box" schema="" table="tbl_include_box" ctx=DDL
+STMT: IndexStmt
+== 023
+ALTER TABLE tbl_include_box add PRIMARY KEY USING INDEX tbl_include_box_idx_unique
+--
+TABLE: name="tbl_include_box" schema="" table="tbl_include_box" ctx=DDL
+STMT: AlterTableStmt
+== 024
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
+WHERE i.indrelid = 'tbl_include_box'::regclass ORDER BY c.relname
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="i" column="indrelid"
+STMT: SelectStmt
+== 025
+-- PK constraint. Must fail.
+CREATE TABLE tbl_include_box_pk (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl_include_box_pk" schema="" table="tbl_include_box_pk" ctx=DDL
+STMT: CreateStmt
+== 026
+INSERT INTO tbl_include_box_pk SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl_include_box_pk" schema="" table="tbl_include_box_pk" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 027
+ALTER TABLE tbl_include_box_pk add PRIMARY KEY (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl_include_box_pk" schema="" table="tbl_include_box_pk" ctx=DDL
+STMT: AlterTableStmt
+== 028
+/*
+ * 2. Test CREATE TABLE with constraint
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				CONSTRAINT covering UNIQUE(c1,c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 029
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 030
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 031
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 032
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 033
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				CONSTRAINT covering PRIMARY KEY(c1,c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 034
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 035
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 036
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 037
+INSERT INTO tbl SELECT 1, NULL, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 038
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,300) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 039
+explain (costs off)
+select * from tbl where (c1,c2,c3) < (2,5,1)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=Select
+FILTER: schema="" table="" column="c1"
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c3"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 040
+select * from tbl where (c1,c2,c3) < (2,5,1)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=Select
+FILTER: schema="" table="" column="c1"
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c3"
+STMT: SelectStmt
+== 041
+-- row comparison that compares high key at page boundary
+SET enable_seqscan = off
+--
+STMT: VariableSetStmt
+== 042
+explain (costs off)
+select * from tbl where (c1,c2,c3) < (262,1,1) limit 1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=Select
+FILTER: schema="" table="" column="c1"
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c3"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 043
+select * from tbl where (c1,c2,c3) < (262,1,1) limit 1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=Select
+FILTER: schema="" table="" column="c1"
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c3"
+STMT: SelectStmt
+== 044
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 045
+RESET enable_seqscan
+--
+STMT: VariableSetStmt
+== 046
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				UNIQUE(c1,c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 047
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 048
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 049
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 050
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 051
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				PRIMARY KEY(c1,c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 052
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 053
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 054
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 055
+INSERT INTO tbl SELECT 1, NULL, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 056
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 057
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 058
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box,
+				EXCLUDE USING btree (c1 WITH =) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 059
+SELECT indexrelid::regclass, indnatts, indnkeyatts, indisunique, indisprimary, indkey, indclass FROM pg_index WHERE indrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 060
+SELECT pg_get_constraintdef(oid), conname, conkey FROM pg_constraint WHERE conrelid = 'tbl'::regclass::oid
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 061
+-- ensure that constraint works
+INSERT INTO tbl SELECT 1, 2, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+INSERT INTO tbl SELECT x, 2*x, NULL, NULL FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 064
+/*
+ * 3.0 Test ALTER TABLE DROP COLUMN.
+ * Any column deletion leads to index deletion.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 int)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 065
+CREATE UNIQUE INDEX tbl_idx ON tbl using btree(c1, c2, c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 066
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 067
+ALTER TABLE tbl DROP COLUMN c3
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 068
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 069
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 070
+/*
+ * 3.1 Test ALTER TABLE DROP COLUMN.
+ * Included column deletion leads to the index deletion,
+ * AS well AS key columns deletion. It's explained in documentation.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 071
+CREATE UNIQUE INDEX tbl_idx ON tbl using btree(c1, c2) INCLUDE(c3,c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 072
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 073
+ALTER TABLE tbl DROP COLUMN c3
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 074
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 075
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 076
+/*
+ * 3.2 Test ALTER TABLE DROP COLUMN.
+ * Included column deletion leads to the index deletion.
+ * AS well AS key columns deletion. It's explained in documentation.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 077
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 078
+ALTER TABLE tbl DROP COLUMN c3
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 079
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 080
+ALTER TABLE tbl DROP COLUMN c1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 081
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 082
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 083
+/*
+ * 3.3 Test ALTER TABLE SET STATISTICS
+ */
+CREATE TABLE tbl (c1 int, c2 int)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 084
+CREATE INDEX tbl_idx ON tbl (c1, (c1+0)) INCLUDE (c2)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 085
+ALTER INDEX tbl_idx ALTER COLUMN 1 SET STATISTICS 1000
+--
+STMT: AlterTableStmt
+== 086
+ALTER INDEX tbl_idx ALTER COLUMN 2 SET STATISTICS 1000
+--
+STMT: AlterTableStmt
+== 087
+ALTER INDEX tbl_idx ALTER COLUMN 3 SET STATISTICS 1000
+--
+STMT: AlterTableStmt
+== 088
+ALTER INDEX tbl_idx ALTER COLUMN 4 SET STATISTICS 1000
+--
+STMT: AlterTableStmt
+== 089
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 090
+/*
+ * 4. CREATE INDEX CONCURRENTLY
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 091
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,1000) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 092
+CREATE UNIQUE INDEX CONCURRENTLY on tbl (c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 093
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 094
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 095
+/*
+ * 5. REINDEX
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 096
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 097
+ALTER TABLE tbl DROP COLUMN c3
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 098
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 099
+REINDEX INDEX tbl_c1_c2_c3_c4_key
+--
+STMT: ReindexStmt
+== 100
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 101
+ALTER TABLE tbl DROP COLUMN c1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 102
+SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="tablename"
+STMT: SelectStmt
+== 103
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 104
+/*
+ * 7. Check various AMs. All but btree, gist and spgist must fail.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 box, c4 box)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 105
+CREATE INDEX on tbl USING brin(c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 106
+CREATE INDEX on tbl USING gist(c3) INCLUDE (c1, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 107
+CREATE INDEX on tbl USING spgist(c3) INCLUDE (c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 108
+CREATE INDEX on tbl USING gin(c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 109
+CREATE INDEX on tbl USING hash(c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 110
+CREATE INDEX on tbl USING rtree(c3) INCLUDE (c1, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 111
+CREATE INDEX on tbl USING btree(c1, c2) INCLUDE (c3, c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 112
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 113
+/*
+ * 8. Update, delete values in indexed table.
+ */
+CREATE TABLE tbl (c1 int, c2 int, c3 int, c4 box)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 114
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 115
+CREATE UNIQUE INDEX tbl_idx_unique ON tbl using btree(c1, c2) INCLUDE (c3,c4)
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: IndexStmt
+== 116
+UPDATE tbl SET c1 = 100 WHERE c1 = 2
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+STMT: UpdateStmt
+== 117
+UPDATE tbl SET c1 = 1 WHERE c1 = 3
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+STMT: UpdateStmt
+== 118
+-- should fail
+UPDATE tbl SET c2 = 2 WHERE c1 = 1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+STMT: UpdateStmt
+== 119
+UPDATE tbl SET c3 = 1
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+STMT: UpdateStmt
+== 120
+DELETE FROM tbl WHERE c1 = 5 OR c3 = 12
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+STMT: DeleteStmt
+== 121
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 122
+/*
+ * 9. Alter column type.
+ */
+CREATE TABLE tbl (c1 int,c2 int, c3 int, c4 box, UNIQUE(c1, c2) INCLUDE(c3,c4))
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: CreateStmt
+== 123
+INSERT INTO tbl SELECT x, 2*x, 3*x, box('4,4,4,4') FROM generate_series(1,10) AS x
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 124
+ALTER TABLE tbl ALTER c1 TYPE bigint
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 125
+ALTER TABLE tbl ALTER c3 TYPE bigint
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: AlterTableStmt
+== 126
+DROP TABLE tbl
+--
+TABLE: name="tbl" schema="" table="tbl" ctx=DDL
+STMT: DropStmt
+== 127
+/*
+ * 10. Test coverage for names stored as cstrings in indexes
+ */
+CREATE TABLE nametbl (c1 int, c2 name, c3 float)
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=DDL
+STMT: CreateStmt
+== 128
+CREATE INDEX nametbl_c1_c2_idx ON nametbl (c2, c1) INCLUDE (c3)
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=DDL
+STMT: IndexStmt
+== 129
+INSERT INTO nametbl VALUES(1, 'two', 3.0)
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 130
+VACUUM nametbl
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=DDL
+STMT: VacuumStmt
+== 131
+SET enable_seqscan = 0
+--
+STMT: VariableSetStmt
+== 132
+-- Ensure we get an index only scan plan
+EXPLAIN (COSTS OFF) SELECT c2, c1, c3 FROM nametbl WHERE c2 = 'two' AND c1 = 1
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=Select
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 133
+-- Validate the results look sane
+SELECT c2, c1, c3 FROM nametbl WHERE c2 = 'two' AND c1 = 1
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=Select
+FILTER: schema="" table="" column="c2"
+FILTER: schema="" table="" column="c1"
+STMT: SelectStmt
+== 134
+RESET enable_seqscan
+--
+STMT: VariableSetStmt
+== 135
+DROP TABLE nametbl
+--
+TABLE: name="nametbl" schema="" table="nametbl" ctx=DDL
+STMT: DropStmt

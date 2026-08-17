@@ -8,6 +8,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 	"github.com/sqlc-dev/oliphant/internal/normalize"
 	"github.com/sqlc-dev/oliphant/internal/parse"
+	"github.com/sqlc-dev/oliphant/internal/plpgsql"
+	"github.com/sqlc-dev/oliphant/internal/summary"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
 
@@ -116,8 +119,21 @@ func DeparseFromProtobuf(input []byte) (result string, err error) {
 	return out, nil
 }
 
+// ParsePlPgSqlToJSON is pg_query_parse_plpgsql: compile every CREATE
+// FUNCTION/PROCEDURE and DO statement with the PL/pgSQL parser and render
+// the JSON array of function dumps.
 func ParsePlPgSqlToJSON(input string) (result string, err error) {
-	return "", errNotImplemented("ParsePlPgSqlToJSON")
+	out, perr := plpgsql.ParseToJSON(input)
+	if perr != nil {
+		return "", &Error{
+			Message:   perr.Message,
+			Filename:  perr.Filename,
+			Funcname:  perr.Funcname,
+			Cursorpos: perr.Cursorpos,
+			Context:   perr.Context,
+		}
+	}
+	return out, nil
 }
 
 // Normalize is pg_query_normalize: constants become $n parameter references.
@@ -247,6 +263,25 @@ func IsUtilityStmt(input string) (result []bool, err error) {
 	return result, nil
 }
 
+// SummaryToProtobuf is pg_query_summary: parse, walk for tables/aliases/
+// CTEs/functions/filter columns/statement types, and — unless truncateLimit
+// is -1 — produce the smart-truncated query text.
 func SummaryToProtobuf(input string, truncateLimit int) ([]byte, error) {
-	return nil, errNotImplemented("SummaryToProtobuf")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	res, serr := summary.Summarize(tree, truncateLimit)
+	if serr != nil {
+		var se *summary.Error
+		if errors.As(serr, &se) {
+			return nil, &Error{
+				Message:  se.Message,
+				Filename: se.Filename,
+				Funcname: se.Funcname,
+			}
+		}
+		return nil, &Error{Message: serr.Error()}
+	}
+	return proto.Marshal(res)
 }

@@ -1,0 +1,1789 @@
+== 001
+|--
+-- Test domains.
+|--
+
+-- Test Comment / Drop
+create domain domaindroptest int4
+--
+STMT: CreateDomainStmt
+== 002
+comment on domain domaindroptest is 'About to drop this..'
+--
+STMT: CommentStmt
+== 003
+create domain dependenttypetest domaindroptest
+--
+STMT: CreateDomainStmt
+== 004
+-- fail because of dependent type
+drop domain domaindroptest
+--
+STMT: DropStmt
+== 005
+drop domain domaindroptest cascade
+--
+STMT: DropStmt
+== 006
+-- this should fail because already gone
+drop domain domaindroptest cascade
+--
+STMT: DropStmt
+== 007
+-- Test domain input.
+
+-- Note: the point of checking both INSERT and COPY FROM is that INSERT
+-- exercises CoerceToDomain while COPY exercises domain_in.
+
+create domain domainvarchar varchar(5)
+--
+STMT: CreateDomainStmt
+== 008
+create domain domainnumeric numeric(8,2)
+--
+STMT: CreateDomainStmt
+== 009
+create domain domainint4 int4
+--
+STMT: CreateDomainStmt
+== 010
+create domain domaintext text
+--
+STMT: CreateDomainStmt
+== 011
+-- Test explicit coercions --- these should succeed (and truncate)
+SELECT cast('123456' as domainvarchar)
+--
+STMT: SelectStmt
+== 012
+SELECT cast('12345' as domainvarchar)
+--
+STMT: SelectStmt
+== 013
+-- Test tables using domains
+create table basictest
+           ( testint4 domainint4
+           , testtext domaintext
+           , testvarchar domainvarchar
+           , testnumeric domainnumeric
+           )
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=DDL
+STMT: CreateStmt
+== 014
+INSERT INTO basictest values ('88', 'haha', 'short', '123.12')
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 015
+-- Good
+INSERT INTO basictest values ('88', 'haha', 'short text', '123.12')
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+-- Bad varchar
+INSERT INTO basictest values ('88', 'haha', 'short', '123.1212')
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+-- Truncate numeric
+
+-- Test copy
+COPY basictest (testvarchar) FROM stdin
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=Select
+STMT: CopyStmt
+== 018
+-- fail
+notsoshorttext
+
+COPY basictest (testvarchar) FROM stdin
+--
+ERROR: syntax error at or near "notsoshorttext"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 019
+select * from basictest
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=Select
+STMT: SelectStmt
+== 020
+-- check that domains inherit operations from base types
+select testtext || testvarchar as concat, testnumeric + 42 as sum
+from basictest
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=Select
+STMT: SelectStmt
+== 021
+-- check that union/case/coalesce type resolution handles domains properly
+select pg_typeof(coalesce(4::domainint4, 7))
+--
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 022
+select pg_typeof(coalesce(4::domainint4, 7::domainint4))
+--
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 023
+drop table basictest
+--
+TABLE: name="basictest" schema="" table="basictest" ctx=DDL
+STMT: DropStmt
+== 024
+drop domain domainvarchar restrict
+--
+STMT: DropStmt
+== 025
+drop domain domainnumeric restrict
+--
+STMT: DropStmt
+== 026
+drop domain domainint4 restrict
+--
+STMT: DropStmt
+== 027
+drop domain domaintext
+--
+STMT: DropStmt
+== 028
+-- Test non-error-throwing input
+
+create domain positiveint int4 check(value > 0)
+--
+STMT: CreateDomainStmt
+== 029
+create domain weirdfloat float8 check((1 / value) < 10)
+--
+STMT: CreateDomainStmt
+== 030
+select pg_input_is_valid('1', 'positiveint')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+select pg_input_is_valid('junk', 'positiveint')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 032
+select pg_input_is_valid('-1', 'positiveint')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 033
+select * from pg_input_error_info('junk', 'positiveint')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 034
+select * from pg_input_error_info('-1', 'positiveint')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 035
+select * from pg_input_error_info('junk', 'weirdfloat')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+select * from pg_input_error_info('0.01', 'weirdfloat')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 037
+-- We currently can't trap errors raised in the CHECK expression itself
+select * from pg_input_error_info('0', 'weirdfloat')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+drop domain positiveint
+--
+STMT: DropStmt
+== 039
+drop domain weirdfloat
+--
+STMT: DropStmt
+== 040
+-- Test domains over array types
+
+create domain domainint4arr int4[1]
+--
+STMT: CreateDomainStmt
+== 041
+create domain domainchar4arr varchar(4)[2][3]
+--
+STMT: CreateDomainStmt
+== 042
+create table domarrtest
+           ( testint4arr domainint4arr
+           , testchar4arr domainchar4arr
+            )
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DDL
+STMT: CreateStmt
+== 043
+INSERT INTO domarrtest values ('{2,2}', '{{"a","b"},{"c","d"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 044
+INSERT INTO domarrtest values ('{{2,2},{2,2}}', '{{"a","b"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 045
+INSERT INTO domarrtest values ('{2,2}', '{{"a","b"},{"c","d"},{"e","f"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 046
+INSERT INTO domarrtest values ('{2,2}', '{{"a"},{"c"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 047
+INSERT INTO domarrtest values (NULL, '{{"a","b","c"},{"d","e","f"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 048
+INSERT INTO domarrtest values (NULL, '{{"toolong","b","c"},{"d","e","f"}}')
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 049
+INSERT INTO domarrtest (testint4arr[1], testint4arr[3]) values (11,22)
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 050
+select * from domarrtest
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=Select
+STMT: SelectStmt
+== 051
+select testint4arr[1], testchar4arr[2:2] from domarrtest
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=Select
+STMT: SelectStmt
+== 052
+select array_dims(testint4arr), array_dims(testchar4arr) from domarrtest
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=Select
+FUNCTION: name="array_dims" function="array_dims" schema="" ctx=Call
+FUNCTION: name="array_dims" function="array_dims" schema="" ctx=Call
+STMT: SelectStmt
+== 053
+COPY domarrtest FROM stdin
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=Select
+STMT: CopyStmt
+== 054
+COPY domarrtest FROM stdin
+--
+TABLE: name="domarrtest" schema="" table="domarrtest" ctx=Select
+STMT: CopyStmt
+== 055
+-- fail
+{3,4}	{qwerty,w,e}
+
+select * from domarrtest
+--
+ERROR: syntax error at or near "{"
+CURSORPOS: 9
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 056
+COPY nulltest FROM stdin
+--
+TABLE: name="nulltest" schema="" table="nulltest" ctx=Select
+STMT: CopyStmt
+== 057
+--fail
+a	b	c	d	\N
+
+-- Last row is bad
+COPY nulltest FROM stdin
+--
+ERROR: syntax error at or near "a"
+CURSORPOS: 8
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 058
+select * from nulltest
+--
+TABLE: name="nulltest" schema="" table="nulltest" ctx=Select
+STMT: SelectStmt
+== 059
+-- Test out coerced (casted) constraints
+SELECT cast('1' as dnotnull)
+--
+STMT: SelectStmt
+== 060
+SELECT cast(NULL as dnotnull)
+--
+STMT: SelectStmt
+== 061
+-- fail
+SELECT cast(cast(NULL as dnull) as dnotnull)
+--
+STMT: SelectStmt
+== 062
+-- fail
+SELECT cast(col4 as dnotnull) from nulltest
+--
+TABLE: name="nulltest" schema="" table="nulltest" ctx=Select
+STMT: SelectStmt
+== 063
+-- fail
+
+-- cleanup
+drop table nulltest
+--
+TABLE: name="nulltest" schema="" table="nulltest" ctx=DDL
+STMT: DropStmt
+== 064
+drop domain dnotnull restrict
+--
+STMT: DropStmt
+== 065
+drop domain dnull restrict
+--
+STMT: DropStmt
+== 066
+drop domain dcheck restrict
+--
+STMT: DropStmt
+== 067
+create domain ddef1 int4 DEFAULT 3
+--
+STMT: CreateDomainStmt
+== 068
+create domain ddef2 oid DEFAULT '12'
+--
+STMT: CreateDomainStmt
+== 069
+-- Type mixing, function returns int8
+create domain ddef3 text DEFAULT 5
+--
+STMT: CreateDomainStmt
+== 070
+create sequence ddef4_seq
+--
+STMT: CreateSeqStmt
+== 071
+create domain ddef4 int4 DEFAULT nextval('ddef4_seq')
+--
+STMT: CreateDomainStmt
+== 072
+create domain ddef5 numeric(8,2) NOT NULL DEFAULT '12.12'
+--
+STMT: CreateDomainStmt
+== 073
+create table defaulttest
+            ( col1 ddef1
+            , col2 ddef2
+            , col3 ddef3
+            , col4 ddef4 PRIMARY KEY
+            , col5 ddef1 NOT NULL DEFAULT NULL
+            , col6 ddef2 DEFAULT '88'
+            , col7 ddef4 DEFAULT 8000
+            , col8 ddef5
+            )
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DDL
+STMT: CreateStmt
+== 074
+insert into defaulttest(col4) values(0)
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 075
+-- fails, col5 defaults to null
+alter table defaulttest alter column col5 drop default
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DDL
+STMT: AlterTableStmt
+== 076
+insert into defaulttest default values
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DML
+STMT: InsertStmt
+== 077
+-- succeeds, inserts domain default
+-- We used to treat SET DEFAULT NULL as equivalent to DROP DEFAULT; wrong
+alter table defaulttest alter column col5 set default null
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DDL
+STMT: AlterTableStmt
+== 078
+insert into defaulttest(col4) values(0)
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 079
+-- fails
+alter table defaulttest alter column col5 drop default
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DDL
+STMT: AlterTableStmt
+== 080
+insert into defaulttest default values
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DML
+STMT: InsertStmt
+== 081
+insert into defaulttest default values
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DML
+STMT: InsertStmt
+== 082
+-- Test defaults with copy
+COPY defaulttest(col5) FROM stdin
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=Select
+STMT: CopyStmt
+== 083
+select * from defaulttest
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=Select
+STMT: SelectStmt
+== 084
+drop table defaulttest cascade
+--
+TABLE: name="defaulttest" schema="" table="defaulttest" ctx=DDL
+STMT: DropStmt
+== 085
+-- Test ALTER DOMAIN .. NOT NULL
+create domain dnotnulltest integer
+--
+STMT: CreateDomainStmt
+== 086
+create table domnotnull
+( col1 dnotnulltest
+, col2 dnotnulltest
+)
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DDL
+STMT: CreateStmt
+== 087
+insert into domnotnull default values
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: InsertStmt
+== 088
+alter domain dnotnulltest set not null
+--
+STMT: AlterDomainStmt
+== 089
+-- fails
+
+update domnotnull set col1 = 5
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 090
+alter domain dnotnulltest set not null
+--
+STMT: AlterDomainStmt
+== 091
+-- fails
+
+update domnotnull set col2 = 6
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 092
+alter domain dnotnulltest set not null
+--
+STMT: AlterDomainStmt
+== 093
+update domnotnull set col1 = null
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 094
+-- fails
+
+alter domain dnotnulltest drop not null
+--
+STMT: AlterDomainStmt
+== 095
+update domnotnull set col1 = null
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 096
+update domnotnull set col1 = 5
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 097
+-- these constraints can also be added and removed by name
+alter domain dnotnulltest add constraint dnotnulltest_notnull not null
+--
+STMT: AlterDomainStmt
+== 098
+update domnotnull set col1 = null
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 099
+-- fails
+select conname, pg_get_constraintdef(oid) from pg_constraint
+ where contypid = 'dnotnulltest'::regtype
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="pg_get_constraintdef" function="pg_get_constraintdef" schema="" ctx=Call
+FILTER: schema="" table="" column="contypid"
+STMT: SelectStmt
+== 100
+alter domain dnotnulltest drop constraint dnotnulltest_notnull
+--
+STMT: AlterDomainStmt
+== 101
+update domnotnull set col1 = null
+--
+TABLE: name="domnotnull" schema="" table="domnotnull" ctx=DML
+STMT: UpdateStmt
+== 102
+drop domain dnotnulltest cascade
+--
+STMT: DropStmt
+== 103
+-- Test ALTER DOMAIN .. DEFAULT ..
+create table domdeftest (col1 ddef1)
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=DDL
+STMT: CreateStmt
+== 104
+insert into domdeftest default values
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=DML
+STMT: InsertStmt
+== 105
+select * from domdeftest
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=Select
+STMT: SelectStmt
+== 106
+alter domain ddef1 set default '42'
+--
+STMT: AlterDomainStmt
+== 107
+insert into domdeftest default values
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=DML
+STMT: InsertStmt
+== 108
+select * from domdeftest
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=Select
+STMT: SelectStmt
+== 109
+alter domain ddef1 drop default
+--
+STMT: AlterDomainStmt
+== 110
+insert into domdeftest default values
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=DML
+STMT: InsertStmt
+== 111
+select * from domdeftest
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=Select
+STMT: SelectStmt
+== 112
+drop table domdeftest
+--
+TABLE: name="domdeftest" schema="" table="domdeftest" ctx=DDL
+STMT: DropStmt
+== 113
+-- Test ALTER DOMAIN .. CONSTRAINT ..
+create domain con as integer
+--
+STMT: CreateDomainStmt
+== 114
+create table domcontest (col1 con)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DDL
+STMT: CreateStmt
+== 115
+insert into domcontest values (1)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 116
+insert into domcontest values (2)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 117
+alter domain con add constraint t check (VALUE < 1)
+--
+STMT: AlterDomainStmt
+== 118
+-- fails
+
+alter domain con add constraint t check (VALUE < 34)
+--
+STMT: AlterDomainStmt
+== 119
+alter domain con add check (VALUE > 0)
+--
+STMT: AlterDomainStmt
+== 120
+insert into domcontest values (-5)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 121
+-- fails
+insert into domcontest values (42)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 122
+-- fails
+insert into domcontest values (5)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 123
+alter domain con drop constraint t
+--
+STMT: AlterDomainStmt
+== 124
+insert into domcontest values (-5)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 125
+--fails
+insert into domcontest values (42)
+--
+TABLE: name="domcontest" schema="" table="domcontest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 126
+alter domain con drop constraint nonexistent
+--
+STMT: AlterDomainStmt
+== 127
+alter domain con drop constraint if exists nonexistent
+--
+STMT: AlterDomainStmt
+== 128
+-- not-null constraints
+create domain connotnull integer
+--
+STMT: CreateDomainStmt
+== 129
+create table domconnotnulltest
+( col1 connotnull
+, col2 connotnull
+)
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DDL
+STMT: CreateStmt
+== 130
+insert into domconnotnulltest default values
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DML
+STMT: InsertStmt
+== 131
+alter domain connotnull add not null
+--
+STMT: AlterDomainStmt
+== 132
+-- fails
+
+update domconnotnulltest set col1 = 5
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DML
+STMT: UpdateStmt
+== 133
+alter domain connotnull add not null
+--
+STMT: AlterDomainStmt
+== 134
+-- fails
+
+update domconnotnulltest set col2 = 6
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DML
+STMT: UpdateStmt
+== 135
+alter domain connotnull add constraint constr1 not null
+--
+STMT: AlterDomainStmt
+== 136
+select count(*) from pg_constraint where contypid = 'connotnull'::regtype and contype = 'n'
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="contypid"
+FILTER: schema="" table="" column="contype"
+STMT: SelectStmt
+== 137
+alter domain connotnull add constraint constr1bis not null
+--
+STMT: AlterDomainStmt
+== 138
+-- redundant
+select count(*) from pg_constraint where contypid = 'connotnull'::regtype and contype = 'n'
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="contypid"
+FILTER: schema="" table="" column="contype"
+STMT: SelectStmt
+== 139
+update domconnotnulltest set col1 = null
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DML
+STMT: UpdateStmt
+== 140
+-- fails
+
+alter domain connotnull drop constraint constr1
+--
+STMT: AlterDomainStmt
+== 141
+update domconnotnulltest set col1 = null
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DML
+STMT: UpdateStmt
+== 142
+drop domain connotnull cascade
+--
+STMT: DropStmt
+== 143
+drop table domconnotnulltest
+--
+TABLE: name="domconnotnulltest" schema="" table="domconnotnulltest" ctx=DDL
+STMT: DropStmt
+== 144
+-- Test ALTER DOMAIN .. CONSTRAINT .. NOT VALID
+create domain things AS INT
+--
+STMT: CreateDomainStmt
+== 145
+CREATE TABLE thethings (stuff things)
+--
+TABLE: name="thethings" schema="" table="thethings" ctx=DDL
+STMT: CreateStmt
+== 146
+INSERT INTO thethings (stuff) VALUES (55)
+--
+TABLE: name="thethings" schema="" table="thethings" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 147
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (VALUE < 11)
+--
+STMT: AlterDomainStmt
+== 148
+ALTER DOMAIN things ADD CONSTRAINT meow CHECK (VALUE < 11) NOT VALID
+--
+STMT: AlterDomainStmt
+== 149
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+--
+STMT: AlterDomainStmt
+== 150
+UPDATE thethings SET stuff = 10
+--
+TABLE: name="thethings" schema="" table="thethings" ctx=DML
+STMT: UpdateStmt
+== 151
+ALTER DOMAIN things VALIDATE CONSTRAINT meow
+--
+STMT: AlterDomainStmt
+== 152
+-- Confirm ALTER DOMAIN with RULES.
+create table domtab (col1 integer)
+--
+TABLE: name="domtab" schema="" table="domtab" ctx=DDL
+STMT: CreateStmt
+== 153
+create domain dom as integer
+--
+STMT: CreateDomainStmt
+== 154
+create view domview as select cast(col1 as dom) from domtab
+--
+TABLE: name="domview" schema="" table="domview" ctx=DDL
+TABLE: name="domtab" schema="" table="domtab" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 155
+insert into domtab (col1) values (null)
+--
+TABLE: name="domtab" schema="" table="domtab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 156
+insert into domtab (col1) values (5)
+--
+TABLE: name="domtab" schema="" table="domtab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 157
+select * from domview
+--
+TABLE: name="domview" schema="" table="domview" ctx=Select
+STMT: SelectStmt
+== 158
+alter domain dom set not null
+--
+STMT: AlterDomainStmt
+== 159
+select * from domview
+--
+TABLE: name="domview" schema="" table="domview" ctx=Select
+STMT: SelectStmt
+== 160
+-- fail
+
+alter domain dom drop not null
+--
+STMT: AlterDomainStmt
+== 161
+select * from domview
+--
+TABLE: name="domview" schema="" table="domview" ctx=Select
+STMT: SelectStmt
+== 162
+alter domain dom add constraint domchkgt6 check(value > 6)
+--
+STMT: AlterDomainStmt
+== 163
+select * from domview
+--
+TABLE: name="domview" schema="" table="domview" ctx=Select
+STMT: SelectStmt
+== 164
+--fail
+
+alter domain dom drop constraint domchkgt6 restrict
+--
+STMT: AlterDomainStmt
+== 165
+select * from domview
+--
+TABLE: name="domview" schema="" table="domview" ctx=Select
+STMT: SelectStmt
+== 166
+-- cleanup
+drop domain ddef1 restrict
+--
+STMT: DropStmt
+== 167
+drop domain ddef2 restrict
+--
+STMT: DropStmt
+== 168
+drop domain ddef3 restrict
+--
+STMT: DropStmt
+== 169
+drop domain ddef4 restrict
+--
+STMT: DropStmt
+== 170
+drop domain ddef5 restrict
+--
+STMT: DropStmt
+== 171
+drop sequence ddef4_seq
+--
+STMT: DropStmt
+== 172
+-- Test domains over domains
+create domain vchar4 varchar(4)
+--
+STMT: CreateDomainStmt
+== 173
+create domain dinter vchar4 check (substring(VALUE, 1, 1) = 'x')
+--
+STMT: CreateDomainStmt
+== 174
+create domain dtop dinter check (substring(VALUE, 2, 1) = '1')
+--
+STMT: CreateDomainStmt
+== 175
+select 'x123'::dtop
+--
+STMT: SelectStmt
+== 176
+select 'x1234'::dtop
+--
+STMT: SelectStmt
+== 177
+-- explicit coercion should truncate
+select 'y1234'::dtop
+--
+STMT: SelectStmt
+== 178
+-- fail
+select 'y123'::dtop
+--
+STMT: SelectStmt
+== 179
+-- fail
+select 'yz23'::dtop
+--
+STMT: SelectStmt
+== 180
+-- fail
+select 'xz23'::dtop
+--
+STMT: SelectStmt
+== 181
+-- fail
+
+create temp table dtest(f1 dtop)
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DDL
+STMT: CreateStmt
+== 182
+insert into dtest values('x123')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 183
+insert into dtest values('x1234')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 184
+-- fail, implicit coercion
+insert into dtest values('y1234')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 185
+-- fail, implicit coercion
+insert into dtest values('y123')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 186
+-- fail
+insert into dtest values('yz23')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 187
+-- fail
+insert into dtest values('xz23')
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 188
+-- fail
+
+drop table dtest
+--
+TABLE: name="dtest" schema="" table="dtest" ctx=DDL
+STMT: DropStmt
+== 189
+drop domain vchar4 cascade
+--
+STMT: DropStmt
+== 190
+-- Make sure that constraints of newly-added domain columns are
+-- enforced correctly, even if there's no default value for the new
+-- column. Per bug #1433
+create domain str_domain as text not null
+--
+STMT: CreateDomainStmt
+== 191
+create table domain_test (a int, b int)
+--
+TABLE: name="domain_test" schema="" table="domain_test" ctx=DDL
+STMT: CreateStmt
+== 192
+insert into domain_test values (1, 2)
+--
+TABLE: name="domain_test" schema="" table="domain_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 193
+insert into domain_test values (1, 2)
+--
+TABLE: name="domain_test" schema="" table="domain_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 194
+-- should fail
+alter table domain_test add column c str_domain
+--
+TABLE: name="domain_test" schema="" table="domain_test" ctx=DDL
+STMT: AlterTableStmt
+== 195
+create domain str_domain2 as text check (value <> 'foo') default 'foo'
+--
+STMT: CreateDomainStmt
+== 196
+-- should fail
+alter table domain_test add column d str_domain2
+--
+TABLE: name="domain_test" schema="" table="domain_test" ctx=DDL
+STMT: AlterTableStmt
+== 197
+-- Check that domain constraints on prepared statement parameters of
+-- unknown type are enforced correctly.
+create domain pos_int as int4 check (value > 0) not null
+--
+STMT: CreateDomainStmt
+== 198
+prepare s1 as select $1::pos_int = 10 as "is_ten"
+--
+STMT: PrepareStmt
+STMT: SelectStmt
+== 199
+execute s1(10)
+--
+STMT: ExecuteStmt
+== 200
+execute s1(0)
+--
+STMT: ExecuteStmt
+== 201
+-- should fail
+execute s1(NULL)
+--
+STMT: ExecuteStmt
+== 202
+-- should fail
+
+-- Check that domain constraints on plpgsql function parameters, results,
+-- and local variables are enforced correctly.
+
+create function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int;
+begin
+    return p1;
+end$$ language plpgsql
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 203
+select doubledecrement(3)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 204
+-- fail because of implicit null assignment
+
+create or replace function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int := 0;
+begin
+    return p1;
+end$$ language plpgsql
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 205
+select doubledecrement(3)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 206
+-- fail at initialization assignment
+
+create or replace function doubledecrement(p1 pos_int) returns pos_int as $$
+declare v pos_int := 1;
+begin
+    v := p1 - 1;
+    return v - 1;
+end$$ language plpgsql
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 207
+select doubledecrement(null)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 208
+-- fail before call
+select doubledecrement(0)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 209
+-- fail before call
+select doubledecrement(1)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 210
+-- fail at assignment to v
+select doubledecrement(2)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 211
+-- fail at return
+select doubledecrement(3)
+--
+FUNCTION: name="doubledecrement" function="doubledecrement" schema="" ctx=Call
+STMT: SelectStmt
+== 212
+-- good
+
+-- Check that ALTER DOMAIN tests columns of derived types
+
+create domain posint as int4
+--
+STMT: CreateDomainStmt
+== 213
+-- Currently, this doesn't work for composite types, but verify it complains
+create type ddtest1 as (f1 posint)
+--
+STMT: CompositeTypeStmt
+== 214
+create table ddtest2(f1 ddtest1)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 215
+insert into ddtest2 values(row(-1))
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 216
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 217
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 218
+-- Likewise for domains within arrays of composite
+create table ddtest2(f1 ddtest1[])
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 219
+insert into ddtest2 values('{(-1)}')
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 220
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 221
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 222
+-- Likewise for domains within domains over composite
+create domain ddtest1d as ddtest1
+--
+STMT: CreateDomainStmt
+== 223
+create table ddtest2(f1 ddtest1d)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 224
+insert into ddtest2 values('(-1)')
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 225
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 226
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 227
+drop domain ddtest1d
+--
+STMT: DropStmt
+== 228
+-- Likewise for domains within domains over array of composite
+create domain ddtest1d as ddtest1[]
+--
+STMT: CreateDomainStmt
+== 229
+create table ddtest2(f1 ddtest1d)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 230
+insert into ddtest2 values('{(-1)}')
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 231
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 232
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 233
+drop domain ddtest1d
+--
+STMT: DropStmt
+== 234
+-- Doesn't work for ranges, either
+create type rposint as range (subtype = posint)
+--
+STMT: CreateRangeStmt
+== 235
+create table ddtest2(f1 rposint)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 236
+insert into ddtest2 values('(-1,3]')
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 237
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 238
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 239
+drop type rposint
+--
+STMT: DropStmt
+== 240
+alter domain posint add constraint c1 check(value >= 0)
+--
+STMT: AlterDomainStmt
+== 241
+create domain posint2 as posint check (value % 2 = 0)
+--
+STMT: CreateDomainStmt
+== 242
+create table ddtest2(f1 posint2)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: CreateStmt
+== 243
+insert into ddtest2 values(11)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 244
+-- fail
+insert into ddtest2 values(-2)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 245
+-- fail
+insert into ddtest2 values(2)
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 246
+alter domain posint add constraint c2 check(value >= 10)
+--
+STMT: AlterDomainStmt
+== 247
+-- fail
+alter domain posint add constraint c2 check(value > 0)
+--
+STMT: AlterDomainStmt
+== 248
+-- OK
+
+drop table ddtest2
+--
+TABLE: name="ddtest2" schema="" table="ddtest2" ctx=DDL
+STMT: DropStmt
+== 249
+drop type ddtest1
+--
+STMT: DropStmt
+== 250
+drop domain posint cascade
+--
+STMT: DropStmt
+== 251
+|--
+-- Check enforcement of domain-related typmod in plpgsql (bug #5717)
+|--
+
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x numeric(4,2)[1];
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 252
+select array_elem_check(121.00)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 253
+select array_elem_check(1.23456)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 254
+create domain mynums as numeric(4,2)[1]
+--
+STMT: CreateDomainStmt
+== 255
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x mynums;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 256
+select array_elem_check(121.00)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 257
+select array_elem_check(1.23456)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 258
+create domain mynums2 as mynums
+--
+STMT: CreateDomainStmt
+== 259
+create or replace function array_elem_check(numeric) returns numeric as $$
+declare
+  x mynums2;
+begin
+  x[1] := $1;
+  return x[1];
+end$$ language plpgsql
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 260
+select array_elem_check(121.00)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 261
+select array_elem_check(1.23456)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 262
+drop function array_elem_check(numeric)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: DropStmt
+== 263
+|--
+-- Check enforcement of array-level domain constraints
+|--
+
+create domain orderedpair as int[2] check (value[1] < value[2])
+--
+STMT: CreateDomainStmt
+== 264
+select array[1,2]::orderedpair
+--
+STMT: SelectStmt
+== 265
+select array[2,1]::orderedpair
+--
+STMT: SelectStmt
+== 266
+-- fail
+
+create temp table op (f1 orderedpair)
+--
+TABLE: name="op" schema="" table="op" ctx=DDL
+STMT: CreateStmt
+== 267
+insert into op values (array[1,2])
+--
+TABLE: name="op" schema="" table="op" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 268
+insert into op values (array[2,1])
+--
+TABLE: name="op" schema="" table="op" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 269
+-- fail
+
+update op set f1[2] = 3
+--
+TABLE: name="op" schema="" table="op" ctx=DML
+STMT: UpdateStmt
+== 270
+update op set f1[2] = 0
+--
+TABLE: name="op" schema="" table="op" ctx=DML
+STMT: UpdateStmt
+== 271
+-- fail
+select * from op
+--
+TABLE: name="op" schema="" table="op" ctx=Select
+STMT: SelectStmt
+== 272
+create or replace function array_elem_check(int) returns int as $$
+declare
+  x orderedpair := '{1,2}';
+begin
+  x[2] := $1;
+  return x[2];
+end$$ language plpgsql
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 273
+select array_elem_check(3)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 274
+select array_elem_check(-1)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=Call
+STMT: SelectStmt
+== 275
+drop function array_elem_check(int)
+--
+FUNCTION: name="array_elem_check" function="array_elem_check" schema="" ctx=DDL
+STMT: DropStmt
+== 276
+|--
+-- Check enforcement of changing constraints in plpgsql
+|--
+
+create domain di as int
+--
+STMT: CreateDomainStmt
+== 277
+create function dom_check(int) returns di as $$
+declare d di;
+begin
+  d := $1::di;
+  return d;
+end
+$$ language plpgsql immutable
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 278
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 279
+alter domain di add constraint pos check (value > 0)
+--
+STMT: AlterDomainStmt
+== 280
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 281
+-- fail
+
+alter domain di drop constraint pos
+--
+STMT: AlterDomainStmt
+== 282
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 283
+-- implicit cast during assignment is a separate code path, test that too
+
+create or replace function dom_check(int) returns di as $$
+declare d di;
+begin
+  d := $1;
+  return d;
+end
+$$ language plpgsql immutable
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 284
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 285
+alter domain di add constraint pos check (value > 0)
+--
+STMT: AlterDomainStmt
+== 286
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 287
+-- fail
+
+alter domain di drop constraint pos
+--
+STMT: AlterDomainStmt
+== 288
+select dom_check(0)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=Call
+STMT: SelectStmt
+== 289
+drop function dom_check(int)
+--
+FUNCTION: name="dom_check" function="dom_check" schema="" ctx=DDL
+STMT: DropStmt
+== 290
+drop domain di
+--
+STMT: DropStmt
+== 291
+|--
+-- Check use of a (non-inline-able) SQL function in a domain constraint;
+-- this has caused issues in the past
+|--
+
+create function sql_is_distinct_from(anyelement, anyelement)
+returns boolean language sql
+as 'select $1 is distinct from $2 limit 1'
+--
+FUNCTION: name="sql_is_distinct_from" function="sql_is_distinct_from" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 292
+create domain inotnull int
+  check (sql_is_distinct_from(value, null))
+--
+STMT: CreateDomainStmt
+== 293
+select 1::inotnull
+--
+STMT: SelectStmt
+== 294
+select null::inotnull
+--
+STMT: SelectStmt
+== 295
+create table dom_table (x inotnull)
+--
+TABLE: name="dom_table" schema="" table="dom_table" ctx=DDL
+STMT: CreateStmt
+== 296
+insert into dom_table values ('1')
+--
+TABLE: name="dom_table" schema="" table="dom_table" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 297
+insert into dom_table values (1)
+--
+TABLE: name="dom_table" schema="" table="dom_table" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 298
+insert into dom_table values (null)
+--
+TABLE: name="dom_table" schema="" table="dom_table" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 299
+drop table dom_table
+--
+TABLE: name="dom_table" schema="" table="dom_table" ctx=DDL
+STMT: DropStmt
+== 300
+drop domain inotnull
+--
+STMT: DropStmt
+== 301
+drop function sql_is_distinct_from(anyelement, anyelement)
+--
+FUNCTION: name="sql_is_distinct_from" function="sql_is_distinct_from" schema="" ctx=DDL
+STMT: DropStmt
+== 302
+|--
+-- Renaming
+|--
+
+create domain testdomain1 as int
+--
+STMT: CreateDomainStmt
+== 303
+alter domain testdomain1 rename to testdomain2
+--
+STMT: RenameStmt
+== 304
+alter type testdomain2 rename to testdomain3
+--
+STMT: RenameStmt
+== 305
+-- alter type also works
+drop domain testdomain3
+--
+STMT: DropStmt
+== 306
+|--
+-- Renaming domain constraints
+|--
+
+create domain testdomain1 as int constraint unsigned check (value > 0)
+--
+STMT: CreateDomainStmt
+== 307
+alter domain testdomain1 rename constraint unsigned to unsigned_foo
+--
+STMT: RenameStmt
+== 308
+alter domain testdomain1 drop constraint unsigned_foo
+--
+STMT: AlterDomainStmt
+== 309
+drop domain testdomain1
+--
+STMT: DropStmt
+== 310
+|--
+-- Get the base type of a domain
+|--
+create domain mytext as text
+--
+STMT: CreateDomainStmt
+== 311
+create domain mytext_child_1 as mytext
+--
+STMT: CreateDomainStmt
+== 312
+select pg_basetype('mytext'::regtype)
+--
+FUNCTION: name="pg_basetype" function="pg_basetype" schema="" ctx=Call
+STMT: SelectStmt
+== 313
+select pg_basetype('mytext_child_1'::regtype)
+--
+FUNCTION: name="pg_basetype" function="pg_basetype" schema="" ctx=Call
+STMT: SelectStmt
+== 314
+select pg_basetype(1)
+--
+FUNCTION: name="pg_basetype" function="pg_basetype" schema="" ctx=Call
+STMT: SelectStmt
+== 315
+-- expect NULL not error
+
+drop domain mytext cascade
+--
+STMT: DropStmt
+== 316
+|--
+-- Information schema
+|--
+
+SELECT * FROM information_schema.column_domain_usage
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY domain_name
+--
+TABLE: name="information_schema.column_domain_usage" schema="information_schema" table="column_domain_usage" ctx=Select
+FILTER: schema="" table="" column="domain_name"
+STMT: SelectStmt
+== 317
+SELECT * FROM information_schema.domain_constraints
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY constraint_name
+--
+TABLE: name="information_schema.domain_constraints" schema="information_schema" table="domain_constraints" ctx=Select
+FILTER: schema="" table="" column="domain_name"
+STMT: SelectStmt
+== 318
+SELECT * FROM information_schema.domains
+  WHERE domain_name IN ('con', 'dom', 'pos_int', 'things')
+  ORDER BY domain_name
+--
+TABLE: name="information_schema.domains" schema="information_schema" table="domains" ctx=Select
+FILTER: schema="" table="" column="domain_name"
+STMT: SelectStmt
+== 319
+SELECT * FROM information_schema.check_constraints
+  WHERE (constraint_schema, constraint_name)
+        IN (SELECT constraint_schema, constraint_name
+            FROM information_schema.domain_constraints
+            WHERE domain_name IN ('con', 'dom', 'pos_int', 'things'))
+  ORDER BY constraint_name
+--
+TABLE: name="information_schema.check_constraints" schema="information_schema" table="check_constraints" ctx=Select
+TABLE: name="information_schema.domain_constraints" schema="information_schema" table="domain_constraints" ctx=Select
+FILTER: schema="" table="" column="constraint_schema"
+FILTER: schema="" table="" column="constraint_name"
+FILTER: schema="" table="" column="domain_name"
+STMT: SelectStmt

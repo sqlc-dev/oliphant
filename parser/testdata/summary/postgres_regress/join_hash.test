@@ -1,0 +1,1812 @@
+== 001
+|--
+-- exercises for the hash join code
+|--
+
+begin
+--
+STMT: TransactionStmt
+== 002
+set local min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 003
+set local parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 004
+set local enable_hashjoin = on
+--
+STMT: VariableSetStmt
+== 005
+-- Extract bucket and batch counts from an explain analyze plan.  In
+-- general we can't make assertions about how many batches (or
+-- buckets) will be required because it can vary, but we can in some
+-- special cases and we can check for growth.
+create or replace function find_hash(node json)
+returns json language plpgsql
+as
+$$
+declare
+  x json;
+  child json;
+begin
+  if node->>'Node Type' = 'Hash' then
+    return node;
+  else
+    for child in select json_array_elements(node->'Plans')
+    loop
+      x := find_hash(child);
+      if x is not null then
+        return x;
+      end if;
+    end loop;
+    return null;
+  end if;
+end;
+$$
+--
+FUNCTION: name="find_hash" function="find_hash" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 006
+create or replace function hash_join_batches(query text)
+returns table (original int, final int) language plpgsql
+as
+$$
+declare
+  whole_plan json;
+  hash_node json;
+begin
+  for whole_plan in
+    execute 'explain (analyze, format ''json'') ' || query
+  loop
+    hash_node := find_hash(json_extract_path(whole_plan, '0', 'Plan'));
+    original := hash_node->>'Original Hash Batches';
+    final := hash_node->>'Hash Batches';
+    return next;
+  end loop;
+end;
+$$
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 007
+-- Make a simple relation with well distributed keys and correctly
+-- estimated size.
+create table simple as
+  select generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 008
+alter table simple set (parallel_workers = 2)
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+STMT: AlterTableStmt
+== 009
+analyze simple
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+STMT: VacuumStmt
+== 010
+-- Make a relation whose size we will under-estimate.  We want stats
+-- to say 1000 rows, but actually there are 20,000 rows.
+create table bigger_than_it_looks as
+  select generate_series(1, 20000) as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 011
+alter table bigger_than_it_looks set (autovacuum_enabled = 'false')
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: AlterTableStmt
+== 012
+alter table bigger_than_it_looks set (parallel_workers = 2)
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: AlterTableStmt
+== 013
+analyze bigger_than_it_looks
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: VacuumStmt
+== 014
+update pg_class set reltuples = 1000 where relname = 'bigger_than_it_looks'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+STMT: UpdateStmt
+== 015
+-- Make a relation whose size we underestimate and that also has a
+-- kind of skew that breaks our batching scheme.  We want stats to say
+-- 2 rows, but actually there are 20,000 rows with the same key.
+create table extremely_skewed (id int, t text)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: CreateStmt
+== 016
+alter table extremely_skewed set (autovacuum_enabled = 'false')
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: AlterTableStmt
+== 017
+alter table extremely_skewed set (parallel_workers = 2)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: AlterTableStmt
+== 018
+analyze extremely_skewed
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: VacuumStmt
+== 019
+insert into extremely_skewed
+  select 42 as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  from generate_series(1, 20000)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 020
+update pg_class
+  set reltuples = 2, relpages = pg_relation_size('extremely_skewed') / 8192
+  where relname = 'extremely_skewed'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+STMT: UpdateStmt
+== 021
+-- Make a relation with a couple of enormous tuples.
+create table wide as select generate_series(1, 2) as id, rpad('', 320000, 'x') as t
+--
+TABLE: name="wide" schema="" table="wide" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="rpad" function="rpad" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 022
+alter table wide set (parallel_workers = 2)
+--
+TABLE: name="wide" schema="" table="wide" ctx=DDL
+STMT: AlterTableStmt
+== 023
+-- The "optimal" case: the hash table fits in memory; we plan for 1
+-- batch, we stick to that number, and peak memory usage stays within
+-- our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 024
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 025
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 026
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 027
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 028
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 029
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 030
+rollback to settings
+--
+STMT: TransactionStmt
+== 031
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 032
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 033
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 034
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 035
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 036
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 037
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+rollback to settings
+--
+STMT: TransactionStmt
+== 040
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 041
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 042
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 043
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 044
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 045
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 046
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 047
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 048
+rollback to settings
+--
+STMT: TransactionStmt
+== 049
+-- The "good" case: batches required, but we plan the right number; we
+-- plan for some number of batches, and we stick to that number, and
+-- peak memory usage says within our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 050
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 051
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 052
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 053
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 054
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 055
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 056
+rollback to settings
+--
+STMT: TransactionStmt
+== 057
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 058
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 059
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 060
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 061
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 062
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 063
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 064
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 065
+rollback to settings
+--
+STMT: TransactionStmt
+== 066
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 067
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 068
+set local work_mem = '192kB'
+--
+STMT: VariableSetStmt
+== 069
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 070
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 071
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 072
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 073
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 074
+-- parallel full multi-batch hash join
+select count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 075
+rollback to settings
+--
+STMT: TransactionStmt
+== 076
+-- The "bad" case: during execution we need to increase number of
+-- batches; in this case we plan for 1 batch, and increase at least a
+-- couple of times, and peak memory usage stays within our work_mem
+-- budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 077
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 078
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 079
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 080
+explain (costs off)
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 081
+select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 082
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 083
+rollback to settings
+--
+STMT: TransactionStmt
+== 084
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 085
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 086
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 087
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 088
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 089
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 090
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 091
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 092
+rollback to settings
+--
+STMT: TransactionStmt
+== 093
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 094
+set local max_parallel_workers_per_gather = 1
+--
+STMT: VariableSetStmt
+== 095
+set local work_mem = '192kB'
+--
+STMT: VariableSetStmt
+== 096
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 097
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 098
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 099
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 101
+rollback to settings
+--
+STMT: TransactionStmt
+== 102
+-- The "ugly" case: increasing the number of batches during execution
+-- doesn't help, so stop trying to fit in work_mem and hope for the
+-- best; in this case we plan for 1 batch, increases just once and
+-- then stop increasing because that didn't help at all, so we blow
+-- right through the work_mem budget and hope for the best...
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 103
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 104
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 105
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 106
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 107
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 108
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 109
+rollback to settings
+--
+STMT: TransactionStmt
+== 110
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 111
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 112
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 113
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 114
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 115
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 116
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 117
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 118
+rollback to settings
+--
+STMT: TransactionStmt
+== 119
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 120
+set local max_parallel_workers_per_gather = 1
+--
+STMT: VariableSetStmt
+== 121
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 122
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 123
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 124
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 125
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 126
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 127
+rollback to settings
+--
+STMT: TransactionStmt
+== 128
+-- A couple of other hash join tests unrelated to work_mem management.
+
+-- Check that EXPLAIN ANALYZE has data even if the leader doesn't participate
+savepoint settings
+--
+STMT: TransactionStmt
+== 129
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 130
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 131
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 132
+set local parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+== 133
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 134
+rollback to settings
+--
+STMT: TransactionStmt
+== 135
+-- Exercise rescans.  We'll turn off parallel_leader_participation so
+-- that we can check that instrumentation comes back correctly.
+
+create table join_foo as select generate_series(1, 3) as id, 'xxxxx'::text as t
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 136
+alter table join_foo set (parallel_workers = 0)
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=DDL
+STMT: AlterTableStmt
+== 137
+create table join_bar as select generate_series(1, 10000) as id, 'xxxxx'::text as t
+--
+TABLE: name="join_bar" schema="" table="join_bar" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 138
+alter table join_bar set (parallel_workers = 2)
+--
+TABLE: name="join_bar" schema="" table="join_bar" ctx=DDL
+STMT: AlterTableStmt
+== 139
+-- multi-batch with rescan, parallel-oblivious
+savepoint settings
+--
+STMT: TransactionStmt
+== 140
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 141
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+== 142
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 143
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 144
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+== 145
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 146
+set enable_material = off
+--
+STMT: VariableSetStmt
+== 147
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+== 148
+set work_mem = '64kB'
+--
+STMT: VariableSetStmt
+== 149
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 150
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 151
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 152
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 153
+rollback to settings
+--
+STMT: TransactionStmt
+== 154
+-- single-batch with rescan, parallel-oblivious
+savepoint settings
+--
+STMT: TransactionStmt
+== 155
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 156
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+== 157
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 158
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 159
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+== 160
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 161
+set enable_material = off
+--
+STMT: VariableSetStmt
+== 162
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+== 163
+set work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 164
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 165
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 166
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 167
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 168
+rollback to settings
+--
+STMT: TransactionStmt
+== 169
+-- multi-batch with rescan, parallel-aware
+savepoint settings
+--
+STMT: TransactionStmt
+== 170
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 171
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+== 172
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 173
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 174
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+== 175
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 176
+set enable_material = off
+--
+STMT: VariableSetStmt
+== 177
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+== 178
+set work_mem = '64kB'
+--
+STMT: VariableSetStmt
+== 179
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 180
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 181
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 182
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 183
+rollback to settings
+--
+STMT: TransactionStmt
+== 184
+-- single-batch with rescan, parallel-aware
+savepoint settings
+--
+STMT: TransactionStmt
+== 185
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 186
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+== 187
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 188
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 189
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+== 190
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 191
+set enable_material = off
+--
+STMT: VariableSetStmt
+== 192
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+== 193
+set work_mem = '4MB'
+--
+STMT: VariableSetStmt
+== 194
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 195
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 196
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 197
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 198
+rollback to settings
+--
+STMT: TransactionStmt
+== 199
+-- A full outer join where every record is matched.
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 200
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 201
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 202
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 203
+rollback to settings
+--
+STMT: TransactionStmt
+== 204
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 205
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 206
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 207
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 208
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 209
+rollback to settings
+--
+STMT: TransactionStmt
+== 210
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 211
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 212
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 213
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 214
+rollback to settings
+--
+STMT: TransactionStmt
+== 215
+-- A full outer join where every record is not matched.
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+== 216
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 217
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 218
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 219
+rollback to settings
+--
+STMT: TransactionStmt
+== 220
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 221
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 222
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 223
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 224
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 225
+rollback to settings
+--
+STMT: TransactionStmt
+== 226
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+== 227
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 228
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 229
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 230
+rollback to settings
+--
+STMT: TransactionStmt
+== 231
+-- exercise special code paths for huge tuples (note use of non-strict
+-- expression and left join required to get the detoasted tuple into
+-- the hash table)
+
+-- parallel with parallel-aware hash join (hits ExecParallelHashLoadTuple and
+-- sts_puttuple oversized tuple cases because it's multi-batch)
+savepoint settings
+--
+STMT: TransactionStmt
+== 232
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+== 233
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 234
+set work_mem = '128kB'
+--
+STMT: VariableSetStmt
+== 235
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 236
+explain (costs off)
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+TABLE: name="wide" schema="" table="wide" ctx=Select
+TABLE: name="wide" schema="" table="wide" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 237
+select length(max(s.t))
+from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+TABLE: name="wide" schema="" table="wide" ctx=Select
+TABLE: name="wide" schema="" table="wide" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 238
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+== 239
+rollback to settings
+--
+STMT: TransactionStmt
+== 240
+-- Hash join reuses the HOT status bit to indicate match status. This can only
+-- be guaranteed to produce correct results if all the hash join tuple match
+-- bits are reset before reuse. This is done upon loading them into the
+-- hashtable.
+SAVEPOINT settings
+--
+STMT: TransactionStmt
+== 241
+SET enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+== 242
+SET min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+== 243
+SET parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+== 244
+SET parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+== 245
+CREATE TABLE hjtest_matchbits_t1(id int)
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=DDL
+STMT: CreateStmt
+== 246
+CREATE TABLE hjtest_matchbits_t2(id int)
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DDL
+STMT: CreateStmt
+== 247
+INSERT INTO hjtest_matchbits_t1 VALUES (1)
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 248
+INSERT INTO hjtest_matchbits_t2 VALUES (2)
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 249
+-- Update should create a HOT tuple. If this status bit isn't cleared, we won't
+-- correctly emit the NULL-extended unmatching tuple in full hash join.
+UPDATE hjtest_matchbits_t2 set id = 2
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DML
+STMT: UpdateStmt
+== 250
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+  ORDER BY t1.id
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=Select
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=Select
+ALIAS: "t1"="hjtest_matchbits_t1"
+ALIAS: "t2"="hjtest_matchbits_t2"
+STMT: SelectStmt
+== 251
+-- Test serial full hash join.
+-- Resetting parallel_setup_cost should force a serial plan.
+-- Just to be safe, however, set enable_parallel_hash to off, as parallel full
+-- hash joins are only supported with shared hashtables.
+RESET parallel_setup_cost
+--
+STMT: VariableSetStmt
+== 252
+SET enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+== 253
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=Select
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=Select
+ALIAS: "t1"="hjtest_matchbits_t1"
+ALIAS: "t2"="hjtest_matchbits_t2"
+STMT: SelectStmt
+== 254
+ROLLBACK TO settings
+--
+STMT: TransactionStmt
+== 255
+rollback
+--
+STMT: TransactionStmt
+== 256
+-- Verify that hash key expressions reference the correct
+-- nodes. Hashjoin's hashkeys need to reference its outer plan, Hash's
+-- need to reference Hash's outer plan (which is below HashJoin's
+-- inner plan). It's not trivial to verify that the references are
+-- correct (we don't display the hashkeys themselves), but if the
+-- hashkeys contain subplan references, those will be displayed. Force
+-- subplans to appear just about everywhere.
+|--
+-- Bug report:
+-- https://www.postgresql.org/message-id/CAPpHfdvGVegF_TKKRiBrSmatJL2dR9uwFCuR%2BteQ_8tEXU8mxg%40mail.gmail.com
+|--
+BEGIN
+--
+STMT: TransactionStmt
+== 257
+SET LOCAL enable_sort = OFF
+--
+STMT: VariableSetStmt
+== 258
+-- avoid mergejoins
+SET LOCAL from_collapse_limit = 1
+--
+STMT: VariableSetStmt
+== 259
+-- allows easy changing of join order
+
+CREATE TABLE hjtest_1 (a text, b int, id int, c bool)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DDL
+STMT: CreateStmt
+== 260
+CREATE TABLE hjtest_2 (a bool, id int, b text, c int)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DDL
+STMT: CreateStmt
+== 261
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 2, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 262
+-- matches
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 2, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 263
+-- fails id join condition
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 20, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 264
+-- fails < 50
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 265
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 2)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 266
+-- matches
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 3, 'another', 7)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 267
+-- fails id join condition
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 90)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 268
+-- fails < 55
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 3)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 269
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'text', 1)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 270
+--  fails hjtest_1.a <> hjtest_2.b;
+
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 271
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: SelectStmt
+== 272
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 273
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: SelectStmt
+== 274
+ROLLBACK
+--
+STMT: TransactionStmt
+== 275
+-- Verify that we behave sanely when the inner hash keys contain parameters
+-- (that is, outer or lateral references).  This situation has to defeat
+-- re-use of the inner hash table across rescans.
+begin
+--
+STMT: TransactionStmt
+== 276
+set local enable_hashjoin = on
+--
+STMT: VariableSetStmt
+== 277
+explain (costs off)
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t1"="tenk1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 278
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t1"="tenk1"
+STMT: SelectStmt
+== 279
+rollback
+--
+STMT: TransactionStmt

@@ -22,13 +22,15 @@ for the development loop.
 | Milestone | State |
 |---|---|
 | 1. Scaffolding + codegen | ✅ module, licenses, CI, vendored pin, `ast/` protobuf types, aliases, keyword tables, API surface, `parser.Error`; pg_query_go's parse_test tree literals compile unchanged |
-| 2. Corpus + oracle | ✅ cgo oracle (`oracle/`), `cmd/regenerate`, 1,525 golden files / 217k cases across 8 suites, byte-reproducible; harness + `cmd/next-test` running everything as todo |
-| 3. Lexer | — |
-| 4. Expressions + SELECT | — |
-| 5–7. DML, DDL, utility | — |
-| 8. Normalize + fingerprint | — |
-| 9. Deparse | — |
-| 10–13. Summary, PL/pgSQL, hardening, sqlc integration | — |
+| 2. Corpus + oracle | ✅ cgo oracle (`oracle/`), `cmd/regenerate`, byte-reproducible goldens; harness + `cmd/next-test` |
+| 3. Lexer | ✅ `Scan`, `SplitWithScanner`, `HashXXH3_64`; token streams byte-identical across the corpus |
+| 4. Expressions + SELECT | ✅ `Parse`/`ParseToJSON` for the SELECT family |
+| 5–7. DML, DDL, utility | ✅ the full statement grammar; `SplitWithParser`, `IsUtilityStmt`; parse corpus at 100% |
+| 8. Normalize + fingerprint | ✅ `Normalize`, `NormalizeUtility`, `Fingerprint` |
+| 9. Deparse | ✅ `Deparse`, byte-equal to the oracle across the corpus |
+| 10. Summary | ✅ `Summary` (classification + smart truncation) |
+| 11. PL/pgSQL | ✅ `ParsePlPgSqlToJSON` (pl_gram + pl_comp subset + JSON dump) |
+| 12–13. Hardening, sqlc integration | — |
 
-Until the parser milestones land, every public entry point returns (or
-panics with, for `HashXXH3_64`) a clear not-implemented error.
+Every public entry point is implemented; the corpus — 2,067 golden files /
+308,561 cases across eleven suites — passes with an empty todo list.

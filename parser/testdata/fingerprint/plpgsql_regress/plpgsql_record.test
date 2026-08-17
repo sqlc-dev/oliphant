@@ -1,0 +1,990 @@
+== 001
+|--
+-- Tests for PL/pgSQL handling of composite (record) variables
+|--
+
+create type two_int4s as (f1 int4, f2 int4)
+--
+beec9e99b48bd933
+== 002
+create type more_int4s as (f0 text, f1 int4, f2 int4)
+--
+870a6ac953d930e0
+== 003
+create type two_int8s as (q1 int8, q2 int8)
+--
+489ac2c2ae61e609
+== 004
+create type nested_int8s as (c1 two_int8s, c2 two_int8s)
+--
+4b99a0af17044d9d
+== 005
+-- base-case return of a composite type
+create function retc(int) returns two_int8s language plpgsql as
+$$ begin return row($1,1)::two_int8s; end $$
+--
+dd1c31f6aa367c45
+== 006
+select retc(42)
+--
+0f388b2602dd5c3b
+== 007
+-- ok to return a matching record type
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ begin return row($1::int8, 1::int8); end $$
+--
+d53a9736868e4965
+== 008
+select retc(42)
+--
+0f388b2602dd5c3b
+== 009
+-- we don't currently support implicit casting
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ begin return row($1,1); end $$
+--
+d53a9736868e4965
+== 010
+select retc(42)
+--
+0f388b2602dd5c3b
+== 011
+-- nor extra columns
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ begin return row($1::int8, 1::int8, 42); end $$
+--
+d53a9736868e4965
+== 012
+select retc(42)
+--
+0f388b2602dd5c3b
+== 013
+-- same cases with an intermediate "record" variable
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ declare r record; begin r := row($1::int8, 1::int8); return r; end $$
+--
+d53a9736868e4965
+== 014
+select retc(42)
+--
+0f388b2602dd5c3b
+== 015
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ declare r record; begin r := row($1,1); return r; end $$
+--
+d53a9736868e4965
+== 016
+select retc(42)
+--
+0f388b2602dd5c3b
+== 017
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ declare r record; begin r := row($1::int8, 1::int8, 42); return r; end $$
+--
+d53a9736868e4965
+== 018
+select retc(42)
+--
+0f388b2602dd5c3b
+== 019
+-- but, for mostly historical reasons, we do convert when assigning
+-- to a named-composite-type variable
+create or replace function retc(int) returns two_int8s language plpgsql as
+$$ declare r two_int8s; begin r := row($1::int8, 1::int8, 42); return r; end $$
+--
+d53a9736868e4965
+== 020
+select retc(42)
+--
+0f388b2602dd5c3b
+== 021
+do $$ declare c two_int8s;
+begin c := row(1,2); raise notice 'c = %', c; end$$
+--
+f936eab75b8c1b90
+== 022
+do $$ declare c two_int8s;
+begin for c in select 1,2 loop raise notice 'c = %', c; end loop; end$$
+--
+f936eab75b8c1b90
+== 023
+do $$ declare c4 two_int4s; c8 two_int8s;
+begin
+  c8 := row(1,2);
+  c4 := c8;
+  c8 := c4;
+  raise notice 'c4 = %', c4;
+  raise notice 'c8 = %', c8;
+end$$
+--
+f936eab75b8c1b90
+== 024
+do $$ declare c two_int8s; d nested_int8s;
+begin
+  c := row(1,2);
+  d := row(c, row(c.q1, c.q2+1));
+  raise notice 'c = %, d = %', c, d;
+  c.q1 := 10;
+  d.c1 := row(11,12);
+  d.c2.q2 := 42;
+  raise notice 'c = %, d = %', c, d;
+  raise notice 'c.q1 = %, d.c2 = %', c.q1, d.c2;
+  raise notice '(d).c2.q2 = %', (d).c2.q2;  -- doesn't work without parens
+  raise notice '(d.c2).q2 = %', (d.c2).q2;  -- doesn't work without parens
+end$$
+--
+f936eab75b8c1b90
+== 025
+-- block-qualified naming
+do $$ <<b>> declare c two_int8s; d nested_int8s;
+begin
+  b.c := row(1,2);
+  b.d := row(b.c, row(b.c.q1, b.c.q2+1));
+  raise notice 'b.c = %, b.d = %', b.c, b.d;
+  b.c.q1 := 10;
+  b.d.c1 := row(11,12);
+  b.d.c2.q2 := 42;
+  raise notice 'b.c = %, b.d = %', b.c, b.d;
+  raise notice 'b.c.q1 = %, b.d.c2 = %', b.c.q1, b.d.c2;
+  raise notice '(b.d).c2.q2 = %', (b.d).c2.q2;  -- doesn't work without parens
+  raise notice '(b.d.c2).q2 = %', (b.d.c2).q2;  -- doesn't work without parens
+end$$
+--
+f936eab75b8c1b90
+== 026
+-- error cases
+do $$ declare c two_int8s; begin c.x = 1; end $$
+--
+f936eab75b8c1b90
+== 027
+do $$ declare c nested_int8s; begin c.x = 1; end $$
+--
+f936eab75b8c1b90
+== 028
+do $$ declare c nested_int8s; begin c.x.q1 = 1; end $$
+--
+f936eab75b8c1b90
+== 029
+do $$ declare c nested_int8s; begin c.c2.x = 1; end $$
+--
+f936eab75b8c1b90
+== 030
+do $$ declare c nested_int8s; begin d.c2.x = 1; end $$
+--
+f936eab75b8c1b90
+== 031
+do $$ <<b>> declare c two_int8s; begin b.c.x = 1; end $$
+--
+f936eab75b8c1b90
+== 032
+do $$ <<b>> declare c nested_int8s; begin b.c.x = 1; end $$
+--
+f936eab75b8c1b90
+== 033
+do $$ <<b>> declare c nested_int8s; begin b.c.x.q1 = 1; end $$
+--
+f936eab75b8c1b90
+== 034
+do $$ <<b>> declare c nested_int8s; begin b.c.c2.x = 1; end $$
+--
+f936eab75b8c1b90
+== 035
+do $$ <<b>> declare c nested_int8s; begin b.d.c2.x = 1; end $$
+--
+f936eab75b8c1b90
+== 036
+-- check passing composite result to another function
+create function getq1(two_int8s) returns int8 language plpgsql as $$
+declare r two_int8s; begin r := $1; return r.q1; end $$
+--
+4f324f6b3490e353
+== 037
+select getq1(retc(344))
+--
+f8d60b3f490377b2
+== 038
+select getq1(row(1,2))
+--
+f3e68499b1c67ff3
+== 039
+do $$
+declare r1 two_int8s; r2 record; x int8;
+begin
+  r1 := retc(345);
+  perform getq1(r1);
+  x := getq1(r1);
+  raise notice 'x = %', x;
+  r2 := retc(346);
+  perform getq1(r2);
+  x := getq1(r2);
+  raise notice 'x = %', x;
+end$$
+--
+f936eab75b8c1b90
+== 040
+-- check assignments of composites
+do $$
+declare r1 two_int8s; r2 two_int8s; r3 record; r4 record;
+begin
+  r1 := row(1,2);
+  raise notice 'r1 = %', r1;
+  r1 := r1;  -- shouldn't do anything
+  raise notice 'r1 = %', r1;
+  r2 := r1;
+  raise notice 'r1 = %', r1;
+  raise notice 'r2 = %', r2;
+  r2.q2 = r1.q1 + 3;  -- check that r2 has distinct storage
+  raise notice 'r1 = %', r1;
+  raise notice 'r2 = %', r2;
+  r1 := null;
+  raise notice 'r1 = %', r1;
+  raise notice 'r2 = %', r2;
+  r1 := row(7,11)::two_int8s;
+  r2 := r1;
+  raise notice 'r1 = %', r1;
+  raise notice 'r2 = %', r2;
+  r3 := row(1,2);
+  r4 := r3;
+  raise notice 'r3 = %', r3;
+  raise notice 'r4 = %', r4;
+  r4.f1 := r4.f1 + 3;  -- check that r4 has distinct storage
+  raise notice 'r3 = %', r3;
+  raise notice 'r4 = %', r4;
+  r1 := r3;
+  raise notice 'r1 = %', r1;
+  r4 := r1;
+  raise notice 'r4 = %', r4;
+  r4.q2 := r4.q2 + 1;  -- r4's field names have changed
+  raise notice 'r4 = %', r4;
+end$$
+--
+f936eab75b8c1b90
+== 041
+-- fields of named-type vars read as null if uninitialized
+do $$
+declare r1 two_int8s;
+begin
+  raise notice 'r1 = %', r1;
+  raise notice 'r1.q1 = %', r1.q1;
+  raise notice 'r1.q2 = %', r1.q2;
+  raise notice 'r1 = %', r1;
+end$$
+--
+f936eab75b8c1b90
+== 042
+do $$
+declare r1 two_int8s;
+begin
+  raise notice 'r1.q1 = %', r1.q1;
+  raise notice 'r1.q2 = %', r1.q2;
+  raise notice 'r1 = %', r1;
+  raise notice 'r1.nosuchfield = %', r1.nosuchfield;
+end$$
+--
+f936eab75b8c1b90
+== 043
+-- records, not so much
+do $$
+declare r1 record;
+begin
+  raise notice 'r1 = %', r1;
+  raise notice 'r1.f1 = %', r1.f1;
+  raise notice 'r1.f2 = %', r1.f2;
+  raise notice 'r1 = %', r1;
+end$$
+--
+f936eab75b8c1b90
+== 044
+-- but OK if you assign first
+do $$
+declare r1 record;
+begin
+  raise notice 'r1 = %', r1;
+  r1 := row(1,2);
+  raise notice 'r1.f1 = %', r1.f1;
+  raise notice 'r1.f2 = %', r1.f2;
+  raise notice 'r1 = %', r1;
+  raise notice 'r1.nosuchfield = %', r1.nosuchfield;
+end$$
+--
+f936eab75b8c1b90
+== 045
+-- check %type with block-qualified variable names
+do $$
+<<blk>>
+declare
+  v int;
+  r two_int8s;
+  v1 v%type;
+  v2 blk.v%type;
+  r1 r%type;
+  r2 blk.r%type;
+begin
+  raise notice '%', pg_typeof(v1);
+  raise notice '%', pg_typeof(v2);
+  raise notice '%', pg_typeof(r1);
+  raise notice '%', pg_typeof(r2);
+end$$
+--
+f936eab75b8c1b90
+== 046
+-- check that type record can be passed through %type
+do $$
+declare r1 record;
+        r2 r1%type;
+begin
+  r2 := row(1,2);
+  raise notice 'r2 = %', r2;
+  r2 := row(3,4,5);
+  raise notice 'r2 = %', r2;
+end$$
+--
+f936eab75b8c1b90
+== 047
+-- arrays of record are not supported at the moment
+do $$
+declare r1 record[];
+begin
+end$$
+--
+f936eab75b8c1b90
+== 048
+do $$
+declare r1 record;
+        r2 r1%type[];
+begin
+end$$
+--
+f936eab75b8c1b90
+== 049
+-- check repeated assignments to composite fields
+create table some_table (id int, data text)
+--
+3d5673c2182fd703
+== 050
+do $$
+declare r some_table;
+begin
+  r := (23, 'skidoo');
+  for i in 1 .. 10 loop
+    r.id := r.id + i;
+    r.data := r.data || ' ' || i;
+  end loop;
+  raise notice 'r = %', r;
+end$$
+--
+f936eab75b8c1b90
+== 051
+-- check behavior of function declared to return "record"
+
+create function returnsrecord(int) returns record language plpgsql as
+$$ begin return row($1,$1+1); end $$
+--
+8a8ebef209b2e0ad
+== 052
+select returnsrecord(42)
+--
+45ab315a2f768e0e
+== 053
+select * from returnsrecord(42) as r(x int, y int)
+--
+cdeb7c1b5cf2cd43
+== 054
+select * from returnsrecord(42) as r(x int, y int, z int)
+--
+216d87745f41273c
+== 055
+-- fail
+select * from returnsrecord(42) as r(x int, y bigint)
+--
+184298095c814cd1
+== 056
+-- fail
+
+-- same with an intermediate record variable
+create or replace function returnsrecord(int) returns record language plpgsql as
+$$ declare r record; begin r := row($1,$1+1); return r; end $$
+--
+5af4f0a64afdeac4
+== 057
+select returnsrecord(42)
+--
+45ab315a2f768e0e
+== 058
+select * from returnsrecord(42) as r(x int, y int)
+--
+cdeb7c1b5cf2cd43
+== 059
+select * from returnsrecord(42) as r(x int, y int, z int)
+--
+216d87745f41273c
+== 060
+-- fail
+select * from returnsrecord(42) as r(x int, y bigint)
+--
+184298095c814cd1
+== 061
+-- fail
+
+-- should work the same with a missing column in the actual result value
+create table has_hole(f1 int, f2 int, f3 int)
+--
+1b70c47c0821c3c2
+== 062
+alter table has_hole drop column f2
+--
+69f1362388cb8399
+== 063
+create or replace function returnsrecord(int) returns record language plpgsql as
+$$ begin return row($1,$1+1)::has_hole; end $$
+--
+5af4f0a64afdeac4
+== 064
+select returnsrecord(42)
+--
+45ab315a2f768e0e
+== 065
+select * from returnsrecord(42) as r(x int, y int)
+--
+cdeb7c1b5cf2cd43
+== 066
+select * from returnsrecord(42) as r(x int, y int, z int)
+--
+216d87745f41273c
+== 067
+-- fail
+select * from returnsrecord(42) as r(x int, y bigint)
+--
+184298095c814cd1
+== 068
+-- fail
+
+-- same with an intermediate record variable
+create or replace function returnsrecord(int) returns record language plpgsql as
+$$ declare r record; begin r := row($1,$1+1)::has_hole; return r; end $$
+--
+5af4f0a64afdeac4
+== 069
+select returnsrecord(42)
+--
+45ab315a2f768e0e
+== 070
+select * from returnsrecord(42) as r(x int, y int)
+--
+cdeb7c1b5cf2cd43
+== 071
+select * from returnsrecord(42) as r(x int, y int, z int)
+--
+216d87745f41273c
+== 072
+-- fail
+select * from returnsrecord(42) as r(x int, y bigint)
+--
+184298095c814cd1
+== 073
+-- fail
+
+-- check access to a field of an argument declared "record"
+create function getf1(x record) returns int language plpgsql as
+$$ begin return x.f1; end $$
+--
+3022ce6d0870e014
+== 074
+select getf1(1)
+--
+7de13ad2fa71cae8
+== 075
+select getf1(row(1,2))
+--
+b7239cb129a0647a
+== 076
+select getf1(row(1,2)::two_int4s)
+--
+2ec68937a66e7f4b
+== 077
+select getf1(row('foo',123,456)::more_int4s)
+--
+d9707a25b1084cc7
+== 078
+-- the context stack is different when debug_discard_caches
+-- is set, so suppress context output
+select getf1(row(1,2)::two_int8s)
+--
+b0f12f8013d83beb
+== 079
+select getf1(row(1,2))
+--
+b7239cb129a0647a
+== 080
+-- this seemingly-equivalent case behaves a bit differently,
+-- because the core parser's handling of $N symbols is simplistic
+create function getf2(record) returns int language plpgsql as
+$$ begin return $1.f2; end $$
+--
+2dbd3b08b3db8f0b
+== 081
+select getf2(row(1,2))
+--
+b37566d209b13f41
+== 082
+-- ideally would work, but does not
+select getf2(row(1,2)::two_int4s)
+--
+ae5d997f2625cd5f
+== 083
+select getf2(row('foo',123,456)::more_int4s)
+--
+8b9d582719207525
+== 084
+-- check behavior when assignment to FOR-loop variable requires coercion
+do $$
+declare r two_int8s;
+begin
+  for r in select i, i+1 from generate_series(1,4) i
+  loop
+    raise notice 'r = %', r;
+  end loop;
+end$$
+--
+f936eab75b8c1b90
+== 085
+-- check behavior when returning setof composite
+create function returnssetofholes() returns setof has_hole language plpgsql as
+$$
+declare r record;
+  h has_hole;
+begin
+  return next h;
+  r := (1,2);
+  h := (3,4);
+  return next r;
+  return next h;
+  return next row(5,6);
+  return next row(7,8)::has_hole;
+end$$
+--
+2bc4f6f4ec20f9dc
+== 086
+select returnssetofholes()
+--
+cc564d34f7dd4ad0
+== 087
+create or replace function returnssetofholes() returns setof has_hole language plpgsql as
+$$
+declare r record;
+begin
+  return next r;  -- fails, not assigned yet
+end$$
+--
+53ee1becf6a2677a
+== 088
+select returnssetofholes()
+--
+cc564d34f7dd4ad0
+== 089
+create or replace function returnssetofholes() returns setof has_hole language plpgsql as
+$$
+begin
+  return next row(1,2,3);  -- fails
+end$$
+--
+53ee1becf6a2677a
+== 090
+select returnssetofholes()
+--
+cc564d34f7dd4ad0
+== 091
+-- check behavior with changes of a named rowtype
+create table mutable(f1 int, f2 text)
+--
+399c9615f41783ee
+== 092
+create function sillyaddone(int) returns int language plpgsql as
+$$ declare r mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+e004e78d7dc89716
+== 093
+select sillyaddone(42)
+--
+72c91c0ff0daf28f
+== 094
+-- test for change of type of column f1 should be here someday;
+-- for now see plpgsql_cache test
+
+alter table mutable drop column f1
+--
+2d6722abd5871810
+== 095
+-- the context stack is different when debug_discard_caches
+-- is set, so suppress context output
+select sillyaddone(42)
+--
+72c91c0ff0daf28f
+== 096
+-- fail
+
+create function getf3(x mutable) returns int language plpgsql as
+$$ begin return x.f3; end $$
+--
+95daa0e80befc108
+== 097
+select getf3(null::mutable)
+--
+f1aaf7660139c314
+== 098
+-- doesn't work yet
+alter table mutable add column f3 int
+--
+11573d958da6948c
+== 099
+select getf3(null::mutable)
+--
+f1aaf7660139c314
+== 100
+-- now it works
+alter table mutable drop column f3
+--
+a4c0f5606421f3dc
+== 101
+-- the context stack is different when debug_discard_caches
+-- is set, so suppress context output
+select getf3(null::mutable)
+--
+f1aaf7660139c314
+== 102
+-- fails again
+
+-- check behavior with creating/dropping a named rowtype
+set check_function_bodies = off
+--
+f8d4a000b73082a4
+== 103
+-- else reference to nonexistent type fails
+
+create function sillyaddtwo(int) returns int language plpgsql as
+$$ declare r mutable2; begin r.f1 := $1; return r.f1 + 2; end $$
+--
+93f412cfccac2d88
+== 104
+reset check_function_bodies
+--
+507d70c54f92e61b
+== 105
+select sillyaddtwo(42)
+--
+f553c3580fb50a15
+== 106
+-- fail
+create table mutable2(f1 int, f2 text)
+--
+70b73cede4134f10
+== 107
+select sillyaddtwo(42)
+--
+f553c3580fb50a15
+== 108
+drop table mutable2
+--
+6efea2a02986013c
+== 109
+-- the context stack is different when debug_discard_caches
+-- is set, so suppress context output
+select sillyaddtwo(42)
+--
+f553c3580fb50a15
+== 110
+-- fail
+create table mutable2(f0 text, f1 int, f2 text)
+--
+63f274197c355177
+== 111
+select sillyaddtwo(42)
+--
+f553c3580fb50a15
+== 112
+select sillyaddtwo(43)
+--
+f553c3580fb50a15
+== 113
+-- check access to system columns in a record variable
+
+create function sillytrig() returns trigger language plpgsql as
+$$begin
+  raise notice 'old.ctid = %', old.ctid;
+  raise notice 'old.tableoid = %', old.tableoid::regclass;
+  return new;
+end$$
+--
+f7d7356f6933307a
+== 114
+create trigger mutable_trig before update on mutable for each row
+execute procedure sillytrig()
+--
+8a16021e4853656d
+== 115
+insert into mutable values ('foo'), ('bar')
+--
+c958c44442943532
+== 116
+update mutable set f2 = f2 || ' baz'
+--
+199ed2107f52c5b0
+== 117
+table mutable
+--
+6628f285331408be
+== 118
+-- check returning a composite datum from a trigger
+
+create or replace function sillytrig() returns trigger language plpgsql as
+$$begin
+  return row(new.*);
+end$$
+--
+32a152421f4c5480
+== 119
+update mutable set f2 = f2 || ' baz'
+--
+199ed2107f52c5b0
+== 120
+table mutable
+--
+6628f285331408be
+== 121
+create or replace function sillytrig() returns trigger language plpgsql as
+$$declare r record;
+begin
+  r := row(new.*);
+  return r;
+end$$
+--
+32a152421f4c5480
+== 122
+update mutable set f2 = f2 || ' baz'
+--
+199ed2107f52c5b0
+== 123
+table mutable
+--
+6628f285331408be
+== 124
+|--
+-- Domains of composite
+|--
+
+create domain ordered_int8s as two_int8s check((value).q1 <= (value).q2)
+--
+007f203b2858f04c
+== 125
+create function read_ordered_int8s(p ordered_int8s) returns int8 as $$
+begin return p.q1 + p.q2; end
+$$ language plpgsql
+--
+da46572d125775f7
+== 126
+select read_ordered_int8s(row(1, 2))
+--
+5909bb9e251c9dc5
+== 127
+select read_ordered_int8s(row(2, 1))
+--
+5909bb9e251c9dc5
+== 128
+-- fail
+
+create function build_ordered_int8s(i int8, j int8) returns ordered_int8s as $$
+begin return row(i,j); end
+$$ language plpgsql
+--
+c558ce340f32c308
+== 129
+select build_ordered_int8s(1,2)
+--
+5e8c235269a5dc11
+== 130
+select build_ordered_int8s(2,1)
+--
+5e8c235269a5dc11
+== 131
+-- fail
+
+create function build_ordered_int8s_2(i int8, j int8) returns ordered_int8s as $$
+declare r record; begin r := row(i,j); return r; end
+$$ language plpgsql
+--
+d9ff9f21fb47525d
+== 132
+select build_ordered_int8s_2(1,2)
+--
+2888bb305ce4bbc4
+== 133
+select build_ordered_int8s_2(2,1)
+--
+2888bb305ce4bbc4
+== 134
+-- fail
+
+create function build_ordered_int8s_3(i int8, j int8) returns ordered_int8s as $$
+declare r two_int8s; begin r := row(i,j); return r; end
+$$ language plpgsql
+--
+d6a8f1c1171d9b4f
+== 135
+select build_ordered_int8s_3(1,2)
+--
+f352ab0b3c879e26
+== 136
+select build_ordered_int8s_3(2,1)
+--
+f352ab0b3c879e26
+== 137
+-- fail
+
+create function build_ordered_int8s_4(i int8, j int8) returns ordered_int8s as $$
+declare r ordered_int8s; begin r := row(i,j); return r; end
+$$ language plpgsql
+--
+c0bb7a6096372a95
+== 138
+select build_ordered_int8s_4(1,2)
+--
+b47ca5f3e93cd1e6
+== 139
+select build_ordered_int8s_4(2,1)
+--
+b47ca5f3e93cd1e6
+== 140
+-- fail
+
+create function build_ordered_int8s_a(i int8, j int8) returns ordered_int8s[] as $$
+begin return array[row(i,j), row(i,j+1)]; end
+$$ language plpgsql
+--
+538b16284108d4fd
+== 141
+select build_ordered_int8s_a(1,2)
+--
+40b2459a90b3f23c
+== 142
+select build_ordered_int8s_a(2,1)
+--
+40b2459a90b3f23c
+== 143
+-- fail
+
+-- check field assignment
+do $$
+declare r ordered_int8s;
+begin
+  r.q1 := null;
+  r.q2 := 43;
+  r.q1 := 42;
+  r.q2 := 41;  -- fail
+end$$
+--
+f936eab75b8c1b90
+== 144
+-- check whole-row assignment
+do $$
+declare r ordered_int8s;
+begin
+  r := null;
+  r := row(null,null);
+  r := row(1,2);
+  r := row(2,1);  -- fail
+end$$
+--
+f936eab75b8c1b90
+== 145
+-- check assignment in for-loop
+do $$
+declare r ordered_int8s;
+begin
+  for r in values (1,2),(3,4),(6,5) loop
+    raise notice 'r = %', r;
+  end loop;
+end$$
+--
+f936eab75b8c1b90
+== 146
+-- check behavior with toastable fields, too
+
+create type two_texts as (f1 text, f2 text)
+--
+f1d3bb611e7aa58d
+== 147
+create domain ordered_texts as two_texts check((value).f1 <= (value).f2)
+--
+318168cb672a6cf8
+== 148
+create table sometable (id int, a text, b text)
+--
+4f147bbee6d1fa56
+== 149
+-- b should be compressed, but in-line
+insert into sometable values (1, 'a', repeat('ffoob',1000))
+--
+f2f9ceb7ae00dcaf
+== 150
+-- this b should be out-of-line
+insert into sometable values (2, 'a', repeat('ffoob',100000))
+--
+f2f9ceb7ae00dcaf
+== 151
+-- this pair should fail the domain check
+insert into sometable values (3, 'z', repeat('ffoob',100000))
+--
+f2f9ceb7ae00dcaf
+== 152
+do $$
+declare d ordered_texts;
+begin
+  for d in select a, b from sometable loop
+    raise notice 'succeeded at "%"', d.f1;
+  end loop;
+end$$
+--
+f936eab75b8c1b90
+== 153
+do $$
+declare r record; d ordered_texts;
+begin
+  for r in select * from sometable loop
+    raise notice 'processing row %', r.id;
+    d := row(r.a, r.b);
+  end loop;
+end$$
+--
+f936eab75b8c1b90
+== 154
+do $$
+declare r record; d ordered_texts;
+begin
+  for r in select * from sometable loop
+    raise notice 'processing row %', r.id;
+    d := null;
+    d.f1 := r.a;
+    d.f2 := r.b;
+  end loop;
+end$$
+--
+f936eab75b8c1b90
+== 155
+-- check coercion of a record result to named-composite function output type
+create function compresult(int8) returns two_int8s language plpgsql as
+$$ declare r record; begin r := row($1,$1); return r; end $$
+--
+ff451c154b6dd3b8
+== 156
+create table two_int8s_tab (f1 two_int8s)
+--
+ddde24e70645e4a6
+== 157
+insert into two_int8s_tab values (compresult(42))
+--
+b9fdfa09349645a2
+== 158
+-- reconnect so we lose any local knowledge of anonymous record types
+table two_int8s_tab
+--
+f961d045d8fb63d1

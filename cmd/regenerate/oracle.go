@@ -19,9 +19,10 @@ type Oracle struct {
 }
 
 type oracleReq struct {
-	Op        string `json:"op"`
-	SQL       string `json:"sql"`
-	TrimSpace bool   `json:"trim_space,omitempty"`
+	Op            string `json:"op"`
+	SQL           string `json:"sql"`
+	TrimSpace     bool   `json:"trim_space,omitempty"`
+	TruncateLimit *int   `json:"truncate_limit,omitempty"`
 }
 
 type oracleError struct {
@@ -40,10 +41,41 @@ type oracleToken struct {
 }
 
 type oracleRes struct {
-	Text   *string       `json:"text"`
-	Stmts  []string      `json:"stmts"`
-	Tokens []oracleToken `json:"tokens"`
-	Err    *oracleError  `json:"error"`
+	Text    *string        `json:"text"`
+	Stmts   []string       `json:"stmts"`
+	Tokens  []oracleToken  `json:"tokens"`
+	Summary *oracleSummary `json:"summary"`
+	Err     *oracleError   `json:"error"`
+}
+
+type oracleSummaryTable struct {
+	Name       string `json:"name"`
+	SchemaName string `json:"schema_name"`
+	TableName  string `json:"table_name"`
+	Context    string `json:"context"`
+}
+
+type oracleSummaryFunction struct {
+	Name         string `json:"name"`
+	FunctionName string `json:"function_name"`
+	SchemaName   string `json:"schema_name"`
+	Context      string `json:"context"`
+}
+
+type oracleSummaryFilterColumn struct {
+	SchemaName string `json:"schema_name"`
+	TableName  string `json:"table_name"`
+	Column     string `json:"column"`
+}
+
+type oracleSummary struct {
+	Tables         []oracleSummaryTable        `json:"tables"`
+	Aliases        map[string]string           `json:"aliases"`
+	CteNames       []string                    `json:"cte_names"`
+	Functions      []oracleSummaryFunction     `json:"functions"`
+	FilterColumns  []oracleSummaryFilterColumn `json:"filter_columns"`
+	StatementTypes []string                    `json:"statement_types"`
+	TruncatedQuery string                      `json:"truncated_query"`
 }
 
 // StartOracle builds (if needed) and starts the oracle binary. bin may name a
@@ -121,6 +153,22 @@ func (o *Oracle) Scan(sql string) ([]oracleToken, *oracleError, error) {
 		return nil, nil, err
 	}
 	return res.Tokens, res.Err, nil
+}
+
+// Summary runs the summary op at the given truncation limit (-1 disables
+// truncation, matching pg_query.Summary).
+func (o *Oracle) Summary(sql string, truncateLimit int) (*oracleSummary, *oracleError, error) {
+	res, err := o.call(oracleReq{Op: "summary", SQL: sql, TruncateLimit: &truncateLimit})
+	if err != nil {
+		return nil, nil, err
+	}
+	if res.Err != nil {
+		return nil, res.Err, nil
+	}
+	if res.Summary == nil {
+		return nil, nil, fmt.Errorf("oracle op summary returned neither summary nor error")
+	}
+	return res.Summary, nil, nil
 }
 
 func (o *Oracle) Split(op, sql string, trimSpace bool) ([]string, *oracleError, error) {

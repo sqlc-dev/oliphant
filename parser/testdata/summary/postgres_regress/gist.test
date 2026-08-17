@@ -1,0 +1,584 @@
+== 001
+|--
+-- Test GiST indexes.
+|--
+-- There are other tests to test different GiST opclasses. This is for
+-- testing GiST code itself. Vacuuming in particular.
+
+create table gist_point_tbl(id int4, p point)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: CreateStmt
+== 002
+create index gist_pointidx on gist_point_tbl using gist(p)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 003
+-- Verify the fillfactor and buffering options
+create index gist_pointidx2 on gist_point_tbl using gist(p) with (buffering = on, fillfactor=50)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 004
+create index gist_pointidx3 on gist_point_tbl using gist(p) with (buffering = off)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 005
+create index gist_pointidx4 on gist_point_tbl using gist(p) with (buffering = auto)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 006
+drop index gist_pointidx2, gist_pointidx3, gist_pointidx4
+--
+STMT: DropStmt
+== 007
+-- Make sure bad values are refused
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (buffering = invalid_value)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 008
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=9)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 009
+create index gist_pointidx5 on gist_point_tbl using gist(p) with (fillfactor=101)
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: IndexStmt
+== 010
+-- Insert enough data to create a tree that's a couple of levels deep.
+insert into gist_point_tbl (id, p)
+select g,        point(g*10, g*10) from generate_series(1, 10000) g
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DML
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 011
+insert into gist_point_tbl (id, p)
+select g+100000, point(g*10+1, g*10+1) from generate_series(1, 10000) g
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DML
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 012
+-- To test vacuum, delete some entries from all over the index.
+delete from gist_point_tbl where id % 2 = 1
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DML
+STMT: DeleteStmt
+== 013
+-- And also delete some concentration of values.
+delete from gist_point_tbl where id > 5000
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DML
+STMT: DeleteStmt
+== 014
+vacuum analyze gist_point_tbl
+--
+TABLE: name="gist_point_tbl" schema="" table="gist_point_tbl" ctx=DDL
+STMT: VacuumStmt
+== 015
+-- rebuild the index with a different fillfactor
+alter index gist_pointidx SET (fillfactor = 40)
+--
+STMT: AlterTableStmt
+== 016
+reindex index gist_pointidx
+--
+STMT: ReindexStmt
+== 017
+|--
+-- Test Index-only plans on GiST indexes
+|--
+
+create table gist_tbl (b box, p point, c circle)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: CreateStmt
+== 018
+insert into gist_tbl
+select box(point(0.05*i, 0.05*i), point(0.05*i, 0.05*i)),
+       point(0.05*i, 0.05*i),
+       circle(point(0.05*i, 0.05*i), 1.0)
+from generate_series(0,10000) as i
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+vacuum analyze gist_tbl
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: VacuumStmt
+== 020
+set enable_seqscan=off
+--
+STMT: VariableSetStmt
+== 021
+set enable_bitmapscan=off
+--
+STMT: VariableSetStmt
+== 022
+set enable_indexonlyscan=on
+--
+STMT: VariableSetStmt
+== 023
+-- Test index-only scan with point opclass
+create index gist_tbl_point_index on gist_tbl using gist (p)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: IndexStmt
+== 024
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 025
+-- execute the same
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 026
+-- Also test an index-only knn-search
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by p <-> point(0.201, 0.201)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 027
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by p <-> point(0.201, 0.201)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 028
+-- Check commuted case as well
+explain (costs off)
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by point(0.101, 0.101) <-> p
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 029
+select p from gist_tbl where p <@ box(point(0,0), point(0.5, 0.5))
+order by point(0.101, 0.101) <-> p
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 030
+-- Check case with multiple rescans (bug #14641)
+explain (costs off)
+select p from
+  (values (box(point(0,0), point(0.5,0.5))),
+          (box(point(0.5,0.5), point(0.75,0.75))),
+          (box(point(0.8,0.8), point(1.0,1.0)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[0] limit 2) ss
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+FILTER: schema="" table="" column="bb"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 031
+select p from
+  (values (box(point(0,0), point(0.5,0.5))),
+          (box(point(0.5,0.5), point(0.75,0.75))),
+          (box(point(0.8,0.8), point(1.0,1.0)))) as v(bb)
+cross join lateral
+  (select p from gist_tbl where p <@ bb order by p <-> bb[0] limit 2) ss
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+FILTER: schema="" table="" column="bb"
+STMT: SelectStmt
+== 032
+drop index gist_tbl_point_index
+--
+STMT: DropStmt
+== 033
+-- Test index-only scan with box opclass
+create index gist_tbl_box_index on gist_tbl using gist (b)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: IndexStmt
+== 034
+-- check that the planner chooses an index-only scan
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 035
+-- execute the same
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 036
+-- Also test an index-only knn-search
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by b <-> point(5.2, 5.91)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 037
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by b <-> point(5.2, 5.91)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 038
+-- Check commuted case as well
+explain (costs off)
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by point(5.2, 5.91) <-> b
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 039
+select b from gist_tbl where b <@ box(point(5,5), point(6,6))
+order by point(5.2, 5.91) <-> b
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 040
+drop index gist_tbl_box_index
+--
+STMT: DropStmt
+== 041
+-- Test that an index-only scan is not chosen, when the query involves the
+-- circle column (the circle opclass does not support index-only scans).
+create index gist_tbl_multi_index on gist_tbl using gist (p, c)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: IndexStmt
+== 042
+explain (costs off)
+select p, c from gist_tbl
+where p <@ box(point(5,5), point(6, 6))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 043
+-- execute the same
+select b, p from gist_tbl
+where b <@ box(point(4.5, 4.5), point(5.5, 5.5))
+and p <@ box(point(5,5), point(6, 6))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 044
+drop index gist_tbl_multi_index
+--
+STMT: DropStmt
+== 045
+-- Test that we don't try to return the value of a non-returnable
+-- column in an index-only scan.  (This isn't GIST-specific, but
+-- it only applies to index AMs that can return some columns and not
+-- others, so GIST with appropriate opclasses is a convenient test case.)
+create index gist_tbl_multi_index on gist_tbl using gist (circle(p,1), p)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+STMT: IndexStmt
+== 046
+explain (verbose, costs off)
+select circle(p,1) from gist_tbl
+where p <@ box(point(5, 5), point(5.3, 5.3))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 047
+select circle(p,1) from gist_tbl
+where p <@ box(point(5, 5), point(5.3, 5.3))
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 048
+-- Similarly, test that index rechecks involving a non-returnable column
+-- are done correctly.
+explain (verbose, costs off)
+select p from gist_tbl where circle(p,1) @> circle(point(0,0),0.95)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 049
+select p from gist_tbl where circle(p,1) @> circle(point(0,0),0.95)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FILTER: schema="" table="" column="p"
+STMT: SelectStmt
+== 050
+-- Also check that use_physical_tlist doesn't trigger in such cases.
+explain (verbose, costs off)
+select count(*) from gist_tbl
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 051
+select count(*) from gist_tbl
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 052
+-- This case isn't supported, but it should at least EXPLAIN correctly.
+explain (verbose, costs off)
+select p from gist_tbl order by circle(p,1) <-> point(0,0) limit 1
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 053
+select p from gist_tbl order by circle(p,1) <-> point(0,0) limit 1
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=Select
+FUNCTION: name="circle" function="circle" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+-- Force an index build using buffering.
+create index gist_tbl_box_index_forcing_buffering on gist_tbl using gist (p)
+  with (buffering=on, fillfactor=50)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: IndexStmt
+== 055
+-- Clean up
+reset enable_seqscan
+--
+STMT: VariableSetStmt
+== 056
+reset enable_bitmapscan
+--
+STMT: VariableSetStmt
+== 057
+reset enable_indexonlyscan
+--
+STMT: VariableSetStmt
+== 058
+drop table gist_tbl
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: DropStmt
+== 059
+-- test an unlogged table, mostly to get coverage of gistbuildempty
+create unlogged table gist_tbl (b box)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: CreateStmt
+== 060
+create index gist_tbl_box_index on gist_tbl using gist (b)
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: IndexStmt
+== 061
+insert into gist_tbl
+  select box(point(0.05*i, 0.05*i)) from generate_series(0,10) as i
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DML
+FUNCTION: name="box" function="box" schema="" ctx=Call
+FUNCTION: name="point" function="point" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+drop table gist_tbl
+--
+TABLE: name="gist_tbl" schema="" table="gist_tbl" ctx=DDL
+STMT: DropStmt

@@ -1,0 +1,578 @@
+== 001
+|--
+-- CREATE_TYPE
+|--
+
+-- directory path and dlsuffix are passed to us in environment variables
+
+
+|--
+-- Test the "old style" approach of making the I/O functions first,
+-- with no explicit shell type creation.
+|--
+CREATE FUNCTION widget_in(cstring)
+   RETURNS widget
+   AS :'regresslib'
+   LANGUAGE C STRICT IMMUTABLE
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 272
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+CREATE FUNCTION widget_out(widget)
+   RETURNS cstring
+   AS :'regresslib'
+   LANGUAGE C STRICT IMMUTABLE
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 61
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 003
+CREATE FUNCTION int44in(cstring)
+   RETURNS city_budget
+   AS :'regresslib'
+   LANGUAGE C STRICT IMMUTABLE
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+CREATE FUNCTION int44out(city_budget)
+   RETURNS cstring
+   AS :'regresslib'
+   LANGUAGE C STRICT IMMUTABLE
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 64
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 005
+CREATE TYPE widget (
+   internallength = 24,
+   input = widget_in,
+   output = widget_out,
+   typmod_in = numerictypmodin,
+   typmod_out = numerictypmodout,
+   alignment = double
+)
+--
+STMT: DefineStmt
+== 006
+CREATE TYPE city_budget (
+   internallength = 16,
+   input = int44in,
+   output = int44out,
+   element = int4,
+   category = 'x',   -- just to verify the system will take it
+   preferred = true  -- ditto
+)
+--
+STMT: DefineStmt
+== 007
+-- Test creation and destruction of shell types
+CREATE TYPE shell
+--
+STMT: DefineStmt
+== 008
+CREATE TYPE shell
+--
+STMT: DefineStmt
+== 009
+-- fail, type already present
+DROP TYPE shell
+--
+STMT: DropStmt
+== 010
+DROP TYPE shell
+--
+STMT: DropStmt
+== 011
+-- fail, type not exist
+
+-- also, let's leave one around for purposes of pg_dump testing
+CREATE TYPE myshell
+--
+STMT: DefineStmt
+== 012
+|--
+-- Test type-related default values (broken in releases before PG 7.2)
+|--
+-- This part of the test also exercises the "new style" approach of making
+-- a shell type and then filling it in.
+|--
+CREATE TYPE int42
+--
+STMT: DefineStmt
+== 013
+CREATE TYPE text_w_default
+--
+STMT: DefineStmt
+== 014
+-- Make dummy I/O routines using the existing internal support for int4, text
+CREATE FUNCTION int42_in(cstring)
+   RETURNS int42
+   AS 'int4in'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+FUNCTION: name="int42_in" function="int42_in" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 015
+CREATE FUNCTION int42_out(int42)
+   RETURNS cstring
+   AS 'int4out'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+FUNCTION: name="int42_out" function="int42_out" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 016
+CREATE FUNCTION text_w_default_in(cstring)
+   RETURNS text_w_default
+   AS 'textin'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+FUNCTION: name="text_w_default_in" function="text_w_default_in" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 017
+CREATE FUNCTION text_w_default_out(text_w_default)
+   RETURNS cstring
+   AS 'textout'
+   LANGUAGE internal STRICT IMMUTABLE
+--
+FUNCTION: name="text_w_default_out" function="text_w_default_out" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 018
+CREATE TYPE int42 (
+   internallength = 4,
+   input = int42_in,
+   output = int42_out,
+   alignment = int4,
+   default = 42,
+   passedbyvalue
+)
+--
+STMT: DefineStmt
+== 019
+CREATE TYPE text_w_default (
+   internallength = variable,
+   input = text_w_default_in,
+   output = text_w_default_out,
+   alignment = int4,
+   default = 'zippo'
+)
+--
+STMT: DefineStmt
+== 020
+CREATE TABLE default_test (f1 text_w_default, f2 int42)
+--
+TABLE: name="default_test" schema="" table="default_test" ctx=DDL
+STMT: CreateStmt
+== 021
+INSERT INTO default_test DEFAULT VALUES
+--
+TABLE: name="default_test" schema="" table="default_test" ctx=DML
+STMT: InsertStmt
+== 022
+SELECT * FROM default_test
+--
+TABLE: name="default_test" schema="" table="default_test" ctx=Select
+STMT: SelectStmt
+== 023
+-- We need a shell type to test some CREATE TYPE failure cases with
+CREATE TYPE bogus_type
+--
+STMT: DefineStmt
+== 024
+-- invalid: non-lowercase quoted identifiers
+CREATE TYPE bogus_type (
+	"Internallength" = 4,
+	"Input" = int42_in,
+	"Output" = int42_out,
+	"Alignment" = int4,
+	"Default" = 42,
+	"Passedbyvalue"
+)
+--
+STMT: DefineStmt
+== 025
+-- invalid: input/output function incompatibility
+CREATE TYPE bogus_type (INPUT = array_in,
+    OUTPUT = array_out,
+    ELEMENT = int,
+    INTERNALLENGTH = 32)
+--
+STMT: DefineStmt
+== 026
+DROP TYPE bogus_type
+--
+STMT: DropStmt
+== 027
+-- It no longer is possible to issue CREATE TYPE without making a shell first
+CREATE TYPE bogus_type (INPUT = array_in,
+    OUTPUT = array_out,
+    ELEMENT = int,
+    INTERNALLENGTH = 32)
+--
+STMT: DefineStmt
+== 028
+-- Test stand-alone composite type
+
+CREATE TYPE default_test_row AS (f1 text_w_default, f2 int42)
+--
+STMT: CompositeTypeStmt
+== 029
+CREATE FUNCTION get_default_test() RETURNS SETOF default_test_row AS '
+  SELECT * FROM default_test;
+' LANGUAGE SQL
+--
+FUNCTION: name="get_default_test" function="get_default_test" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 030
+SELECT * FROM get_default_test()
+--
+FUNCTION: name="get_default_test" function="get_default_test" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+-- Test comments
+COMMENT ON TYPE bad IS 'bad comment'
+--
+STMT: CommentStmt
+== 032
+COMMENT ON TYPE default_test_row IS 'good comment'
+--
+STMT: CommentStmt
+== 033
+COMMENT ON TYPE default_test_row IS NULL
+--
+STMT: CommentStmt
+== 034
+COMMENT ON COLUMN default_test_row.nope IS 'bad comment'
+--
+STMT: CommentStmt
+== 035
+COMMENT ON COLUMN default_test_row.f1 IS 'good comment'
+--
+STMT: CommentStmt
+== 036
+COMMENT ON COLUMN default_test_row.f1 IS NULL
+--
+STMT: CommentStmt
+== 037
+-- Check shell type create for existing types
+CREATE TYPE text_w_default
+--
+STMT: DefineStmt
+== 038
+-- should fail
+
+DROP TYPE default_test_row CASCADE
+--
+STMT: DropStmt
+== 039
+DROP TABLE default_test
+--
+TABLE: name="default_test" schema="" table="default_test" ctx=DDL
+STMT: DropStmt
+== 040
+-- Check dependencies are established when creating a new type
+CREATE TYPE base_type
+--
+STMT: DefineStmt
+== 041
+CREATE FUNCTION base_fn_in(cstring) RETURNS base_type AS 'boolin'
+    LANGUAGE internal IMMUTABLE STRICT
+--
+FUNCTION: name="base_fn_in" function="base_fn_in" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 042
+CREATE FUNCTION base_fn_out(base_type) RETURNS cstring AS 'boolout'
+    LANGUAGE internal IMMUTABLE STRICT
+--
+FUNCTION: name="base_fn_out" function="base_fn_out" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 043
+CREATE TYPE base_type(INPUT = base_fn_in, OUTPUT = base_fn_out)
+--
+STMT: DefineStmt
+== 044
+DROP FUNCTION base_fn_in(cstring)
+--
+FUNCTION: name="base_fn_in" function="base_fn_in" schema="" ctx=DDL
+STMT: DropStmt
+== 045
+-- error
+DROP FUNCTION base_fn_out(base_type)
+--
+FUNCTION: name="base_fn_out" function="base_fn_out" schema="" ctx=DDL
+STMT: DropStmt
+== 046
+-- error
+DROP TYPE base_type
+--
+STMT: DropStmt
+== 047
+-- error
+DROP TYPE base_type CASCADE
+--
+STMT: DropStmt
+== 048
+-- Check usage of typmod with a user-defined type
+-- (we have borrowed numeric's typmod functions)
+
+CREATE TEMP TABLE mytab (foo widget(42,13,7))
+--
+TABLE: name="mytab" schema="" table="mytab" ctx=DDL
+STMT: CreateStmt
+== 049
+-- should fail
+CREATE TEMP TABLE mytab (foo widget(42,13))
+--
+TABLE: name="mytab" schema="" table="mytab" ctx=DDL
+STMT: CreateStmt
+== 050
+SELECT format_type(atttypid,atttypmod) FROM pg_attribute
+WHERE attrelid = 'mytab'::regclass AND attnum > 0
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FUNCTION: name="format_type" function="format_type" schema="" ctx=Call
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attnum"
+STMT: SelectStmt
+== 051
+-- might as well exercise the widget type while we're here
+INSERT INTO mytab VALUES ('(1,2,3)'), ('(-44,5.5,12)')
+--
+TABLE: name="mytab" schema="" table="mytab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 052
+TABLE mytab
+--
+TABLE: name="mytab" schema="" table="mytab" ctx=Select
+STMT: SelectStmt
+== 053
+-- and test format_type() a bit more, too
+select format_type('varchar'::regtype, 42)
+--
+FUNCTION: name="format_type" function="format_type" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+select format_type('bpchar'::regtype, null)
+--
+FUNCTION: name="format_type" function="format_type" schema="" ctx=Call
+STMT: SelectStmt
+== 055
+-- this behavior difference is intentional
+select format_type('bpchar'::regtype, -1)
+--
+FUNCTION: name="format_type" function="format_type" schema="" ctx=Call
+STMT: SelectStmt
+== 056
+-- Test non-error-throwing APIs using widget, which still throws errors
+SELECT pg_input_is_valid('(1,2,3)', 'widget')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 057
+SELECT pg_input_is_valid('(1,2)', 'widget')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 058
+-- hard error expected
+SELECT pg_input_is_valid('{"(1,2,3)"}', 'widget[]')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 059
+SELECT pg_input_is_valid('{"(1,2)"}', 'widget[]')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 060
+-- hard error expected
+SELECT pg_input_is_valid('("(1,2,3)")', 'mytab')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 061
+SELECT pg_input_is_valid('("(1,2)")', 'mytab')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 062
+-- hard error expected
+
+-- Test creation of an operator over a user-defined type
+
+CREATE FUNCTION pt_in_widget(point, widget)
+   RETURNS bool
+   AS :'regresslib'
+   LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 149
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 063
+CREATE OPERATOR <% (
+   leftarg = point,
+   rightarg = widget,
+   procedure = pt_in_widget,
+   commutator = >% ,
+   negator = >=%
+)
+--
+STMT: DefineStmt
+== 064
+SELECT point '(1,2)' <% widget '(0,0,3)' AS t,
+       point '(1,2)' <% widget '(0,0,1)' AS f
+--
+STMT: SelectStmt
+== 065
+-- exercise city_budget type
+CREATE TABLE city (
+	name		name,
+	location 	box,
+	budget 		city_budget
+)
+--
+TABLE: name="city" schema="" table="city" ctx=DDL
+STMT: CreateStmt
+== 066
+INSERT INTO city VALUES
+('Podunk', '(1,2),(3,4)', '100,127,1000'),
+('Gotham', '(1000,34),(1100,334)', '123456,127,-1000,6789')
+--
+TABLE: name="city" schema="" table="city" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 067
+TABLE city
+--
+TABLE: name="city" schema="" table="city" ctx=Select
+STMT: SelectStmt
+== 068
+|--
+-- Test CREATE/ALTER TYPE using a type that's compatible with varchar,
+-- so we can re-use those support functions
+|--
+CREATE TYPE myvarchar
+--
+STMT: DefineStmt
+== 069
+CREATE FUNCTION myvarcharin(cstring, oid, integer) RETURNS myvarchar
+LANGUAGE internal IMMUTABLE PARALLEL SAFE STRICT AS 'varcharin'
+--
+FUNCTION: name="myvarcharin" function="myvarcharin" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 070
+CREATE FUNCTION myvarcharout(myvarchar) RETURNS cstring
+LANGUAGE internal IMMUTABLE PARALLEL SAFE STRICT AS 'varcharout'
+--
+FUNCTION: name="myvarcharout" function="myvarcharout" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 071
+CREATE FUNCTION myvarcharsend(myvarchar) RETURNS bytea
+LANGUAGE internal STABLE PARALLEL SAFE STRICT AS 'varcharsend'
+--
+FUNCTION: name="myvarcharsend" function="myvarcharsend" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 072
+CREATE FUNCTION myvarcharrecv(internal, oid, integer) RETURNS myvarchar
+LANGUAGE internal STABLE PARALLEL SAFE STRICT AS 'varcharrecv'
+--
+FUNCTION: name="myvarcharrecv" function="myvarcharrecv" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 073
+-- fail, it's still a shell:
+ALTER TYPE myvarchar SET (storage = extended)
+--
+STMT: AlterTypeStmt
+== 074
+CREATE TYPE myvarchar (
+    input = myvarcharin,
+    output = myvarcharout,
+    alignment = integer,
+    storage = main
+)
+--
+STMT: DefineStmt
+== 075
+-- want to check updating of a domain over the target type, too
+CREATE DOMAIN myvarchardom AS myvarchar
+--
+STMT: CreateDomainStmt
+== 076
+ALTER TYPE myvarchar SET (storage = plain)
+--
+STMT: AlterTypeStmt
+== 077
+-- not allowed
+
+ALTER TYPE myvarchar SET (storage = extended)
+--
+STMT: AlterTypeStmt
+== 078
+ALTER TYPE myvarchar SET (
+    send = myvarcharsend,
+    receive = myvarcharrecv,
+    typmod_in = varchartypmodin,
+    typmod_out = varchartypmodout,
+    -- these are bogus, but it's safe as long as we don't use the type:
+    analyze = ts_typanalyze,
+    subscript = raw_array_subscript_handler
+)
+--
+STMT: AlterTypeStmt
+== 079
+SELECT typinput, typoutput, typreceive, typsend, typmodin, typmodout,
+       typanalyze, typsubscript, typstorage
+FROM pg_type WHERE typname = 'myvarchar'
+--
+TABLE: name="pg_type" schema="" table="pg_type" ctx=Select
+FILTER: schema="" table="" column="typname"
+STMT: SelectStmt
+== 080
+SELECT typinput, typoutput, typreceive, typsend, typmodin, typmodout,
+       typanalyze, typsubscript, typstorage
+FROM pg_type WHERE typname = '_myvarchar'
+--
+TABLE: name="pg_type" schema="" table="pg_type" ctx=Select
+FILTER: schema="" table="" column="typname"
+STMT: SelectStmt
+== 081
+SELECT typinput, typoutput, typreceive, typsend, typmodin, typmodout,
+       typanalyze, typsubscript, typstorage
+FROM pg_type WHERE typname = 'myvarchardom'
+--
+TABLE: name="pg_type" schema="" table="pg_type" ctx=Select
+FILTER: schema="" table="" column="typname"
+STMT: SelectStmt
+== 082
+SELECT typinput, typoutput, typreceive, typsend, typmodin, typmodout,
+       typanalyze, typsubscript, typstorage
+FROM pg_type WHERE typname = '_myvarchardom'
+--
+TABLE: name="pg_type" schema="" table="pg_type" ctx=Select
+FILTER: schema="" table="" column="typname"
+STMT: SelectStmt
+== 083
+-- ensure dependencies are straight
+DROP FUNCTION myvarcharsend(myvarchar)
+--
+FUNCTION: name="myvarcharsend" function="myvarcharsend" schema="" ctx=DDL
+STMT: DropStmt
+== 084
+-- fail
+DROP TYPE myvarchar
+--
+STMT: DropStmt
+== 085
+-- fail
+
+DROP TYPE myvarchar CASCADE
+--
+STMT: DropStmt

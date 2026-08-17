@@ -1,0 +1,400 @@
+== 001
+|--
+-- Tests for PL/pgSQL variable properties: CONSTANT, NOT NULL, initializers
+|--
+
+create type var_record as (f1 int4, f2 int4)
+--
+[]
+== 002
+create domain int_nn as int not null
+--
+[]
+== 003
+create domain var_record_nn as var_record not null
+--
+[]
+== 004
+create domain var_record_colnn as var_record check((value).f2 is not null)
+--
+[]
+== 005
+-- CONSTANT
+
+do $$
+declare x constant int := 42;
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int "}},"isconst":true,"default_val":{"PLpgSQL_expr":{"query":"42","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 006
+do $$
+declare x constant int;
+begin
+  x := 42;  -- fail
+end$$
+--
+ERROR: variable "x" is declared CONSTANT
+FILENAME: pl_gram.y
+FUNCNAME: check_assignable
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 007
+do $$
+declare x constant int; y int;
+begin
+  for x, y in select 1, 2 loop  -- fail
+  end loop;
+end$$
+--
+ERROR: variable "x" is declared CONSTANT
+FILENAME: pl_gram.y
+FUNCNAME: check_assignable
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 4"
+== 008
+do $$
+declare x constant int[];
+begin
+  x[1] := 42;  -- fail
+end$$
+--
+ERROR: variable "x" is declared CONSTANT
+FILENAME: pl_gram.y
+FUNCNAME: check_assignable
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 009
+do $$
+declare x constant int[]; y int;
+begin
+  for x[1], y in select 1, 2 loop  -- fail (currently, unsupported syntax)
+  end loop;
+end$$
+--
+ERROR: syntax error at or near "["
+FILENAME: src_pl_plpgsql_src_pl_scanner.c
+FUNCNAME: plpgsql_yyerror
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 4"
+== 010
+do $$
+declare x constant var_record;
+begin
+  x.f1 := 42;  -- fail
+end$$
+--
+ERROR: "x.f1" is not a known variable
+FILENAME: pl_gram.y
+FUNCNAME: cword_is_not_variable
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 011
+do $$
+declare x constant var_record; y int;
+begin
+  for x.f1, y in select 1, 2 loop  -- fail
+  end loop;
+end$$
+--
+ERROR: "x.f1" is not a known variable
+FILENAME: pl_gram.y
+FUNCNAME: cword_is_not_variable
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 012
+-- initializer expressions
+
+do $$
+declare x int := sin(0);
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int "}},"default_val":{"PLpgSQL_expr":{"query":"sin(0)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 013
+do $$
+declare x int := 1/0;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int "}},"default_val":{"PLpgSQL_expr":{"query":"1/0","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 014
+do $$
+declare x bigint[] := array[1,3,5];
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"bigint[] "}},"default_val":{"PLpgSQL_expr":{"query":"array[1,3,5]","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 015
+do $$
+declare x record := row(1,2,3);
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"x","dno":1,"lineno":2}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 016
+do $$
+declare x var_record := row(1,2);
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record "}},"default_val":{"PLpgSQL_expr":{"query":"row(1,2)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 017
+-- NOT NULL
+
+do $$
+declare x int not null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+ERROR: variable "x" must have a default value, since it's declared NOT NULL
+FILENAME: pl_gram.y
+FUNCNAME: plpgsql_yyparse
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 018
+do $$
+declare x int not null := 42;
+begin
+  raise notice 'x = %', x;
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"42","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 019
+do $$
+declare x int not null := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 020
+do $$
+declare x record not null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+ERROR: variable "x" must have a default value, since it's declared NOT NULL
+FILENAME: pl_gram.y
+FUNCNAME: plpgsql_yyparse
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 021
+do $$
+declare x record not null := row(42);
+begin
+  raise notice 'x = %', x;
+  x := row(null);  -- ok
+  raise notice 'x = %', x;
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"x","dno":1,"lineno":2}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := row(null)","parseMode":3}}}},{"PLpgSQL_stmt_raise":{"lineno":6,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 022
+do $$
+declare x record not null := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"x","dno":1,"lineno":2}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 023
+do $$
+declare x var_record not null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+ERROR: variable "x" must have a default value, since it's declared NOT NULL
+FILENAME: pl_gram.y
+FUNCNAME: plpgsql_yyparse
+CONTEXT: "compilation of PL/pgSQL function \"inline_code_block\" near line 2"
+== 024
+do $$
+declare x var_record not null := row(41,42);
+begin
+  raise notice 'x = %', x;
+  x := row(null,null);  -- ok
+  raise notice 'x = %', x;
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"row(41,42)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := row(null,null)","parseMode":3}}}},{"PLpgSQL_stmt_raise":{"lineno":6,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 025
+do $$
+declare x var_record not null := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 026
+-- Check that variables are reinitialized on block re-entry.
+
+do $$
+begin
+  for i in 1..3 loop
+    declare
+      x int;
+      y int := i;
+      r record;
+      c var_record;
+    begin
+      if i = 1 then
+        x := 42;
+        r := row(i, i+1);
+        c := row(i, i+1);
+      end if;
+      raise notice 'x = %', x;
+      raise notice 'y = %', y;
+      raise notice 'r = %', r;
+      raise notice 'c = %', c;
+    end;
+  end loop;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"i","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_var":{"refname":"y","lineno":6,"datatype":{"PLpgSQL_type":{"typname":"int "}},"default_val":{"PLpgSQL_expr":{"query":"i","parseMode":2}}}},{"PLpgSQL_rec":{"refname":"r","dno":4,"lineno":7}},{"PLpgSQL_var":{"refname":"c","lineno":8,"datatype":{"PLpgSQL_type":{"typname":"var_record"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_fori":{"lineno":3,"var":{"PLpgSQL_var":{"refname":"i","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},"lower":{"PLpgSQL_expr":{"query":"1","parseMode":2}},"upper":{"PLpgSQL_expr":{"query":"3","parseMode":2}},"body":[{"PLpgSQL_stmt_block":{"lineno":9,"body":[{"PLpgSQL_stmt_if":{"lineno":10,"cond":{"PLpgSQL_expr":{"query":"i = 1","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":11,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := 42","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":12,"varno":4,"expr":{"PLpgSQL_expr":{"query":"r := row(i, i+1)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":13,"varno":5,"expr":{"PLpgSQL_expr":{"query":"c := row(i, i+1)","parseMode":3}}}}]}},{"PLpgSQL_stmt_raise":{"lineno":15,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_raise":{"lineno":16,"elog_level":18,"message":"y = %","params":[{"PLpgSQL_expr":{"query":"y","parseMode":2}}]}},{"PLpgSQL_stmt_raise":{"lineno":17,"elog_level":18,"message":"r = %","params":[{"PLpgSQL_expr":{"query":"r","parseMode":2}}]}},{"PLpgSQL_stmt_raise":{"lineno":18,"elog_level":18,"message":"c = %","params":[{"PLpgSQL_expr":{"query":"c","parseMode":2}}]}}]}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 027
+-- Check enforcement of domain constraints during initialization
+
+do $$
+declare x int_nn;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int_nn"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 028
+do $$
+declare x int_nn := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int_nn "}},"default_val":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 029
+do $$
+declare x int_nn := 42;
+begin
+  raise notice 'x = %', x;
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int_nn "}},"default_val":{"PLpgSQL_expr":{"query":"42","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 030
+do $$
+declare x var_record_nn;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_nn"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 031
+do $$
+declare x var_record_nn := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_nn "}},"default_val":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 032
+do $$
+declare x var_record_nn := row(1,2);
+begin
+  raise notice 'x = %', x;
+  x := row(null,null);  -- ok
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_nn "}},"default_val":{"PLpgSQL_expr":{"query":"row(1,2)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := row(null,null)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":6,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 033
+do $$
+declare x var_record_colnn;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_colnn"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 034
+do $$
+declare x var_record_colnn := null;  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_colnn "}},"default_val":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 035
+do $$
+declare x var_record_colnn := row(1,null);  -- fail
+begin
+  raise notice 'x = %', x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_colnn "}},"default_val":{"PLpgSQL_expr":{"query":"row(1,null)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 036
+do $$
+declare x var_record_colnn := row(1,2);
+begin
+  raise notice 'x = %', x;
+  x := null;  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_colnn "}},"default_val":{"PLpgSQL_expr":{"query":"row(1,2)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := null","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 037
+do $$
+declare x var_record_colnn := row(1,2);
+begin
+  raise notice 'x = %', x;
+  x := row(null,null);  -- fail
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"var_record_colnn "}},"default_val":{"PLpgSQL_expr":{"query":"row(1,2)","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_raise":{"lineno":4,"elog_level":18,"message":"x = %","params":[{"PLpgSQL_expr":{"query":"x","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":5,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := row(null,null)","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]

@@ -22,6 +22,7 @@ import (
 var suiteOrder = []string{
 	"scan", "split_scanner", "parse", "deparse",
 	"normalize", "normalize_utility", "fingerprint", "split_parser",
+	"summary", "summary_truncate", "plpgsql",
 }
 
 func main() {

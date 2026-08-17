@@ -1,0 +1,1617 @@
+== 001
+|--
+-- ALTER TABLE ADD COLUMN DEFAULT test
+|--
+
+SET search_path = fast_default
+--
+STMT: VariableSetStmt
+== 002
+CREATE SCHEMA fast_default
+--
+STMT: CreateSchemaStmt
+== 003
+CREATE TABLE m(id OID)
+--
+TABLE: name="m" schema="" table="m" ctx=DDL
+STMT: CreateStmt
+== 004
+INSERT INTO m VALUES (NULL::OID)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+CREATE FUNCTION set(tabname name) RETURNS VOID
+AS $$
+BEGIN
+  UPDATE m
+  SET id = (SELECT c.relfilenode
+            FROM pg_class AS c, pg_namespace AS s
+            WHERE c.relname = tabname
+                AND c.relnamespace = s.oid
+                AND s.nspname = 'fast_default');
+END;
+$$ LANGUAGE 'plpgsql'
+--
+FUNCTION: name="set" function="set" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 006
+CREATE FUNCTION comp() RETURNS TEXT
+AS $$
+BEGIN
+  RETURN (SELECT CASE
+               WHEN m.id = c.relfilenode THEN 'Unchanged'
+               ELSE 'Rewritten'
+               END
+           FROM m, pg_class AS c, pg_namespace AS s
+           WHERE c.relname = 't'
+               AND c.relnamespace = s.oid
+               AND s.nspname = 'fast_default');
+END;
+$$ LANGUAGE 'plpgsql'
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 007
+CREATE FUNCTION log_rewrite() RETURNS event_trigger
+LANGUAGE plpgsql as
+$func$
+
+declare
+   this_schema text;
+begin
+    select into this_schema relnamespace::regnamespace::text
+    from pg_class
+    where oid = pg_event_trigger_table_rewrite_oid();
+    if this_schema = 'fast_default'
+    then
+        RAISE NOTICE 'rewriting table % for reason %',
+          pg_event_trigger_table_rewrite_oid()::regclass,
+          pg_event_trigger_table_rewrite_reason();
+    end if;
+end;
+$func$
+--
+FUNCTION: name="log_rewrite" function="log_rewrite" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 008
+CREATE TABLE has_volatile AS
+SELECT * FROM generate_series(1,10) id
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 009
+CREATE EVENT TRIGGER has_volatile_rewrite
+                  ON table_rewrite
+   EXECUTE PROCEDURE log_rewrite()
+--
+STMT: CreateEventTrigStmt
+== 010
+-- only the last of these should trigger a rewrite
+ALTER TABLE has_volatile ADD col1 int
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+STMT: AlterTableStmt
+== 011
+ALTER TABLE has_volatile ADD col2 int DEFAULT 1
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+STMT: AlterTableStmt
+== 012
+ALTER TABLE has_volatile ADD col3 timestamptz DEFAULT current_timestamp
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+STMT: AlterTableStmt
+== 013
+ALTER TABLE has_volatile ADD col4 int DEFAULT (random() * 10000)::int
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+STMT: AlterTableStmt
+== 014
+-- Test a large sample of different datatypes
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY, c_int INT DEFAULT 1)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 015
+SELECT set('t')
+--
+FUNCTION: name="set" function="set" schema="" ctx=Call
+STMT: SelectStmt
+== 016
+INSERT INTO T VALUES (1), (2)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+ALTER TABLE T ADD COLUMN c_bpchar BPCHAR(5) DEFAULT 'hello',
+              ALTER COLUMN c_int SET DEFAULT 2
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 018
+INSERT INTO T VALUES (3), (4)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+ALTER TABLE T ADD COLUMN c_text TEXT  DEFAULT 'world',
+              ALTER COLUMN c_bpchar SET DEFAULT 'dog'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 020
+INSERT INTO T VALUES (5), (6)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 021
+ALTER TABLE T ADD COLUMN c_date DATE DEFAULT '2016-06-02',
+              ALTER COLUMN c_text SET DEFAULT 'cat'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 022
+INSERT INTO T VALUES (7), (8)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 023
+ALTER TABLE T ADD COLUMN c_timestamp TIMESTAMP DEFAULT '2016-09-01 12:00:00',
+              ADD COLUMN c_timestamp_null TIMESTAMP,
+              ALTER COLUMN c_date SET DEFAULT '2010-01-01'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 024
+INSERT INTO T VALUES (9), (10)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 025
+ALTER TABLE T ADD COLUMN c_array TEXT[]
+                  DEFAULT '{"This", "is", "the", "real", "world"}',
+              ALTER COLUMN c_timestamp SET DEFAULT '1970-12-31 11:12:13',
+              ALTER COLUMN c_timestamp_null SET DEFAULT '2016-09-29 12:00:00'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 026
+INSERT INTO T VALUES (11), (12)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 027
+ALTER TABLE T ADD COLUMN c_small SMALLINT DEFAULT -5,
+              ADD COLUMN c_small_null SMALLINT,
+              ALTER COLUMN c_array
+                  SET DEFAULT '{"This", "is", "no", "fantasy"}'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 028
+INSERT INTO T VALUES (13), (14)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 029
+ALTER TABLE T ADD COLUMN c_big BIGINT DEFAULT 180000000000018,
+              ALTER COLUMN c_small SET DEFAULT 9,
+              ALTER COLUMN c_small_null SET DEFAULT 13
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 030
+INSERT INTO T VALUES (15), (16)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 031
+ALTER TABLE T ADD COLUMN c_num NUMERIC DEFAULT 1.00000000001,
+              ALTER COLUMN c_big SET DEFAULT -9999999999999999
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 032
+INSERT INTO T VALUES (17), (18)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 033
+ALTER TABLE T ADD COLUMN c_time TIME DEFAULT '12:00:00',
+              ALTER COLUMN c_num SET DEFAULT 2.000000000000002
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 034
+INSERT INTO T VALUES (19), (20)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 035
+ALTER TABLE T ADD COLUMN c_interval INTERVAL DEFAULT '1 day',
+              ALTER COLUMN c_time SET DEFAULT '23:59:59'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 036
+INSERT INTO T VALUES (21), (22)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 037
+ALTER TABLE T ADD COLUMN c_hugetext TEXT DEFAULT repeat('abcdefg',1000),
+              ALTER COLUMN c_interval SET DEFAULT '3 hours'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 038
+INSERT INTO T VALUES (23), (24)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 039
+ALTER TABLE T ALTER COLUMN c_interval DROP DEFAULT,
+              ALTER COLUMN c_hugetext SET DEFAULT repeat('poiuyt', 1000)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 040
+INSERT INTO T VALUES (25), (26)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 041
+ALTER TABLE T ALTER COLUMN c_bpchar    DROP DEFAULT,
+              ALTER COLUMN c_date      DROP DEFAULT,
+              ALTER COLUMN c_text      DROP DEFAULT,
+              ALTER COLUMN c_timestamp DROP DEFAULT,
+              ALTER COLUMN c_array     DROP DEFAULT,
+              ALTER COLUMN c_small     DROP DEFAULT,
+              ALTER COLUMN c_big       DROP DEFAULT,
+              ALTER COLUMN c_num       DROP DEFAULT,
+              ALTER COLUMN c_time      DROP DEFAULT,
+              ALTER COLUMN c_hugetext  DROP DEFAULT
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 042
+INSERT INTO T VALUES (27), (28)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 043
+SELECT pk, c_int, c_bpchar, c_text, c_date, c_timestamp,
+       c_timestamp_null, c_array, c_small, c_small_null,
+       c_big, c_num, c_time, c_interval,
+       c_hugetext = repeat('abcdefg',1000) as c_hugetext_origdef,
+       c_hugetext = repeat('poiuyt', 1000) as c_hugetext_newdef
+FROM T ORDER BY pk
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: SelectStmt
+== 044
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 045
+DROP TABLE T
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 046
+-- Test expressions in the defaults
+CREATE OR REPLACE FUNCTION foo(a INT) RETURNS TEXT AS $$
+DECLARE res TEXT := '';
+        i INT;
+BEGIN
+  i := 0;
+  WHILE (i < a) LOOP
+    res := res || chr(ascii('a') + i);
+    i := i + 1;
+  END LOOP;
+  RETURN res;
+END; $$ LANGUAGE PLPGSQL STABLE
+--
+FUNCTION: name="foo" function="foo" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 047
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY, c_int INT DEFAULT LENGTH(foo(6)))
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 048
+SELECT set('t')
+--
+FUNCTION: name="set" function="set" schema="" ctx=Call
+STMT: SelectStmt
+== 049
+INSERT INTO T VALUES (1), (2)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 050
+ALTER TABLE T ADD COLUMN c_bpchar BPCHAR(5) DEFAULT foo(4),
+              ALTER COLUMN c_int SET DEFAULT LENGTH(foo(8))
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 051
+INSERT INTO T VALUES (3), (4)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 052
+ALTER TABLE T ADD COLUMN c_text TEXT  DEFAULT foo(6),
+              ALTER COLUMN c_bpchar SET DEFAULT foo(3)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 053
+INSERT INTO T VALUES (5), (6)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 054
+ALTER TABLE T ADD COLUMN c_date DATE
+                  DEFAULT '2016-06-02'::DATE  + LENGTH(foo(10)),
+              ALTER COLUMN c_text SET DEFAULT foo(12)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 055
+INSERT INTO T VALUES (7), (8)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 056
+ALTER TABLE T ADD COLUMN c_timestamp TIMESTAMP
+                  DEFAULT '2016-09-01'::DATE + LENGTH(foo(10)),
+              ALTER COLUMN c_date
+                  SET DEFAULT '2010-01-01'::DATE - LENGTH(foo(4))
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 057
+INSERT INTO T VALUES (9), (10)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 058
+ALTER TABLE T ADD COLUMN c_array TEXT[]
+                  DEFAULT ('{"This", "is", "' || foo(4) ||
+                           '","the", "real", "world"}')::TEXT[],
+              ALTER COLUMN c_timestamp
+                  SET DEFAULT '1970-12-31'::DATE + LENGTH(foo(30))
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 059
+INSERT INTO T VALUES (11), (12)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 060
+ALTER TABLE T ALTER COLUMN c_int DROP DEFAULT,
+              ALTER COLUMN c_array
+                  SET DEFAULT ('{"This", "is", "' || foo(1) ||
+                               '", "fantasy"}')::text[]
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 061
+INSERT INTO T VALUES (13), (14)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+ALTER TABLE T ALTER COLUMN c_bpchar    DROP DEFAULT,
+              ALTER COLUMN c_date      DROP DEFAULT,
+              ALTER COLUMN c_text      DROP DEFAULT,
+              ALTER COLUMN c_timestamp DROP DEFAULT,
+              ALTER COLUMN c_array     DROP DEFAULT
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 063
+INSERT INTO T VALUES (15), (16)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 064
+SELECT * FROM T
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 065
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 066
+DROP TABLE T
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 067
+-- Test domains with default value for table rewrite.
+CREATE DOMAIN domain1 AS int DEFAULT 11
+--
+STMT: CreateDomainStmt
+== 068
+-- constant
+CREATE DOMAIN domain2 AS int DEFAULT random(min=>10, max=>100)
+--
+STMT: CreateDomainStmt
+== 069
+-- volatile
+CREATE DOMAIN domain3 AS text DEFAULT foo(4)
+--
+STMT: CreateDomainStmt
+== 070
+-- stable
+CREATE DOMAIN domain4 AS text[]
+  DEFAULT ('{"This", "is", "' || foo(4) || '","the", "real", "world"}')::TEXT[]
+--
+STMT: CreateDomainStmt
+== 071
+CREATE TABLE t2 (a domain1)
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: CreateStmt
+== 072
+INSERT INTO t2 VALUES (1),(2)
+--
+TABLE: name="t2" schema="" table="t2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 073
+-- no table rewrite
+ALTER TABLE t2 ADD COLUMN b domain1 default 3
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: AlterTableStmt
+== 074
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attnum"
+FILTER: schema="" table="" column="attrelid"
+STMT: SelectStmt
+== 075
+-- table rewrite should happen
+ALTER TABLE t2 ADD COLUMN c domain3 default left(random()::text,3)
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: AlterTableStmt
+== 076
+-- no table rewrite
+ALTER TABLE t2 ADD COLUMN d domain4
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: AlterTableStmt
+== 077
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attnum"
+FILTER: schema="" table="" column="attrelid"
+STMT: SelectStmt
+== 078
+-- table rewrite should happen
+ALTER TABLE t2 ADD COLUMN e domain2
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: AlterTableStmt
+== 079
+SELECT attnum, attname, atthasmissing, atthasdef, attmissingval
+FROM pg_attribute
+WHERE attnum > 0 AND attrelid = 't2'::regclass
+ORDER BY attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attnum"
+FILTER: schema="" table="" column="attrelid"
+STMT: SelectStmt
+== 080
+SELECT a, b, length(c) = 3 as c_ok, d, e >= 10 as e_ok FROM t2
+--
+TABLE: name="t2" schema="" table="t2" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 081
+DROP TABLE t2
+--
+TABLE: name="t2" schema="" table="t2" ctx=DDL
+STMT: DropStmt
+== 082
+DROP DOMAIN domain1
+--
+STMT: DropStmt
+== 083
+DROP DOMAIN domain2
+--
+STMT: DropStmt
+== 084
+DROP DOMAIN domain3
+--
+STMT: DropStmt
+== 085
+DROP DOMAIN domain4
+--
+STMT: DropStmt
+== 086
+DROP FUNCTION foo(INT)
+--
+FUNCTION: name="foo" function="foo" schema="" ctx=DDL
+STMT: DropStmt
+== 087
+-- Fall back to full rewrite for volatile expressions
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 088
+INSERT INTO T VALUES (1)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 089
+SELECT set('t')
+--
+FUNCTION: name="set" function="set" schema="" ctx=Call
+STMT: SelectStmt
+== 090
+-- now() is stable, because it returns the transaction timestamp
+ALTER TABLE T ADD COLUMN c1 TIMESTAMP DEFAULT now()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 091
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 092
+-- clock_timestamp() is volatile
+ALTER TABLE T ADD COLUMN c2 TIMESTAMP DEFAULT clock_timestamp()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 093
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 094
+-- check that we notice insertion of a volatile default argument
+CREATE FUNCTION foolme(timestamptz DEFAULT clock_timestamp())
+  RETURNS timestamptz
+  IMMUTABLE AS 'select $1' LANGUAGE sql
+--
+FUNCTION: name="foolme" function="foolme" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 095
+ALTER TABLE T ADD COLUMN c3 timestamptz DEFAULT foolme()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 096
+SELECT attname, atthasmissing, attmissingval FROM pg_attribute
+  WHERE attrelid = 't'::regclass AND attnum > 0
+  ORDER BY attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attnum"
+STMT: SelectStmt
+== 097
+DROP TABLE T
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 098
+DROP FUNCTION foolme(timestamptz)
+--
+FUNCTION: name="foolme" function="foolme" schema="" ctx=DDL
+STMT: DropStmt
+== 099
+-- Simple querie
+CREATE TABLE T (pk INT NOT NULL PRIMARY KEY)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 100
+SELECT set('t')
+--
+FUNCTION: name="set" function="set" schema="" ctx=Call
+STMT: SelectStmt
+== 101
+INSERT INTO T SELECT * FROM generate_series(1, 10) a
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 102
+ALTER TABLE T ADD COLUMN c_bigint BIGINT NOT NULL DEFAULT -1
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 103
+INSERT INTO T SELECT b, b - 10 FROM generate_series(11, 20) a(b)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 104
+ALTER TABLE T ADD COLUMN c_text TEXT DEFAULT 'hello'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 105
+INSERT INTO T SELECT b, b - 10, (b + 10)::text FROM generate_series(21, 30) a(b)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 106
+-- WHERE clause
+SELECT c_bigint, c_text FROM T WHERE c_bigint = -1 LIMIT 1
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_bigint"
+STMT: SelectStmt
+== 107
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT c_bigint, c_text FROM T WHERE c_bigint = -1 LIMIT 1
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_bigint"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 108
+SELECT c_bigint, c_text FROM T WHERE c_text = 'hello' LIMIT 1
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_text"
+STMT: SelectStmt
+== 109
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) SELECT c_bigint, c_text FROM T WHERE c_text = 'hello' LIMIT 1
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_text"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 110
+-- COALESCE
+SELECT COALESCE(c_bigint, pk), COALESCE(c_text, pk::text)
+FROM T
+ORDER BY pk LIMIT 10
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 111
+-- Aggregate function
+SELECT SUM(c_bigint), MAX(c_text COLLATE "C" ), MIN(c_text COLLATE "C") FROM T
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+STMT: SelectStmt
+== 112
+-- ORDER BY
+SELECT * FROM T ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 113
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT * FROM T ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 114
+-- LIMIT
+SELECT * FROM T WHERE c_bigint > -1 ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_bigint"
+STMT: SelectStmt
+== 115
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+SELECT * FROM T WHERE c_bigint > -1 ORDER BY c_bigint, c_text, pk LIMIT 10
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_bigint"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 116
+--  DELETE with RETURNING
+DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: DeleteStmt
+== 117
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: ExplainStmt
+STMT: DeleteStmt
+== 118
+-- UPDATE
+UPDATE T SET c_text = '"' || c_text || '"'  WHERE pk < 10
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 119
+SELECT * FROM T WHERE c_text LIKE '"%"' ORDER BY PK
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_text"
+STMT: SelectStmt
+== 120
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 121
+DROP TABLE T
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 122
+-- Combine with other DDL
+CREATE TABLE T(pk INT NOT NULL PRIMARY KEY)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 123
+SELECT set('t')
+--
+FUNCTION: name="set" function="set" schema="" ctx=Call
+STMT: SelectStmt
+== 124
+INSERT INTO T VALUES (1), (2)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 125
+ALTER TABLE T ADD COLUMN c_int INT NOT NULL DEFAULT -1
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 126
+INSERT INTO T VALUES (3), (4)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 127
+ALTER TABLE T ADD COLUMN c_text TEXT DEFAULT 'Hello'
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 128
+INSERT INTO T VALUES (5), (6)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 129
+ALTER TABLE T ALTER COLUMN c_text SET DEFAULT 'world',
+              ALTER COLUMN c_int  SET DEFAULT 1
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 130
+INSERT INTO T VALUES (7), (8)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 131
+SELECT * FROM T ORDER BY pk
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 132
+-- Add an index
+CREATE INDEX i ON T(c_int, c_text)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: IndexStmt
+== 133
+SELECT c_text FROM T WHERE c_int = -1
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="c_int"
+STMT: SelectStmt
+== 134
+SELECT comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=Call
+STMT: SelectStmt
+== 135
+-- query to exercise expand_tuple function
+CREATE TABLE t1 AS
+SELECT 1::int AS a , 2::int AS b
+FROM generate_series(1,20) q
+--
+TABLE: name="t1" schema="" table="t1" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 136
+ALTER TABLE t1 ADD COLUMN c text
+--
+TABLE: name="t1" schema="" table="t1" ctx=DDL
+STMT: AlterTableStmt
+== 137
+SELECT a,
+       stddev(cast((SELECT sum(1) FROM generate_series(1,20) x) AS float4))
+          OVER (PARTITION BY a,b,c ORDER BY b)
+       AS z
+FROM t1
+--
+TABLE: name="t1" schema="" table="t1" ctx=Select
+FUNCTION: name="stddev" function="stddev" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 138
+DROP TABLE T
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 139
+-- test that we account for missing columns without defaults correctly
+-- in expand_tuple, and that rows are correctly expanded for triggers
+
+CREATE FUNCTION test_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+
+begin
+    raise notice 'old tuple: %', to_json(OLD)::text;
+    if TG_OP = 'DELETE'
+    then
+       return OLD;
+    else
+       return NEW;
+    end if;
+end;
+
+$$
+--
+FUNCTION: name="test_trigger" function="test_trigger" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 140
+-- 2 new columns, both have defaults
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 141
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 142
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 143
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 144
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 145
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 146
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 147
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 148
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 149
+-- 2 new columns, first has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 150
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 151
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 152
+ALTER TABLE t ADD COLUMN y int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 153
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 154
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 155
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 156
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 157
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 158
+-- 2 new columns, second has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 159
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 160
+ALTER TABLE t ADD COLUMN x int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 161
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 162
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 163
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 164
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 165
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 166
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 167
+-- 2 new columns, neither has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 168
+INSERT INTO t (a,b,c) VALUES (1,2,3)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 169
+ALTER TABLE t ADD COLUMN x int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 170
+ALTER TABLE t ADD COLUMN y int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 171
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 172
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 173
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 174
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 175
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 176
+-- same as last 4 tests but here the last original column has a NULL value
+-- 2 new columns, both have defaults
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 177
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 178
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 179
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 180
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 181
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 182
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 183
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 184
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 185
+-- 2 new columns, first has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 186
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 187
+ALTER TABLE t ADD COLUMN x int NOT NULL DEFAULT 4
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 188
+ALTER TABLE t ADD COLUMN y int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 189
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 190
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 191
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 192
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 193
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 194
+-- 2 new columns, second has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 195
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 196
+ALTER TABLE t ADD COLUMN x int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 197
+ALTER TABLE t ADD COLUMN y int NOT NULL DEFAULT 5
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 198
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 199
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 200
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 201
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 202
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 203
+-- 2 new columns, neither has default
+CREATE TABLE t (id serial PRIMARY KEY, a int, b int, c int)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 204
+INSERT INTO t (a,b,c) VALUES (1,2,NULL)
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 205
+ALTER TABLE t ADD COLUMN x int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 206
+ALTER TABLE t ADD COLUMN y int
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 207
+CREATE TRIGGER a BEFORE UPDATE ON t FOR EACH ROW EXECUTE PROCEDURE test_trigger()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateTrigStmt
+== 208
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 209
+UPDATE t SET y = 2
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 210
+SELECT * FROM t
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+STMT: SelectStmt
+== 211
+DROP TABLE t
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: DropStmt
+== 212
+-- make sure expanded tuple has correct self pointer
+-- it will be required by the RI trigger doing the cascading delete
+
+CREATE TABLE leader (a int PRIMARY KEY, b int)
+--
+TABLE: name="leader" schema="" table="leader" ctx=DDL
+STMT: CreateStmt
+== 213
+CREATE TABLE follower (a int REFERENCES leader ON DELETE CASCADE, b int)
+--
+TABLE: name="follower" schema="" table="follower" ctx=DDL
+STMT: CreateStmt
+== 214
+INSERT INTO leader VALUES (1, 1), (2, 2)
+--
+TABLE: name="leader" schema="" table="leader" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 215
+ALTER TABLE leader ADD c int
+--
+TABLE: name="leader" schema="" table="leader" ctx=DDL
+STMT: AlterTableStmt
+== 216
+ALTER TABLE leader DROP c
+--
+TABLE: name="leader" schema="" table="leader" ctx=DDL
+STMT: AlterTableStmt
+== 217
+DELETE FROM leader
+--
+TABLE: name="leader" schema="" table="leader" ctx=DML
+STMT: DeleteStmt
+== 218
+-- check that ALTER TABLE ... ALTER TYPE does the right thing
+
+CREATE TABLE vtype( a integer)
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DDL
+STMT: CreateStmt
+== 219
+INSERT INTO vtype VALUES (1)
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 220
+ALTER TABLE vtype ADD COLUMN b DOUBLE PRECISION DEFAULT 0.2
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DDL
+STMT: AlterTableStmt
+== 221
+ALTER TABLE vtype ADD COLUMN c BOOLEAN DEFAULT true
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DDL
+STMT: AlterTableStmt
+== 222
+SELECT * FROM vtype
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=Select
+STMT: SelectStmt
+== 223
+ALTER TABLE vtype
+      ALTER b TYPE text USING b::text,
+      ALTER c TYPE text USING c::text
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DDL
+STMT: AlterTableStmt
+== 224
+SELECT * FROM vtype
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=Select
+STMT: SelectStmt
+== 225
+-- also check the case that doesn't rewrite the table
+
+CREATE TABLE vtype2 (a int)
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DDL
+STMT: CreateStmt
+== 226
+INSERT INTO vtype2 VALUES (1)
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 227
+ALTER TABLE vtype2 ADD COLUMN b varchar(10) DEFAULT 'xxx'
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DDL
+STMT: AlterTableStmt
+== 228
+ALTER TABLE vtype2 ALTER COLUMN b SET DEFAULT 'yyy'
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DDL
+STMT: AlterTableStmt
+== 229
+INSERT INTO vtype2 VALUES (2)
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 230
+ALTER TABLE vtype2 ALTER COLUMN b TYPE varchar(20) USING b::varchar(20)
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DDL
+STMT: AlterTableStmt
+== 231
+SELECT * FROM vtype2
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=Select
+STMT: SelectStmt
+== 232
+-- Ensure that defaults are checked when evaluating whether HOT update
+-- is possible, this was broken for a while:
+-- https://postgr.es/m/20190202133521.ylauh3ckqa7colzj%40alap3.anarazel.de
+BEGIN
+--
+STMT: TransactionStmt
+== 233
+CREATE TABLE t()
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: CreateStmt
+== 234
+INSERT INTO t DEFAULT VALUES
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: InsertStmt
+== 235
+ALTER TABLE t ADD COLUMN a int DEFAULT 1
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: AlterTableStmt
+== 236
+CREATE INDEX ON t(a)
+--
+TABLE: name="t" schema="" table="t" ctx=DDL
+STMT: IndexStmt
+== 237
+-- set column with a default 1 to NULL, due to a bug that wasn't
+-- noticed has heap_getattr buggily returned NULL for default columns
+UPDATE t SET a = NULL
+--
+TABLE: name="t" schema="" table="t" ctx=DML
+STMT: UpdateStmt
+== 238
+-- verify that index and non-index scans show the same result
+SET LOCAL enable_seqscan = true
+--
+STMT: VariableSetStmt
+== 239
+SELECT * FROM t WHERE a IS NULL
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 240
+SET LOCAL enable_seqscan = false
+--
+STMT: VariableSetStmt
+== 241
+SELECT * FROM t WHERE a IS NULL
+--
+TABLE: name="t" schema="" table="t" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 242
+ROLLBACK
+--
+STMT: TransactionStmt
+== 243
+-- verify that a default set on a non-plain table doesn't set a missing
+-- value on the attribute
+CREATE FOREIGN DATA WRAPPER dummy
+--
+STMT: CreateFdwStmt
+== 244
+CREATE SERVER s0 FOREIGN DATA WRAPPER dummy
+--
+STMT: CreateForeignServerStmt
+== 245
+CREATE FOREIGN TABLE ft1 (c1 integer NOT NULL) SERVER s0
+--
+STMT: CreateForeignTableStmt
+== 246
+ALTER FOREIGN TABLE ft1 ADD COLUMN c8 integer DEFAULT 0
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 247
+ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE char(10)
+--
+TABLE: name="ft1" schema="" table="ft1" ctx=DDL
+STMT: AlterTableStmt
+== 248
+SELECT count(*)
+  FROM pg_attribute
+  WHERE attrelid = 'ft1'::regclass AND
+    (attmissingval IS NOT NULL OR atthasmissing)
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attmissingval"
+FILTER: schema="" table="" column="atthasmissing"
+STMT: SelectStmt
+== 249
+-- cleanup
+DROP FOREIGN TABLE ft1
+--
+STMT: DropStmt
+== 250
+DROP SERVER s0
+--
+STMT: DropStmt
+== 251
+DROP FOREIGN DATA WRAPPER dummy
+--
+STMT: DropStmt
+== 252
+DROP TABLE vtype
+--
+TABLE: name="vtype" schema="" table="vtype" ctx=DDL
+STMT: DropStmt
+== 253
+DROP TABLE vtype2
+--
+TABLE: name="vtype2" schema="" table="vtype2" ctx=DDL
+STMT: DropStmt
+== 254
+DROP TABLE follower
+--
+TABLE: name="follower" schema="" table="follower" ctx=DDL
+STMT: DropStmt
+== 255
+DROP TABLE leader
+--
+TABLE: name="leader" schema="" table="leader" ctx=DDL
+STMT: DropStmt
+== 256
+DROP FUNCTION test_trigger()
+--
+FUNCTION: name="test_trigger" function="test_trigger" schema="" ctx=DDL
+STMT: DropStmt
+== 257
+DROP TABLE t1
+--
+TABLE: name="t1" schema="" table="t1" ctx=DDL
+STMT: DropStmt
+== 258
+DROP FUNCTION set(name)
+--
+FUNCTION: name="set" function="set" schema="" ctx=DDL
+STMT: DropStmt
+== 259
+DROP FUNCTION comp()
+--
+FUNCTION: name="comp" function="comp" schema="" ctx=DDL
+STMT: DropStmt
+== 260
+DROP TABLE m
+--
+TABLE: name="m" schema="" table="m" ctx=DDL
+STMT: DropStmt
+== 261
+DROP TABLE has_volatile
+--
+TABLE: name="has_volatile" schema="" table="has_volatile" ctx=DDL
+STMT: DropStmt
+== 262
+DROP EVENT TRIGGER has_volatile_rewrite
+--
+STMT: DropStmt
+== 263
+DROP FUNCTION log_rewrite
+--
+FUNCTION: name="log_rewrite" function="log_rewrite" schema="" ctx=DDL
+STMT: DropStmt
+== 264
+DROP SCHEMA fast_default
+--
+STMT: DropStmt
+== 265
+-- Leave a table with an active fast default in place, for pg_upgrade testing
+set search_path = public
+--
+STMT: VariableSetStmt
+== 266
+create table has_fast_default(f1 int)
+--
+TABLE: name="has_fast_default" schema="" table="has_fast_default" ctx=DDL
+STMT: CreateStmt
+== 267
+insert into has_fast_default values(1)
+--
+TABLE: name="has_fast_default" schema="" table="has_fast_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 268
+alter table has_fast_default add column f2 int default 42
+--
+TABLE: name="has_fast_default" schema="" table="has_fast_default" ctx=DDL
+STMT: AlterTableStmt
+== 269
+table has_fast_default
+--
+TABLE: name="has_fast_default" schema="" table="has_fast_default" ctx=Select
+STMT: SelectStmt

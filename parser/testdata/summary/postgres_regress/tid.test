@@ -1,0 +1,239 @@
+== 001
+-- basic tests for the TID data type
+
+SELECT
+  '(0,0)'::tid as tid00,
+  '(0,1)'::tid as tid01,
+  '(-1,0)'::tid as tidm10,
+  '(4294967295,65535)'::tid as tidmax
+--
+STMT: SelectStmt
+== 002
+SELECT '(4294967296,1)'::tid
+--
+STMT: SelectStmt
+== 003
+-- error
+SELECT '(1,65536)'::tid
+--
+STMT: SelectStmt
+== 004
+-- error
+
+-- Also try it with non-error-throwing API
+SELECT pg_input_is_valid('(0)', 'tid')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 005
+SELECT * FROM pg_input_error_info('(0)', 'tid')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 006
+SELECT pg_input_is_valid('(0,-1)', 'tid')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 007
+SELECT * FROM pg_input_error_info('(0,-1)', 'tid')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 008
+-- tests for functions related to TID handling
+
+CREATE TABLE tid_tab (a int)
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: CreateStmt
+== 009
+-- min() and max() for TIDs
+INSERT INTO tid_tab VALUES (1), (2)
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 010
+SELECT min(ctid) FROM tid_tab
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+STMT: SelectStmt
+== 011
+SELECT max(ctid) FROM tid_tab
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=Select
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 012
+TRUNCATE tid_tab
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: TruncateStmt
+== 013
+-- Tests for currtid2() with various relation kinds
+
+-- Materialized view
+CREATE MATERIALIZED VIEW tid_matview AS SELECT a FROM tid_tab
+--
+TABLE: name="tid_matview" schema="" table="tid_matview" ctx=DDL
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=Select
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 014
+SELECT currtid2('tid_matview'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 015
+-- fails
+INSERT INTO tid_tab VALUES (1)
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+REFRESH MATERIALIZED VIEW tid_matview
+--
+TABLE: name="tid_matview" schema="" table="tid_matview" ctx=DDL
+STMT: RefreshMatViewStmt
+== 017
+SELECT currtid2('tid_matview'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 018
+-- ok
+DROP MATERIALIZED VIEW tid_matview
+--
+STMT: DropStmt
+== 019
+TRUNCATE tid_tab
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: TruncateStmt
+== 020
+-- Sequence
+CREATE SEQUENCE tid_seq
+--
+STMT: CreateSeqStmt
+== 021
+SELECT currtid2('tid_seq'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 022
+-- ok
+DROP SEQUENCE tid_seq
+--
+STMT: DropStmt
+== 023
+-- Index, fails with incorrect relation type
+CREATE INDEX tid_ind ON tid_tab(a)
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: IndexStmt
+== 024
+SELECT currtid2('tid_ind'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 025
+-- fails
+DROP INDEX tid_ind
+--
+STMT: DropStmt
+== 026
+-- Partitioned table, no storage
+CREATE TABLE tid_part (a int) PARTITION BY RANGE (a)
+--
+TABLE: name="tid_part" schema="" table="tid_part" ctx=DDL
+STMT: CreateStmt
+== 027
+SELECT currtid2('tid_part'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 028
+-- fails
+DROP TABLE tid_part
+--
+TABLE: name="tid_part" schema="" table="tid_part" ctx=DDL
+STMT: DropStmt
+== 029
+-- Views
+-- ctid not defined in the view
+CREATE VIEW tid_view_no_ctid AS SELECT a FROM tid_tab
+--
+TABLE: name="tid_view_no_ctid" schema="" table="tid_view_no_ctid" ctx=DDL
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 030
+SELECT currtid2('tid_view_no_ctid'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+-- fails
+DROP VIEW tid_view_no_ctid
+--
+STMT: DropStmt
+== 032
+-- ctid fetched directly from the source table.
+CREATE VIEW tid_view_with_ctid AS SELECT ctid, a FROM tid_tab
+--
+TABLE: name="tid_view_with_ctid" schema="" table="tid_view_with_ctid" ctx=DDL
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 033
+SELECT currtid2('tid_view_with_ctid'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 034
+-- fails
+INSERT INTO tid_tab VALUES (1)
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 035
+SELECT currtid2('tid_view_with_ctid'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+-- ok
+DROP VIEW tid_view_with_ctid
+--
+STMT: DropStmt
+== 037
+TRUNCATE tid_tab
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: TruncateStmt
+== 038
+-- ctid attribute with incorrect data type
+CREATE VIEW tid_view_fake_ctid AS SELECT 1 AS ctid, 2 AS a
+--
+TABLE: name="tid_view_fake_ctid" schema="" table="tid_view_fake_ctid" ctx=DDL
+STMT: ViewStmt
+STMT: SelectStmt
+== 039
+SELECT currtid2('tid_view_fake_ctid'::text, '(0,1)'::tid)
+--
+FUNCTION: name="currtid2" function="currtid2" schema="" ctx=Call
+STMT: SelectStmt
+== 040
+-- fails
+DROP VIEW tid_view_fake_ctid
+--
+STMT: DropStmt
+== 041
+DROP TABLE tid_tab CASCADE
+--
+TABLE: name="tid_tab" schema="" table="tid_tab" ctx=DDL
+STMT: DropStmt

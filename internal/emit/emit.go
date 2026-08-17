@@ -270,6 +270,11 @@ func emitAConst(b *strings.Builder, m protoreflect.Message) {
 	fmt.Fprintf(b, `,"location":%d`, loc)
 }
 
+// Token exposes emitToken to the other internal packages that emit the same
+// JSON string encoding (the PL/pgSQL dump shares _outToken with this
+// emitter via pg_query_json_helper.c).
+func Token(b *strings.Builder, s string) { emitToken(b, s) }
+
 // emitToken is _outToken: JSON string quoting with the reference's exact
 // escape set — \b \f \n \r \t \" \\ as two-character escapes, and \u%04x for
 // other control bytes plus '<' and '>'.
