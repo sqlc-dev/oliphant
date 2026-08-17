@@ -417,12 +417,19 @@ gate; the corpus harness exists before the first line of the lexer.
    reference's parse → deparse → reparse roundtrip criterion, since the
    goldens are the oracle's own deparse output). See "As-built notes
    (milestones 8–9)".
-10. **Summary.** Port the summary API (classification + smart truncation).
-11. **PL/pgSQL.** Port `pl_gram.y` + `pl_comp` subset + the JSON serializer
-    behind `ParsePlPgSqlToJSON`. Deliberately last: self-contained, and the
-    only piece whose deferral wouldn't block sqlc. If v1.0 ships without it,
-    the function returns a clear unimplemented error — flagged for an
-    explicit scope call rather than silently dropped.
+10. **Summary.** ✅ *Landed 2026-08-17.* Port the summary API
+    (classification + smart truncation). **Gate:** the deferred summary
+    corpus extracted and green — met: all 43,992 summary and 43,345
+    summary_truncate cases pass (the regress tiers untruncated and at limit
+    100, plus libpg_query's summary test-call inputs at their upstream
+    limits). See "As-built notes (milestones 10–11)".
+11. **PL/pgSQL.** ✅ *Landed 2026-08-17.* Port `pl_gram.y` + `pl_comp`
+    subset + the JSON serializer behind `ParsePlPgSqlToJSON`. **Gate:** the
+    deferred `plpgsql_regress/` + `plpgsql_samples` corpus green — met: all
+    690 plpgsql cases pass, and the plpgsql_regress files also feed the
+    standard SQL suites (all passing on arrival). Every corpus suite's todo
+    list is empty: 2,067 files / 308,561 cases across eleven suites. See
+    "As-built notes (milestones 10–11)".
 12. **Hardening.** `cmd/difftest` mutation fuzzing vs the live oracle as a
     scheduled CI job; `go test -race` over the parallel corpus run;
     benchmarks vs pg_query_go (cgo) and wasilibs (wasm) — expect wins from
@@ -460,7 +467,10 @@ Measured at the pin, where the plan's estimates differ:
 - Deferred, deliberately: the **sqlc endtoend tier** (needs per-directory
   engine classification in the sqlc repo; import it alongside milestone 4),
   **`plpgsql_regress/`** (milestone 11), and **summary** golden extraction
-  (milestone 10). The stretch tarball tier remains stretch.
+  (milestone 10). The stretch tarball tier remains stretch. *(The plpgsql
+  and summary tiers landed with milestones 10–11: the corpus is now 2,067
+  files / 308,561 cases across eleven suites; only the sqlc endtoend and
+  stretch tiers remain out.)*
 
 ### As-built notes (milestone 3)
 
@@ -647,6 +657,70 @@ Measured at the pin, where the plan's estimates differ:
   43,352 deparse todos. Every suite's todo list is now empty; the remaining
   unimplemented entry points are `Summary` (milestone 10) and
   `ParsePlPgSqlToJSON` (milestone 11).
+
+### As-built notes (milestones 10–11)
+
+- The deferred corpus tiers landed first, as their own commit: `summary`
+  (regress + plpgsql_regress + libpg_query's summary test-call inputs,
+  untruncated), `summary_truncate` (the same regress statements at limit
+  100 — the limit rides along as a `-- truncate_limit: N` directive line in
+  the case input, stripped by both sides — plus the upstream truncate tests
+  at their exact limits and every summary input at limit 50), and `plpgsql`
+  (`plpgsql_regress/` + `plpgsql_samples.sql`, one `ParsePlPgSqlToJSON`
+  golden per statement). libpg_query's summary tests are call sites, not
+  `tests[]` tables, so `cmd/regenerate` grew a call extractor
+  (`summary("...", 0, limit)` with C line splices removed); inputs are
+  transcribed mechanically, expectations always from the oracle. The
+  plpgsql_regress files also feed the five standard SQL suites — all of
+  those passed the existing implementation on arrival.
+- Summary (`internal/summary`) is three ports over one shared
+  `raw_expression_tree_walker` (now `internal/rawwalk`, PostgreSQL 17's
+  nodeFuncs.c gated by `pg_query_raw_tree_walker_supports`): the
+  table/alias/CTE/function/filter-column walk with its quirks preserved
+  (WHERE clauses walked twice, so functions there are recorded once per
+  pass; the filter-column pass aborts at sub-SELECTs; `MERGE ... USING`
+  sources are never tables), the statement-type walk (insertion-ordered
+  set), and deparse-driven truncation. Truncation ordering needed the exact
+  `pg_qsort` algorithm again — `list_sort` maps to `pg_qsort` at the pin,
+  and equal (depth, length) pairs are ordered by the partition scheme, not
+  the comparator. List nodes count as depth levels, matching `WALK` on a
+  List field. The `"…"` dummy-node replacements and the multibyte fallback
+  chop (`pg_mbcharcliplen` over UTF-8) are byte-exact ports.
+- PL/pgSQL (`internal/plpgsql`) ports what libpg_query *builds*, not
+  vanilla PostgreSQL: `extract_source.rb` mocks `parse_datatype` (type text
+  kept verbatim; only RECORD/REFCURSOR/CURSOR/TEXT recognized, by
+  length-limited case-insensitive prefix), stubs the `%TYPE`/`%ROWTYPE`
+  lookups to NULL (so `foo%rowtype` falls through to the verbatim-text
+  path), replaces `make_return_stmt` (no return-type checks; RETURN never
+  captures a varno), and fails `function_parse_error_transpose`
+  unconditionally — so compile errors carry `compilation of PL/pgSQL
+  function "f" near line N` context and no cursor, with filenames as the
+  vendored build's `__FILE__` (`pl_gram.y`,
+  `src_pl_plpgsql_src_pl_scanner.c`, ...).
+- The pl scanner layers on the milestone-3 lexer: the core scanner runs
+  with the PL reserved keyword list, modeled by re-classifying the SQL
+  lexer's output (SQL keywords become plain identifiers unless
+  PL-reserved; the `n'...'` NCHAR special falls back to IDENT `"n"`), plus
+  the pushback stack, `A.B.C` datum composition, and the
+  statement-start/unreserved-keyword dance. `pl_gram.y` became recursive
+  descent with statement linenos computed at bison's reduce points —
+  `plpgsql_latest_lineno` is stateful and feeds the error context, so call
+  order is part of conformance.
+- `check_sql_expr` needed the core grammar's PL/pgSQL raw-parse modes:
+  `parse.ParseWithMode` adds `RAW_PARSE_PLPGSQL_EXPR` (the `PLpgSQL_Expr`
+  production — everything that can follow SELECT, minus SELECT) and
+  `ASSIGN1..3` (`PLAssignStmt`). Embedded-SQL errors keep the core
+  message/filename/funcname but lose their cursor
+  (`plpgsql_sql_error_callback` flushes the external position).
+- `cmd/generate -plpgsql` emits `internal/plpgsql/tables.go` from the newly
+  vendored `pl_reserved_kwlist.h`/`pl_unreserved_kwlist.h`/`plerrcodes.h`
+  (condition names with their duplicate counts — duplicate names produce
+  condition chains of that length).
+- Corpus effect: all 43,992 summary, 43,345 summary_truncate, and 690
+  plpgsql todos graduated; every suite's todo list is empty (2,067 files /
+  308,561 cases). pg_query_go's `summary_test.go` is ported verbatim and
+  `TestParsePlPgSQL` now runs green; no entry point returns
+  not-implemented anymore.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 

@@ -23,7 +23,8 @@ the main module; the only module allowed to link pg_query_go (cgo) is
 - **Expected outputs are never edited by hand.** Goldens come from
   `cmd/regenerate` (the pinned oracle) or not at all.
 - Generated files (`ast/pg_query.pb.go`, `aliases.go`,
-  `internal/lexer/keywords.go`) are only ever written by `cmd/generate`.
+  `internal/lexer/keywords.go`, `internal/plpgsql/tables.go`) are only ever
+  written by `cmd/generate`.
 - The public API mirrors pg_query_go exactly; consumers must migrate by
   changing one import path. Never rename, add, or remove exported symbols
   without checking pg_query_go v6.2.2.
