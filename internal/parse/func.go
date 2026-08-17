@@ -1117,6 +1117,7 @@ func (p *parser) parseJsonFormatClause() *ast.JsonFormat {
 	tok := p.expect(ast.Token_FORMAT_LA)
 	p.expect(ast.Token_JSON)
 	if p.have(ast.Token_ENCODING) {
+		ntok := p.peek()
 		name := p.name()
 		var enc ast.JsonEncoding
 		switch strings.ToLower(name) {
@@ -1127,8 +1128,8 @@ func (p *parser) parseJsonFormatClause() *ast.JsonFormat {
 		case "utf32":
 			enc = ast.JsonEncoding_JS_ENC_UTF32
 		default:
-			// gram.y: this ereport carries no parser_errposition.
-			p.ereport("base_yyparse", "unrecognized JSON encoding: "+name, -1)
+			// gram.y: parser_errposition(@4) since PG 18.
+			p.ereport("base_yyparse", "unrecognized JSON encoding: "+name, ntok.Start)
 		}
 		return makeJsonFormat(ast.JsonFormatType_JS_FORMAT_JSON, enc, tok.Start)
 	}

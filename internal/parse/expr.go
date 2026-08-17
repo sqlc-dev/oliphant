@@ -493,9 +493,10 @@ func (p *parser) parseBetweenRest(lhs *ast.Node, opTok lexer.Token, not bool) *a
 		lhs, nList([]*ast.Node{low, high}), opTok.Start))
 }
 
-// parseInRest handles a_expr [NOT_LA] IN_P in_expr.
+// parseInRest handles a_expr [NOT_LA] IN_P (select_with_parens |
+// '(' expr_list ')') — PG 18 inlines what used to be in_expr, and the scalar
+// form records the parens as rexpr_list_start/rexpr_list_end.
 func (p *parser) parseInRest(lhs *ast.Node, opTok lexer.Token, not bool) *ast.Node {
-	// gram.y: in_expr: select_with_parens | '(' expr_list ')'
 	if sel, ok := p.trySelectWithParens(); ok {
 		n := &ast.SubLink{
 			SubLinkType: ast.SubLinkType_ANY_SUBLINK,
@@ -509,14 +510,17 @@ func (p *parser) parseInRest(lhs *ast.Node, opTok lexer.Token, not bool) *ast.No
 		}
 		return nSubLink(n)
 	}
-	p.expect(ast.Token('('))
+	ltok := p.expect(ast.Token('('))
 	list := p.parseExprList()
-	p.expect(ast.Token(')'))
+	rtok := p.expect(ast.Token(')'))
 	name := "="
 	if not {
 		name = "<>"
 	}
-	return nAExpr(makeSimpleA_Expr(ast.A_Expr_Kind_AEXPR_IN, name, lhs, nList(list), opTok.Start))
+	n := makeSimpleA_Expr(ast.A_Expr_Kind_AEXPR_IN, name, lhs, nList(list), opTok.Start)
+	n.RexprListStart = ltok.Start
+	n.RexprListEnd = rtok.Start
+	return nAExpr(n)
 }
 
 // parseIsRest handles the postfix IS/ISNULL/NOTNULL family. exprStart is the

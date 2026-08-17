@@ -193,11 +193,12 @@ func emitFields(b *strings.Builder, m protoreflect.Message) int {
 			b.WriteString(fd.JSONName())
 			b.WriteString(`":true`)
 		case fd.Kind() == protoreflect.StringKind:
-			// WRITE_STRING_FIELD / WRITE_CHAR_FIELD: omitted when NULL/0. A
-			// non-NULL empty C string is indistinguishable in proto3; the
-			// places upstream produces one (String.sval is handled above) are
-			// fields the grammar always assigns, listed in alwaysEmitString.
-			if v.String() == "" && !alwaysEmitString[string(d.Name())+"."+fd.JSONName()] {
+			// WRITE_STRING_FIELD / WRITE_CHAR_FIELD: omitted when NULL/0.
+			// Since 18.0.0 the C emitter also skips empty strings — proto3
+			// cannot represent the NULL/"" distinction, so empty values are
+			// omitted to match the protobuf round-trip (String.sval is
+			// handled above).
+			if v.String() == "" {
 				continue
 			}
 			sep()
@@ -312,14 +313,6 @@ func emitToken(b *strings.Builder, s string) {
 	b.WriteByte('"')
 }
 
-// alwaysEmitString lists string fields whose C value is never NULL — the
-// grammar assigns them unconditionally, and ” is legal input — so the C
-// emitter always writes them, even when empty. (proto3 cannot represent the
-// NULL/"" distinction; for these fields "" means present.)
-var alwaysEmitString = map[string]bool{
-	"CreateSubscriptionStmt.conninfo": true, // CONNECTION Sconst is required syntax
-	"CreateTableSpaceStmt.location":   true, // LOCATION Sconst is required syntax
-}
 
 func boolStr(v bool) string {
 	if v {

@@ -82,12 +82,14 @@ func (p *parser) parseClusterStmt() *ast.Node {
 
 // parseVacuumRelationList is gram.y's opt_vacuum_relation_list.
 func (p *parser) parseOptVacuumRelationList() []*ast.Node {
-	if !isColIdToken(p.peek()) {
+	if !isColIdToken(p.peek()) && p.kind() != ast.Token_ONLY {
 		return nil
 	}
 	var list []*ast.Node
 	for {
-		v := &ast.VacuumRelation{Relation: p.parseQualifiedName()}
+		// vacuum_relation: relation_expr opt_name_list (PG 18: ONLY and
+		// trailing * accepted).
+		v := &ast.VacuumRelation{Relation: p.parseRelationExprVar()}
 		if p.have(ast.Token('(')) {
 			v.VaCols = p.nameList()
 			p.expect(ast.Token(')'))

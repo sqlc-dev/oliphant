@@ -194,8 +194,8 @@ func (p *parser) parseArrayExpr() *ast.Node {
 	default:
 		elems = p.parseExprList()
 	}
-	p.expect(ast.Token(']'))
-	return makeAArrayExpr(elems, tok.Start)
+	etok := p.expect(ast.Token(']'))
+	return makeAArrayExpr(elems, tok.Start, etok.Start)
 }
 
 // parseOptIndirection is gram.y's opt_indirection; returns nil when empty.

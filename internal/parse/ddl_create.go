@@ -832,6 +832,11 @@ func (p *parser) parseConstraintAttributeSpec() (int, int32) {
 		default:
 			return spec, loc
 		}
+		if loc == -1 {
+			// PG 18's YYLLOC_DEFAULT scans for the first valid location, so
+			// a non-empty spec's location is its first element's.
+			loc = tok.Start
+		}
 		newspec := spec | bit
 		// gram.y: ConstraintAttributeSpec conflict checks, reported at @2.
 		if newspec&(casNotDeferrable|casInitiallyDeferred) == casNotDeferrable|casInitiallyDeferred {

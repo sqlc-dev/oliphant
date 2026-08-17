@@ -264,8 +264,13 @@ func makeNotExpr(expr *ast.Node, location int32) *ast.Node {
 }
 
 // gram.y: makeAArrayExpr
-func makeAArrayExpr(elements []*ast.Node, location int32) *ast.Node {
-	return nAArrayExpr(&ast.A_ArrayExpr{Elements: elements, Location: location})
+func makeAArrayExpr(elements []*ast.Node, location, locationEnd int32) *ast.Node {
+	return nAArrayExpr(&ast.A_ArrayExpr{
+		Elements:  elements,
+		Location:  location,
+		ListStart: location,
+		ListEnd:   locationEnd,
+	})
 }
 
 // gram.y: makeSQLValueFunction
