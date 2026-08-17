@@ -23,8 +23,8 @@ STMT: SelectStmt
 == 003
 -- The entire output of pg_backend_memory_contexts is not stable,
 -- we test only the existence and basic condition of TopMemoryContext.
-select name, ident, parent, level, total_bytes >= free_bytes
-  from pg_backend_memory_contexts where level = 0
+select type, name, ident, level, total_bytes >= free_bytes
+  from pg_backend_memory_contexts where level = 1
 --
 TABLE: name="pg_backend_memory_contexts" schema="" table="pg_backend_memory_contexts" ctx=Select
 FILTER: schema="" table="" column="level"
@@ -50,7 +50,7 @@ fetch 1 from cur
 --
 STMT: FetchStmt
 == 007
-select name, parent, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
+select type, name, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
 from pg_backend_memory_contexts where name = 'Caller tuples'
 --
 TABLE: name="pg_backend_memory_contexts" schema="" table="pg_backend_memory_contexts" ctx=Select
@@ -61,26 +61,48 @@ rollback
 --
 STMT: TransactionStmt
 == 009
+-- Further sanity checks on pg_backend_memory_contexts.  We expect
+-- CacheMemoryContext to have multiple children.  Ensure that's the case.
+with contexts as (
+  select * from pg_backend_memory_contexts
+)
+select count(*) > 1
+from contexts c1, contexts c2
+where c2.name = 'CacheMemoryContext'
+and c1.path[c2.level] = c2.path[c2.level]
+--
+TABLE: name="pg_backend_memory_contexts" schema="" table="pg_backend_memory_contexts" ctx=Select
+ALIAS: "c1"="contexts"
+ALIAS: "c2"="contexts"
+CTE: "contexts"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="c2" column="name"
+FILTER: schema="" table="c1" column="path"
+FILTER: schema="" table="c2" column="level"
+FILTER: schema="" table="c2" column="path"
+FILTER: schema="" table="c2" column="level"
+STMT: SelectStmt
+== 010
 -- At introduction, pg_config had 23 entries; it may grow
 select count(*) > 20 as ok from pg_config
 --
 TABLE: name="pg_config" schema="" table="pg_config" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 010
+== 011
 -- We expect no cursors in this test; see also portals.sql
 select count(*) = 0 as ok from pg_cursors
 --
 TABLE: name="pg_cursors" schema="" table="pg_cursors" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 011
+== 012
 select count(*) >= 0 as ok from pg_file_settings
 --
 TABLE: name="pg_file_settings" schema="" table="pg_file_settings" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 012
+== 013
 -- There will surely be at least one rule, with no errors.
 select count(*) > 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
   from pg_hba_file_rules
@@ -89,7 +111,7 @@ TABLE: name="pg_hba_file_rules" schema="" table="pg_hba_file_rules" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 013
+== 014
 -- There may be no rules, and there should be no errors.
 select count(*) >= 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
   from pg_ident_file_mappings
@@ -98,49 +120,49 @@ TABLE: name="pg_ident_file_mappings" schema="" table="pg_ident_file_mappings" ct
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 014
+== 015
 -- There will surely be at least one active lock
 select count(*) > 0 as ok from pg_locks
 --
 TABLE: name="pg_locks" schema="" table="pg_locks" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 015
+== 016
 -- We expect no prepared statements in this test; see also prepare.sql
 select count(*) = 0 as ok from pg_prepared_statements
 --
 TABLE: name="pg_prepared_statements" schema="" table="pg_prepared_statements" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 016
+== 017
 -- See also prepared_xacts.sql
 select count(*) >= 0 as ok from pg_prepared_xacts
 --
 TABLE: name="pg_prepared_xacts" schema="" table="pg_prepared_xacts" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 017
+== 018
 -- There will surely be at least one SLRU cache
 select count(*) > 0 as ok from pg_stat_slru
 --
 TABLE: name="pg_stat_slru" schema="" table="pg_stat_slru" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 018
+== 019
 -- There must be only one record
 select count(*) = 1 as ok from pg_stat_wal
 --
 TABLE: name="pg_stat_wal" schema="" table="pg_stat_wal" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 019
+== 020
 -- We expect no walreceiver running in this test
 select count(*) = 0 as ok from pg_stat_wal_receiver
 --
 TABLE: name="pg_stat_wal_receiver" schema="" table="pg_stat_wal_receiver" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 020
+== 021
 -- This is to record the prevailing planner enable_foo settings during
 -- a regression test run.
 select name, setting from pg_settings where name like 'enable%'
@@ -148,7 +170,7 @@ select name, setting from pg_settings where name like 'enable%'
 TABLE: name="pg_settings" schema="" table="pg_settings" ctx=Select
 FILTER: schema="" table="" column="name"
 STMT: SelectStmt
-== 021
+== 022
 -- There are always wait event descriptions for various types.  InjectionPoint
 -- may be present or absent, depending on history since last postmaster start.
 select type, count(*) > 0 as ok FROM pg_wait_events
@@ -158,7 +180,7 @@ TABLE: name="pg_wait_events" schema="" table="pg_wait_events" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FILTER: schema="" table="" column="type"
 STMT: SelectStmt
-== 022
+== 023
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail
 -- without the outputs changing anytime IANA updates the underlying data,
@@ -170,30 +192,38 @@ select count(distinct utc_offset) >= 24 as ok from pg_timezone_names
 TABLE: name="pg_timezone_names" schema="" table="pg_timezone_names" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 023
+== 024
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 TABLE: name="pg_timezone_abbrevs" schema="" table="pg_timezone_abbrevs" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 024
+== 025
 -- Let's check the non-default timezone abbreviation sets, too
 set timezone_abbreviations = 'Australia'
 --
 STMT: VariableSetStmt
-== 025
+== 026
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 TABLE: name="pg_timezone_abbrevs" schema="" table="pg_timezone_abbrevs" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
 STMT: SelectStmt
-== 026
+== 027
 set timezone_abbreviations = 'India'
 --
 STMT: VariableSetStmt
-== 027
+== 028
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 TABLE: name="pg_timezone_abbrevs" schema="" table="pg_timezone_abbrevs" ctx=Select
 FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 029
+-- One specific case we can check without much fear of breakage
+-- is the historical local-mean-time value used for America/Los_Angeles.
+select * from pg_timezone_abbrevs where abbrev = 'LMT'
+--
+TABLE: name="pg_timezone_abbrevs" schema="" table="pg_timezone_abbrevs" ctx=Select
+FILTER: schema="" table="" column="abbrev"
 STMT: SelectStmt

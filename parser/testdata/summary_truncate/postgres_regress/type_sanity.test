@@ -14,6 +14,9 @@
 -- row in the linked-to table.  However, if we want to enforce that a link
 -- field can't be 0, we have to check it here.
 
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
 -- **************** pg_type ****************
 
 -- Look for illegal values in pg_type fields.
@@ -976,15 +979,13 @@ TRUNCATED: "SELECT ... FROM pg_class pc JOIN pg_am pa ON pc.relam = pa.oid WHERE
 SELECT a1.attrelid, a1.attname
 FROM pg_attribute as a1
 WHERE a1.attrelid = 0 OR a1.atttypid = 0 OR a1.attnum = 0 OR
-    a1.attcacheoff != -1 OR a1.attinhcount < 0 OR
-    (a1.attinhcount = 0 AND NOT a1.attislocal)
+    a1.attinhcount < 0 OR (a1.attinhcount = 0 AND NOT a1.attislocal)
 --
 TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
 ALIAS: "a1"="pg_attribute"
 FILTER: schema="" table="a1" column="attrelid"
 FILTER: schema="" table="a1" column="atttypid"
 FILTER: schema="" table="a1" column="attnum"
-FILTER: schema="" table="a1" column="attcacheoff"
 FILTER: schema="" table="a1" column="attinhcount"
 FILTER: schema="" table="a1" column="attinhcount"
 FILTER: schema="" table="a1" column="attislocal"
@@ -1062,6 +1063,40 @@ STMT: SelectStmt
 TRUNCATED: "SELECT a1.attrelid, a1.attname, t1.oid, t1.typname FROM pg_attribute a1, pg_type t1 WHERE ..."
 == 054
 -- truncate_limit: 100
+-- Look for IsCatalogTextUniqueIndexOid() omissions.
+
+CREATE FUNCTION is_catalog_text_unique_index_oid(oid) RETURNS bool
+    AS :'regresslib', 'is_catalog_text_unique_index_oid'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 129
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 055
+-- truncate_limit: 100
+SELECT indexrelid::regclass
+FROM pg_index
+WHERE (is_catalog_text_unique_index_oid(indexrelid) <>
+       (indisunique AND
+        indexrelid < 16384 AND
+        EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = indexrelid AND atttypid = 'text'::regtype)))
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FUNCTION: name="is_catalog_text_unique_index_oid" function="is_catalog_text_unique_index_oid" schema="" ctx=Call
+FUNCTION: name="is_catalog_text_unique_index_oid" function="is_catalog_text_unique_index_oid" schema="" ctx=Call
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="indisunique"
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="atttypid"
+STMT: SelectStmt
+TRUNCATED: "SELECT indexrelid::regclass FROM pg_index WHERE ..."
+== 056
+-- truncate_limit: 100
 -- **************** pg_range ****************
 
 -- Look for illegal values in pg_range fields.
@@ -1077,7 +1112,7 @@ FILTER: schema="" table="r" column="rngsubtype"
 FILTER: schema="" table="r" column="rngsubopc"
 STMT: SelectStmt
 TRUNCATED: "SELECT r.rngtypid, r.rngsubtype FROM pg_range r WHERE ..."
-== 055
+== 057
 -- truncate_limit: 100
 -- rngcollation should be specified iff subtype is collatable
 
@@ -1093,7 +1128,7 @@ FILTER: schema="" table="" column="rngcollation"
 FILTER: schema="" table="" column="typcollation"
 STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM pg_range r JOIN pg_type t ON t.oid = r.rngsubtype WHERE ..."
-== 056
+== 058
 -- truncate_limit: 100
 -- opclass had better be a btree opclass accepting the subtype.
 -- We must allow anyarray matches, cf IsBinaryCoercible()
@@ -1122,7 +1157,7 @@ FILTER: schema="" table="" column="typelem"
 FILTER: schema="" table="" column="typsubscript"
 STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM pg_range r JOIN pg_opclass o ON o.oid = r.rngsubopc WHERE ..."
-== 057
+== 059
 -- truncate_limit: 100
 -- canonical function, if any, had better match the range type
 
@@ -1141,7 +1176,7 @@ FILTER: schema="" table="" column="prorettype"
 FILTER: schema="" table="" column="rngtypid"
 STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM pg_range r JOIN pg_proc p ON p.oid = r.rngcanonical WHERE ..."
-== 058
+== 060
 -- truncate_limit: 100
 -- subdiff function, if any, had better match the subtype
 
@@ -1163,7 +1198,7 @@ FILTER: schema="" table="" column="rngsubtype"
 FILTER: schema="" table="" column="prorettype"
 STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM pg_range r JOIN pg_proc p ON p.oid = r.rngsubdiff WHERE ..."
-== 059
+== 061
 -- truncate_limit: 100
 -- every range should have a valid multirange
 
@@ -1177,7 +1212,7 @@ FILTER: schema="" table="r" column="rngmultitypid"
 FILTER: schema="" table="r" column="rngmultitypid"
 STMT: SelectStmt
 TRUNCATED: "SELECT r.rngtypid, r.rngsubtype, r.rngmultitypid FROM pg_range r WHERE ..."
-== 060
+== 062
 -- truncate_limit: 100
 -- Create a table that holds all the known in-core data types and leave it
 -- around so as pg_upgrade is able to test their binary compatibility.
@@ -1252,7 +1287,7 @@ FUNCTION: name="format" function="format" schema="" ctx=Call
 STMT: CreateTableAsStmt
 STMT: SelectStmt
 TRUNCATED: "CREATE TABLE tab_core_types AS SELECT '(11,12)'::point, '(1,1),(2,2)'::line, '((11,11),(12,12))':..."
-== 061
+== 063
 -- truncate_limit: 100
 -- Sanity check on the previous table, checking that all core types are
 -- included in this table.

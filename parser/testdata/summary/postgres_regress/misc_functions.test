@@ -2,6 +2,50 @@
 -- directory paths and dlsuffix are passed to us in environment variables
 
 
+-- Function to assist with verifying EXPLAIN which includes costs.  A series
+-- of bool flags allows control over which portions are masked out
+CREATE FUNCTION explain_mask_costs(query text, do_analyze bool,
+    hide_costs bool, hide_row_est bool, hide_width bool) RETURNS setof text
+LANGUAGE plpgsql AS
+$$
+DECLARE
+    ln text;
+    analyze_str text;
+BEGIN
+    IF do_analyze = true THEN
+        analyze_str := 'on';
+    ELSE
+        analyze_str := 'off';
+    END IF;
+
+    -- avoid jit related output by disabling it
+    SET LOCAL jit = 0;
+
+    FOR ln IN
+        EXECUTE format('explain (analyze %s, costs on, summary off, timing off, buffers off) %s',
+            analyze_str, query)
+    LOOP
+        IF hide_costs = true THEN
+            ln := regexp_replace(ln, 'cost=\d+\.\d\d\.\.\d+\.\d\d', 'cost=N..N');
+        END IF;
+
+        IF hide_row_est = true THEN
+            -- don't use 'g' so that we leave the actual rows intact
+            ln := regexp_replace(ln, 'rows=\d+', 'rows=N');
+        END IF;
+
+        IF hide_width = true THEN
+            ln := regexp_replace(ln, 'width=\d+', 'width=N');
+        END IF;
+
+        RETURN NEXT ln;
+    END LOOP;
+END;
+$$
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 002
 |--
 -- num_nulls()
 |--
@@ -10,116 +54,116 @@ SELECT num_nonnulls(NULL)
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 002
+== 003
 SELECT num_nonnulls('1')
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 003
+== 004
 SELECT num_nonnulls(NULL::text)
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 004
+== 005
 SELECT num_nonnulls(NULL::text, NULL::int)
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 005
+== 006
 SELECT num_nonnulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 006
+== 007
 SELECT num_nonnulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 007
+== 008
 SELECT num_nonnulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 008
+== 009
 SELECT num_nonnulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: SelectStmt
-== 009
+== 010
 SELECT num_nulls(NULL)
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 010
+== 011
 SELECT num_nulls('1')
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 011
+== 012
 SELECT num_nulls(NULL::text)
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 012
+== 013
 SELECT num_nulls(NULL::text, NULL::int)
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 013
+== 014
 SELECT num_nulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 014
+== 015
 SELECT num_nulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 015
+== 016
 SELECT num_nulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 016
+== 017
 SELECT num_nulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: SelectStmt
-== 017
+== 018
 -- special cases
 SELECT num_nonnulls(VARIADIC NULL::text[])
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 018
+== 019
 SELECT num_nonnulls(VARIADIC '{}'::int[])
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 019
+== 020
 SELECT num_nulls(VARIADIC NULL::text[])
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 020
+== 021
 SELECT num_nulls(VARIADIC '{}'::int[])
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 021
+== 022
 -- should fail, one or more arguments is required
 SELECT num_nonnulls()
 --
 FUNCTION: name="num_nonnulls" function="num_nonnulls" schema="" ctx=Call
 STMT: SelectStmt
-== 022
+== 023
 SELECT num_nulls()
 --
 FUNCTION: name="num_nulls" function="num_nulls" schema="" ctx=Call
 STMT: SelectStmt
-== 023
+== 024
 |--
 -- canonicalize_path()
 |--
@@ -133,117 +177,117 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 98
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 024
+== 025
 SELECT test_canonicalize_path('/')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 025
+== 026
 SELECT test_canonicalize_path('/./abc/def/')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 026
+== 027
 SELECT test_canonicalize_path('/./../abc/def')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 027
+== 028
 SELECT test_canonicalize_path('/./../../abc/def/')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 028
+== 029
 SELECT test_canonicalize_path('/abc/.././def/ghi')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 029
+== 030
 SELECT test_canonicalize_path('/abc/./../def/ghi//')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 030
+== 031
 SELECT test_canonicalize_path('/abc/def/../..')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 031
+== 032
 SELECT test_canonicalize_path('/abc/def/../../..')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 032
+== 033
 SELECT test_canonicalize_path('/abc/def/../../../../ghi/jkl')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 033
+== 034
 SELECT test_canonicalize_path('.')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 034
+== 035
 SELECT test_canonicalize_path('./')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 035
+== 036
 SELECT test_canonicalize_path('./abc/..')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 036
+== 037
 SELECT test_canonicalize_path('abc/../')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 037
+== 038
 SELECT test_canonicalize_path('abc/../def')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 038
+== 039
 SELECT test_canonicalize_path('..')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 039
+== 040
 SELECT test_canonicalize_path('../abc/def')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 040
+== 041
 SELECT test_canonicalize_path('../abc/..')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 041
+== 042
 SELECT test_canonicalize_path('../abc/../def')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 042
+== 043
 SELECT test_canonicalize_path('../abc/../../def/ghi')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 043
+== 044
 SELECT test_canonicalize_path('./abc/./def/.')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 044
+== 045
 SELECT test_canonicalize_path('./abc/././def/.')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 045
+== 046
 SELECT test_canonicalize_path('./abc/./def/.././ghi/../../../jkl/mno')
 --
 FUNCTION: name="test_canonicalize_path" function="test_canonicalize_path" schema="" ctx=Call
 STMT: SelectStmt
-== 046
+== 047
 |--
 -- pg_log_backend_memory_contexts()
 |--
@@ -258,7 +302,7 @@ SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 FUNCTION: name="pg_log_backend_memory_contexts" function="pg_log_backend_memory_contexts" schema="" ctx=Call
 FUNCTION: name="pg_backend_pid" function="pg_backend_pid" schema="" ctx=Call
 STMT: SelectStmt
-== 047
+== 048
 SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity
   WHERE backend_type = 'checkpointer'
 --
@@ -266,17 +310,17 @@ TABLE: name="pg_stat_activity" schema="" table="pg_stat_activity" ctx=Select
 FUNCTION: name="pg_log_backend_memory_contexts" function="pg_log_backend_memory_contexts" schema="" ctx=Call
 FILTER: schema="" table="" column="backend_type"
 STMT: SelectStmt
-== 048
+== 049
 CREATE ROLE regress_log_memory
 --
 STMT: CreateRoleStmt
-== 049
+== 050
 SELECT has_function_privilege('regress_log_memory',
   'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 050
+== 051
 -- no
 
 GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
@@ -284,39 +328,39 @@ GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
 --
 FUNCTION: name="pg_log_backend_memory_contexts" function="pg_log_backend_memory_contexts" schema="" ctx=DDL
 STMT: GrantStmt
-== 051
+== 052
 SELECT has_function_privilege('regress_log_memory',
   'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 052
+== 053
 -- yes
 
 SET ROLE regress_log_memory
 --
 STMT: VariableSetStmt
-== 053
+== 054
 SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 --
 FUNCTION: name="pg_log_backend_memory_contexts" function="pg_log_backend_memory_contexts" schema="" ctx=Call
 FUNCTION: name="pg_backend_pid" function="pg_backend_pid" schema="" ctx=Call
 STMT: SelectStmt
-== 054
+== 055
 RESET ROLE
 --
 STMT: VariableSetStmt
-== 055
+== 056
 REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
   FROM regress_log_memory
 --
 FUNCTION: name="pg_log_backend_memory_contexts" function="pg_log_backend_memory_contexts" schema="" ctx=DDL
 STMT: GrantStmt
-== 056
+== 057
 DROP ROLE regress_log_memory
 --
 STMT: DropRoleStmt
-== 057
+== 058
 |--
 -- Test some built-in SRFs
 |--
@@ -332,26 +376,26 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 256
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 058
+== 059
 -- Test ProjectSet as well as FunctionScan
 select count(*) > 0 as ok from (select pg_ls_waldir()) ss
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_ls_waldir" function="pg_ls_waldir" schema="" ctx=Call
 STMT: SelectStmt
-== 059
+== 060
 -- Test not-run-to-completion cases.
 select * from pg_ls_waldir() limit 0
 --
 FUNCTION: name="pg_ls_waldir" function="pg_ls_waldir" schema="" ctx=Call
 STMT: SelectStmt
-== 060
+== 061
 select count(*) > 0 as ok from (select * from pg_ls_waldir() limit 1) ss
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_ls_waldir" function="pg_ls_waldir" schema="" ctx=Call
 STMT: SelectStmt
-== 061
+== 062
 select (w).size = :segsize as ok
 from (select pg_ls_waldir() w) ss where length((w).name) = 24 limit 1
 --
@@ -359,51 +403,57 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 19
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 062
+== 063
 select count(*) >= 0 as ok from pg_ls_archive_statusdir()
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_ls_archive_statusdir" function="pg_ls_archive_statusdir" schema="" ctx=Call
 STMT: SelectStmt
-== 063
+== 064
+select count(*) >= 0 as ok from pg_ls_summariesdir()
+--
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="pg_ls_summariesdir" function="pg_ls_summariesdir" schema="" ctx=Call
+STMT: SelectStmt
+== 065
 -- pg_read_file()
 select length(pg_read_file('postmaster.pid')) > 20
 --
 FUNCTION: name="length" function="length" schema="" ctx=Call
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 064
+== 066
 select length(pg_read_file('postmaster.pid', 1, 20))
 --
 FUNCTION: name="length" function="length" schema="" ctx=Call
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 065
+== 067
 -- Test missing_ok
 select pg_read_file('does not exist')
 --
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 066
+== 068
 -- error
 select pg_read_file('does not exist', true) IS NULL
 --
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 067
+== 069
 -- ok
 -- Test invalid argument
 select pg_read_file('does not exist', 0, -1)
 --
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 068
+== 070
 -- error
 select pg_read_file('does not exist', 0, -1, true)
 --
 FUNCTION: name="pg_read_file" function="pg_read_file" schema="" ctx=Call
 STMT: SelectStmt
-== 069
+== 071
 -- error
 
 -- pg_read_binary_file()
@@ -412,38 +462,38 @@ select length(pg_read_binary_file('postmaster.pid')) > 20
 FUNCTION: name="length" function="length" schema="" ctx=Call
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 070
+== 072
 select length(pg_read_binary_file('postmaster.pid', 1, 20))
 --
 FUNCTION: name="length" function="length" schema="" ctx=Call
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 071
+== 073
 -- Test missing_ok
 select pg_read_binary_file('does not exist')
 --
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 072
+== 074
 -- error
 select pg_read_binary_file('does not exist', true) IS NULL
 --
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 073
+== 075
 -- ok
 -- Test invalid argument
 select pg_read_binary_file('does not exist', 0, -1)
 --
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 074
+== 076
 -- error
 select pg_read_binary_file('does not exist', 0, -1, true)
 --
 FUNCTION: name="pg_read_binary_file" function="pg_read_binary_file" schema="" ctx=Call
 STMT: SelectStmt
-== 075
+== 077
 -- error
 
 -- pg_stat_file()
@@ -451,26 +501,26 @@ select size > 20, isdir from pg_stat_file('postmaster.pid')
 --
 FUNCTION: name="pg_stat_file" function="pg_stat_file" schema="" ctx=Call
 STMT: SelectStmt
-== 076
+== 078
 -- pg_ls_dir()
 select * from (select pg_ls_dir('.') a) a where a = 'base' limit 1
 --
 FUNCTION: name="pg_ls_dir" function="pg_ls_dir" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 077
+== 079
 -- Test missing_ok (second argument)
 select pg_ls_dir('does not exist', false, false)
 --
 FUNCTION: name="pg_ls_dir" function="pg_ls_dir" schema="" ctx=Call
 STMT: SelectStmt
-== 078
+== 080
 -- error
 select pg_ls_dir('does not exist', true, false)
 --
 FUNCTION: name="pg_ls_dir" function="pg_ls_dir" schema="" ctx=Call
 STMT: SelectStmt
-== 079
+== 081
 -- ok
 -- Test include_dot_dirs (third argument)
 select count(*) = 1 as dot_found
@@ -480,7 +530,7 @@ FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_ls_dir" function="pg_ls_dir" schema="" ctx=Call
 FILTER: schema="" table="" column="ls"
 STMT: SelectStmt
-== 080
+== 082
 select count(*) = 1 as dot_found
   from pg_ls_dir('.', false, false) as ls where ls = '.'
 --
@@ -488,14 +538,14 @@ FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_ls_dir" function="pg_ls_dir" schema="" ctx=Call
 FILTER: schema="" table="" column="ls"
 STMT: SelectStmt
-== 081
+== 083
 -- pg_timezone_names()
 select * from (select (pg_timezone_names()).name) ptn where name='UTC' limit 1
 --
 FUNCTION: name="pg_timezone_names" function="pg_timezone_names" schema="" ctx=Call
 FILTER: schema="" table="" column="name"
 STMT: SelectStmt
-== 082
+== 084
 -- pg_tablespace_databases()
 select count(*) > 0 from
   (select pg_tablespace_databases(oid) as pts from pg_tablespace
@@ -509,60 +559,60 @@ FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_tablespace_databases" function="pg_tablespace_databases" schema="" ctx=Call
 FILTER: schema="" table="" column="spcname"
 STMT: SelectStmt
-== 083
+== 085
 |--
 -- Test replication slot directory functions
 |--
 CREATE ROLE regress_slot_dir_funcs
 --
 STMT: CreateRoleStmt
-== 084
+== 086
 -- Not available by default.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 085
+== 087
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalmapdir()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 086
+== 088
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_replslotdir(text)', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 087
+== 089
 GRANT pg_monitor TO regress_slot_dir_funcs
 --
 STMT: GrantRoleStmt
-== 088
+== 090
 -- Role is now part of pg_monitor, so these are available.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 089
+== 091
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalmapdir()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 090
+== 092
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_replslotdir(text)', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 091
+== 093
 DROP ROLE regress_slot_dir_funcs
 --
 STMT: DropRoleStmt
-== 092
+== 094
 |--
 -- Test adding a support function to a subject function
 |--
@@ -573,7 +623,7 @@ CREATE FUNCTION my_int_eq(int, int) RETURNS bool
 --
 FUNCTION: name="my_int_eq" function="my_int_eq" schema="" ctx=DDL
 STMT: CreateFunctionStmt
-== 093
+== 095
 -- By default, planner does not think that's selective
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
@@ -588,7 +638,7 @@ FUNCTION: name="my_int_eq" function="my_int_eq" schema="" ctx=Call
 FILTER: schema="" table="a" column="unique2"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 094
+== 096
 -- With support function that knows it's int4eq, we get a different plan
 CREATE FUNCTION test_support_func(internal)
     RETURNS internal
@@ -599,11 +649,11 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 146
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 095
+== 097
 ALTER FUNCTION my_int_eq(int, int) SUPPORT test_support_func
 --
 STMT: AlterFunctionStmt
-== 096
+== 098
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
 WHERE my_int_eq(a.unique2, 42)
@@ -617,7 +667,7 @@ FUNCTION: name="my_int_eq" function="my_int_eq" schema="" ctx=Call
 FILTER: schema="" table="a" column="unique2"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 097
+== 099
 -- Also test non-default rowcount estimate
 CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
   LANGUAGE internal STRICT IMMUTABLE PARALLEL SAFE
@@ -626,7 +676,7 @@ CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
 --
 FUNCTION: name="my_gen_series" function="my_gen_series" schema="" ctx=DDL
 STMT: CreateFunctionStmt
-== 098
+== 100
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,1000) g ON a.unique1 = g
 --
@@ -635,7 +685,7 @@ ALIAS: "a"="tenk1"
 FUNCTION: name="my_gen_series" function="my_gen_series" schema="" ctx=Call
 STMT: ExplainStmt
 STMT: SelectStmt
-== 099
+== 101
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,10) g ON a.unique1 = g
 --
@@ -644,55 +694,183 @@ ALIAS: "a"="tenk1"
 FUNCTION: name="my_gen_series" function="my_gen_series" schema="" ctx=Call
 STMT: ExplainStmt
 STMT: SelectStmt
-== 100
+== 102
+|--
+-- Test the SupportRequestRows support function for generate_series_timestamp()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 103
+-- As above but with generate_series_timestamp
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMP '2024-02-01', TIMESTAMP '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 104
+-- As above but with generate_series_timestamptz_at_zone()
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day', 'UTC') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 105
+-- Ensure the estimated and actual row counts match when the range isn't
+-- evenly divisible by the step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '7 day') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 106
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '-1 day') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 107
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 108
+-- Ensure we get the default row estimate for infinity values
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '-infinity', TIMESTAMPTZ 'infinity', INTERVAL '1 day') g(s);$$,
+false, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 109
+-- Ensure the row estimate behaves correctly when step size is zero.
+-- We expect generate_series_timestamp() to throw the error rather than in
+-- the support function.
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '0 day') g(s)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 110
+|--
+-- Test the SupportRequestRows support function for generate_series_numeric()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0) g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 111
+-- As above but with non-default step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 2.0) g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 112
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, -1.0) g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 113
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, 1.0) g(s);$$,
+true, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 114
+-- Ensure we get the default row estimate for error cases (infinity/NaN values
+-- and zero step size)
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series('-infinity'::NUMERIC, 'infinity'::NUMERIC, 1.0) g(s);$$,
+false, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 115
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 'NaN'::NUMERIC) g(s);$$,
+false, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 116
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 2.0, 0.0) g(s);$$,
+false, true, false, true)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=Call
+STMT: SelectStmt
+== 117
 -- Test functions for control data
 SELECT count(*) > 0 AS ok FROM pg_control_checkpoint()
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_control_checkpoint" function="pg_control_checkpoint" schema="" ctx=Call
 STMT: SelectStmt
-== 101
+== 118
 SELECT count(*) > 0 AS ok FROM pg_control_init()
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_control_init" function="pg_control_init" schema="" ctx=Call
 STMT: SelectStmt
-== 102
+== 119
 SELECT count(*) > 0 AS ok FROM pg_control_recovery()
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_control_recovery" function="pg_control_recovery" schema="" ctx=Call
 STMT: SelectStmt
-== 103
+== 120
 SELECT count(*) > 0 AS ok FROM pg_control_system()
 --
 FUNCTION: name="count" function="count" schema="" ctx=Call
 FUNCTION: name="pg_control_system" function="pg_control_system" schema="" ctx=Call
 STMT: SelectStmt
-== 104
+== 121
 -- pg_split_walfile_name, pg_walfile_name & pg_walfile_name_offset
 SELECT * FROM pg_split_walfile_name(NULL)
 --
 FUNCTION: name="pg_split_walfile_name" function="pg_split_walfile_name" schema="" ctx=Call
 STMT: SelectStmt
-== 105
+== 122
 SELECT * FROM pg_split_walfile_name('invalid')
 --
 FUNCTION: name="pg_split_walfile_name" function="pg_split_walfile_name" schema="" ctx=Call
 STMT: SelectStmt
-== 106
+== 123
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('000000010000000100000000')
 --
 FUNCTION: name="pg_split_walfile_name" function="pg_split_walfile_name" schema="" ctx=Call
 STMT: SelectStmt
-== 107
+== 124
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('ffffffFF00000001000000af')
 --
 FUNCTION: name="pg_split_walfile_name" function="pg_split_walfile_name" schema="" ctx=Call
 STMT: SelectStmt
-== 108
+== 125
 SELECT setting::int8 AS segment_size
 FROM pg_settings
 WHERE name = 'wal_segment_size'
@@ -704,7 +882,7 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 87
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 109
+== 126
 SELECT segment_number, file_offset
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size + 1),
      pg_split_walfile_name(file_name)
@@ -713,7 +891,7 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 80
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 110
+== 127
 SELECT segment_number, file_offset = :segment_size - 1
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size - 1),
      pg_split_walfile_name(file_name)
@@ -722,47 +900,47 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 38
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 111
+== 128
 -- pg_current_logfile
 CREATE ROLE regress_current_logfile
 --
 STMT: CreateRoleStmt
-== 112
+== 129
 -- not available by default
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 113
+== 130
 GRANT pg_monitor TO regress_current_logfile
 --
 STMT: GrantRoleStmt
-== 114
+== 131
 -- role has privileges of pg_monitor and can execute the function
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
 --
 FUNCTION: name="has_function_privilege" function="has_function_privilege" schema="" ctx=Call
 STMT: SelectStmt
-== 115
+== 132
 DROP ROLE regress_current_logfile
 --
 STMT: DropRoleStmt
-== 116
+== 133
 -- pg_column_toast_chunk_id
 CREATE TABLE test_chunk_id (a TEXT, b TEXT STORAGE EXTERNAL)
 --
 TABLE: name="test_chunk_id" schema="" table="test_chunk_id" ctx=DDL
 STMT: CreateStmt
-== 117
+== 134
 INSERT INTO test_chunk_id VALUES ('x', repeat('x', 8192))
 --
 TABLE: name="test_chunk_id" schema="" table="test_chunk_id" ctx=DML
 FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
-== 118
+== 135
 SELECT t.relname AS toastrel FROM pg_class c
   LEFT JOIN pg_class t ON c.reltoastrelid = t.oid
   WHERE c.relname = 'test_chunk_id'
@@ -774,8 +952,47 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 132
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 119
+== 136
 DROP TABLE test_chunk_id
 --
 TABLE: name="test_chunk_id" schema="" table="test_chunk_id" ctx=DDL
 STMT: DropStmt
+== 137
+DROP FUNCTION explain_mask_costs(text, bool, bool, bool, bool)
+--
+FUNCTION: name="explain_mask_costs" function="explain_mask_costs" schema="" ctx=DDL
+STMT: DropStmt
+== 138
+-- test stratnum translation support functions
+SELECT gist_translate_cmptype_common(7)
+--
+FUNCTION: name="gist_translate_cmptype_common" function="gist_translate_cmptype_common" schema="" ctx=Call
+STMT: SelectStmt
+== 139
+SELECT gist_translate_cmptype_common(3)
+--
+FUNCTION: name="gist_translate_cmptype_common" function="gist_translate_cmptype_common" schema="" ctx=Call
+STMT: SelectStmt
+== 140
+-- relpath tests
+CREATE FUNCTION test_relpath()
+    RETURNS void
+    AS :'regresslib'
+    LANGUAGE C
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 73
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 141
+SELECT test_relpath()
+--
+FUNCTION: name="test_relpath" function="test_relpath" schema="" ctx=Call
+STMT: SelectStmt
+== 142
+-- pg_replication_origin.roname limit
+SELECT pg_replication_origin_create('regress_' || repeat('a', 505))
+--
+FUNCTION: name="pg_replication_origin_create" function="pg_replication_origin_create" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: SelectStmt

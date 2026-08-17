@@ -15,6 +15,34 @@ SET client_encoding TO UTF8
 STMT: VariableSetStmt
 == 003
 |--
+-- Test builtin "C"
+|--
+CREATE COLLATION regress_builtin_c (
+  provider = builtin, locale = 'C')
+--
+STMT: DefineStmt
+== 004
+-- non-ASCII characters are unchanged
+SELECT LOWER(U&'\00C1' COLLATE regress_builtin_c) = U&'\00C1'
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 005
+SELECT UPPER(U&'\00E1' COLLATE regress_builtin_c) = U&'\00E1'
+--
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: SelectStmt
+== 006
+-- non-ASCII characters are not alphabetic
+SELECT U&'\00C1\00E1' !~ '[[:alpha:]]' COLLATE regress_builtin_c
+--
+STMT: SelectStmt
+== 007
+DROP COLLATION regress_builtin_c
+--
+STMT: DropStmt
+== 008
+|--
 -- Test PG_C_UTF8
 |--
 
@@ -22,33 +50,34 @@ CREATE COLLATION regress_pg_c_utf8 (
   provider = builtin, locale = 'C_UTF8')
 --
 STMT: DefineStmt
-== 004
+== 009
 -- fails
 CREATE COLLATION regress_pg_c_utf8 (
   provider = builtin, locale = 'C.UTF8')
 --
 STMT: DefineStmt
-== 005
+== 010
 DROP COLLATION regress_pg_c_utf8
 --
 STMT: DropStmt
-== 006
+== 011
 CREATE COLLATION regress_pg_c_utf8 (
   provider = builtin, locale = 'C.UTF-8')
 --
 STMT: DefineStmt
-== 007
+== 012
 CREATE TABLE test_pg_c_utf8 (
   t TEXT COLLATE PG_C_UTF8
 )
 --
 TABLE: name="test_pg_c_utf8" schema="" table="test_pg_c_utf8" ctx=DDL
 STMT: CreateStmt
-== 008
+== 013
 INSERT INTO test_pg_c_utf8 VALUES
   ('abc DEF 123abc'),
   ('ábc sßs ßss DÉF'),
   ('ǄxxǄ ǆxxǅ ǅxxǆ'),
+  (U&'Λλ 1a \FF11a'),
   ('ȺȺȺ'),
   ('ⱥⱥⱥ'),
   ('ⱥȺ')
@@ -56,7 +85,7 @@ INSERT INTO test_pg_c_utf8 VALUES
 TABLE: name="test_pg_c_utf8" schema="" table="test_pg_c_utf8" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 009
+== 014
 SELECT
     t, lower(t), initcap(t), upper(t),
     length(convert_to(t, 'UTF8')) AS t_bytes,
@@ -81,55 +110,55 @@ FUNCTION: name="length" function="length" schema="" ctx=Call
 FUNCTION: name="convert_to" function="convert_to" schema="" ctx=Call
 FUNCTION: name="upper" function="upper" schema="" ctx=Call
 STMT: SelectStmt
-== 010
+== 015
 DROP TABLE test_pg_c_utf8
 --
 TABLE: name="test_pg_c_utf8" schema="" table="test_pg_c_utf8" ctx=DDL
 STMT: DropStmt
-== 011
+== 016
 -- negative test: Final_Sigma not used for builtin locale C.UTF-8
 SELECT lower('ΑΣ' COLLATE PG_C_UTF8)
 --
 FUNCTION: name="lower" function="lower" schema="" ctx=Call
 STMT: SelectStmt
-== 012
+== 017
 SELECT lower('ΑͺΣͺ' COLLATE PG_C_UTF8)
 --
 FUNCTION: name="lower" function="lower" schema="" ctx=Call
 STMT: SelectStmt
-== 013
+== 018
 SELECT lower('Α΄Σ΄' COLLATE PG_C_UTF8)
 --
 FUNCTION: name="lower" function="lower" schema="" ctx=Call
 STMT: SelectStmt
-== 014
+== 019
 -- properties
 
 SELECT 'xyz' ~ '[[:alnum:]]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 015
+== 020
 SELECT 'xyz' !~ '[[:upper:]]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 016
+== 021
 SELECT '@' !~ '[[:alnum:]]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 017
+== 022
 SELECT '=' ~ '[[:punct:]]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 018
+== 023
 -- symbols are punctuation in posix
 SELECT 'a8a' ~ '[[:digit:]]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 019
+== 024
 SELECT '൧' !~ '\d' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 020
+== 025
 -- only 0-9 considered digits in posix
 
 -- case mapping
@@ -137,19 +166,207 @@ STMT: SelectStmt
 SELECT 'xYz' ~* 'XyZ' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 021
+== 026
 SELECT 'xAb' ~* '[W-Y]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 022
+== 027
 SELECT 'xAb' !~* '[c-d]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 023
+== 028
 SELECT 'Δ' ~* '[γ-λ]' COLLATE PG_C_UTF8
 --
 STMT: SelectStmt
-== 024
+== 029
 SELECT 'δ' ~* '[Γ-Λ]' COLLATE PG_C_UTF8
 --
+STMT: SelectStmt
+== 030
+-- same as above with cases reversed
+
+-- case folding
+select casefold('AbCd 123 #$% ıiIİ ẞ ß Ǆǅǆ Σσς' collate PG_C_UTF8)
+--
+FUNCTION: name="casefold" function="casefold" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+|--
+-- Test PG_UNICODE_FAST
+|--
+
+CREATE COLLATION regress_pg_unicode_fast (
+  provider = builtin, locale = 'unicode')
+--
+STMT: DefineStmt
+== 032
+-- fails
+CREATE COLLATION regress_pg_unicode_fast (
+  provider = builtin, locale = 'PG_UNICODE_FAST')
+--
+STMT: DefineStmt
+== 033
+CREATE TABLE test_pg_unicode_fast (
+  t TEXT COLLATE PG_UNICODE_FAST
+)
+--
+TABLE: name="test_pg_unicode_fast" schema="" table="test_pg_unicode_fast" ctx=DDL
+STMT: CreateStmt
+== 034
+INSERT INTO test_pg_unicode_fast VALUES
+  ('abc DEF 123abc'),
+  ('ábc sßs ßss DÉF'),
+  ('ǄxxǄ ǆxxǅ ǅxxǆ'),
+  (U&'Λλ 1a \FF11a'),
+  ('ȺȺȺ'),
+  ('ⱥⱥⱥ'),
+  ('ⱥȺ')
+--
+TABLE: name="test_pg_unicode_fast" schema="" table="test_pg_unicode_fast" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 035
+SELECT
+    t, lower(t), initcap(t), upper(t),
+    length(convert_to(t, 'UTF8')) AS t_bytes,
+    length(convert_to(lower(t), 'UTF8')) AS lower_t_bytes,
+    length(convert_to(initcap(t), 'UTF8')) AS initcap_t_bytes,
+    length(convert_to(upper(t), 'UTF8')) AS upper_t_bytes
+  FROM test_pg_unicode_fast
+--
+TABLE: name="test_pg_unicode_fast" schema="" table="test_pg_unicode_fast" ctx=Select
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="initcap" function="initcap" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="convert_to" function="convert_to" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="convert_to" function="convert_to" schema="" ctx=Call
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="convert_to" function="convert_to" schema="" ctx=Call
+FUNCTION: name="initcap" function="initcap" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="convert_to" function="convert_to" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+DROP TABLE test_pg_unicode_fast
+--
+TABLE: name="test_pg_unicode_fast" schema="" table="test_pg_unicode_fast" ctx=DDL
+STMT: DropStmt
+== 037
+-- test Final_Sigma
+SELECT lower('ΑΣ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+-- 0391 03A3
+SELECT lower('ΑΣ0' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+-- 0391 03A3 0030
+SELECT lower('ἈΣ̓' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 040
+-- 0391 0343 03A3 0343
+SELECT lower('ᾼΣͅ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 041
+-- 0391 0345 03A3 0345
+
+-- test !Final_Sigma
+SELECT lower('Σ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 042
+-- 03A3
+SELECT lower('0Σ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 043
+-- 0030 03A3
+SELECT lower('ΑΣΑ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 044
+-- 0391 03A3 0391
+SELECT lower('ἈΣ̓Α' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 045
+-- 0391 0343 03A3 0343 0391
+SELECT lower('ᾼΣͅΑ' COLLATE PG_UNICODE_FAST)
+--
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: SelectStmt
+== 046
+-- 0391 0345 03A3 0345 0391
+
+-- properties
+
+SELECT 'xyz' ~ '[[:alnum:]]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 047
+SELECT 'xyz' !~ '[[:upper:]]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 048
+SELECT '@' !~ '[[:alnum:]]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 049
+SELECT '=' !~ '[[:punct:]]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 050
+-- symbols are not punctuation
+SELECT 'a8a' ~ '[[:digit:]]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 051
+SELECT '൧' ~ '\d' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 052
+-- case mapping
+
+SELECT 'xYz' ~* 'XyZ' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 053
+SELECT 'xAb' ~* '[W-Y]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 054
+SELECT 'xAb' !~* '[c-d]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 055
+SELECT 'Δ' ~* '[γ-λ]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 056
+SELECT 'δ' ~* '[Γ-Λ]' COLLATE PG_UNICODE_FAST
+--
+STMT: SelectStmt
+== 057
+-- same as above with cases reversed
+
+-- case folding
+select casefold('AbCd 123 #$% ıiIİ ẞ ß Ǆǅǆ Σσς' collate PG_UNICODE_FAST)
+--
+FUNCTION: name="casefold" function="casefold" schema="" ctx=Call
 STMT: SelectStmt

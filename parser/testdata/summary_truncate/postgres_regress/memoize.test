@@ -13,7 +13,7 @@ declare
     ln text;
 begin
     for ln in
-        execute format('explain (analyze, costs off, summary off, timing off) %s',
+        execute format('explain (analyze, costs off, summary off, timing off, buffers off) %s',
             query)
     loop
         if hide_hitmiss = true then
@@ -25,8 +25,9 @@ begin
         ln := regexp_replace(ln, 'Evictions: 0', 'Evictions: Zero');
         ln := regexp_replace(ln, 'Evictions: \d+', 'Evictions: N');
         ln := regexp_replace(ln, 'Memory Usage: \d+', 'Memory Usage: N');
-	ln := regexp_replace(ln, 'Heap Fetches: \d+', 'Heap Fetches: N');
-	ln := regexp_replace(ln, 'loops=\d+', 'loops=N');
+        ln := regexp_replace(ln, 'Heap Fetches: \d+', 'Heap Fetches: N');
+        ln := regexp_replace(ln, 'loops=\d+', 'loops=N');
+        ln := regexp_replace(ln, 'Index Searches: \d+', 'Index Searches: N');
         return next ln;
     end loop;
 end;
@@ -141,11 +142,71 @@ STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM tenk1 t1 LEFT JOIN LATERAL (SELECT ... FROM tenk1 t2 WHERE ... OFFSET 0) t2 ON t1..."
 == 010
 -- truncate_limit: 100
+-- Try with LATERAL references within PlaceHolderVars
+SELECT explain_memoize('
+SELECT COUNT(*), AVG(t1.twenty) FROM tenk1 t1 LEFT JOIN
+LATERAL (SELECT t1.two+1 AS c1, t2.unique1 AS c2 FROM tenk1 t2) s ON TRUE
+WHERE s.c1 = s.c2 AND t1.unique1 < 1000;', false)
+--
+FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ..."
+== 011
+-- truncate_limit: 100
+-- And check we get the expected results.
+SELECT COUNT(*), AVG(t1.twenty) FROM tenk1 t1 LEFT JOIN
+LATERAL (SELECT t1.two+1 AS c1, t2.unique1 AS c2 FROM tenk1 t2) s ON TRUE
+WHERE s.c1 = s.c2 AND t1.unique1 < 1000
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FILTER: schema="" table="s" column="c1"
+FILTER: schema="" table="s" column="c2"
+FILTER: schema="" table="t1" column="unique1"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM tenk1 t1 LEFT JOIN LATERAL (SELECT ... FROM tenk1 t2) s ON true WHERE ..."
+== 012
+-- truncate_limit: 100
+-- Ensure we do not omit the cache keys from PlaceHolderVars
+SELECT explain_memoize('
+SELECT COUNT(*), AVG(t1.twenty) FROM tenk1 t1 LEFT JOIN
+LATERAL (SELECT t1.twenty AS c1, t2.unique1 AS c2, t2.two FROM tenk1 t2) s
+ON t1.two = s.two
+WHERE s.c1 = s.c2 AND t1.unique1 < 1000;', false)
+--
+FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ..."
+== 013
+-- truncate_limit: 100
+-- And check we get the expected results.
+SELECT COUNT(*), AVG(t1.twenty) FROM tenk1 t1 LEFT JOIN
+LATERAL (SELECT t1.twenty AS c1, t2.unique1 AS c2, t2.two FROM tenk1 t2) s
+ON t1.two = s.two
+WHERE s.c1 = s.c2 AND t1.unique1 < 1000
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FILTER: schema="" table="s" column="c1"
+FILTER: schema="" table="s" column="c2"
+FILTER: schema="" table="t1" column="unique1"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM tenk1 t1 LEFT JOIN LATERAL (SELECT ... FROM tenk1 t2) s ON t1.two = s.two WHERE ..."
+== 014
+-- truncate_limit: 100
 SET enable_mergejoin TO off
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET enable_mergejoin TO OFF"
-== 011
+== 015
 -- truncate_limit: 100
 -- Test for varlena datatype with expr evaluation
 CREATE TABLE expr_key (x numeric, t text)
@@ -153,7 +214,7 @@ CREATE TABLE expr_key (x numeric, t text)
 TABLE: name="expr_key" schema="" table="expr_key" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE expr_key (x numeric, t text)"
-== 012
+== 016
 -- truncate_limit: 100
 INSERT INTO expr_key (x, t)
 SELECT d1::numeric, d1::text FROM (
@@ -167,7 +228,7 @@ FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO expr_key (x, t) SELECT ... FROM (SELECT ... FROM generate_series(1, 20) d) t"
-== 013
+== 017
 -- truncate_limit: 100
 -- duplicate rows so we get some cache hits
 INSERT INTO expr_key SELECT * FROM expr_key
@@ -177,21 +238,21 @@ TABLE: name="expr_key" schema="" table="expr_key" ctx=Select
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO expr_key SELECT * FROM expr_key"
-== 014
+== 018
 -- truncate_limit: 100
 CREATE INDEX expr_key_idx_x_t ON expr_key (x, t)
 --
 TABLE: name="expr_key" schema="" table="expr_key" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX expr_key_idx_x_t ON expr_key USING btree (x, t)"
-== 015
+== 019
 -- truncate_limit: 100
 VACUUM ANALYZE expr_key
 --
 TABLE: name="expr_key" schema="" table="expr_key" ctx=DDL
 STMT: VacuumStmt
 TRUNCATED: "VACUUM (ANALYZE) expr_key"
-== 016
+== 020
 -- truncate_limit: 100
 -- Ensure we get we get a cache miss and hit for each of the 20 distinct values
 SELECT explain_memoize('
@@ -201,27 +262,27 @@ ON t1.x = t2.t::numeric AND t1.t::numeric = t2.x;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT ..."
-== 017
+== 021
 -- truncate_limit: 100
 DROP TABLE expr_key
 --
 TABLE: name="expr_key" schema="" table="expr_key" ctx=DDL
 STMT: DropStmt
 TRUNCATED: "DROP TABLE expr_key"
-== 018
+== 022
 -- truncate_limit: 100
 -- Reduce work_mem and hash_mem_multiplier so that we see some cache evictions
 SET work_mem TO '64kB'
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET work_mem TO \"64kB\""
-== 019
+== 023
 -- truncate_limit: 100
 SET hash_mem_multiplier TO 1.0
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET hash_mem_multiplier TO 1.0"
-== 020
+== 024
 -- truncate_limit: 100
 -- Ensure we get some evictions.  We're unable to validate the hits and misses
 -- here as the number of entries that fit in the cache at once will vary
@@ -234,21 +295,21 @@ WHERE t2.unique1 < 1200;', true)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT ..."
-== 021
+== 025
 -- truncate_limit: 100
 CREATE TABLE flt (f float)
 --
 TABLE: name="flt" schema="" table="flt" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE flt (f double precision)"
-== 022
+== 026
 -- truncate_limit: 100
 CREATE INDEX flt_f_idx ON flt (f)
 --
 TABLE: name="flt" schema="" table="flt" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX flt_f_idx ON flt USING btree (f)"
-== 023
+== 027
 -- truncate_limit: 100
 INSERT INTO flt VALUES('-0.0'::float),('+0.0'::float)
 --
@@ -256,20 +317,20 @@ TABLE: name="flt" schema="" table="flt" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO flt VALUES ('-0.0'::double precision), ('+0.0'::double precision)"
-== 024
+== 028
 -- truncate_limit: 100
 ANALYZE flt
 --
 TABLE: name="flt" schema="" table="flt" ctx=DDL
 STMT: VacuumStmt
 TRUNCATED: "ANALYZE flt"
-== 025
+== 029
 -- truncate_limit: 100
 SET enable_seqscan TO off
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET enable_seqscan TO OFF"
-== 026
+== 030
 -- truncate_limit: 100
 -- Ensure memoize operates in logical mode
 SELECT explain_memoize('
@@ -278,7 +339,7 @@ SELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f = f2.f;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT explain_memoize('\nSELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f = f2.f;', false)"
-== 027
+== 031
 -- truncate_limit: 100
 -- Ensure memoize operates in binary mode
 SELECT explain_memoize('
@@ -287,14 +348,14 @@ SELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f >= f2.f;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT explain_memoize('\nSELECT * FROM flt f1 INNER JOIN flt f2 ON f1.f >= f2.f;', false)"
-== 028
+== 032
 -- truncate_limit: 100
 DROP TABLE flt
 --
 TABLE: name="flt" schema="" table="flt" ctx=DDL
 STMT: DropStmt
 TRUNCATED: "DROP TABLE flt"
-== 029
+== 033
 -- truncate_limit: 100
 -- Exercise Memoize in binary mode with a large fixed width type and a
 -- varlena type.
@@ -303,21 +364,21 @@ CREATE TABLE strtest (n name, t text)
 TABLE: name="strtest" schema="" table="strtest" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE strtest (n name, t text)"
-== 030
+== 034
 -- truncate_limit: 100
 CREATE INDEX strtest_n_idx ON strtest (n)
 --
 TABLE: name="strtest" schema="" table="strtest" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX strtest_n_idx ON strtest USING btree (n)"
-== 031
+== 035
 -- truncate_limit: 100
 CREATE INDEX strtest_t_idx ON strtest (t)
 --
 TABLE: name="strtest" schema="" table="strtest" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX strtest_t_idx ON strtest USING btree (t)"
-== 032
+== 036
 -- truncate_limit: 100
 INSERT INTO strtest VALUES('one','one'),('two','two'),('three',repeat(fipshash('three'),100))
 --
@@ -327,7 +388,7 @@ FUNCTION: name="fipshash" function="fipshash" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO strtest VALUES ('one', 'one'), ('two', 'two'), ('three', repeat(fipshash('three'), 100))"
-== 033
+== 037
 -- truncate_limit: 100
 -- duplicate rows so we get some cache hits
 INSERT INTO strtest SELECT * FROM strtest
@@ -337,14 +398,14 @@ TABLE: name="strtest" schema="" table="strtest" ctx=Select
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO strtest SELECT * FROM strtest"
-== 034
+== 038
 -- truncate_limit: 100
 ANALYZE strtest
 --
 TABLE: name="strtest" schema="" table="strtest" ctx=DDL
 STMT: VacuumStmt
 TRUNCATED: "ANALYZE strtest"
-== 035
+== 039
 -- truncate_limit: 100
 -- Ensure we get 3 hits and 3 misses
 SELECT explain_memoize('
@@ -353,7 +414,7 @@ SELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.n >= s2.n;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT explain_memoize('\nSELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.n >= s2.n;', false)"
-== 036
+== 040
 -- truncate_limit: 100
 -- Ensure we get 3 hits and 3 misses
 SELECT explain_memoize('
@@ -362,42 +423,42 @@ SELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.t >= s2.t;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT explain_memoize('\nSELECT * FROM strtest s1 INNER JOIN strtest s2 ON s1.t >= s2.t;', false)"
-== 037
+== 041
 -- truncate_limit: 100
 DROP TABLE strtest
 --
 TABLE: name="strtest" schema="" table="strtest" ctx=DDL
 STMT: DropStmt
 TRUNCATED: "DROP TABLE strtest"
-== 038
+== 042
 -- truncate_limit: 100
 -- Ensure memoize works with partitionwise join
 SET enable_partitionwise_join TO on
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET enable_partitionwise_join TO ON"
-== 039
+== 043
 -- truncate_limit: 100
 CREATE TABLE prt (a int) PARTITION BY RANGE(a)
 --
 TABLE: name="prt" schema="" table="prt" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE prt (a int) PARTITION BY RANGE (a)"
-== 040
+== 044
 -- truncate_limit: 100
 CREATE TABLE prt_p1 PARTITION OF prt FOR VALUES FROM (0) TO (10)
 --
 TABLE: name="prt_p1" schema="" table="prt_p1" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE prt_p1 PARTITION OF prt FOR VALUES FROM (0) TO (10)"
-== 041
+== 045
 -- truncate_limit: 100
 CREATE TABLE prt_p2 PARTITION OF prt FOR VALUES FROM (10) TO (20)
 --
 TABLE: name="prt_p2" schema="" table="prt_p2" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TABLE prt_p2 PARTITION OF prt FOR VALUES FROM (10) TO (20)"
-== 042
+== 046
 -- truncate_limit: 100
 INSERT INTO prt VALUES (0), (0), (0), (0)
 --
@@ -405,7 +466,7 @@ TABLE: name="prt" schema="" table="prt" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO prt VALUES (0), (0), (0), (0)"
-== 043
+== 047
 -- truncate_limit: 100
 INSERT INTO prt VALUES (10), (10), (10), (10)
 --
@@ -413,28 +474,28 @@ TABLE: name="prt" schema="" table="prt" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
 TRUNCATED: "INSERT INTO prt VALUES (10), (10), (10), (10)"
-== 044
+== 048
 -- truncate_limit: 100
 CREATE INDEX iprt_p1_a ON prt_p1 (a)
 --
 TABLE: name="prt_p1" schema="" table="prt_p1" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX iprt_p1_a ON prt_p1 USING btree (a)"
-== 045
+== 049
 -- truncate_limit: 100
 CREATE INDEX iprt_p2_a ON prt_p2 (a)
 --
 TABLE: name="prt_p2" schema="" table="prt_p2" ctx=DDL
 STMT: IndexStmt
 TRUNCATED: "CREATE INDEX iprt_p2_a ON prt_p2 USING btree (a)"
-== 046
+== 050
 -- truncate_limit: 100
 ANALYZE prt
 --
 TABLE: name="prt" schema="" table="prt" ctx=DDL
 STMT: VacuumStmt
 TRUNCATED: "ANALYZE prt"
-== 047
+== 051
 -- truncate_limit: 100
 SELECT explain_memoize('
 SELECT * FROM prt t1 INNER JOIN prt t2 ON t1.a = t2.a;', false)
@@ -442,14 +503,14 @@ SELECT * FROM prt t1 INNER JOIN prt t2 ON t1.a = t2.a;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT explain_memoize('\nSELECT * FROM prt t1 INNER JOIN prt t2 ON t1.a = t2.a;', false)"
-== 048
+== 052
 -- truncate_limit: 100
 -- Ensure memoize works with parameterized union-all Append path
 SET enable_partitionwise_join TO off
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET enable_partitionwise_join TO OFF"
-== 049
+== 053
 -- truncate_limit: 100
 SELECT explain_memoize('
 SELECT * FROM prt_p1 t1 INNER JOIN
@@ -459,20 +520,20 @@ ON t1.a = t2.a;', false)
 FUNCTION: name="explain_memoize" function="explain_memoize" schema="" ctx=Call
 STMT: SelectStmt
 TRUNCATED: "SELECT ..."
-== 050
+== 054
 -- truncate_limit: 100
 DROP TABLE prt
 --
 TABLE: name="prt" schema="" table="prt" ctx=DDL
 STMT: DropStmt
 TRUNCATED: "DROP TABLE prt"
-== 051
+== 055
 -- truncate_limit: 100
 RESET enable_partitionwise_join
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET enable_partitionwise_join"
-== 052
+== 056
 -- truncate_limit: 100
 -- Exercise Memoize code that flushes the cache when a parameter changes which
 -- is not part of the cache key.
@@ -500,7 +561,7 @@ FILTER: schema="" table="t2" column="four"
 STMT: ExplainStmt
 STMT: SelectStmt
 TRUNCATED: "EXPLAIN (COSTS OFF) SELECT unique1 FROM tenk1 t0 WHERE unique1 < 3 AND EXISTS (SELECT 1 FROM tenk..."
-== 053
+== 057
 -- truncate_limit: 100
 -- Ensure the above query returns the correct result
 SELECT unique1 FROM tenk1 t0
@@ -523,68 +584,68 @@ FILTER: schema="" table="t0" column="two"
 FILTER: schema="" table="t2" column="four"
 STMT: SelectStmt
 TRUNCATED: "SELECT unique1 FROM tenk1 t0 WHERE ..."
-== 054
+== 058
 -- truncate_limit: 100
 RESET enable_seqscan
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET enable_seqscan"
-== 055
+== 059
 -- truncate_limit: 100
 RESET enable_mergejoin
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET enable_mergejoin"
-== 056
+== 060
 -- truncate_limit: 100
 RESET work_mem
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET work_mem"
-== 057
+== 061
 -- truncate_limit: 100
 RESET hash_mem_multiplier
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET hash_mem_multiplier"
-== 058
+== 062
 -- truncate_limit: 100
 RESET enable_bitmapscan
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET enable_bitmapscan"
-== 059
+== 063
 -- truncate_limit: 100
 RESET enable_hashjoin
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET enable_hashjoin"
-== 060
+== 064
 -- truncate_limit: 100
 -- Test parallel plans with Memoize
 SET min_parallel_table_scan_size TO 0
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET min_parallel_table_scan_size TO 0"
-== 061
+== 065
 -- truncate_limit: 100
 SET parallel_setup_cost TO 0
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET parallel_setup_cost TO 0"
-== 062
+== 066
 -- truncate_limit: 100
 SET parallel_tuple_cost TO 0
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET parallel_tuple_cost TO 0"
-== 063
+== 067
 -- truncate_limit: 100
 SET max_parallel_workers_per_gather TO 2
 --
 STMT: VariableSetStmt
 TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
-== 064
+== 068
 -- truncate_limit: 100
 -- Ensure we get a parallel plan.
 EXPLAIN (COSTS OFF)
@@ -604,7 +665,7 @@ FILTER: schema="" table="t2" column="unique1"
 STMT: ExplainStmt
 STMT: SelectStmt
 TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*), avg(t2.unique1) FROM tenk1 t1, LATERAL (SELECT t2.unique1 FR..."
-== 065
+== 069
 -- truncate_limit: 100
 -- And ensure the parallel plan gives us the correct results.
 SELECT COUNT(*),AVG(t2.unique1) FROM tenk1 t1,
@@ -622,25 +683,25 @@ FILTER: schema="" table="t1" column="twenty"
 FILTER: schema="" table="t2" column="unique1"
 STMT: SelectStmt
 TRUNCATED: "SELECT ... FROM tenk1 t1, LATERAL (SELECT ... FROM tenk1 t2 WHERE ...) t2 WHERE t1.unique1 < 1000"
-== 066
+== 070
 -- truncate_limit: 100
 RESET max_parallel_workers_per_gather
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET max_parallel_workers_per_gather"
-== 067
+== 071
 -- truncate_limit: 100
 RESET parallel_tuple_cost
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET parallel_tuple_cost"
-== 068
+== 072
 -- truncate_limit: 100
 RESET parallel_setup_cost
 --
 STMT: VariableSetStmt
 TRUNCATED: "RESET parallel_setup_cost"
-== 069
+== 073
 -- truncate_limit: 100
 RESET min_parallel_table_scan_size
 --

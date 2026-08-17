@@ -488,9 +488,10 @@ INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 --
 INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 == 098
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0
+CREATE VIEW rw_view1 AS
+  SELECT *, 'Const' AS c, (SELECT concat('b: ', b)) AS d FROM base_tbl WHERE a>0
 --
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0
+CREATE VIEW rw_view1 AS SELECT *, 'Const' AS c, (SELECT concat('b: ', b)) AS d FROM base_tbl WHERE a > 0
 == 099
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
@@ -531,20 +532,28 @@ SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
 == 107
+SET jit_above_cost = 0
+--
+SET jit_above_cost TO 0
+== 108
 MERGE INTO rw_view1 t
   USING (VALUES (0, 'ROW 0'), (1, 'ROW 1'),
                 (2, 'ROW 2'), (3, 'ROW 3')) AS v(a,b) ON t.a = v.a
   WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b
   WHEN MATCHED THEN DELETE
   WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a)
-  RETURNING merge_action(), v.*, t.*
+  RETURNING merge_action(), v.*, old, new, old.*, new.*, t.*
 --
-MERGE INTO rw_view1 t USING (VALUES (0, 'ROW 0'), (1, 'ROW 1'), (2, 'ROW 2'), (3, 'ROW 3')) v(a, b) ON t.a = v.a WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b WHEN MATCHED THEN DELETE WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a) RETURNING merge_action() , v.*, t.*
-== 108
-SELECT * FROM base_tbl ORDER BY a
---
-SELECT * FROM base_tbl ORDER BY a
+MERGE INTO rw_view1 t USING (VALUES (0, 'ROW 0'), (1, 'ROW 1'), (2, 'ROW 2'), (3, 'ROW 3')) v(a, b) ON t.a = v.a WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b WHEN MATCHED THEN DELETE WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a) RETURNING merge_action() , v.*, old, new, old.*, new.*, t.*
 == 109
+SET jit_above_cost TO DEFAULT
+--
+SET jit_above_cost TO DEFAULT
+== 110
+SELECT * FROM base_tbl ORDER BY a
+--
+SELECT * FROM base_tbl ORDER BY a
+== 111
 MERGE INTO rw_view1 t
   USING (VALUES (0, 'R0'), (1, 'R1'),
                 (2, 'R2'), (3, 'R3')) AS v(a,b) ON t.a = v.a
@@ -552,420 +561,377 @@ MERGE INTO rw_view1 t
   WHEN MATCHED THEN DELETE
   WHEN NOT MATCHED BY SOURCE THEN DELETE
   WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a)
-  RETURNING merge_action(), v.*, t.*
+  RETURNING merge_action(), v.*, old, new, old.*, new.*, t.*
 --
-MERGE INTO rw_view1 t USING (VALUES (0, 'R0'), (1, 'R1'), (2, 'R2'), (3, 'R3')) v(a, b) ON t.a = v.a WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b WHEN MATCHED THEN DELETE WHEN NOT MATCHED BY SOURCE THEN DELETE WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a) RETURNING merge_action() , v.*, t.*
-== 110
+MERGE INTO rw_view1 t USING (VALUES (0, 'R0'), (1, 'R1'), (2, 'R2'), (3, 'R3')) v(a, b) ON t.a = v.a WHEN MATCHED AND t.a <= 1 THEN UPDATE SET b = v.b WHEN MATCHED THEN DELETE WHEN NOT MATCHED BY SOURCE THEN DELETE WHEN NOT MATCHED AND a > 0 THEN INSERT (a) VALUES (v.a) RETURNING merge_action() , v.*, old, new, old.*, new.*, t.*
+== 112
 SELECT * FROM base_tbl ORDER BY a
 --
 SELECT * FROM base_tbl ORDER BY a
-== 111
+== 113
 EXPLAIN (costs off) UPDATE rw_view1 SET a=6 WHERE a=5
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view1 SET a = 6 WHERE a = 5
-== 112
+== 114
 EXPLAIN (costs off) DELETE FROM rw_view1 WHERE a=5
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view1 WHERE a = 5
-== 113
+== 115
 EXPLAIN (costs off)
 MERGE INTO rw_view1 t USING (VALUES (5, 'X')) AS v(a,b) ON t.a = v.a
   WHEN MATCHED THEN DELETE
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view1 t USING (VALUES (5, 'X')) v(a, b) ON t.a = v.a WHEN MATCHED THEN DELETE
-== 114
+== 116
 EXPLAIN (costs off)
 MERGE INTO rw_view1 t
   USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
   WHEN MATCHED THEN UPDATE SET b = 'Updated'
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view1 t USING (SELECT * FROM generate_series(1, 5)) s(a) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = 'Updated'
-== 115
+== 117
 EXPLAIN (costs off)
 MERGE INTO rw_view1 t
   USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
   WHEN NOT MATCHED BY SOURCE THEN DELETE
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view1 t USING (SELECT * FROM generate_series(1, 5)) s(a) ON t.a = s.a WHEN NOT MATCHED BY SOURCE THEN DELETE
-== 116
+== 118
 EXPLAIN (costs off)
 MERGE INTO rw_view1 t
   USING (SELECT * FROM generate_series(1,5)) AS s(a) ON t.a = s.a
   WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view1 t USING (SELECT * FROM generate_series(1, 5)) s(a) ON t.a = s.a WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)
-== 117
+== 119
 -- it's still updatable if we add a DO ALSO rule
 
 CREATE TABLE base_tbl_hist(ts timestamptz default now(), a int, b text)
 --
 CREATE TABLE base_tbl_hist (ts timestamptz DEFAULT now(), a int, b text)
-== 118
+== 120
 CREATE RULE base_tbl_log AS ON INSERT TO rw_view1 DO ALSO
   INSERT INTO base_tbl_hist(a,b) VALUES(new.a, new.b)
 --
 CREATE RULE base_tbl_log AS ON INSERT TO rw_view1 DO INSERT INTO base_tbl_hist (a, b) VALUES (new.a, new.b)
-== 119
+== 121
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name = 'rw_view1'
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name = 'rw_view1'
-== 120
+== 122
 -- Check behavior with DEFAULTs (bug #17633)
 
 INSERT INTO rw_view1 VALUES (9, DEFAULT), (10, DEFAULT)
 --
 INSERT INTO rw_view1 VALUES (9, DEFAULT), (10, DEFAULT)
-== 121
-SELECT a, b FROM base_tbl_hist
---
-SELECT a, b FROM base_tbl_hist
-== 122
-DROP TABLE base_tbl CASCADE
---
-DROP TABLE base_tbl CASCADE
 == 123
+SELECT a, b FROM base_tbl_hist
+--
+SELECT a, b FROM base_tbl_hist
+== 124
+DROP TABLE base_tbl CASCADE
+--
+DROP TABLE base_tbl CASCADE
+== 125
 DROP TABLE base_tbl_hist
 --
 DROP TABLE base_tbl_hist
-== 124
+== 126
 -- view on top of view
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
-== 125
-INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
---
-INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
-== 126
-CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl WHERE a>0
---
-CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl WHERE a > 0
 == 127
-CREATE VIEW rw_view2 AS SELECT aa AS aaa, bb AS bbb FROM rw_view1 WHERE aa<10
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 --
-CREATE VIEW rw_view2 AS SELECT aa AS aaa, bb AS bbb FROM rw_view1 WHERE aa < 10
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 == 128
+CREATE VIEW rw_view1 AS
+  SELECT b AS bb, a AS aa, 'Const1' AS c FROM base_tbl WHERE a>0
+--
+CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa, 'Const1' AS c FROM base_tbl WHERE a > 0
+== 129
+CREATE VIEW rw_view2 AS
+  SELECT aa AS aaa, bb AS bbb, c AS c1, 'Const2' AS c2 FROM rw_view1 WHERE aa<10
+--
+CREATE VIEW rw_view2 AS SELECT aa AS aaa, bb AS bbb, c AS c1, 'Const2' AS c2 FROM rw_view1 WHERE aa < 10
+== 130
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name = 'rw_view2'
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name = 'rw_view2'
-== 129
+== 131
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name = 'rw_view2'
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name = 'rw_view2'
-== 130
+== 132
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name = 'rw_view2'
  ORDER BY ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name = 'rw_view2' ORDER BY ordinal_position
-== 131
-INSERT INTO rw_view2 VALUES (3, 'Row 3')
---
-INSERT INTO rw_view2 VALUES (3, 'Row 3')
-== 132
-INSERT INTO rw_view2 (aaa) VALUES (4)
---
-INSERT INTO rw_view2 (aaa) VALUES (4)
 == 133
+INSERT INTO rw_view2 VALUES (3, 'Row 3')
+--
+INSERT INTO rw_view2 VALUES (3, 'Row 3')
+== 134
+INSERT INTO rw_view2 (aaa) VALUES (4)
+--
+INSERT INTO rw_view2 (aaa) VALUES (4)
+== 135
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 134
+== 136
 UPDATE rw_view2 SET bbb='Row 4' WHERE aaa=4
 --
 UPDATE rw_view2 SET bbb = 'Row 4' WHERE aaa = 4
-== 135
+== 137
 DELETE FROM rw_view2 WHERE aaa=2
 --
 DELETE FROM rw_view2 WHERE aaa = 2
-== 136
+== 138
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 137
+== 139
 MERGE INTO rw_view2 t
   USING (VALUES (3, 'R3'), (4, 'R4'), (5, 'R5')) AS v(a,b) ON aaa = v.a
   WHEN MATCHED AND aaa = 3 THEN DELETE
   WHEN MATCHED THEN UPDATE SET bbb = v.b
   WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a)
-  RETURNING merge_action(), v.*, t.*
+  RETURNING merge_action(), v.*, (SELECT old), (SELECT (SELECT new)), t.*
 --
-MERGE INTO rw_view2 t USING (VALUES (3, 'R3'), (4, 'R4'), (5, 'R5')) v(a, b) ON aaa = v.a WHEN MATCHED AND aaa = 3 THEN DELETE WHEN MATCHED THEN UPDATE SET bbb = v.b WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a) RETURNING merge_action() , v.*, t.*
-== 138
+MERGE INTO rw_view2 t USING (VALUES (3, 'R3'), (4, 'R4'), (5, 'R5')) v(a, b) ON aaa = v.a WHEN MATCHED AND aaa = 3 THEN DELETE WHEN MATCHED THEN UPDATE SET bbb = v.b WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a) RETURNING merge_action() , v.*, (SELECT old), (SELECT (SELECT new)), t.*
+== 140
 SELECT * FROM rw_view2 ORDER BY aaa
 --
 SELECT * FROM rw_view2 ORDER BY aaa
-== 139
+== 141
 MERGE INTO rw_view2 t
   USING (VALUES (4, 'r4'), (5, 'r5'), (6, 'r6')) AS v(a,b) ON aaa = v.a
   WHEN MATCHED AND aaa = 4 THEN DELETE
   WHEN MATCHED THEN UPDATE SET bbb = v.b
   WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a)
   WHEN NOT MATCHED BY SOURCE THEN UPDATE SET bbb = 'Not matched by source'
-  RETURNING merge_action(), v.*, t.*
+  RETURNING merge_action(), v.*, old, (SELECT new FROM (VALUES ((SELECT new)))), t.*
 --
-MERGE INTO rw_view2 t USING (VALUES (4, 'r4'), (5, 'r5'), (6, 'r6')) v(a, b) ON aaa = v.a WHEN MATCHED AND aaa = 4 THEN DELETE WHEN MATCHED THEN UPDATE SET bbb = v.b WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a) WHEN NOT MATCHED BY SOURCE THEN UPDATE SET bbb = 'Not matched by source' RETURNING merge_action() , v.*, t.*
-== 140
+MERGE INTO rw_view2 t USING (VALUES (4, 'r4'), (5, 'r5'), (6, 'r6')) v(a, b) ON aaa = v.a WHEN MATCHED AND aaa = 4 THEN DELETE WHEN MATCHED THEN UPDATE SET bbb = v.b WHEN NOT MATCHED THEN INSERT (aaa) VALUES (v.a) WHEN NOT MATCHED BY SOURCE THEN UPDATE SET bbb = 'Not matched by source' RETURNING merge_action() , v.*, old, (SELECT new FROM (VALUES ((SELECT new)))), t.*
+== 142
 SELECT * FROM rw_view2 ORDER BY aaa
 --
 SELECT * FROM rw_view2 ORDER BY aaa
-== 141
+== 143
 EXPLAIN (costs off) UPDATE rw_view2 SET aaa=5 WHERE aaa=4
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view2 SET aaa = 5 WHERE aaa = 4
-== 142
+== 144
 EXPLAIN (costs off) DELETE FROM rw_view2 WHERE aaa=4
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view2 WHERE aaa = 4
-== 143
+== 145
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 144
+== 146
 -- view on top of view with rules
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
-== 145
+== 147
 INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 --
 INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
-== 146
+== 148
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0 OFFSET 0
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0 OFFSET 0
-== 147
+== 149
 -- not updatable without rules/triggers
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a<10
 --
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
-== 148
+== 150
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 149
+== 151
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 150
+== 152
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 151
+== 153
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
   DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a, NEW.b) RETURNING *
 --
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1 DO INSTEAD INSERT INTO base_tbl VALUES (new.a, new.b) RETURNING *
-== 152
+== 154
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 153
+== 155
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 154
+== 156
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 155
+== 157
 CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1
   DO INSTEAD UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a RETURNING NEW.*
 --
 CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1 DO INSTEAD UPDATE base_tbl SET b = new.b WHERE a = old.a RETURNING new.*
-== 156
+== 158
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 157
+== 159
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 158
+== 160
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 159
+== 161
 CREATE RULE rw_view1_del_rule AS ON DELETE TO rw_view1
   DO INSTEAD DELETE FROM base_tbl WHERE a=OLD.a RETURNING OLD.*
 --
 CREATE RULE rw_view1_del_rule AS ON DELETE TO rw_view1 DO INSTEAD DELETE FROM base_tbl WHERE a = old.a RETURNING old.*
-== 160
+== 162
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 161
+== 163
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 162
+== 164
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 163
-INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
---
-INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
-== 164
-UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING *
---
-UPDATE rw_view2 SET b = 'Row three' WHERE a = 3 RETURNING *
 == 165
-SELECT * FROM rw_view2
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING old.*, new.*
 --
-SELECT * FROM rw_view2
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING old.*, new.*
 == 166
-DELETE FROM rw_view2 WHERE a=3 RETURNING *
+UPDATE rw_view2 SET b='R3' WHERE a=3 RETURNING old.*, new.*
 --
-DELETE FROM rw_view2 WHERE a = 3 RETURNING *
+UPDATE rw_view2 SET b = 'R3' WHERE a = 3 RETURNING old.*, new.*
 == 167
+-- rule returns NEW
+DROP RULE rw_view1_upd_rule ON rw_view1
+--
+DROP RULE rw_view1_upd_rule ON rw_view1
+== 168
+CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1
+  DO INSTEAD UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a RETURNING *
+--
+CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1 DO INSTEAD UPDATE base_tbl SET b = new.b WHERE a = old.a RETURNING *
+== 169
+UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING old.*, new.*
+--
+UPDATE rw_view2 SET b = 'Row three' WHERE a = 3 RETURNING old.*, new.*
+== 170
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 168
+== 171
+DELETE FROM rw_view2 WHERE a=3 RETURNING old.*, new.*
+--
+DELETE FROM rw_view2 WHERE a = 3 RETURNING old.*, new.*
+== 172
+SELECT * FROM rw_view2
+--
+SELECT * FROM rw_view2
+== 173
 MERGE INTO rw_view2 t USING (VALUES (3, 'Row 3')) AS v(a,b) ON t.a = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b)
 --
 MERGE INTO rw_view2 t USING (VALUES (3, 'Row 3')) v(a, b) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b)
-== 169
+== 174
 -- should fail
 
 EXPLAIN (costs off) UPDATE rw_view2 SET a=3 WHERE a=2
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view2 SET a = 3 WHERE a = 2
-== 170
+== 175
 EXPLAIN (costs off) DELETE FROM rw_view2 WHERE a=2
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view2 WHERE a = 2
-== 171
+== 176
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 172
+== 177
 -- view on top of view with triggers
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
-== 173
-INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
---
-INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
-== 174
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a>0 OFFSET 0
---
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0 OFFSET 0
-== 175
--- not updatable without rules/triggers
-CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a<10
---
-CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
-== 176
-SELECT table_name, is_insertable_into
-  FROM information_schema.tables
- WHERE table_name LIKE 'rw_view%'
- ORDER BY table_name
---
-SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 177
-SELECT table_name, is_updatable, is_insertable_into,
-       is_trigger_updatable, is_trigger_deletable,
-       is_trigger_insertable_into
-  FROM information_schema.views
- WHERE table_name LIKE 'rw_view%'
- ORDER BY table_name
---
-SELECT table_name, is_updatable, is_insertable_into, is_trigger_updatable, is_trigger_deletable, is_trigger_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
 == 178
-SELECT table_name, column_name, is_updatable
-  FROM information_schema.columns
- WHERE table_name LIKE 'rw_view%'
- ORDER BY table_name, ordinal_position
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 --
-SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
+INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 == 179
-CREATE FUNCTION rw_view1_trig_fn()
-RETURNS trigger AS
-$$
-BEGIN
-  IF TG_OP = 'INSERT' THEN
-    INSERT INTO base_tbl VALUES (NEW.a, NEW.b);
-    RETURN NEW;
-  ELSIF TG_OP = 'UPDATE' THEN
-    UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a;
-    RETURN NEW;
-  ELSIF TG_OP = 'DELETE' THEN
-    DELETE FROM base_tbl WHERE a=OLD.a;
-    RETURN OLD;
-  END IF;
-END;
-$$
-LANGUAGE plpgsql
+CREATE VIEW rw_view1 AS
+  SELECT *, 'Const1' AS c1 FROM base_tbl WHERE a>0 OFFSET 0
 --
-CREATE FUNCTION rw_view1_trig_fn() RETURNS trigger AS $$
-BEGIN
-  IF TG_OP = 'INSERT' THEN
-    INSERT INTO base_tbl VALUES (NEW.a, NEW.b);
-    RETURN NEW;
-  ELSIF TG_OP = 'UPDATE' THEN
-    UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a;
-    RETURN NEW;
-  ELSIF TG_OP = 'DELETE' THEN
-    DELETE FROM base_tbl WHERE a=OLD.a;
-    RETURN OLD;
-  END IF;
-END;
-$$ LANGUAGE plpgsql
+CREATE VIEW rw_view1 AS SELECT *, 'Const1' AS c1 FROM base_tbl WHERE a > 0 OFFSET 0
 == 180
-CREATE TRIGGER rw_view1_ins_trig INSTEAD OF INSERT ON rw_view1
-  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+-- not updatable without rules/triggers
+CREATE VIEW rw_view2 AS
+  SELECT *, 'Const2' AS c2 FROM rw_view1 WHERE a<10
 --
-CREATE TRIGGER rw_view1_ins_trig INSTEAD OF INSERT ON rw_view1 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
+CREATE VIEW rw_view2 AS SELECT *, 'Const2' AS c2 FROM rw_view1 WHERE a < 10
 == 181
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
@@ -990,18 +956,83 @@ SELECT table_name, column_name, is_updatable
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
 == 184
+CREATE FUNCTION rw_view1_trig_fn()
+RETURNS trigger AS
+$$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO base_tbl VALUES (NEW.a, NEW.b);
+    NEW.c1 = 'Trigger Const1';
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a;
+    NEW.c1 = 'Trigger Const1';
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    DELETE FROM base_tbl WHERE a=OLD.a;
+    RETURN OLD;
+  END IF;
+END;
+$$
+LANGUAGE plpgsql
+--
+CREATE FUNCTION rw_view1_trig_fn() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO base_tbl VALUES (NEW.a, NEW.b);
+    NEW.c1 = 'Trigger Const1';
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    UPDATE base_tbl SET b=NEW.b WHERE a=OLD.a;
+    NEW.c1 = 'Trigger Const1';
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    DELETE FROM base_tbl WHERE a=OLD.a;
+    RETURN OLD;
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+== 185
+CREATE TRIGGER rw_view1_ins_trig INSTEAD OF INSERT ON rw_view1
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+CREATE TRIGGER rw_view1_ins_trig INSTEAD OF INSERT ON rw_view1 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
+== 186
+SELECT table_name, is_insertable_into
+  FROM information_schema.tables
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
+== 187
+SELECT table_name, is_updatable, is_insertable_into,
+       is_trigger_updatable, is_trigger_deletable,
+       is_trigger_insertable_into
+  FROM information_schema.views
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name
+--
+SELECT table_name, is_updatable, is_insertable_into, is_trigger_updatable, is_trigger_deletable, is_trigger_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
+== 188
+SELECT table_name, column_name, is_updatable
+  FROM information_schema.columns
+ WHERE table_name LIKE 'rw_view%'
+ ORDER BY table_name, ordinal_position
+--
+SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
+== 189
 CREATE TRIGGER rw_view1_upd_trig INSTEAD OF UPDATE ON rw_view1
   FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
 --
 CREATE TRIGGER rw_view1_upd_trig INSTEAD OF UPDATE ON rw_view1 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
-== 185
+== 190
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 186
+== 191
 SELECT table_name, is_updatable, is_insertable_into,
        is_trigger_updatable, is_trigger_deletable,
        is_trigger_insertable_into
@@ -1010,26 +1041,26 @@ SELECT table_name, is_updatable, is_insertable_into,
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into, is_trigger_updatable, is_trigger_deletable, is_trigger_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 187
+== 192
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 188
+== 193
 CREATE TRIGGER rw_view1_del_trig INSTEAD OF DELETE ON rw_view1
   FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
 --
 CREATE TRIGGER rw_view1_del_trig INSTEAD OF DELETE ON rw_view1 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
-== 189
+== 194
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 190
+== 195
 SELECT table_name, is_updatable, is_insertable_into,
        is_trigger_updatable, is_trigger_deletable,
        is_trigger_insertable_into
@@ -1038,68 +1069,68 @@ SELECT table_name, is_updatable, is_insertable_into,
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into, is_trigger_updatable, is_trigger_deletable, is_trigger_insertable_into FROM information_schema.views WHERE table_name LIKE 'rw_view%' ORDER BY table_name
-== 191
+== 196
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE 'rw_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE 'rw_view%' ORDER BY table_name, ordinal_position
-== 192
-INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
---
-INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING *
-== 193
-UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING *
---
-UPDATE rw_view2 SET b = 'Row three' WHERE a = 3 RETURNING *
-== 194
-SELECT * FROM rw_view2
---
-SELECT * FROM rw_view2
-== 195
-DELETE FROM rw_view2 WHERE a=3 RETURNING *
---
-DELETE FROM rw_view2 WHERE a = 3 RETURNING *
-== 196
-SELECT * FROM rw_view2
---
-SELECT * FROM rw_view2
 == 197
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING old.*, new.*
+--
+INSERT INTO rw_view2 VALUES (3, 'Row 3') RETURNING old.*, new.*
+== 198
+UPDATE rw_view2 SET b='Row three' WHERE a=3 RETURNING old.*, new.*
+--
+UPDATE rw_view2 SET b = 'Row three' WHERE a = 3 RETURNING old.*, new.*
+== 199
+SELECT * FROM rw_view2
+--
+SELECT * FROM rw_view2
+== 200
+DELETE FROM rw_view2 WHERE a=3 RETURNING old.*, new.*
+--
+DELETE FROM rw_view2 WHERE a = 3 RETURNING old.*, new.*
+== 201
+SELECT * FROM rw_view2
+--
+SELECT * FROM rw_view2
+== 202
 MERGE INTO rw_view2 t
   USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
   WHEN MATCHED AND t.a <= 1 THEN DELETE
   WHEN MATCHED THEN UPDATE SET b = s.b
   WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
-  RETURNING merge_action(), s.*, t.*
+  RETURNING merge_action(), s.*, old, new, t.*
 --
-MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED AND t.a <= 1 THEN DELETE WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b) RETURNING merge_action() , s.*, t.*
-== 198
+MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED AND t.a <= 1 THEN DELETE WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b) RETURNING merge_action() , s.*, old, new, t.*
+== 203
 SELECT * FROM base_tbl ORDER BY a
 --
 SELECT * FROM base_tbl ORDER BY a
-== 199
+== 204
 MERGE INTO rw_view2 t
   USING (SELECT x, 'r'||x FROM generate_series(0,2) x) AS s(a,b) ON t.a = s.a
   WHEN MATCHED THEN UPDATE SET b = s.b
   WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
   WHEN NOT MATCHED BY SOURCE THEN UPDATE SET b = 'Not matched by source'
-  RETURNING merge_action(), s.*, t.*
+  RETURNING merge_action(), s.*, old, new, t.*
 --
-MERGE INTO rw_view2 t USING (SELECT x, 'r' || x FROM generate_series(0, 2) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b) WHEN NOT MATCHED BY SOURCE THEN UPDATE SET b = 'Not matched by source' RETURNING merge_action() , s.*, t.*
-== 200
+MERGE INTO rw_view2 t USING (SELECT x, 'r' || x FROM generate_series(0, 2) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b) WHEN NOT MATCHED BY SOURCE THEN UPDATE SET b = 'Not matched by source' RETURNING merge_action() , s.*, old, new, t.*
+== 205
 SELECT * FROM base_tbl ORDER BY a
 --
 SELECT * FROM base_tbl ORDER BY a
-== 201
+== 206
 EXPLAIN (costs off) UPDATE rw_view2 SET a=3 WHERE a=2
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view2 SET a = 3 WHERE a = 2
-== 202
+== 207
 EXPLAIN (costs off) DELETE FROM rw_view2 WHERE a=2
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view2 WHERE a = 2
-== 203
+== 208
 EXPLAIN (costs off)
 MERGE INTO rw_view2 t
   USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
@@ -1108,12 +1139,12 @@ MERGE INTO rw_view2 t
   WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED AND t.a <= 1 THEN DELETE WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
-== 204
+== 209
 -- MERGE with incomplete set of INSTEAD OF triggers
 DROP TRIGGER rw_view1_del_trig ON rw_view1
 --
 DROP TRIGGER rw_view1_del_trig ON rw_view1
-== 205
+== 210
 MERGE INTO rw_view2 t
   USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
   WHEN MATCHED AND t.a <= 1 THEN DELETE
@@ -1121,43 +1152,8 @@ MERGE INTO rw_view2 t
   WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
 --
 MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED AND t.a <= 1 THEN DELETE WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
-== 206
--- should fail
-MERGE INTO rw_view2 t
-  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
-  WHEN MATCHED THEN UPDATE SET b = s.b
-  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
---
-MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
-== 207
--- ok
-
-DROP TRIGGER rw_view1_ins_trig ON rw_view1
---
-DROP TRIGGER rw_view1_ins_trig ON rw_view1
-== 208
-MERGE INTO rw_view2 t
-  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
-  WHEN MATCHED THEN UPDATE SET b = s.b
-  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
---
-MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
-== 209
--- should fail
-MERGE INTO rw_view2 t
-  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
-  WHEN MATCHED THEN UPDATE SET b = s.b
---
-MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b
-== 210
--- ok
-
--- MERGE with INSTEAD OF triggers on auto-updatable view
-CREATE TRIGGER rw_view2_upd_trig INSTEAD OF UPDATE ON rw_view2
-  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
---
-CREATE TRIGGER rw_view2_upd_trig INSTEAD OF UPDATE ON rw_view2 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
 == 211
+-- should fail
 MERGE INTO rw_view2 t
   USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
   WHEN MATCHED THEN UPDATE SET b = s.b
@@ -1165,156 +1161,191 @@ MERGE INTO rw_view2 t
 --
 MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
 == 212
+-- ok
+
+DROP TRIGGER rw_view1_ins_trig ON rw_view1
+--
+DROP TRIGGER rw_view1_ins_trig ON rw_view1
+== 213
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+== 214
 -- should fail
 MERGE INTO rw_view2 t
   USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
   WHEN MATCHED THEN UPDATE SET b = s.b
 --
 MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b
-== 213
+== 215
+-- ok
+
+-- MERGE with INSTEAD OF triggers on auto-updatable view
+CREATE TRIGGER rw_view2_upd_trig INSTEAD OF UPDATE ON rw_view2
+  FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
+--
+CREATE TRIGGER rw_view2_upd_trig INSTEAD OF UPDATE ON rw_view2 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
+== 216
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+  WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+--
+MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b WHEN NOT MATCHED AND s.a > 0 THEN INSERT VALUES (s.a, s.b)
+== 217
+-- should fail
+MERGE INTO rw_view2 t
+  USING (SELECT x, 'R'||x FROM generate_series(0,3) x) AS s(a,b) ON t.a = s.a
+  WHEN MATCHED THEN UPDATE SET b = s.b
+--
+MERGE INTO rw_view2 t USING (SELECT x, 'R' || x FROM generate_series(0, 3) x) s(a, b) ON t.a = s.a WHEN MATCHED THEN UPDATE SET b = s.b
+== 218
 -- ok
 SELECT * FROM base_tbl ORDER BY a
 --
 SELECT * FROM base_tbl ORDER BY a
-== 214
+== 219
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 215
+== 220
 DROP FUNCTION rw_view1_trig_fn()
 --
 DROP FUNCTION rw_view1_trig_fn()
-== 216
+== 221
 -- update using whole row from view
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
-== 217
+== 222
 INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
 --
 INSERT INTO base_tbl SELECT i, 'Row ' || i FROM generate_series(-2, 2) g(i)
-== 218
+== 223
 CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT b AS bb, a AS aa FROM base_tbl
-== 219
+== 224
 CREATE FUNCTION rw_view1_aa(x rw_view1)
   RETURNS int AS $$ SELECT x.aa $$ LANGUAGE sql
 --
 CREATE FUNCTION rw_view1_aa(x rw_view1) RETURNS int AS $$ SELECT x.aa $$ LANGUAGE sql
-== 220
+== 225
 UPDATE rw_view1 v SET bb='Updated row 2' WHERE rw_view1_aa(v)=2
   RETURNING rw_view1_aa(v), v.bb
 --
 UPDATE rw_view1 v SET bb = 'Updated row 2' WHERE rw_view1_aa(v) = 2 RETURNING rw_view1_aa(v), v.bb
-== 221
+== 226
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 222
+== 227
 EXPLAIN (costs off)
 UPDATE rw_view1 v SET bb='Updated row 2' WHERE rw_view1_aa(v)=2
   RETURNING rw_view1_aa(v), v.bb
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view1 v SET bb = 'Updated row 2' WHERE rw_view1_aa(v) = 2 RETURNING rw_view1_aa(v), v.bb
-== 223
+== 228
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 224
+== 229
 -- permissions checks
 
 CREATE USER regress_view_user1
 --
 CREATE USER regress_view_user1
-== 225
+== 230
 CREATE USER regress_view_user2
 --
 CREATE USER regress_view_user2
-== 226
+== 231
 CREATE USER regress_view_user3
 --
 CREATE USER regress_view_user3
-== 227
+== 232
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 228
+== 233
 CREATE TABLE base_tbl(a int, b text, c float)
 --
 CREATE TABLE base_tbl (a int, b text, c double precision)
-== 229
+== 234
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
-== 230
+== 235
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 231
+== 236
 INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
 --
 INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
-== 232
+== 237
 GRANT SELECT ON base_tbl TO regress_view_user2
 --
 GRANT select ON base_tbl TO regress_view_user2
-== 233
+== 238
 GRANT SELECT ON rw_view1 TO regress_view_user2
 --
 GRANT select ON rw_view1 TO regress_view_user2
-== 234
+== 239
 GRANT UPDATE (a,c) ON base_tbl TO regress_view_user2
 --
 GRANT update (a, c) ON base_tbl TO regress_view_user2
-== 235
+== 240
 GRANT UPDATE (bb,cc) ON rw_view1 TO regress_view_user2
 --
 GRANT update (bb, cc) ON rw_view1 TO regress_view_user2
-== 236
+== 241
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 237
+== 242
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 238
+== 243
 CREATE VIEW rw_view2 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
 --
 CREATE VIEW rw_view2 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 239
+== 244
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 240
+== 245
 -- ok
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 241
+== 246
 -- ok
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 242
+== 247
 -- ok
 
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
 --
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
-== 243
+== 248
 -- not allowed
 INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
 --
 INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
-== 244
+== 249
 -- not allowed
 INSERT INTO rw_view2 VALUES ('Row 3', 3.0, 3)
 --
 INSERT INTO rw_view2 VALUES ('Row 3', 3.0, 3)
-== 245
+== 250
 -- not allowed
 
 MERGE INTO rw_view1 t
@@ -1322,1468 +1353,1468 @@ MERGE INTO rw_view1 t
   WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
 --
 MERGE INTO rw_view1 t USING (VALUES ('Row 3', 3.0, 3)) v(b, c, a) ON t.aa = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
-== 246
+== 251
 -- not allowed
 MERGE INTO rw_view2 t
   USING (VALUES ('Row 3', 3.0, 3)) AS v(b,c,a) ON t.aa = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
 --
 MERGE INTO rw_view2 t USING (VALUES ('Row 3', 3.0, 3)) v(b, c, a) ON t.aa = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
-== 247
+== 252
 -- not allowed
 
 UPDATE base_tbl SET a=a, c=c
 --
 UPDATE base_tbl SET a = a, c = c
-== 248
+== 253
 -- ok
 UPDATE base_tbl SET b=b
 --
 UPDATE base_tbl SET b = b
-== 249
+== 254
 -- not allowed
 UPDATE rw_view1 SET bb=bb, cc=cc
 --
 UPDATE rw_view1 SET bb = bb, cc = cc
-== 250
+== 255
 -- ok
 UPDATE rw_view1 SET aa=aa
 --
 UPDATE rw_view1 SET aa = aa
-== 251
+== 256
 -- not allowed
 UPDATE rw_view2 SET aa=aa, cc=cc
 --
 UPDATE rw_view2 SET aa = aa, cc = cc
-== 252
+== 257
 -- ok
 UPDATE rw_view2 SET bb=bb
 --
 UPDATE rw_view2 SET bb = bb
-== 253
+== 258
 -- not allowed
 
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET bb = bb, cc = cc
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET bb = bb, cc = cc
-== 254
+== 259
 -- ok
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET aa = aa
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET aa = aa
-== 255
+== 260
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET aa = aa, cc = cc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET aa = aa, cc = cc
-== 256
+== 261
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET bb = bb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET bb = bb
-== 257
+== 262
 -- not allowed
 
 DELETE FROM base_tbl
 --
 DELETE FROM base_tbl
-== 258
+== 263
 -- not allowed
 DELETE FROM rw_view1
 --
 DELETE FROM rw_view1
-== 259
+== 264
 -- not allowed
 DELETE FROM rw_view2
 --
 DELETE FROM rw_view2
-== 260
+== 265
 -- not allowed
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 261
+== 266
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 262
+== 267
 GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
 --
 GRANT insert, delete ON base_tbl TO regress_view_user2
-== 263
+== 268
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 264
+== 269
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 265
+== 270
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
 --
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
-== 266
+== 271
 -- ok
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
 --
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
-== 267
+== 272
 -- not allowed
 INSERT INTO rw_view2 VALUES ('Row 4', 4.0, 4)
 --
 INSERT INTO rw_view2 VALUES ('Row 4', 4.0, 4)
-== 268
+== 273
 -- ok
 DELETE FROM base_tbl WHERE a=1
 --
 DELETE FROM base_tbl WHERE a = 1
-== 269
+== 274
 -- ok
 DELETE FROM rw_view1 WHERE aa=2
 --
 DELETE FROM rw_view1 WHERE aa = 2
-== 270
+== 275
 -- not allowed
 DELETE FROM rw_view2 WHERE aa=2
 --
 DELETE FROM rw_view2 WHERE aa = 2
-== 271
+== 276
 -- ok
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED AND bb = 'xxx' THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED AND bb = 'xxx' THEN DELETE
-== 272
+== 277
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED AND bb = 'xxx' THEN DELETE
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED AND bb = 'xxx' THEN DELETE
-== 273
+== 278
 -- ok
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 274
+== 279
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 275
+== 280
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 276
+== 281
 REVOKE INSERT, DELETE ON base_tbl FROM regress_view_user2
 --
 REVOKE insert, delete ON base_tbl FROM regress_view_user2
-== 277
+== 282
 GRANT INSERT, DELETE ON rw_view1 TO regress_view_user2
 --
 GRANT insert, delete ON rw_view1 TO regress_view_user2
-== 278
+== 283
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 279
+== 284
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 280
+== 285
 INSERT INTO base_tbl VALUES (5, 'Row 5', 5.0)
 --
 INSERT INTO base_tbl VALUES (5, 'Row 5', 5.0)
-== 281
+== 286
 -- not allowed
 INSERT INTO rw_view1 VALUES ('Row 5', 5.0, 5)
 --
 INSERT INTO rw_view1 VALUES ('Row 5', 5.0, 5)
-== 282
+== 287
 -- ok
 INSERT INTO rw_view2 VALUES ('Row 6', 6.0, 6)
 --
 INSERT INTO rw_view2 VALUES ('Row 6', 6.0, 6)
-== 283
+== 288
 -- not allowed
 DELETE FROM base_tbl WHERE a=3
 --
 DELETE FROM base_tbl WHERE a = 3
-== 284
+== 289
 -- not allowed
 DELETE FROM rw_view1 WHERE aa=3
 --
 DELETE FROM rw_view1 WHERE aa = 3
-== 285
+== 290
 -- ok
 DELETE FROM rw_view2 WHERE aa=4
 --
 DELETE FROM rw_view2 WHERE aa = 4
-== 286
+== 291
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED AND bb = 'xxx' THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED AND bb = 'xxx' THEN DELETE
-== 287
+== 292
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED AND bb = 'xxx' THEN DELETE
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED AND bb = 'xxx' THEN DELETE
-== 288
+== 293
 -- not allowed
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 289
+== 294
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 290
+== 295
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 291
+== 296
 -- nested-view permissions
 
 CREATE TABLE base_tbl(a int, b text, c float)
 --
 CREATE TABLE base_tbl (a int, b text, c double precision)
-== 292
+== 297
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
-== 293
+== 298
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 294
+== 299
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
-== 295
+== 300
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 296
+== 301
 -- not allowed
 SELECT * FROM rw_view1 FOR UPDATE
 --
 SELECT * FROM rw_view1 FOR UPDATE
-== 297
+== 302
 -- not allowed
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
 --
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
-== 298
+== 303
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 299
+== 304
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 300
+== 305
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1
 --
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1
-== 301
+== 306
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 302
+== 307
 -- not allowed
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 303
+== 308
 -- not allowed
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 304
+== 309
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 305
+== 310
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 306
+== 311
 GRANT SELECT ON base_tbl TO regress_view_user1
 --
 GRANT select ON base_tbl TO regress_view_user1
-== 307
+== 312
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 308
+== 313
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 309
+== 314
 SELECT * FROM rw_view1 FOR UPDATE
 --
 SELECT * FROM rw_view1 FOR UPDATE
-== 310
+== 315
 -- not allowed
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
 --
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
-== 311
+== 316
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 312
+== 317
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 313
+== 318
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 314
+== 319
 -- not allowed
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 315
+== 320
 -- not allowed
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 316
+== 321
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 317
+== 322
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 318
+== 323
 GRANT SELECT ON rw_view1 TO regress_view_user2
 --
 GRANT select ON rw_view1 TO regress_view_user2
-== 319
+== 324
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 320
+== 325
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 321
+== 326
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 322
+== 327
 -- not allowed
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 323
+== 328
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 324
+== 329
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 325
+== 330
 GRANT UPDATE ON base_tbl TO regress_view_user1
 --
 GRANT update ON base_tbl TO regress_view_user1
-== 326
+== 331
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 327
+== 332
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 328
+== 333
 SELECT * FROM rw_view1 FOR UPDATE
 --
 SELECT * FROM rw_view1 FOR UPDATE
-== 329
+== 334
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
 --
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
-== 330
+== 335
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 331
+== 336
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 332
+== 337
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 333
+== 338
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 334
+== 339
 -- not allowed
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 335
+== 340
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'bar'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'bar'
-== 336
+== 341
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 337
+== 342
 GRANT UPDATE ON rw_view1 TO regress_view_user2
 --
 GRANT update ON rw_view1 TO regress_view_user2
-== 338
+== 343
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 339
+== 344
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 340
+== 345
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 341
+== 346
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 342
+== 347
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'fud'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'fud'
-== 343
+== 348
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 344
+== 349
 REVOKE UPDATE ON base_tbl FROM regress_view_user1
 --
 REVOKE update ON base_tbl FROM regress_view_user1
-== 345
+== 350
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 346
+== 351
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 347
+== 352
 SELECT * FROM rw_view1 FOR UPDATE
 --
 SELECT * FROM rw_view1 FOR UPDATE
-== 348
+== 353
 -- not allowed
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
 --
 UPDATE rw_view1 SET b = 'foo' WHERE a = 1
-== 349
+== 354
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 350
+== 355
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 351
+== 356
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 352
+== 357
 SELECT * FROM rw_view2 FOR UPDATE
 --
 SELECT * FROM rw_view2 FOR UPDATE
-== 353
+== 358
 -- not allowed
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
 --
 UPDATE rw_view2 SET b = 'bar' WHERE a = 1
-== 354
+== 359
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET b = 'foo'
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = 'foo'
-== 355
+== 360
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 356
+== 361
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 357
+== 362
 -- security invoker view permissions
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 358
+== 363
 CREATE TABLE base_tbl(a int, b text, c float)
 --
 CREATE TABLE base_tbl (a int, b text, c double precision)
-== 359
+== 364
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
-== 360
+== 365
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 361
+== 366
 ALTER VIEW rw_view1 SET (security_invoker = true)
 --
 ALTER VIEW rw_view1 SET (security_invoker=true)
-== 362
+== 367
 INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
 --
 INSERT INTO rw_view1 VALUES ('Row 2', 2.0, 2)
-== 363
+== 368
 GRANT SELECT ON rw_view1 TO regress_view_user2
 --
 GRANT select ON rw_view1 TO regress_view_user2
-== 364
+== 369
 GRANT UPDATE (bb,cc) ON rw_view1 TO regress_view_user2
 --
 GRANT update (bb, cc) ON rw_view1 TO regress_view_user2
-== 365
+== 370
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 366
+== 371
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 367
+== 372
 -- not allowed
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 368
+== 373
 -- not allowed
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
 --
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
-== 369
+== 374
 -- not allowed
 INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
 --
 INSERT INTO rw_view1 VALUES ('Row 3', 3.0, 3)
-== 370
+== 375
 -- not allowed
 UPDATE base_tbl SET a=a
 --
 UPDATE base_tbl SET a = a
-== 371
+== 376
 -- not allowed
 UPDATE rw_view1 SET bb=bb, cc=cc
 --
 UPDATE rw_view1 SET bb = bb, cc = cc
-== 372
+== 377
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET bb = bb
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET bb = bb
-== 373
+== 378
 -- not allowed
 DELETE FROM base_tbl
 --
 DELETE FROM base_tbl
-== 374
+== 379
 -- not allowed
 DELETE FROM rw_view1
 --
 DELETE FROM rw_view1
-== 375
+== 380
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN DELETE
-== 376
+== 381
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 377
+== 382
 GRANT SELECT ON base_tbl TO regress_view_user2
 --
 GRANT select ON base_tbl TO regress_view_user2
-== 378
+== 383
 GRANT UPDATE (a,c) ON base_tbl TO regress_view_user2
 --
 GRANT update (a, c) ON base_tbl TO regress_view_user2
-== 379
+== 384
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 380
+== 385
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 381
+== 386
 -- ok
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 382
+== 387
 -- ok
 UPDATE base_tbl SET a=a, c=c
 --
 UPDATE base_tbl SET a = a, c = c
-== 383
+== 388
 -- ok
 UPDATE base_tbl SET b=b
 --
 UPDATE base_tbl SET b = b
-== 384
+== 389
 -- not allowed
 UPDATE rw_view1 SET cc=cc
 --
 UPDATE rw_view1 SET cc = cc
-== 385
+== 390
 -- ok
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET cc = cc
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET cc = cc
-== 386
+== 391
 -- ok
 UPDATE rw_view1 SET aa=aa
 --
 UPDATE rw_view1 SET aa = aa
-== 387
+== 392
 -- not allowed
 UPDATE rw_view1 SET bb=bb
 --
 UPDATE rw_view1 SET bb = bb
-== 388
+== 393
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET aa = aa
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET aa = aa
-== 389
+== 394
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET bb = bb
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET bb = bb
-== 390
+== 395
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 391
+== 396
 GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
 --
 GRANT insert, delete ON base_tbl TO regress_view_user2
-== 392
+== 397
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 393
+== 398
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
 --
 INSERT INTO base_tbl VALUES (3, 'Row 3', 3.0)
-== 394
+== 399
 -- ok
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
 --
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
-== 395
+== 400
 -- not allowed
 DELETE FROM base_tbl WHERE a=1
 --
 DELETE FROM base_tbl WHERE a = 1
-== 396
+== 401
 -- ok
 DELETE FROM rw_view1 WHERE aa=2
 --
 DELETE FROM rw_view1 WHERE aa = 2
-== 397
+== 402
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN DELETE
-== 398
+== 403
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 399
+== 404
 REVOKE INSERT, DELETE ON base_tbl FROM regress_view_user2
 --
 REVOKE insert, delete ON base_tbl FROM regress_view_user2
-== 400
+== 405
 GRANT INSERT, DELETE ON rw_view1 TO regress_view_user2
 --
 GRANT insert, delete ON rw_view1 TO regress_view_user2
-== 401
+== 406
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 402
+== 407
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
 --
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
-== 403
+== 408
 -- not allowed
 DELETE FROM rw_view1 WHERE aa=2
 --
 DELETE FROM rw_view1 WHERE aa = 2
-== 404
+== 409
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN DELETE
-== 405
+== 410
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 406
+== 411
 GRANT INSERT, DELETE ON base_tbl TO regress_view_user2
 --
 GRANT insert, delete ON base_tbl TO regress_view_user2
-== 407
+== 412
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 408
+== 413
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
 --
 INSERT INTO rw_view1 VALUES ('Row 4', 4.0, 4)
-== 409
+== 414
 -- ok
 DELETE FROM rw_view1 WHERE aa=2
 --
 DELETE FROM rw_view1 WHERE aa = 2
-== 410
+== 415
 -- ok
 MERGE INTO rw_view1 t USING (VALUES (3)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN DELETE
 --
 MERGE INTO rw_view1 t USING (VALUES (3)) v(a) ON t.aa = v.a WHEN MATCHED THEN DELETE
-== 411
+== 416
 -- ok
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 412
+== 417
 -- ok
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 413
+== 418
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 414
+== 419
 -- ordinary view on top of security invoker view permissions
 
 CREATE TABLE base_tbl(a int, b text, c float)
 --
 CREATE TABLE base_tbl (a int, b text, c double precision)
-== 415
+== 420
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0)
-== 416
+== 421
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 417
+== 422
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 418
+== 423
 ALTER VIEW rw_view1 SET (security_invoker = true)
 --
 ALTER VIEW rw_view1 SET (security_invoker=true)
-== 419
+== 424
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 420
+== 425
 -- not allowed
 UPDATE rw_view1 SET aa=aa
 --
 UPDATE rw_view1 SET aa = aa
-== 421
+== 426
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (2, 'Row 2', 2.0)) AS v(a,b,c) ON t.aa = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
 --
 MERGE INTO rw_view1 t USING (VALUES (2, 'Row 2', 2.0)) v(a, b, c) ON t.aa = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.b, v.c, v.a)
-== 422
+== 427
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 423
+== 428
 CREATE VIEW rw_view2 AS SELECT cc AS ccc, aa AS aaa, bb AS bbb FROM rw_view1
 --
 CREATE VIEW rw_view2 AS SELECT cc AS ccc, aa AS aaa, bb AS bbb FROM rw_view1
-== 424
+== 429
 GRANT SELECT, UPDATE ON rw_view2 TO regress_view_user3
 --
 GRANT select, update ON rw_view2 TO regress_view_user3
-== 425
+== 430
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 426
+== 431
 -- not allowed
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 427
+== 432
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (2, 'Row 2', 2.0)) AS v(a,b,c) ON t.aaa = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.c, v.a, v.b)
 --
 MERGE INTO rw_view2 t USING (VALUES (2, 'Row 2', 2.0)) v(a, b, c) ON t.aaa = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.c, v.a, v.b)
-== 428
+== 433
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 429
+== 434
 GRANT SELECT ON base_tbl TO regress_view_user1
 --
 GRANT select ON base_tbl TO regress_view_user1
-== 430
+== 435
 GRANT UPDATE (a, b) ON base_tbl TO regress_view_user1
 --
 GRANT update (a, b) ON base_tbl TO regress_view_user1
-== 431
+== 436
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 432
+== 437
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 433
+== 438
 -- ok
 UPDATE rw_view1 SET aa=aa, bb=bb
 --
 UPDATE rw_view1 SET aa = aa, bb = bb
-== 434
+== 439
 -- ok
 UPDATE rw_view1 SET cc=cc
 --
 UPDATE rw_view1 SET cc = cc
-== 435
+== 440
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET aa = aa, bb = bb
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET aa = aa, bb = bb
-== 436
+== 441
 -- ok
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET cc = cc
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET cc = cc
-== 437
+== 442
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 438
+== 443
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 439
+== 444
 -- not allowed
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 440
+== 445
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 441
+== 446
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 442
+== 447
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 443
+== 448
 -- not allowed
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 444
+== 449
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 445
+== 450
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 446
+== 451
 GRANT SELECT ON rw_view1 TO regress_view_user2
 --
 GRANT select ON rw_view1 TO regress_view_user2
-== 447
+== 452
 GRANT UPDATE (bb, cc) ON rw_view1 TO regress_view_user2
 --
 GRANT update (bb, cc) ON rw_view1 TO regress_view_user2
-== 448
+== 453
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 449
+== 454
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 450
+== 455
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 451
+== 456
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 452
+== 457
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 453
+== 458
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 454
+== 459
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 455
+== 460
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 456
+== 461
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 457
+== 462
 GRANT SELECT ON base_tbl TO regress_view_user2
 --
 GRANT select ON base_tbl TO regress_view_user2
-== 458
+== 463
 GRANT UPDATE (a, c) ON base_tbl TO regress_view_user2
 --
 GRANT update (a, c) ON base_tbl TO regress_view_user2
-== 459
+== 464
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 460
+== 465
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 461
+== 466
 -- ok
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 462
+== 467
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 463
+== 468
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 464
+== 469
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 465
+== 470
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 466
+== 471
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 467
+== 472
 -- ok
 
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 468
+== 473
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 469
+== 474
 -- not allowed
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 470
+== 475
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 471
+== 476
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 472
+== 477
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 473
+== 478
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 474
+== 479
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 475
+== 480
 -- not allowed
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 476
+== 481
 GRANT SELECT ON base_tbl TO regress_view_user3
 --
 GRANT select ON base_tbl TO regress_view_user3
-== 477
+== 482
 GRANT UPDATE (a, c) ON base_tbl TO regress_view_user3
 --
 GRANT update (a, c) ON base_tbl TO regress_view_user3
-== 478
+== 483
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 479
+== 484
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 480
+== 485
 -- ok
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 481
+== 486
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 482
+== 487
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 483
+== 488
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 484
+== 489
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 485
+== 490
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 486
+== 491
 -- ok
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 487
+== 492
 REVOKE SELECT, UPDATE ON base_tbl FROM regress_view_user1
 --
 REVOKE select, update ON base_tbl FROM regress_view_user1
-== 488
+== 493
 SET SESSION AUTHORIZATION regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 489
+== 494
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 490
+== 495
 -- not allowed
 UPDATE rw_view1 SET aa=aa
 --
 UPDATE rw_view1 SET aa = aa
-== 491
+== 496
 -- not allowed
 MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.aa = v.a
   WHEN MATCHED THEN UPDATE SET aa = aa
 --
 MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.aa = v.a WHEN MATCHED THEN UPDATE SET aa = aa
-== 492
+== 497
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 493
+== 498
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 494
+== 499
 -- ok
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 495
+== 500
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 496
+== 501
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 497
+== 502
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 498
+== 503
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 499
+== 504
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 500
+== 505
 -- ok
 
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 501
+== 506
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 502
+== 507
 -- ok
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 503
+== 508
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 504
+== 509
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 505
+== 510
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 506
+== 511
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 507
+== 512
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 508
+== 513
 -- ok
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 509
+== 514
 REVOKE SELECT, UPDATE ON base_tbl FROM regress_view_user2
 --
 REVOKE select, update ON base_tbl FROM regress_view_user2
-== 510
+== 515
 SET SESSION AUTHORIZATION regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 511
+== 516
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 512
+== 517
 -- not allowed
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 513
+== 518
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 514
+== 519
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 515
+== 520
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 516
+== 521
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 517
+== 522
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 518
+== 523
 -- not allowed
 
 SET SESSION AUTHORIZATION regress_view_user3
 --
 SET session_authorization TO regress_view_user3
-== 519
+== 524
 SELECT * FROM rw_view2
 --
 SELECT * FROM rw_view2
-== 520
+== 525
 -- ok
 UPDATE rw_view2 SET aaa=aaa
 --
 UPDATE rw_view2 SET aaa = aaa
-== 521
+== 526
 -- not allowed
 UPDATE rw_view2 SET bbb=bbb
 --
 UPDATE rw_view2 SET bbb = bbb
-== 522
+== 527
 -- not allowed
 UPDATE rw_view2 SET ccc=ccc
 --
 UPDATE rw_view2 SET ccc = ccc
-== 523
+== 528
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET aaa = aaa
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET aaa = aaa
-== 524
+== 529
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET bbb = bbb
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET bbb = bbb
-== 525
+== 530
 -- not allowed
 MERGE INTO rw_view2 t USING (VALUES (1)) AS v(a) ON t.aaa = v.a
   WHEN MATCHED THEN UPDATE SET ccc = ccc
 --
 MERGE INTO rw_view2 t USING (VALUES (1)) v(a) ON t.aaa = v.a WHEN MATCHED THEN UPDATE SET ccc = ccc
-== 526
+== 531
 -- ok
 
 RESET SESSION AUTHORIZATION
 --
 RESET session_authorization
-== 527
+== 532
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 528
+== 533
 DROP USER regress_view_user1
 --
 DROP ROLE regress_view_user1
-== 529
+== 534
 DROP USER regress_view_user2
 --
 DROP ROLE regress_view_user2
-== 530
+== 535
 DROP USER regress_view_user3
 --
 DROP ROLE regress_view_user3
-== 531
+== 536
 -- column defaults
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified', c serial)
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified', c serial)
-== 532
-INSERT INTO base_tbl VALUES (1, 'Row 1')
---
-INSERT INTO base_tbl VALUES (1, 'Row 1')
-== 533
-INSERT INTO base_tbl VALUES (2, 'Row 2')
---
-INSERT INTO base_tbl VALUES (2, 'Row 2')
-== 534
-INSERT INTO base_tbl VALUES (3)
---
-INSERT INTO base_tbl VALUES (3)
-== 535
-CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
---
-CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
-== 536
-ALTER VIEW rw_view1 ALTER COLUMN bb SET DEFAULT 'View default'
---
-ALTER VIEW rw_view1 ALTER COLUMN bb SET DEFAULT 'View default'
 == 537
-INSERT INTO rw_view1 VALUES (4, 'Row 4')
+INSERT INTO base_tbl VALUES (1, 'Row 1')
 --
-INSERT INTO rw_view1 VALUES (4, 'Row 4')
+INSERT INTO base_tbl VALUES (1, 'Row 1')
 == 538
+INSERT INTO base_tbl VALUES (2, 'Row 2')
+--
+INSERT INTO base_tbl VALUES (2, 'Row 2')
+== 539
+INSERT INTO base_tbl VALUES (3)
+--
+INSERT INTO base_tbl VALUES (3)
+== 540
+CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
+--
+CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
+== 541
+ALTER VIEW rw_view1 ALTER COLUMN bb SET DEFAULT 'View default'
+--
+ALTER VIEW rw_view1 ALTER COLUMN bb SET DEFAULT 'View default'
+== 542
+INSERT INTO rw_view1 VALUES (4, 'Row 4')
+--
+INSERT INTO rw_view1 VALUES (4, 'Row 4')
+== 543
 INSERT INTO rw_view1 (aa) VALUES (5)
 --
 INSERT INTO rw_view1 (aa) VALUES (5)
-== 539
+== 544
 MERGE INTO rw_view1 t USING (VALUES (6)) AS v(a) ON t.aa = v.a
   WHEN NOT MATCHED THEN INSERT (aa) VALUES (v.a)
 --
 MERGE INTO rw_view1 t USING (VALUES (6)) v(a) ON t.aa = v.a WHEN NOT MATCHED THEN INSERT (aa) VALUES (v.a)
-== 540
+== 545
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 541
+== 546
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 542
+== 547
 -- Table having triggers
 
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
 --
 CREATE TABLE base_tbl (a int PRIMARY KEY, b text DEFAULT 'Unspecified')
-== 543
+== 548
 INSERT INTO base_tbl VALUES (1, 'Row 1')
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1')
-== 544
+== 549
 INSERT INTO base_tbl VALUES (2, 'Row 2')
 --
 INSERT INTO base_tbl VALUES (2, 'Row 2')
-== 545
+== 550
 CREATE FUNCTION rw_view1_trig_fn()
 RETURNS trigger AS
 $$
@@ -2806,118 +2837,118 @@ BEGIN
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql
-== 546
+== 551
 CREATE TRIGGER rw_view1_ins_trig AFTER INSERT ON base_tbl
   FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
 --
 CREATE TRIGGER rw_view1_ins_trig AFTER INSERT ON base_tbl FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
-== 547
+== 552
 CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT a AS aa, b AS bb FROM base_tbl
-== 548
+== 553
 INSERT INTO rw_view1 VALUES (3, 'Row 3')
 --
 INSERT INTO rw_view1 VALUES (3, 'Row 3')
-== 549
+== 554
 select * from base_tbl
 --
 SELECT * FROM base_tbl
-== 550
+== 555
 DROP VIEW rw_view1
 --
 DROP VIEW rw_view1
-== 551
+== 556
 DROP TRIGGER rw_view1_ins_trig on base_tbl
 --
 DROP TRIGGER rw_view1_ins_trig ON base_tbl
-== 552
+== 557
 DROP FUNCTION rw_view1_trig_fn()
 --
 DROP FUNCTION rw_view1_trig_fn()
-== 553
+== 558
 DROP TABLE base_tbl
 --
 DROP TABLE base_tbl
-== 554
+== 559
 -- view with ORDER BY
 
 CREATE TABLE base_tbl (a int, b int)
 --
 CREATE TABLE base_tbl (a int, b int)
-== 555
+== 560
 INSERT INTO base_tbl VALUES (1,2), (4,5), (3,-3)
 --
 INSERT INTO base_tbl VALUES (1, 2), (4, 5), (3, -3)
-== 556
+== 561
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl ORDER BY a+b
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl ORDER BY a + b
-== 557
-SELECT * FROM rw_view1
---
-SELECT * FROM rw_view1
-== 558
-INSERT INTO rw_view1 VALUES (7,-8)
---
-INSERT INTO rw_view1 VALUES (7, -8)
-== 559
-SELECT * FROM rw_view1
---
-SELECT * FROM rw_view1
-== 560
-EXPLAIN (verbose, costs off) UPDATE rw_view1 SET b = b + 1 RETURNING *
---
-EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET b = b + 1 RETURNING *
-== 561
-UPDATE rw_view1 SET b = b + 1 RETURNING *
---
-UPDATE rw_view1 SET b = b + 1 RETURNING *
 == 562
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
 == 563
+INSERT INTO rw_view1 VALUES (7,-8)
+--
+INSERT INTO rw_view1 VALUES (7, -8)
+== 564
+SELECT * FROM rw_view1
+--
+SELECT * FROM rw_view1
+== 565
+EXPLAIN (verbose, costs off) UPDATE rw_view1 SET b = b + 1 RETURNING *
+--
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET b = b + 1 RETURNING *
+== 566
+UPDATE rw_view1 SET b = b + 1 RETURNING *
+--
+UPDATE rw_view1 SET b = b + 1 RETURNING *
+== 567
+SELECT * FROM rw_view1
+--
+SELECT * FROM rw_view1
+== 568
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 564
+== 569
 -- multiple array-column updates
 
 CREATE TABLE base_tbl (a int, arr int[])
 --
 CREATE TABLE base_tbl (a int, arr int[])
-== 565
+== 570
 INSERT INTO base_tbl VALUES (1,ARRAY[2]), (3,ARRAY[4])
 --
 INSERT INTO base_tbl VALUES (1, ARRAY[2]), (3, ARRAY[4])
-== 566
+== 571
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
-== 567
+== 572
 UPDATE rw_view1 SET arr[1] = 42, arr[2] = 77 WHERE a = 3
 --
 UPDATE rw_view1 SET arr[1] = 42, arr[2] = 77 WHERE a = 3
-== 568
+== 573
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 569
+== 574
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 570
+== 575
 -- views with updatable and non-updatable columns
 
 CREATE TABLE base_tbl(a float)
 --
 CREATE TABLE base_tbl (a double precision)
-== 571
+== 576
 INSERT INTO base_tbl SELECT i/10.0 FROM generate_series(1,10) g(i)
 --
 INSERT INTO base_tbl SELECT i / 10.0 FROM generate_series(1, 10) g(i)
-== 572
+== 577
 CREATE VIEW rw_view1 AS
   SELECT ctid, sin(a) s, a, cos(a) c
   FROM base_tbl
@@ -2925,41 +2956,41 @@ CREATE VIEW rw_view1 AS
   ORDER BY abs(a)
 --
 CREATE VIEW rw_view1 AS SELECT ctid, sin(a) AS s, a, cos(a) AS c FROM base_tbl WHERE a <> 0 ORDER BY abs(a)
-== 573
+== 578
 INSERT INTO rw_view1 VALUES (null, null, 1.1, null)
 --
 INSERT INTO rw_view1 VALUES (NULL, NULL, 1.1, NULL)
-== 574
+== 579
 -- should fail
 INSERT INTO rw_view1 (s, c, a) VALUES (null, null, 1.1)
 --
 INSERT INTO rw_view1 (s, c, a) VALUES (NULL, NULL, 1.1)
-== 575
+== 580
 -- should fail
 INSERT INTO rw_view1 (s, c, a) VALUES (default, default, 1.1)
 --
 INSERT INTO rw_view1 (s, c, a) VALUES (DEFAULT, DEFAULT, 1.1)
-== 576
+== 581
 -- should fail
 INSERT INTO rw_view1 (a) VALUES (1.1) RETURNING a, s, c
 --
 INSERT INTO rw_view1 (a) VALUES (1.1) RETURNING a, s, c
-== 577
+== 582
 -- OK
 UPDATE rw_view1 SET s = s WHERE a = 1.1
 --
 UPDATE rw_view1 SET s = s WHERE a = 1.1
-== 578
+== 583
 -- should fail
 UPDATE rw_view1 SET a = 1.05 WHERE a = 1.1 RETURNING s
 --
 UPDATE rw_view1 SET a = 1.05 WHERE a = 1.1 RETURNING s
-== 579
+== 584
 -- OK
 DELETE FROM rw_view1 WHERE a = 1.05
 --
 DELETE FROM rw_view1 WHERE a = 1.05
-== 580
+== 585
 -- OK
 
 CREATE VIEW rw_view2 AS
@@ -2967,41 +2998,41 @@ CREATE VIEW rw_view2 AS
   FROM rw_view1
 --
 CREATE VIEW rw_view2 AS SELECT s, c, s / c AS t, a AS base_a, ctid FROM rw_view1
-== 581
+== 586
 INSERT INTO rw_view2 VALUES (null, null, null, 1.1, null)
 --
 INSERT INTO rw_view2 VALUES (NULL, NULL, NULL, 1.1, NULL)
-== 582
+== 587
 -- should fail
 INSERT INTO rw_view2(s, c, base_a) VALUES (null, null, 1.1)
 --
 INSERT INTO rw_view2 (s, c, base_a) VALUES (NULL, NULL, 1.1)
-== 583
+== 588
 -- should fail
 INSERT INTO rw_view2(base_a) VALUES (1.1) RETURNING t
 --
 INSERT INTO rw_view2 (base_a) VALUES (1.1) RETURNING t
-== 584
+== 589
 -- OK
 UPDATE rw_view2 SET s = s WHERE base_a = 1.1
 --
 UPDATE rw_view2 SET s = s WHERE base_a = 1.1
-== 585
+== 590
 -- should fail
 UPDATE rw_view2 SET t = t WHERE base_a = 1.1
 --
 UPDATE rw_view2 SET t = t WHERE base_a = 1.1
-== 586
+== 591
 -- should fail
 UPDATE rw_view2 SET base_a = 1.05 WHERE base_a = 1.1
 --
 UPDATE rw_view2 SET base_a = 1.05 WHERE base_a = 1.1
-== 587
+== 592
 -- OK
 DELETE FROM rw_view2 WHERE base_a = 1.05 RETURNING base_a, s, c, t
 --
 DELETE FROM rw_view2 WHERE base_a = 1.05 RETURNING base_a, s, c, t
-== 588
+== 593
 -- OK
 
 CREATE VIEW rw_view3 AS
@@ -3009,667 +3040,667 @@ CREATE VIEW rw_view3 AS
   FROM rw_view1
 --
 CREATE VIEW rw_view3 AS SELECT s, c, s / c AS t, ctid FROM rw_view1
-== 589
+== 594
 INSERT INTO rw_view3 VALUES (null, null, null, null)
 --
 INSERT INTO rw_view3 VALUES (NULL, NULL, NULL, NULL)
-== 590
+== 595
 -- should fail
 INSERT INTO rw_view3(s) VALUES (null)
 --
 INSERT INTO rw_view3 (s) VALUES (NULL)
-== 591
+== 596
 -- should fail
 UPDATE rw_view3 SET s = s
 --
 UPDATE rw_view3 SET s = s
-== 592
+== 597
 -- should fail
 DELETE FROM rw_view3 WHERE s = sin(0.1)
 --
 DELETE FROM rw_view3 WHERE s = sin(0.1)
-== 593
+== 598
 -- should be OK
 SELECT * FROM base_tbl ORDER BY a
 --
 SELECT * FROM base_tbl ORDER BY a
-== 594
+== 599
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name LIKE E'r_\\_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name LIKE E'r_\\_view%' ORDER BY table_name
-== 595
+== 600
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name LIKE E'r_\\_view%'
  ORDER BY table_name
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name LIKE E'r_\\_view%' ORDER BY table_name
-== 596
+== 601
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name LIKE E'r_\\_view%'
  ORDER BY table_name, ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name LIKE E'r_\\_view%' ORDER BY table_name, ordinal_position
-== 597
+== 602
 SELECT events & 4 != 0 AS upd,
        events & 8 != 0 AS ins,
        events & 16 != 0 AS del
   FROM pg_catalog.pg_relation_is_updatable('rw_view3'::regclass, false) t(events)
 --
 SELECT (events & 4) <> 0 AS upd, (events & 8) <> 0 AS ins, (events & 16) <> 0 AS del FROM pg_catalog.pg_relation_is_updatable('rw_view3'::regclass, false) t(events)
-== 598
+== 603
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 599
+== 604
 -- view on table with GENERATED columns
 
 CREATE TABLE base_tbl (id int, idplus1 int GENERATED ALWAYS AS (id + 1) STORED)
 --
 CREATE TABLE base_tbl (id int, idplus1 int GENERATED ALWAYS AS (id + 1) STORED)
-== 600
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
---
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
-== 601
-INSERT INTO base_tbl (id) VALUES (1)
---
-INSERT INTO base_tbl (id) VALUES (1)
-== 602
-INSERT INTO rw_view1 (id) VALUES (2)
---
-INSERT INTO rw_view1 (id) VALUES (2)
-== 603
-INSERT INTO base_tbl (id, idplus1) VALUES (3, DEFAULT)
---
-INSERT INTO base_tbl (id, idplus1) VALUES (3, DEFAULT)
-== 604
-INSERT INTO rw_view1 (id, idplus1) VALUES (4, DEFAULT)
---
-INSERT INTO rw_view1 (id, idplus1) VALUES (4, DEFAULT)
 == 605
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
+--
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl
+== 606
+INSERT INTO base_tbl (id) VALUES (1)
+--
+INSERT INTO base_tbl (id) VALUES (1)
+== 607
+INSERT INTO rw_view1 (id) VALUES (2)
+--
+INSERT INTO rw_view1 (id) VALUES (2)
+== 608
+INSERT INTO base_tbl (id, idplus1) VALUES (3, DEFAULT)
+--
+INSERT INTO base_tbl (id, idplus1) VALUES (3, DEFAULT)
+== 609
+INSERT INTO rw_view1 (id, idplus1) VALUES (4, DEFAULT)
+--
+INSERT INTO rw_view1 (id, idplus1) VALUES (4, DEFAULT)
+== 610
 INSERT INTO base_tbl (id, idplus1) VALUES (5, 6)
 --
 INSERT INTO base_tbl (id, idplus1) VALUES (5, 6)
-== 606
+== 611
 -- error
 INSERT INTO rw_view1 (id, idplus1) VALUES (6, 7)
 --
 INSERT INTO rw_view1 (id, idplus1) VALUES (6, 7)
-== 607
+== 612
 -- error
 
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 608
+== 613
 UPDATE base_tbl SET id = 2000 WHERE id = 2
 --
 UPDATE base_tbl SET id = 2000 WHERE id = 2
-== 609
+== 614
 UPDATE rw_view1 SET id = 3000 WHERE id = 3
 --
 UPDATE rw_view1 SET id = 3000 WHERE id = 3
-== 610
+== 615
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 611
+== 616
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 612
+== 617
 -- inheritance tests
 
 CREATE TABLE base_tbl_parent (a int)
 --
 CREATE TABLE base_tbl_parent (a int)
-== 613
-CREATE TABLE base_tbl_child (CHECK (a > 0)) INHERITS (base_tbl_parent)
---
-CREATE TABLE base_tbl_child (CHECK (a > 0)) INHERITS (base_tbl_parent)
-== 614
-INSERT INTO base_tbl_parent SELECT * FROM generate_series(-8, -1)
---
-INSERT INTO base_tbl_parent SELECT * FROM generate_series(-8, -1)
-== 615
-INSERT INTO base_tbl_child SELECT * FROM generate_series(1, 8)
---
-INSERT INTO base_tbl_child SELECT * FROM generate_series(1, 8)
-== 616
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl_parent
---
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl_parent
-== 617
-CREATE VIEW rw_view2 AS SELECT * FROM ONLY base_tbl_parent
---
-CREATE VIEW rw_view2 AS SELECT * FROM ONLY base_tbl_parent
 == 618
-SELECT * FROM rw_view1 ORDER BY a
+CREATE TABLE base_tbl_child (CHECK (a > 0)) INHERITS (base_tbl_parent)
 --
-SELECT * FROM rw_view1 ORDER BY a
+CREATE TABLE base_tbl_child (CHECK (a > 0)) INHERITS (base_tbl_parent)
 == 619
-SELECT * FROM ONLY rw_view1 ORDER BY a
+INSERT INTO base_tbl_parent SELECT * FROM generate_series(-8, -1)
 --
-SELECT * FROM ONLY rw_view1 ORDER BY a
+INSERT INTO base_tbl_parent SELECT * FROM generate_series(-8, -1)
 == 620
-SELECT * FROM rw_view2 ORDER BY a
+INSERT INTO base_tbl_child SELECT * FROM generate_series(1, 8)
 --
-SELECT * FROM rw_view2 ORDER BY a
+INSERT INTO base_tbl_child SELECT * FROM generate_series(1, 8)
 == 621
-INSERT INTO rw_view1 VALUES (-100), (100)
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl_parent
 --
-INSERT INTO rw_view1 VALUES (-100), (100)
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl_parent
 == 622
+CREATE VIEW rw_view2 AS SELECT * FROM ONLY base_tbl_parent
+--
+CREATE VIEW rw_view2 AS SELECT * FROM ONLY base_tbl_parent
+== 623
+SELECT * FROM rw_view1 ORDER BY a
+--
+SELECT * FROM rw_view1 ORDER BY a
+== 624
+SELECT * FROM ONLY rw_view1 ORDER BY a
+--
+SELECT * FROM ONLY rw_view1 ORDER BY a
+== 625
+SELECT * FROM rw_view2 ORDER BY a
+--
+SELECT * FROM rw_view2 ORDER BY a
+== 626
+INSERT INTO rw_view1 VALUES (-100), (100)
+--
+INSERT INTO rw_view1 VALUES (-100), (100)
+== 627
 INSERT INTO rw_view2 VALUES (-200), (200)
 --
 INSERT INTO rw_view2 VALUES (-200), (200)
-== 623
+== 628
 UPDATE rw_view1 SET a = a*10 WHERE a IN (-1, 1)
 --
 UPDATE rw_view1 SET a = a * 10 WHERE a IN (-1, 1)
-== 624
+== 629
 -- Should produce -10 and 10
 UPDATE ONLY rw_view1 SET a = a*10 WHERE a IN (-2, 2)
 --
 UPDATE ONLY rw_view1 SET a = a * 10 WHERE a IN (-2, 2)
-== 625
+== 630
 -- Should produce -20 and 20
 UPDATE rw_view2 SET a = a*10 WHERE a IN (-3, 3)
 --
 UPDATE rw_view2 SET a = a * 10 WHERE a IN (-3, 3)
-== 626
+== 631
 -- Should produce -30 only
 UPDATE ONLY rw_view2 SET a = a*10 WHERE a IN (-4, 4)
 --
 UPDATE ONLY rw_view2 SET a = a * 10 WHERE a IN (-4, 4)
-== 627
+== 632
 -- Should produce -40 only
 
 DELETE FROM rw_view1 WHERE a IN (-5, 5)
 --
 DELETE FROM rw_view1 WHERE a IN (-5, 5)
-== 628
+== 633
 -- Should delete -5 and 5
 DELETE FROM ONLY rw_view1 WHERE a IN (-6, 6)
 --
 DELETE FROM ONLY rw_view1 WHERE a IN (-6, 6)
-== 629
+== 634
 -- Should delete -6 and 6
 DELETE FROM rw_view2 WHERE a IN (-7, 7)
 --
 DELETE FROM rw_view2 WHERE a IN (-7, 7)
-== 630
+== 635
 -- Should delete -7 only
 DELETE FROM ONLY rw_view2 WHERE a IN (-8, 8)
 --
 DELETE FROM ONLY rw_view2 WHERE a IN (-8, 8)
-== 631
+== 636
 -- Should delete -8 only
 
 SELECT * FROM ONLY base_tbl_parent ORDER BY a
 --
 SELECT * FROM ONLY base_tbl_parent ORDER BY a
-== 632
+== 637
 SELECT * FROM base_tbl_child ORDER BY a
 --
 SELECT * FROM base_tbl_child ORDER BY a
-== 633
+== 638
 MERGE INTO rw_view1 t USING (VALUES (-200), (10)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET a = t.a+1
 --
 MERGE INTO rw_view1 t USING (VALUES (-200), (10)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
-== 634
+== 639
 -- Should produce -199 and 11
 MERGE INTO ONLY rw_view1 t USING (VALUES (-100), (20)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET a = t.a+1
 --
 MERGE INTO ONLY rw_view1 t USING (VALUES (-100), (20)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
-== 635
+== 640
 -- Should produce -99 and 21
 MERGE INTO rw_view2 t USING (VALUES (-40), (3)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET a = t.a+1
 --
 MERGE INTO rw_view2 t USING (VALUES (-40), (3)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
-== 636
+== 641
 -- Should produce -39 only
 MERGE INTO ONLY rw_view2 t USING (VALUES (-30), (4)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET a = t.a+1
 --
 MERGE INTO ONLY rw_view2 t USING (VALUES (-30), (4)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
-== 637
+== 642
 -- Should produce -29 only
 
 SELECT * FROM ONLY base_tbl_parent ORDER BY a
 --
 SELECT * FROM ONLY base_tbl_parent ORDER BY a
-== 638
+== 643
 SELECT * FROM base_tbl_child ORDER BY a
 --
 SELECT * FROM base_tbl_child ORDER BY a
-== 639
+== 644
 CREATE TABLE other_tbl_parent (id int)
 --
 CREATE TABLE other_tbl_parent (id int)
-== 640
+== 645
 CREATE TABLE other_tbl_child () INHERITS (other_tbl_parent)
 --
 CREATE TABLE other_tbl_child () INHERITS (other_tbl_parent)
-== 641
+== 646
 INSERT INTO other_tbl_parent VALUES (7),(200)
 --
 INSERT INTO other_tbl_parent VALUES (7), (200)
-== 642
+== 647
 INSERT INTO other_tbl_child VALUES (8),(100)
 --
 INSERT INTO other_tbl_child VALUES (8), (100)
-== 643
+== 648
 EXPLAIN (costs off)
 UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
-== 644
-UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
---
-UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
-== 645
-SELECT * FROM ONLY base_tbl_parent ORDER BY a
---
-SELECT * FROM ONLY base_tbl_parent ORDER BY a
-== 646
-SELECT * FROM base_tbl_child ORDER BY a
---
-SELECT * FROM base_tbl_child ORDER BY a
-== 647
-DROP TABLE base_tbl_parent, base_tbl_child CASCADE
---
-DROP TABLE base_tbl_parent, base_tbl_child CASCADE
-== 648
-DROP TABLE other_tbl_parent CASCADE
---
-DROP TABLE other_tbl_parent CASCADE
 == 649
+UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
+--
+UPDATE rw_view1 SET a = a + 1000 FROM other_tbl_parent WHERE a = id
+== 650
+SELECT * FROM ONLY base_tbl_parent ORDER BY a
+--
+SELECT * FROM ONLY base_tbl_parent ORDER BY a
+== 651
+SELECT * FROM base_tbl_child ORDER BY a
+--
+SELECT * FROM base_tbl_child ORDER BY a
+== 652
+DROP TABLE base_tbl_parent, base_tbl_child CASCADE
+--
+DROP TABLE base_tbl_parent, base_tbl_child CASCADE
+== 653
+DROP TABLE other_tbl_parent CASCADE
+--
+DROP TABLE other_tbl_parent CASCADE
+== 654
 -- simple WITH CHECK OPTION
 
 CREATE TABLE base_tbl (a int, b int DEFAULT 10)
 --
 CREATE TABLE base_tbl (a int, b int DEFAULT 10)
-== 650
+== 655
 INSERT INTO base_tbl VALUES (1,2), (2,3), (1,-1)
 --
 INSERT INTO base_tbl VALUES (1, 2), (2, 3), (1, -1)
-== 651
+== 656
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b
   WITH LOCAL CHECK OPTION
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b WITH LOCAL CHECK OPTION
-== 652
+== 657
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view1'
 --
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view1'
-== 653
+== 658
 INSERT INTO rw_view1 VALUES(3,4)
 --
 INSERT INTO rw_view1 VALUES (3, 4)
-== 654
+== 659
 -- ok
 INSERT INTO rw_view1 VALUES(4,3)
 --
 INSERT INTO rw_view1 VALUES (4, 3)
-== 655
+== 660
 -- should fail
 INSERT INTO rw_view1 VALUES(5,null)
 --
 INSERT INTO rw_view1 VALUES (5, NULL)
-== 656
+== 661
 -- should fail
 UPDATE rw_view1 SET b = 5 WHERE a = 3
 --
 UPDATE rw_view1 SET b = 5 WHERE a = 3
-== 657
+== 662
 -- ok
 UPDATE rw_view1 SET b = -5 WHERE a = 3
 --
 UPDATE rw_view1 SET b = -5 WHERE a = 3
-== 658
+== 663
 -- should fail
 INSERT INTO rw_view1(a) VALUES (9)
 --
 INSERT INTO rw_view1 (a) VALUES (9)
-== 659
+== 664
 -- ok
 INSERT INTO rw_view1(a) VALUES (10)
 --
 INSERT INTO rw_view1 (a) VALUES (10)
-== 660
--- should fail
-SELECT * FROM base_tbl ORDER BY a, b
---
-SELECT * FROM base_tbl ORDER BY a, b
-== 661
-MERGE INTO rw_view1 t USING (VALUES (10)) AS v(a) ON t.a = v.a
-  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a + 1)
---
-MERGE INTO rw_view1 t USING (VALUES (10)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a + 1)
-== 662
--- ok
-MERGE INTO rw_view1 t USING (VALUES (11)) AS v(a) ON t.a = v.a
-  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a - 1)
---
-MERGE INTO rw_view1 t USING (VALUES (11)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a - 1)
-== 663
--- should fail
-MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
-  WHEN MATCHED THEN UPDATE SET a = t.a - 1
---
-MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a - 1
-== 664
--- ok
-MERGE INTO rw_view1 t USING (VALUES (2)) AS v(a) ON t.a = v.a
-  WHEN MATCHED THEN UPDATE SET a = t.a + 1
---
-MERGE INTO rw_view1 t USING (VALUES (2)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
 == 665
 -- should fail
 SELECT * FROM base_tbl ORDER BY a, b
 --
 SELECT * FROM base_tbl ORDER BY a, b
 == 666
+MERGE INTO rw_view1 t USING (VALUES (10)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a + 1)
+--
+MERGE INTO rw_view1 t USING (VALUES (10)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a + 1)
+== 667
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (11)) AS v(a) ON t.a = v.a
+  WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a - 1)
+--
+MERGE INTO rw_view1 t USING (VALUES (11)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.a - 1)
+== 668
+-- should fail
+MERGE INTO rw_view1 t USING (VALUES (1)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a - 1
+--
+MERGE INTO rw_view1 t USING (VALUES (1)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a - 1
+== 669
+-- ok
+MERGE INTO rw_view1 t USING (VALUES (2)) AS v(a) ON t.a = v.a
+  WHEN MATCHED THEN UPDATE SET a = t.a + 1
+--
+MERGE INTO rw_view1 t USING (VALUES (2)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a + 1
+== 670
+-- should fail
+SELECT * FROM base_tbl ORDER BY a, b
+--
+SELECT * FROM base_tbl ORDER BY a, b
+== 671
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 667
+== 672
 -- WITH LOCAL/CASCADED CHECK OPTION
 
 CREATE TABLE base_tbl (a int)
 --
 CREATE TABLE base_tbl (a int)
-== 668
+== 673
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0
-== 669
+== 674
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
   WITH CHECK OPTION
 --
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10 WITH CHECK OPTION
-== 670
+== 675
 -- implicitly cascaded
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
 --
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
-== 671
+== 676
 INSERT INTO rw_view2 VALUES (-5)
 --
 INSERT INTO rw_view2 VALUES (-5)
-== 672
+== 677
 -- should fail
 INSERT INTO rw_view2 VALUES (5)
 --
 INSERT INTO rw_view2 VALUES (5)
-== 673
+== 678
 -- ok
 INSERT INTO rw_view2 VALUES (15)
 --
 INSERT INTO rw_view2 VALUES (15)
-== 674
+== 679
 -- should fail
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 675
+== 680
 UPDATE rw_view2 SET a = a - 10
 --
 UPDATE rw_view2 SET a = a - 10
-== 676
+== 681
 -- should fail
 UPDATE rw_view2 SET a = a + 10
 --
 UPDATE rw_view2 SET a = a + 10
-== 677
+== 682
 -- should fail
 
 CREATE OR REPLACE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
   WITH LOCAL CHECK OPTION
 --
 CREATE OR REPLACE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10 WITH LOCAL CHECK OPTION
-== 678
+== 683
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
 --
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
-== 679
+== 684
 INSERT INTO rw_view2 VALUES (-10)
 --
 INSERT INTO rw_view2 VALUES (-10)
-== 680
+== 685
 -- ok, but not in view
 INSERT INTO rw_view2 VALUES (20)
 --
 INSERT INTO rw_view2 VALUES (20)
-== 681
+== 686
 -- should fail
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 682
+== 687
 ALTER VIEW rw_view1 SET (check_option=here)
 --
 ALTER VIEW rw_view1 SET (check_option=here)
-== 683
+== 688
 -- invalid
 ALTER VIEW rw_view1 SET (check_option=local)
 --
 ALTER VIEW rw_view1 SET (check_option=local)
-== 684
+== 689
 INSERT INTO rw_view2 VALUES (-20)
 --
 INSERT INTO rw_view2 VALUES (-20)
-== 685
+== 690
 -- should fail
 INSERT INTO rw_view2 VALUES (30)
 --
 INSERT INTO rw_view2 VALUES (30)
-== 686
+== 691
 -- should fail
 
 ALTER VIEW rw_view2 RESET (check_option)
 --
 ALTER VIEW rw_view2 RESET (check_option)
-== 687
+== 692
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
 --
 SELECT * FROM information_schema.views WHERE table_name = 'rw_view2'
-== 688
+== 693
 INSERT INTO rw_view2 VALUES (30)
 --
 INSERT INTO rw_view2 VALUES (30)
-== 689
+== 694
 -- ok, but not in view
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 690
+== 695
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 691
+== 696
 -- WITH CHECK OPTION with no local view qual
 
 CREATE TABLE base_tbl (a int)
 --
 CREATE TABLE base_tbl (a int)
-== 692
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WITH CHECK OPTION
---
-CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WITH CHECK OPTION
-== 693
-CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0
---
-CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0
-== 694
-CREATE VIEW rw_view3 AS SELECT * FROM rw_view2 WITH CHECK OPTION
---
-CREATE VIEW rw_view3 AS SELECT * FROM rw_view2 WITH CHECK OPTION
-== 695
-SELECT * FROM information_schema.views WHERE table_name LIKE E'rw\\_view_' ORDER BY table_name
---
-SELECT * FROM information_schema.views WHERE table_name LIKE E'rw\\_view_' ORDER BY table_name
-== 696
-INSERT INTO rw_view1 VALUES (-1)
---
-INSERT INTO rw_view1 VALUES (-1)
 == 697
--- ok
-INSERT INTO rw_view1 VALUES (1)
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WITH CHECK OPTION
 --
-INSERT INTO rw_view1 VALUES (1)
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WITH CHECK OPTION
 == 698
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0
+--
+CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0
+== 699
+CREATE VIEW rw_view3 AS SELECT * FROM rw_view2 WITH CHECK OPTION
+--
+CREATE VIEW rw_view3 AS SELECT * FROM rw_view2 WITH CHECK OPTION
+== 700
+SELECT * FROM information_schema.views WHERE table_name LIKE E'rw\\_view_' ORDER BY table_name
+--
+SELECT * FROM information_schema.views WHERE table_name LIKE E'rw\\_view_' ORDER BY table_name
+== 701
+INSERT INTO rw_view1 VALUES (-1)
+--
+INSERT INTO rw_view1 VALUES (-1)
+== 702
+-- ok
+INSERT INTO rw_view1 VALUES (1)
+--
+INSERT INTO rw_view1 VALUES (1)
+== 703
 -- ok
 INSERT INTO rw_view2 VALUES (-2)
 --
 INSERT INTO rw_view2 VALUES (-2)
-== 699
+== 704
 -- ok, but not in view
 INSERT INTO rw_view2 VALUES (2)
 --
 INSERT INTO rw_view2 VALUES (2)
-== 700
+== 705
 -- ok
 INSERT INTO rw_view3 VALUES (-3)
 --
 INSERT INTO rw_view3 VALUES (-3)
-== 701
+== 706
 -- should fail
 INSERT INTO rw_view3 VALUES (3)
 --
 INSERT INTO rw_view3 VALUES (3)
-== 702
+== 707
 -- ok
 
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 703
+== 708
 -- WITH CHECK OPTION with scalar array ops
 
 CREATE TABLE base_tbl (a int, b int[])
 --
 CREATE TABLE base_tbl (a int, b int[])
-== 704
+== 709
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a = ANY (b)
   WITH CHECK OPTION
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a = ANY(b) WITH CHECK OPTION
-== 705
+== 710
 INSERT INTO rw_view1 VALUES (1, ARRAY[1,2,3])
 --
 INSERT INTO rw_view1 VALUES (1, ARRAY[1, 2, 3])
-== 706
+== 711
 -- ok
 INSERT INTO rw_view1 VALUES (10, ARRAY[4,5])
 --
 INSERT INTO rw_view1 VALUES (10, ARRAY[4, 5])
-== 707
+== 712
 -- should fail
 
 UPDATE rw_view1 SET b[2] = -b[2] WHERE a = 1
 --
 UPDATE rw_view1 SET b[2] = - b[2] WHERE a = 1
-== 708
+== 713
 -- ok
 UPDATE rw_view1 SET b[1] = -b[1] WHERE a = 1
 --
 UPDATE rw_view1 SET b[1] = - b[1] WHERE a = 1
-== 709
+== 714
 -- should fail
 
 PREPARE ins(int, int[]) AS INSERT INTO rw_view1 VALUES($1, $2)
 --
 PREPARE ins(int, int[]) AS INSERT INTO rw_view1 VALUES ($1, $2)
-== 710
+== 715
 EXECUTE ins(2, ARRAY[1,2,3])
 --
 EXECUTE ins(2, ARRAY[1, 2, 3])
-== 711
+== 716
 -- ok
 EXECUTE ins(10, ARRAY[4,5])
 --
 EXECUTE ins(10, ARRAY[4, 5])
-== 712
+== 717
 -- should fail
 DEALLOCATE PREPARE ins
 --
 DEALLOCATE ins
-== 713
+== 718
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 714
+== 719
 -- WITH CHECK OPTION with subquery
 
 CREATE TABLE base_tbl (a int)
 --
 CREATE TABLE base_tbl (a int)
-== 715
+== 720
 CREATE TABLE ref_tbl (a int PRIMARY KEY)
 --
 CREATE TABLE ref_tbl (a int PRIMARY KEY)
-== 716
+== 721
 INSERT INTO ref_tbl SELECT * FROM generate_series(1,10)
 --
 INSERT INTO ref_tbl SELECT * FROM generate_series(1, 10)
-== 717
+== 722
 CREATE VIEW rw_view1 AS
   SELECT * FROM base_tbl b
   WHERE EXISTS(SELECT 1 FROM ref_tbl r WHERE r.a = b.a)
   WITH CHECK OPTION
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl b WHERE EXISTS (SELECT 1 FROM ref_tbl r WHERE r.a = b.a) WITH CHECK OPTION
-== 718
+== 723
 INSERT INTO rw_view1 VALUES (5)
 --
 INSERT INTO rw_view1 VALUES (5)
-== 719
+== 724
 -- ok
 INSERT INTO rw_view1 VALUES (15)
 --
 INSERT INTO rw_view1 VALUES (15)
-== 720
+== 725
 -- should fail
 
 UPDATE rw_view1 SET a = a + 5
 --
 UPDATE rw_view1 SET a = a + 5
-== 721
+== 726
 -- ok
 UPDATE rw_view1 SET a = a + 5
 --
 UPDATE rw_view1 SET a = a + 5
-== 722
+== 727
 -- should fail
 
 EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (5)
 --
 EXPLAIN (COSTS OFF) INSERT INTO rw_view1 VALUES (5)
-== 723
+== 728
 EXPLAIN (costs off) UPDATE rw_view1 SET a = a + 5
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view1 SET a = a + 5
-== 724
+== 729
 DROP TABLE base_tbl, ref_tbl CASCADE
 --
 DROP TABLE base_tbl, ref_tbl CASCADE
-== 725
+== 730
 -- WITH CHECK OPTION with BEFORE trigger on base table
 
 CREATE TABLE base_tbl (a int, b int)
 --
 CREATE TABLE base_tbl (a int, b int)
-== 726
+== 731
 CREATE FUNCTION base_tbl_trig_fn()
 RETURNS trigger AS
 $$
@@ -3686,50 +3717,50 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
-== 727
+== 732
 CREATE TRIGGER base_tbl_trig BEFORE INSERT OR UPDATE ON base_tbl
   FOR EACH ROW EXECUTE PROCEDURE base_tbl_trig_fn()
 --
 CREATE TRIGGER base_tbl_trig BEFORE INSERT OR UPDATE ON base_tbl FOR EACH ROW EXECUTE FUNCTION base_tbl_trig_fn()
-== 728
+== 733
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b WITH CHECK OPTION
 --
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b WITH CHECK OPTION
-== 729
+== 734
 INSERT INTO rw_view1 VALUES (5,0)
 --
 INSERT INTO rw_view1 VALUES (5, 0)
-== 730
+== 735
 -- ok
 INSERT INTO rw_view1 VALUES (15, 20)
 --
 INSERT INTO rw_view1 VALUES (15, 20)
-== 731
+== 736
 -- should fail
 UPDATE rw_view1 SET a = 20, b = 30
 --
 UPDATE rw_view1 SET a = 20, b = 30
-== 732
+== 737
 -- should fail
 
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 733
+== 738
 DROP FUNCTION base_tbl_trig_fn()
 --
 DROP FUNCTION base_tbl_trig_fn()
-== 734
+== 739
 -- WITH LOCAL CHECK OPTION with INSTEAD OF trigger on base view
 
 CREATE TABLE base_tbl (a int, b int)
 --
 CREATE TABLE base_tbl (a int, b int)
-== 735
+== 740
 CREATE VIEW rw_view1 AS SELECT a FROM base_tbl WHERE a < b
 --
 CREATE VIEW rw_view1 AS SELECT a FROM base_tbl WHERE a < b
-== 736
+== 741
 CREATE FUNCTION rw_view1_trig_fn()
 RETURNS trigger AS
 $$
@@ -3762,188 +3793,188 @@ BEGIN
   END IF;
 END;
 $$ LANGUAGE plpgsql
-== 737
+== 742
 CREATE TRIGGER rw_view1_trig
   INSTEAD OF INSERT OR UPDATE OR DELETE ON rw_view1
   FOR EACH ROW EXECUTE PROCEDURE rw_view1_trig_fn()
 --
 CREATE TRIGGER rw_view1_trig INSTEAD OF INSERT OR DELETE OR UPDATE ON rw_view1 FOR EACH ROW EXECUTE FUNCTION rw_view1_trig_fn()
-== 738
+== 743
 CREATE VIEW rw_view2 AS
   SELECT * FROM rw_view1 WHERE a > 0 WITH LOCAL CHECK OPTION
 --
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > 0 WITH LOCAL CHECK OPTION
-== 739
+== 744
 INSERT INTO rw_view2 VALUES (-5)
 --
 INSERT INTO rw_view2 VALUES (-5)
-== 740
+== 745
 -- should fail
 MERGE INTO rw_view2 t USING (VALUES (-5)) AS v(a) ON t.a = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.a)
 --
 MERGE INTO rw_view2 t USING (VALUES (-5)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a)
-== 741
+== 746
 -- should fail
 INSERT INTO rw_view2 VALUES (5)
 --
 INSERT INTO rw_view2 VALUES (5)
-== 742
+== 747
 -- ok
 MERGE INTO rw_view2 t USING (VALUES (6)) AS v(a) ON t.a = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.a)
 --
 MERGE INTO rw_view2 t USING (VALUES (6)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a)
-== 743
+== 748
 -- ok
 INSERT INTO rw_view2 VALUES (50)
 --
 INSERT INTO rw_view2 VALUES (50)
-== 744
+== 749
 -- ok, but not in view
 MERGE INTO rw_view2 t USING (VALUES (60)) AS v(a) ON t.a = v.a
   WHEN NOT MATCHED THEN INSERT VALUES (v.a)
 --
 MERGE INTO rw_view2 t USING (VALUES (60)) v(a) ON t.a = v.a WHEN NOT MATCHED THEN INSERT VALUES (v.a)
-== 745
+== 750
 -- ok, but not in view
 UPDATE rw_view2 SET a = a - 10
 --
 UPDATE rw_view2 SET a = a - 10
-== 746
+== 751
 -- should fail
 MERGE INTO rw_view2 t USING (VALUES (6)) AS v(a) ON t.a = v.a
   WHEN MATCHED THEN UPDATE SET a = t.a - 10
 --
 MERGE INTO rw_view2 t USING (VALUES (6)) v(a) ON t.a = v.a WHEN MATCHED THEN UPDATE SET a = t.a - 10
-== 747
+== 752
 -- should fail
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 748
+== 753
 -- Check option won't cascade down to base view with INSTEAD OF triggers
 
 ALTER VIEW rw_view2 SET (check_option=cascaded)
 --
 ALTER VIEW rw_view2 SET (check_option=cascaded)
-== 749
+== 754
 INSERT INTO rw_view2 VALUES (100)
 --
 INSERT INTO rw_view2 VALUES (100)
-== 750
+== 755
 -- ok, but not in view (doesn't fail rw_view1's check)
 UPDATE rw_view2 SET a = 200 WHERE a = 5
 --
 UPDATE rw_view2 SET a = 200 WHERE a = 5
-== 751
+== 756
 -- ok, but not in view (doesn't fail rw_view1's check)
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 752
+== 757
 -- Neither local nor cascaded check options work with INSTEAD rules
 
 DROP TRIGGER rw_view1_trig ON rw_view1
 --
 DROP TRIGGER rw_view1_trig ON rw_view1
-== 753
+== 758
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
   DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a, 10)
 --
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1 DO INSTEAD INSERT INTO base_tbl VALUES (new.a, 10)
-== 754
+== 759
 CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1
   DO INSTEAD UPDATE base_tbl SET a=NEW.a WHERE a=OLD.a
 --
 CREATE RULE rw_view1_upd_rule AS ON UPDATE TO rw_view1 DO INSTEAD UPDATE base_tbl SET a = new.a WHERE a = old.a
-== 755
-INSERT INTO rw_view2 VALUES (-10)
---
-INSERT INTO rw_view2 VALUES (-10)
-== 756
--- ok, but not in view (doesn't fail rw_view2's check)
-INSERT INTO rw_view2 VALUES (5)
---
-INSERT INTO rw_view2 VALUES (5)
-== 757
--- ok
-INSERT INTO rw_view2 VALUES (20)
---
-INSERT INTO rw_view2 VALUES (20)
-== 758
--- ok, but not in view (doesn't fail rw_view1's check)
-UPDATE rw_view2 SET a = 30 WHERE a = 5
---
-UPDATE rw_view2 SET a = 30 WHERE a = 5
-== 759
--- ok, but not in view (doesn't fail rw_view1's check)
-INSERT INTO rw_view2 VALUES (5)
---
-INSERT INTO rw_view2 VALUES (5)
 == 760
--- ok
-UPDATE rw_view2 SET a = -5 WHERE a = 5
+INSERT INTO rw_view2 VALUES (-10)
 --
-UPDATE rw_view2 SET a = -5 WHERE a = 5
+INSERT INTO rw_view2 VALUES (-10)
 == 761
 -- ok, but not in view (doesn't fail rw_view2's check)
-SELECT * FROM base_tbl
+INSERT INTO rw_view2 VALUES (5)
 --
-SELECT * FROM base_tbl
+INSERT INTO rw_view2 VALUES (5)
 == 762
-DROP TABLE base_tbl CASCADE
+-- ok
+INSERT INTO rw_view2 VALUES (20)
 --
-DROP TABLE base_tbl CASCADE
+INSERT INTO rw_view2 VALUES (20)
 == 763
-DROP FUNCTION rw_view1_trig_fn()
+-- ok, but not in view (doesn't fail rw_view1's check)
+UPDATE rw_view2 SET a = 30 WHERE a = 5
 --
-DROP FUNCTION rw_view1_trig_fn()
+UPDATE rw_view2 SET a = 30 WHERE a = 5
 == 764
+-- ok, but not in view (doesn't fail rw_view1's check)
+INSERT INTO rw_view2 VALUES (5)
+--
+INSERT INTO rw_view2 VALUES (5)
+== 765
+-- ok
+UPDATE rw_view2 SET a = -5 WHERE a = 5
+--
+UPDATE rw_view2 SET a = -5 WHERE a = 5
+== 766
+-- ok, but not in view (doesn't fail rw_view2's check)
+SELECT * FROM base_tbl
+--
+SELECT * FROM base_tbl
+== 767
+DROP TABLE base_tbl CASCADE
+--
+DROP TABLE base_tbl CASCADE
+== 768
+DROP FUNCTION rw_view1_trig_fn()
+--
+DROP FUNCTION rw_view1_trig_fn()
+== 769
 CREATE TABLE base_tbl (a int)
 --
 CREATE TABLE base_tbl (a int)
-== 765
+== 770
 CREATE VIEW rw_view1 AS SELECT a,10 AS b FROM base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT a, 10 AS b FROM base_tbl
-== 766
+== 771
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1
   DO INSTEAD INSERT INTO base_tbl VALUES (NEW.a)
 --
 CREATE RULE rw_view1_ins_rule AS ON INSERT TO rw_view1 DO INSTEAD INSERT INTO base_tbl VALUES (new.a)
-== 767
+== 772
 CREATE VIEW rw_view2 AS
   SELECT * FROM rw_view1 WHERE a > b WITH LOCAL CHECK OPTION
 --
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a > b WITH LOCAL CHECK OPTION
-== 768
+== 773
 INSERT INTO rw_view2 VALUES (2,3)
 --
 INSERT INTO rw_view2 VALUES (2, 3)
-== 769
+== 774
 -- ok, but not in view (doesn't fail rw_view2's check)
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 770
+== 775
 -- security barrier view
 
 CREATE TABLE base_tbl (person text, visibility text)
 --
 CREATE TABLE base_tbl (person text, visibility text)
-== 771
+== 776
 INSERT INTO base_tbl VALUES ('Tom', 'public'),
                             ('Dick', 'private'),
                             ('Harry', 'public')
 --
 INSERT INTO base_tbl VALUES ('Tom', 'public'), ('Dick', 'private'), ('Harry', 'public')
-== 772
+== 777
 CREATE VIEW rw_view1 AS
   SELECT person FROM base_tbl WHERE visibility = 'public'
 --
 CREATE VIEW rw_view1 AS SELECT person FROM base_tbl WHERE visibility = 'public'
-== 773
+== 778
 CREATE FUNCTION snoop(anyelement)
 RETURNS boolean AS
 $$
@@ -3960,7 +3991,7 @@ BEGIN
   RETURN true;
 END;
 $$ LANGUAGE plpgsql COST 0.000001
-== 774
+== 779
 CREATE OR REPLACE FUNCTION leakproof(anyelement)
 RETURNS boolean AS
 $$
@@ -3975,496 +4006,496 @@ BEGIN
   RETURN true;
 END;
 $$ LANGUAGE plpgsql RETURNS NULL ON NULL INPUT IMMUTABLE LEAKPROOF
-== 775
+== 780
 SELECT * FROM rw_view1 WHERE snoop(person)
 --
 SELECT * FROM rw_view1 WHERE snoop(person)
-== 776
+== 781
 UPDATE rw_view1 SET person=person WHERE snoop(person)
 --
 UPDATE rw_view1 SET person = person WHERE snoop(person)
-== 777
+== 782
 DELETE FROM rw_view1 WHERE NOT snoop(person)
 --
 DELETE FROM rw_view1 WHERE NOT snoop(person)
-== 778
+== 783
 ALTER VIEW rw_view1 SET (security_barrier = true)
 --
 ALTER VIEW rw_view1 SET (security_barrier=true)
-== 779
+== 784
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name = 'rw_view1'
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name = 'rw_view1'
-== 780
+== 785
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name = 'rw_view1'
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name = 'rw_view1'
-== 781
+== 786
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name = 'rw_view1'
  ORDER BY ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name = 'rw_view1' ORDER BY ordinal_position
-== 782
+== 787
 SELECT * FROM rw_view1 WHERE snoop(person)
 --
 SELECT * FROM rw_view1 WHERE snoop(person)
-== 783
+== 788
 UPDATE rw_view1 SET person=person WHERE snoop(person)
 --
 UPDATE rw_view1 SET person = person WHERE snoop(person)
-== 784
+== 789
 DELETE FROM rw_view1 WHERE NOT snoop(person)
 --
 DELETE FROM rw_view1 WHERE NOT snoop(person)
-== 785
+== 790
 MERGE INTO rw_view1 t
   USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
   WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
 --
 MERGE INTO rw_view1 t USING (VALUES ('Tom'), ('Dick'), ('Harry')) v(person) ON t.person = v.person WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
-== 786
+== 791
 EXPLAIN (costs off) SELECT * FROM rw_view1 WHERE snoop(person)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM rw_view1 WHERE snoop(person)
-== 787
+== 792
 EXPLAIN (costs off) UPDATE rw_view1 SET person=person WHERE snoop(person)
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view1 SET person = person WHERE snoop(person)
-== 788
+== 793
 EXPLAIN (costs off) DELETE FROM rw_view1 WHERE NOT snoop(person)
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view1 WHERE NOT snoop(person)
-== 789
+== 794
 EXPLAIN (costs off)
 MERGE INTO rw_view1 t
   USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
   WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view1 t USING (VALUES ('Tom'), ('Dick'), ('Harry')) v(person) ON t.person = v.person WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
-== 790
+== 795
 -- security barrier view on top of security barrier view
 
 CREATE VIEW rw_view2 WITH (security_barrier = true) AS
   SELECT * FROM rw_view1 WHERE snoop(person)
 --
 CREATE VIEW rw_view2 WITH (security_barrier=true) AS SELECT * FROM rw_view1 WHERE snoop(person)
-== 791
+== 796
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
  WHERE table_name = 'rw_view2'
 --
 SELECT table_name, is_insertable_into FROM information_schema.tables WHERE table_name = 'rw_view2'
-== 792
+== 797
 SELECT table_name, is_updatable, is_insertable_into
   FROM information_schema.views
  WHERE table_name = 'rw_view2'
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name = 'rw_view2'
-== 793
+== 798
 SELECT table_name, column_name, is_updatable
   FROM information_schema.columns
  WHERE table_name = 'rw_view2'
  ORDER BY ordinal_position
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name = 'rw_view2' ORDER BY ordinal_position
-== 794
+== 799
 SELECT * FROM rw_view2 WHERE snoop(person)
 --
 SELECT * FROM rw_view2 WHERE snoop(person)
-== 795
+== 800
 UPDATE rw_view2 SET person=person WHERE snoop(person)
 --
 UPDATE rw_view2 SET person = person WHERE snoop(person)
-== 796
+== 801
 DELETE FROM rw_view2 WHERE NOT snoop(person)
 --
 DELETE FROM rw_view2 WHERE NOT snoop(person)
-== 797
+== 802
 MERGE INTO rw_view2 t
   USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
   WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
 --
 MERGE INTO rw_view2 t USING (VALUES ('Tom'), ('Dick'), ('Harry')) v(person) ON t.person = v.person WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
-== 798
+== 803
 EXPLAIN (costs off) SELECT * FROM rw_view2 WHERE snoop(person)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM rw_view2 WHERE snoop(person)
-== 799
+== 804
 EXPLAIN (costs off) UPDATE rw_view2 SET person=person WHERE snoop(person)
 --
 EXPLAIN (COSTS OFF) UPDATE rw_view2 SET person = person WHERE snoop(person)
-== 800
+== 805
 EXPLAIN (costs off) DELETE FROM rw_view2 WHERE NOT snoop(person)
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view2 WHERE NOT snoop(person)
-== 801
+== 806
 EXPLAIN (costs off)
 MERGE INTO rw_view2 t
   USING (VALUES ('Tom'), ('Dick'), ('Harry')) AS v(person) ON t.person = v.person
   WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
 --
 EXPLAIN (COSTS OFF) MERGE INTO rw_view2 t USING (VALUES ('Tom'), ('Dick'), ('Harry')) v(person) ON t.person = v.person WHEN MATCHED AND snoop(t.person) THEN UPDATE SET person = v.person
-== 802
+== 807
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 803
+== 808
 -- security barrier view on top of table with rules
 
 CREATE TABLE base_tbl(id int PRIMARY KEY, data text, deleted boolean)
 --
 CREATE TABLE base_tbl (id int PRIMARY KEY, data text, deleted boolean)
-== 804
+== 809
 INSERT INTO base_tbl VALUES (1, 'Row 1', false), (2, 'Row 2', true)
 --
 INSERT INTO base_tbl VALUES (1, 'Row 1', false), (2, 'Row 2', true)
-== 805
+== 810
 CREATE RULE base_tbl_ins_rule AS ON INSERT TO base_tbl
   WHERE EXISTS (SELECT 1 FROM base_tbl t WHERE t.id = new.id)
   DO INSTEAD
     UPDATE base_tbl SET data = new.data, deleted = false WHERE id = new.id
 --
 CREATE RULE base_tbl_ins_rule AS ON INSERT TO base_tbl WHERE EXISTS (SELECT 1 FROM base_tbl t WHERE t.id = new.id) DO INSTEAD UPDATE base_tbl SET data = new.data, deleted = false WHERE id = new.id
-== 806
+== 811
 CREATE RULE base_tbl_del_rule AS ON DELETE TO base_tbl
   DO INSTEAD
     UPDATE base_tbl SET deleted = true WHERE id = old.id
 --
 CREATE RULE base_tbl_del_rule AS ON DELETE TO base_tbl DO INSTEAD UPDATE base_tbl SET deleted = true WHERE id = old.id
-== 807
+== 812
 CREATE VIEW rw_view1 WITH (security_barrier=true) AS
   SELECT id, data FROM base_tbl WHERE NOT deleted
 --
 CREATE VIEW rw_view1 WITH (security_barrier=true) AS SELECT id, data FROM base_tbl WHERE NOT deleted
-== 808
+== 813
 SELECT * FROM rw_view1
 --
 SELECT * FROM rw_view1
-== 809
+== 814
 EXPLAIN (costs off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
 --
 EXPLAIN (COSTS OFF) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
-== 810
+== 815
 DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
 --
 DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
-== 811
+== 816
 EXPLAIN (costs off) INSERT INTO rw_view1 VALUES (2, 'New row 2')
 --
 EXPLAIN (COSTS OFF) INSERT INTO rw_view1 VALUES (2, 'New row 2')
-== 812
+== 817
 INSERT INTO rw_view1 VALUES (2, 'New row 2')
 --
 INSERT INTO rw_view1 VALUES (2, 'New row 2')
-== 813
+== 818
 SELECT * FROM base_tbl
 --
 SELECT * FROM base_tbl
-== 814
+== 819
 DROP TABLE base_tbl CASCADE
 --
 DROP TABLE base_tbl CASCADE
-== 815
+== 820
 -- security barrier view based on inheritance set
 CREATE TABLE t1 (a int, b float, c text)
 --
 CREATE TABLE t1 (a int, b double precision, c text)
-== 816
+== 821
 CREATE INDEX t1_a_idx ON t1(a)
 --
 CREATE INDEX t1_a_idx ON t1 USING btree (a)
-== 817
+== 822
 INSERT INTO t1
 SELECT i,i,'t1' FROM generate_series(1,10) g(i)
 --
 INSERT INTO t1 SELECT i, i, 't1' FROM generate_series(1, 10) g(i)
-== 818
+== 823
 ANALYZE t1
 --
 ANALYZE t1
-== 819
+== 824
 CREATE TABLE t11 (d text) INHERITS (t1)
 --
 CREATE TABLE t11 (d text) INHERITS (t1)
-== 820
+== 825
 CREATE INDEX t11_a_idx ON t11(a)
 --
 CREATE INDEX t11_a_idx ON t11 USING btree (a)
-== 821
+== 826
 INSERT INTO t11
 SELECT i,i,'t11','t11d' FROM generate_series(1,10) g(i)
 --
 INSERT INTO t11 SELECT i, i, 't11', 't11d' FROM generate_series(1, 10) g(i)
-== 822
+== 827
 ANALYZE t11
 --
 ANALYZE t11
-== 823
+== 828
 CREATE TABLE t12 (e int[]) INHERITS (t1)
 --
 CREATE TABLE t12 (e int[]) INHERITS (t1)
-== 824
+== 829
 CREATE INDEX t12_a_idx ON t12(a)
 --
 CREATE INDEX t12_a_idx ON t12 USING btree (a)
-== 825
+== 830
 INSERT INTO t12
 SELECT i,i,'t12','{1,2}'::int[] FROM generate_series(1,10) g(i)
 --
 INSERT INTO t12 SELECT i, i, 't12', '{1,2}'::int[] FROM generate_series(1, 10) g(i)
-== 826
+== 831
 ANALYZE t12
 --
 ANALYZE t12
-== 827
+== 832
 CREATE TABLE t111 () INHERITS (t11, t12)
 --
 CREATE TABLE t111 () INHERITS (t11, t12)
-== 828
+== 833
 CREATE INDEX t111_a_idx ON t111(a)
 --
 CREATE INDEX t111_a_idx ON t111 USING btree (a)
-== 829
+== 834
 INSERT INTO t111
 SELECT i,i,'t111','t111d','{1,1,1}'::int[] FROM generate_series(1,10) g(i)
 --
 INSERT INTO t111 SELECT i, i, 't111', 't111d', '{1,1,1}'::int[] FROM generate_series(1, 10) g(i)
-== 830
+== 835
 ANALYZE t111
 --
 ANALYZE t111
-== 831
+== 836
 CREATE VIEW v1 WITH (security_barrier=true) AS
 SELECT *, (SELECT d FROM t11 WHERE t11.a = t1.a LIMIT 1) AS d
 FROM t1
 WHERE a > 5 AND EXISTS(SELECT 1 FROM t12 WHERE t12.a = t1.a)
 --
 CREATE VIEW v1 WITH (security_barrier=true) AS SELECT *, (SELECT d FROM t11 WHERE t11.a = t1.a LIMIT 1) AS d FROM t1 WHERE a > 5 AND EXISTS (SELECT 1 FROM t12 WHERE t12.a = t1.a)
-== 832
+== 837
 SELECT * FROM v1 WHERE a=3
 --
 SELECT * FROM v1 WHERE a = 3
-== 833
+== 838
 -- should not see anything
 SELECT * FROM v1 WHERE a=8
 --
 SELECT * FROM v1 WHERE a = 8
-== 834
+== 839
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6
 --
 EXPLAIN (VERBOSE, COSTS OFF) UPDATE v1 SET a = 100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a <> 6
-== 835
+== 840
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6
 --
 UPDATE v1 SET a = 100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a <> 6
-== 836
+== 841
 SELECT * FROM v1 WHERE a=100
 --
 SELECT * FROM v1 WHERE a = 100
-== 837
+== 842
 -- Nothing should have been changed to 100
 SELECT * FROM t1 WHERE a=100
 --
 SELECT * FROM t1 WHERE a = 100
-== 838
+== 843
 -- Nothing should have been changed to 100
 
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8
 --
 EXPLAIN (VERBOSE, COSTS OFF) UPDATE v1 SET a = a + 1 WHERE snoop(a) AND leakproof(a) AND a = 8
-== 839
+== 844
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8
 --
 UPDATE v1 SET a = a + 1 WHERE snoop(a) AND leakproof(a) AND a = 8
-== 840
+== 845
 SELECT * FROM v1 WHERE b=8
 --
 SELECT * FROM v1 WHERE b = 8
-== 841
+== 846
 DELETE FROM v1 WHERE snoop(a) AND leakproof(a)
 --
 DELETE FROM v1 WHERE snoop(a) AND leakproof(a)
-== 842
+== 847
 -- should not delete everything, just where a>5
 
 TABLE t1
 --
 SELECT * FROM t1
-== 843
+== 848
 -- verify all a<=5 are intact
 
 DROP TABLE t1, t11, t12, t111 CASCADE
 --
 DROP TABLE t1, t11, t12, t111 CASCADE
-== 844
+== 849
 DROP FUNCTION snoop(anyelement)
 --
 DROP FUNCTION snoop(anyelement)
-== 845
+== 850
 DROP FUNCTION leakproof(anyelement)
 --
 DROP FUNCTION leakproof(anyelement)
-== 846
+== 851
 CREATE TABLE tx1 (a integer)
 --
 CREATE TABLE tx1 (a int)
-== 847
+== 852
 CREATE TABLE tx2 (b integer)
 --
 CREATE TABLE tx2 (b int)
-== 848
+== 853
 CREATE TABLE tx3 (c integer)
 --
 CREATE TABLE tx3 (c int)
-== 849
+== 854
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
 --
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS (SELECT 1 FROM tx2 JOIN tx3 ON b = c)
-== 850
+== 855
 INSERT INTO vx1 values (1)
 --
 INSERT INTO vx1 VALUES (1)
-== 851
-SELECT * FROM tx1
---
-SELECT * FROM tx1
-== 852
-SELECT * FROM vx1
---
-SELECT * FROM vx1
-== 853
-DROP VIEW vx1
---
-DROP VIEW vx1
-== 854
-DROP TABLE tx1
---
-DROP TABLE tx1
-== 855
-DROP TABLE tx2
---
-DROP TABLE tx2
 == 856
+SELECT * FROM tx1
+--
+SELECT * FROM tx1
+== 857
+SELECT * FROM vx1
+--
+SELECT * FROM vx1
+== 858
+DROP VIEW vx1
+--
+DROP VIEW vx1
+== 859
+DROP TABLE tx1
+--
+DROP TABLE tx1
+== 860
+DROP TABLE tx2
+--
+DROP TABLE tx2
+== 861
 DROP TABLE tx3
 --
 DROP TABLE tx3
-== 857
+== 862
 CREATE TABLE tx1 (a integer)
 --
 CREATE TABLE tx1 (a int)
-== 858
+== 863
 CREATE TABLE tx2 (b integer)
 --
 CREATE TABLE tx2 (b int)
-== 859
+== 864
 CREATE TABLE tx3 (c integer)
 --
 CREATE TABLE tx3 (c int)
-== 860
+== 865
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
 --
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS (SELECT 1 FROM tx2 JOIN tx3 ON b = c)
-== 861
-INSERT INTO vx1 VALUES (1)
---
-INSERT INTO vx1 VALUES (1)
-== 862
-INSERT INTO vx1 VALUES (1)
---
-INSERT INTO vx1 VALUES (1)
-== 863
-SELECT * FROM tx1
---
-SELECT * FROM tx1
-== 864
-SELECT * FROM vx1
---
-SELECT * FROM vx1
-== 865
-DROP VIEW vx1
---
-DROP VIEW vx1
 == 866
-DROP TABLE tx1
+INSERT INTO vx1 VALUES (1)
 --
-DROP TABLE tx1
+INSERT INTO vx1 VALUES (1)
 == 867
-DROP TABLE tx2
+INSERT INTO vx1 VALUES (1)
 --
-DROP TABLE tx2
+INSERT INTO vx1 VALUES (1)
 == 868
+SELECT * FROM tx1
+--
+SELECT * FROM tx1
+== 869
+SELECT * FROM vx1
+--
+SELECT * FROM vx1
+== 870
+DROP VIEW vx1
+--
+DROP VIEW vx1
+== 871
+DROP TABLE tx1
+--
+DROP TABLE tx1
+== 872
+DROP TABLE tx2
+--
+DROP TABLE tx2
+== 873
 DROP TABLE tx3
 --
 DROP TABLE tx3
-== 869
+== 874
 CREATE TABLE tx1 (a integer, b integer)
 --
 CREATE TABLE tx1 (a int, b int)
-== 870
+== 875
 CREATE TABLE tx2 (b integer, c integer)
 --
 CREATE TABLE tx2 (b int, c int)
-== 871
+== 876
 CREATE TABLE tx3 (c integer, d integer)
 --
 CREATE TABLE tx3 (c int, d int)
-== 872
+== 877
 ALTER TABLE tx1 DROP COLUMN b
 --
 ALTER TABLE tx1 DROP b
-== 873
+== 878
 ALTER TABLE tx2 DROP COLUMN c
 --
 ALTER TABLE tx2 DROP c
-== 874
+== 879
 ALTER TABLE tx3 DROP COLUMN d
 --
 ALTER TABLE tx3 DROP d
-== 875
+== 880
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS(SELECT 1 FROM tx2 JOIN tx3 ON b=c)
 --
 CREATE VIEW vx1 AS SELECT a FROM tx1 WHERE EXISTS (SELECT 1 FROM tx2 JOIN tx3 ON b = c)
-== 876
-INSERT INTO vx1 VALUES (1)
---
-INSERT INTO vx1 VALUES (1)
-== 877
-INSERT INTO vx1 VALUES (1)
---
-INSERT INTO vx1 VALUES (1)
-== 878
-SELECT * FROM tx1
---
-SELECT * FROM tx1
-== 879
-SELECT * FROM vx1
---
-SELECT * FROM vx1
-== 880
-DROP VIEW vx1
---
-DROP VIEW vx1
 == 881
-DROP TABLE tx1
+INSERT INTO vx1 VALUES (1)
 --
-DROP TABLE tx1
+INSERT INTO vx1 VALUES (1)
 == 882
-DROP TABLE tx2
+INSERT INTO vx1 VALUES (1)
 --
-DROP TABLE tx2
+INSERT INTO vx1 VALUES (1)
 == 883
+SELECT * FROM tx1
+--
+SELECT * FROM tx1
+== 884
+SELECT * FROM vx1
+--
+SELECT * FROM vx1
+== 885
+DROP VIEW vx1
+--
+DROP VIEW vx1
+== 886
+DROP TABLE tx1
+--
+DROP TABLE tx1
+== 887
+DROP TABLE tx2
+--
+DROP TABLE tx2
+== 888
 DROP TABLE tx3
 --
 DROP TABLE tx3
-== 884
+== 889
 |--
 -- Test handling of vars from correlated subqueries in quals from outer
 -- security barrier views, per bug #13988
@@ -4472,126 +4503,126 @@ DROP TABLE tx3
 CREATE TABLE t1 (a int, b text, c int)
 --
 CREATE TABLE t1 (a int, b text, c int)
-== 885
+== 890
 INSERT INTO t1 VALUES (1, 'one', 10)
 --
 INSERT INTO t1 VALUES (1, 'one', 10)
-== 886
+== 891
 CREATE TABLE t2 (cc int)
 --
 CREATE TABLE t2 (cc int)
-== 887
+== 892
 INSERT INTO t2 VALUES (10), (20)
 --
 INSERT INTO t2 VALUES (10), (20)
-== 888
+== 893
 CREATE VIEW v1 WITH (security_barrier = true) AS
   SELECT * FROM t1 WHERE (a > 0)
   WITH CHECK OPTION
 --
 CREATE VIEW v1 WITH (security_barrier=true) AS SELECT * FROM t1 WHERE a > 0 WITH CHECK OPTION
-== 889
+== 894
 CREATE VIEW v2 WITH (security_barrier = true) AS
   SELECT * FROM v1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.cc = v1.c)
   WITH CHECK OPTION
 --
 CREATE VIEW v2 WITH (security_barrier=true) AS SELECT * FROM v1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.cc = v1.c) WITH CHECK OPTION
-== 890
-INSERT INTO v2 VALUES (2, 'two', 20)
---
-INSERT INTO v2 VALUES (2, 'two', 20)
-== 891
--- ok
-INSERT INTO v2 VALUES (-2, 'minus two', 20)
---
-INSERT INTO v2 VALUES (-2, 'minus two', 20)
-== 892
--- not allowed
-INSERT INTO v2 VALUES (3, 'three', 30)
---
-INSERT INTO v2 VALUES (3, 'three', 30)
-== 893
--- not allowed
-
-UPDATE v2 SET b = 'ONE' WHERE a = 1
---
-UPDATE v2 SET b = 'ONE' WHERE a = 1
-== 894
--- ok
-UPDATE v2 SET a = -1 WHERE a = 1
---
-UPDATE v2 SET a = -1 WHERE a = 1
 == 895
+INSERT INTO v2 VALUES (2, 'two', 20)
+--
+INSERT INTO v2 VALUES (2, 'two', 20)
+== 896
+-- ok
+INSERT INTO v2 VALUES (-2, 'minus two', 20)
+--
+INSERT INTO v2 VALUES (-2, 'minus two', 20)
+== 897
+-- not allowed
+INSERT INTO v2 VALUES (3, 'three', 30)
+--
+INSERT INTO v2 VALUES (3, 'three', 30)
+== 898
+-- not allowed
+
+UPDATE v2 SET b = 'ONE' WHERE a = 1
+--
+UPDATE v2 SET b = 'ONE' WHERE a = 1
+== 899
+-- ok
+UPDATE v2 SET a = -1 WHERE a = 1
+--
+UPDATE v2 SET a = -1 WHERE a = 1
+== 900
 -- not allowed
 UPDATE v2 SET c = 30 WHERE a = 1
 --
 UPDATE v2 SET c = 30 WHERE a = 1
-== 896
+== 901
 -- not allowed
 
 DELETE FROM v2 WHERE a = 2
 --
 DELETE FROM v2 WHERE a = 2
-== 897
+== 902
 -- ok
 SELECT * FROM v2
 --
 SELECT * FROM v2
-== 898
+== 903
 DROP VIEW v2
 --
 DROP VIEW v2
-== 899
+== 904
 DROP VIEW v1
 --
 DROP VIEW v1
-== 900
+== 905
 DROP TABLE t2
 --
 DROP TABLE t2
-== 901
+== 906
 DROP TABLE t1
 --
 DROP TABLE t1
-== 902
+== 907
 |--
 -- Test sub-select in nested security barrier views, per bug #17972
 |--
 CREATE TABLE t1 (a int)
 --
 CREATE TABLE t1 (a int)
-== 903
+== 908
 CREATE VIEW v1 WITH (security_barrier = true) AS
   SELECT * FROM t1
 --
 CREATE VIEW v1 WITH (security_barrier=true) AS SELECT * FROM t1
-== 904
+== 909
 CREATE RULE v1_upd_rule AS ON UPDATE TO v1 DO INSTEAD
   UPDATE t1 SET a = NEW.a WHERE a = OLD.a
 --
 CREATE RULE v1_upd_rule AS ON UPDATE TO v1 DO INSTEAD UPDATE t1 SET a = new.a WHERE a = old.a
-== 905
+== 910
 CREATE VIEW v2 WITH (security_barrier = true) AS
   SELECT * FROM v1 WHERE EXISTS (SELECT 1)
 --
 CREATE VIEW v2 WITH (security_barrier=true) AS SELECT * FROM v1 WHERE EXISTS (SELECT 1)
-== 906
+== 911
 EXPLAIN (COSTS OFF) UPDATE v2 SET a = 1
 --
 EXPLAIN (COSTS OFF) UPDATE v2 SET a = 1
-== 907
+== 912
 DROP VIEW v2
 --
 DROP VIEW v2
-== 908
+== 913
 DROP VIEW v1
 --
 DROP VIEW v1
-== 909
+== 914
 DROP TABLE t1
 --
 DROP TABLE t1
-== 910
+== 915
 |--
 -- Test CREATE OR REPLACE VIEW turning a non-updatable view into an
 -- auto-updatable view and adding check options in a single step
@@ -4599,130 +4630,130 @@ DROP TABLE t1
 CREATE TABLE t1 (a int, b text)
 --
 CREATE TABLE t1 (a int, b text)
-== 911
+== 916
 CREATE VIEW v1 AS SELECT null::int AS a
 --
 CREATE VIEW v1 AS SELECT NULL::int AS a
-== 912
+== 917
 CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1 WHERE a > 0 WITH CHECK OPTION
 --
 CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1 WHERE a > 0 WITH CHECK OPTION
-== 913
+== 918
 INSERT INTO v1 VALUES (1, 'ok')
 --
 INSERT INTO v1 VALUES (1, 'ok')
-== 914
+== 919
 -- ok
 INSERT INTO v1 VALUES (-1, 'invalid')
 --
 INSERT INTO v1 VALUES (-1, 'invalid')
-== 915
+== 920
 -- should fail
 
 DROP VIEW v1
 --
 DROP VIEW v1
-== 916
+== 921
 DROP TABLE t1
 --
 DROP TABLE t1
-== 917
+== 922
 -- check that an auto-updatable view on a partitioned table works correctly
 create table uv_pt (a int, b int, v varchar) partition by range (a, b)
 --
 CREATE TABLE uv_pt (a int, b int, v varchar) PARTITION BY RANGE (a, b)
-== 918
+== 923
 create table uv_pt1 (b int not null, v varchar, a int not null) partition by range (b)
 --
 CREATE TABLE uv_pt1 (b int NOT NULL, v varchar, a int NOT NULL) PARTITION BY RANGE (b)
-== 919
+== 924
 create table uv_pt11 (like uv_pt1)
 --
 CREATE TABLE uv_pt11 (LIKE uv_pt1)
-== 920
+== 925
 alter table uv_pt11 drop a
 --
 ALTER TABLE uv_pt11 DROP a
-== 921
+== 926
 alter table uv_pt11 add a int
 --
 ALTER TABLE uv_pt11 ADD COLUMN a int
-== 922
+== 927
 alter table uv_pt11 drop a
 --
 ALTER TABLE uv_pt11 DROP a
-== 923
+== 928
 alter table uv_pt11 add a int not null
 --
 ALTER TABLE uv_pt11 ADD COLUMN a int NOT NULL
-== 924
+== 929
 alter table uv_pt1 attach partition uv_pt11 for values from (2) to (5)
 --
 ALTER TABLE uv_pt1 ATTACH PARTITION uv_pt11 FOR VALUES FROM (2) TO (5)
-== 925
+== 930
 alter table uv_pt attach partition uv_pt1 for values from (1, 2) to (1, 10)
 --
 ALTER TABLE uv_pt ATTACH PARTITION uv_pt1 FOR VALUES FROM (1, 2) TO (1, 10)
-== 926
+== 931
 create view uv_ptv as select * from uv_pt
 --
 CREATE VIEW uv_ptv AS SELECT * FROM uv_pt
-== 927
+== 932
 select events & 4 != 0 AS upd,
        events & 8 != 0 AS ins,
        events & 16 != 0 AS del
   from pg_catalog.pg_relation_is_updatable('uv_pt'::regclass, false) t(events)
 --
 SELECT (events & 4) <> 0 AS upd, (events & 8) <> 0 AS ins, (events & 16) <> 0 AS del FROM pg_catalog.pg_relation_is_updatable('uv_pt'::regclass, false) t(events)
-== 928
+== 933
 select pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 1::smallint, false)
 --
 SELECT pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 1::smallint, false)
-== 929
+== 934
 select pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 2::smallint, false)
 --
 SELECT pg_catalog.pg_column_is_updatable('uv_pt'::regclass, 2::smallint, false)
-== 930
+== 935
 select table_name, is_updatable, is_insertable_into
   from information_schema.views where table_name = 'uv_ptv'
 --
 SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_name = 'uv_ptv'
-== 931
+== 936
 select table_name, column_name, is_updatable
   from information_schema.columns where table_name = 'uv_ptv' order by column_name
 --
 SELECT table_name, column_name, is_updatable FROM information_schema.columns WHERE table_name = 'uv_ptv' ORDER BY column_name
-== 932
+== 937
 insert into uv_ptv values (1, 2)
 --
 INSERT INTO uv_ptv VALUES (1, 2)
-== 933
+== 938
 select tableoid::regclass, * from uv_pt
 --
 SELECT tableoid::regclass, * FROM uv_pt
-== 934
+== 939
 create view uv_ptv_wco as select * from uv_pt where a = 0 with check option
 --
 CREATE VIEW uv_ptv_wco AS SELECT * FROM uv_pt WHERE a = 0 WITH CHECK OPTION
-== 935
+== 940
 insert into uv_ptv_wco values (1, 2)
 --
 INSERT INTO uv_ptv_wco VALUES (1, 2)
-== 936
+== 941
 merge into uv_ptv t
   using (values (1,2), (1,4)) as v(a,b) on t.a = v.a -- fail: matches 2 src rows
   when matched then update set b = t.b + 1
   when not matched then insert values (v.a, v.b + 1)
 --
 MERGE INTO uv_ptv t USING (VALUES (1, 2), (1, 4)) v(a, b) ON t.a = v.a WHEN MATCHED THEN UPDATE SET b = t.b + 1 WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b + 1)
-== 937
+== 942
 merge into uv_ptv t
   using (values (1,2), (1,4)) as v(a,b) on t.a = v.a and t.b = v.b
   when matched then update set b = t.b + 1
   when not matched then insert values (v.a, v.b + 1)
 --
 MERGE INTO uv_ptv t USING (VALUES (1, 2), (1, 4)) v(a, b) ON t.a = v.a AND t.b = v.b WHEN MATCHED THEN UPDATE SET b = t.b + 1 WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b + 1)
-== 938
+== 943
 -- fail: no partition for b=5
 merge into uv_ptv t
   using (values (1,2), (1,3)) as v(a,b) on t.a = v.a and t.b = v.b
@@ -4730,62 +4761,62 @@ merge into uv_ptv t
   when not matched then insert values (v.a, v.b + 1)
 --
 MERGE INTO uv_ptv t USING (VALUES (1, 2), (1, 3)) v(a, b) ON t.a = v.a AND t.b = v.b WHEN MATCHED THEN UPDATE SET b = t.b + 1 WHEN NOT MATCHED THEN INSERT VALUES (v.a, v.b + 1)
-== 939
+== 944
 -- ok
 select tableoid::regclass, * from uv_pt order by a, b
 --
 SELECT tableoid::regclass, * FROM uv_pt ORDER BY a, b
-== 940
+== 945
 drop view uv_ptv, uv_ptv_wco
 --
 DROP VIEW uv_ptv, uv_ptv_wco
-== 941
+== 946
 drop table uv_pt, uv_pt1, uv_pt11
 --
 DROP TABLE uv_pt, uv_pt1, uv_pt11
-== 942
+== 947
 -- check that wholerow vars appearing in WITH CHECK OPTION constraint expressions
 -- work fine with partitioned tables
 create table wcowrtest (a int) partition by list (a)
 --
 CREATE TABLE wcowrtest (a int) PARTITION BY LIST (a)
-== 943
+== 948
 create table wcowrtest1 partition of wcowrtest for values in (1)
 --
 CREATE TABLE wcowrtest1 PARTITION OF wcowrtest FOR VALUES IN (1)
-== 944
+== 949
 create view wcowrtest_v as select * from wcowrtest where wcowrtest = '(2)'::wcowrtest with check option
 --
 CREATE VIEW wcowrtest_v AS SELECT * FROM wcowrtest WHERE wcowrtest = '(2)'::wcowrtest WITH CHECK OPTION
-== 945
+== 950
 insert into wcowrtest_v values (1)
 --
 INSERT INTO wcowrtest_v VALUES (1)
-== 946
+== 951
 alter table wcowrtest add b text
 --
 ALTER TABLE wcowrtest ADD COLUMN b text
-== 947
+== 952
 create table wcowrtest2 (b text, c int, a int)
 --
 CREATE TABLE wcowrtest2 (b text, c int, a int)
-== 948
+== 953
 alter table wcowrtest2 drop c
 --
 ALTER TABLE wcowrtest2 DROP c
-== 949
+== 954
 alter table wcowrtest attach partition wcowrtest2 for values in (2)
 --
 ALTER TABLE wcowrtest ATTACH PARTITION wcowrtest2 FOR VALUES IN (2)
-== 950
+== 955
 create table sometable (a int, b text)
 --
 CREATE TABLE sometable (a int, b text)
-== 951
+== 956
 insert into sometable values (1, 'a'), (2, 'b')
 --
 INSERT INTO sometable VALUES (1, 'a'), (2, 'b')
-== 952
+== 957
 create view wcowrtest_v2 as
     select *
       from wcowrtest r
@@ -4793,102 +4824,102 @@ create view wcowrtest_v2 as
 with check option
 --
 CREATE VIEW wcowrtest_v2 AS SELECT * FROM wcowrtest r WHERE r IN (SELECT s FROM sometable s WHERE r.a = s.a) WITH CHECK OPTION
-== 953
+== 958
 -- WITH CHECK qual will be processed with wcowrtest2's
 -- rowtype after tuple-routing
 insert into wcowrtest_v2 values (2, 'no such row in sometable')
 --
 INSERT INTO wcowrtest_v2 VALUES (2, 'no such row in sometable')
-== 954
+== 959
 drop view wcowrtest_v, wcowrtest_v2
 --
 DROP VIEW wcowrtest_v, wcowrtest_v2
-== 955
+== 960
 drop table wcowrtest, sometable
 --
 DROP TABLE wcowrtest, sometable
-== 956
+== 961
 -- Check INSERT .. ON CONFLICT DO UPDATE works correctly when the view's
 -- columns are named and ordered differently than the underlying table's.
 create table uv_iocu_tab (a text unique, b float)
 --
 CREATE TABLE uv_iocu_tab (a text UNIQUE, b double precision)
-== 957
+== 962
 insert into uv_iocu_tab values ('xyxyxy', 0)
 --
 INSERT INTO uv_iocu_tab VALUES ('xyxyxy', 0)
-== 958
+== 963
 create view uv_iocu_view as
    select b, b+1 as c, a, '2.0'::text as two from uv_iocu_tab
 --
 CREATE VIEW uv_iocu_view AS SELECT b, b + 1 AS c, a, '2.0'::text AS two FROM uv_iocu_tab
-== 959
+== 964
 insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
    on conflict (a) do update set b = uv_iocu_view.b
 --
 INSERT INTO uv_iocu_view (a, b) VALUES ('xyxyxy', 1) ON CONFLICT (a) DO UPDATE SET b = uv_iocu_view.b
-== 960
+== 965
 select * from uv_iocu_tab
 --
 SELECT * FROM uv_iocu_tab
-== 961
+== 966
 insert into uv_iocu_view (a, b) values ('xyxyxy', 1)
    on conflict (a) do update set b = excluded.b
 --
 INSERT INTO uv_iocu_view (a, b) VALUES ('xyxyxy', 1) ON CONFLICT (a) DO UPDATE SET b = excluded.b
-== 962
+== 967
 select * from uv_iocu_tab
 --
 SELECT * FROM uv_iocu_tab
-== 963
+== 968
 -- OK to access view columns that are not present in underlying base
 -- relation in the ON CONFLICT portion of the query
 insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
    on conflict (a) do update set b = cast(excluded.two as float)
 --
 INSERT INTO uv_iocu_view (a, b) VALUES ('xyxyxy', 3) ON CONFLICT (a) DO UPDATE SET b = excluded.two::double precision
-== 964
+== 969
 select * from uv_iocu_tab
 --
 SELECT * FROM uv_iocu_tab
-== 965
+== 970
 explain (costs off)
 insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
    on conflict (a) do update set b = excluded.b where excluded.c > 0
 --
 EXPLAIN (COSTS OFF) INSERT INTO uv_iocu_view (a, b) VALUES ('xyxyxy', 3) ON CONFLICT (a) DO UPDATE SET b = excluded.b WHERE excluded.c > 0
-== 966
+== 971
 insert into uv_iocu_view (a, b) values ('xyxyxy', 3)
    on conflict (a) do update set b = excluded.b where excluded.c > 0
 --
 INSERT INTO uv_iocu_view (a, b) VALUES ('xyxyxy', 3) ON CONFLICT (a) DO UPDATE SET b = excluded.b WHERE excluded.c > 0
-== 967
+== 972
 select * from uv_iocu_tab
 --
 SELECT * FROM uv_iocu_tab
-== 968
+== 973
 drop view uv_iocu_view
 --
 DROP VIEW uv_iocu_view
-== 969
+== 974
 drop table uv_iocu_tab
 --
 DROP TABLE uv_iocu_tab
-== 970
+== 975
 -- Test whole-row references to the view
 create table uv_iocu_tab (a int unique, b text)
 --
 CREATE TABLE uv_iocu_tab (a int UNIQUE, b text)
-== 971
+== 976
 create view uv_iocu_view as
     select b as bb, a as aa, uv_iocu_tab::text as cc from uv_iocu_tab
 --
 CREATE VIEW uv_iocu_view AS SELECT b AS bb, a AS aa, uv_iocu_tab::text AS cc FROM uv_iocu_tab
-== 972
+== 977
 insert into uv_iocu_view (aa,bb) values (1,'x')
 --
 INSERT INTO uv_iocu_view (aa, bb) VALUES (1, 'x')
-== 973
+== 978
 explain (costs off)
 insert into uv_iocu_view (aa,bb) values (1,'y')
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*
@@ -4897,7 +4928,7 @@ insert into uv_iocu_view (aa,bb) values (1,'y')
    and excluded.cc is not null
 --
 EXPLAIN (COSTS OFF) INSERT INTO uv_iocu_view (aa, bb) VALUES (1, 'y') ON CONFLICT (aa) DO UPDATE SET bb = 'Rejected: ' || excluded.* WHERE excluded.aa > 0 AND excluded.bb <> '' AND excluded.cc IS NOT NULL
-== 974
+== 979
 insert into uv_iocu_view (aa,bb) values (1,'y')
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*
    where excluded.aa > 0
@@ -4905,321 +4936,321 @@ insert into uv_iocu_view (aa,bb) values (1,'y')
    and excluded.cc is not null
 --
 INSERT INTO uv_iocu_view (aa, bb) VALUES (1, 'y') ON CONFLICT (aa) DO UPDATE SET bb = 'Rejected: ' || excluded.* WHERE excluded.aa > 0 AND excluded.bb <> '' AND excluded.cc IS NOT NULL
-== 975
+== 980
 select * from uv_iocu_view
 --
 SELECT * FROM uv_iocu_view
-== 976
+== 981
 -- Test omitting a column of the base relation
 delete from uv_iocu_view
 --
 DELETE FROM uv_iocu_view
-== 977
+== 982
 insert into uv_iocu_view (aa,bb) values (1,'x')
 --
 INSERT INTO uv_iocu_view (aa, bb) VALUES (1, 'x')
-== 978
+== 983
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*
 --
 INSERT INTO uv_iocu_view (aa) VALUES (1) ON CONFLICT (aa) DO UPDATE SET bb = 'Rejected: ' || excluded.*
-== 979
+== 984
 select * from uv_iocu_view
 --
 SELECT * FROM uv_iocu_view
-== 980
+== 985
 alter table uv_iocu_tab alter column b set default 'table default'
 --
 ALTER TABLE uv_iocu_tab ALTER COLUMN b SET DEFAULT 'table default'
-== 981
+== 986
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*
 --
 INSERT INTO uv_iocu_view (aa) VALUES (1) ON CONFLICT (aa) DO UPDATE SET bb = 'Rejected: ' || excluded.*
-== 982
+== 987
 select * from uv_iocu_view
 --
 SELECT * FROM uv_iocu_view
-== 983
+== 988
 alter view uv_iocu_view alter column bb set default 'view default'
 --
 ALTER VIEW uv_iocu_view ALTER COLUMN bb SET DEFAULT 'view default'
-== 984
+== 989
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set bb = 'Rejected: '||excluded.*
 --
 INSERT INTO uv_iocu_view (aa) VALUES (1) ON CONFLICT (aa) DO UPDATE SET bb = 'Rejected: ' || excluded.*
-== 985
+== 990
 select * from uv_iocu_view
 --
 SELECT * FROM uv_iocu_view
-== 986
+== 991
 -- Should fail to update non-updatable columns
 insert into uv_iocu_view (aa) values (1)
    on conflict (aa) do update set cc = 'XXX'
 --
 INSERT INTO uv_iocu_view (aa) VALUES (1) ON CONFLICT (aa) DO UPDATE SET cc = 'XXX'
-== 987
+== 992
 drop view uv_iocu_view
 --
 DROP VIEW uv_iocu_view
-== 988
+== 993
 drop table uv_iocu_tab
 --
 DROP TABLE uv_iocu_tab
-== 989
+== 994
 -- ON CONFLICT DO UPDATE permissions checks
 create user regress_view_user1
 --
 CREATE USER regress_view_user1
-== 990
+== 995
 create user regress_view_user2
 --
 CREATE USER regress_view_user2
-== 991
+== 996
 set session authorization regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 992
+== 997
 create table base_tbl(a int unique, b text, c float)
 --
 CREATE TABLE base_tbl (a int UNIQUE, b text, c double precision)
-== 993
+== 998
 insert into base_tbl values (1,'xxx',1.0)
 --
 INSERT INTO base_tbl VALUES (1, 'xxx', 1.0)
-== 994
+== 999
 create view rw_view1 as select b as bb, c as cc, a as aa from base_tbl
 --
 CREATE VIEW rw_view1 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 995
+== 1000
 grant select (aa,bb) on rw_view1 to regress_view_user2
 --
 GRANT select (aa, bb) ON rw_view1 TO regress_view_user2
-== 996
+== 1001
 grant insert on rw_view1 to regress_view_user2
 --
 GRANT insert ON rw_view1 TO regress_view_user2
-== 997
+== 1002
 grant update (bb) on rw_view1 to regress_view_user2
 --
 GRANT update (bb) ON rw_view1 TO regress_view_user2
-== 998
+== 1003
 set session authorization regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 999
+== 1004
 insert into rw_view1 values ('yyy',2.0,1)
   on conflict (aa) do update set bb = excluded.cc
 --
 INSERT INTO rw_view1 VALUES ('yyy', 2.0, 1) ON CONFLICT (aa) DO UPDATE SET bb = excluded.cc
-== 1000
+== 1005
 -- Not allowed
 insert into rw_view1 values ('yyy',2.0,1)
   on conflict (aa) do update set bb = rw_view1.cc
 --
 INSERT INTO rw_view1 VALUES ('yyy', 2.0, 1) ON CONFLICT (aa) DO UPDATE SET bb = rw_view1.cc
-== 1001
+== 1006
 -- Not allowed
 insert into rw_view1 values ('yyy',2.0,1)
   on conflict (aa) do update set bb = excluded.bb
 --
 INSERT INTO rw_view1 VALUES ('yyy', 2.0, 1) ON CONFLICT (aa) DO UPDATE SET bb = excluded.bb
-== 1002
+== 1007
 -- OK
 insert into rw_view1 values ('zzz',2.0,1)
   on conflict (aa) do update set bb = rw_view1.bb||'xxx'
 --
 INSERT INTO rw_view1 VALUES ('zzz', 2.0, 1) ON CONFLICT (aa) DO UPDATE SET bb = rw_view1.bb || 'xxx'
-== 1003
+== 1008
 -- OK
 insert into rw_view1 values ('zzz',2.0,1)
   on conflict (aa) do update set cc = 3.0
 --
 INSERT INTO rw_view1 VALUES ('zzz', 2.0, 1) ON CONFLICT (aa) DO UPDATE SET cc = 3.0
-== 1004
+== 1009
 -- Not allowed
 reset session authorization
 --
 RESET session_authorization
-== 1005
+== 1010
 select * from base_tbl
 --
 SELECT * FROM base_tbl
-== 1006
+== 1011
 set session authorization regress_view_user1
 --
 SET session_authorization TO regress_view_user1
-== 1007
+== 1012
 grant select (a,b) on base_tbl to regress_view_user2
 --
 GRANT select (a, b) ON base_tbl TO regress_view_user2
-== 1008
+== 1013
 grant insert (a,b) on base_tbl to regress_view_user2
 --
 GRANT insert (a, b) ON base_tbl TO regress_view_user2
-== 1009
+== 1014
 grant update (a,b) on base_tbl to regress_view_user2
 --
 GRANT update (a, b) ON base_tbl TO regress_view_user2
-== 1010
+== 1015
 set session authorization regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 1011
+== 1016
 create view rw_view2 as select b as bb, c as cc, a as aa from base_tbl
 --
 CREATE VIEW rw_view2 AS SELECT b AS bb, c AS cc, a AS aa FROM base_tbl
-== 1012
+== 1017
 insert into rw_view2 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb
 --
 INSERT INTO rw_view2 (aa, bb) VALUES (1, 'xxx') ON CONFLICT (aa) DO UPDATE SET bb = excluded.bb
-== 1013
+== 1018
 -- Not allowed
 create view rw_view3 as select b as bb, a as aa from base_tbl
 --
 CREATE VIEW rw_view3 AS SELECT b AS bb, a AS aa FROM base_tbl
-== 1014
+== 1019
 insert into rw_view3 (aa,bb) values (1,'xxx')
   on conflict (aa) do update set bb = excluded.bb
 --
 INSERT INTO rw_view3 (aa, bb) VALUES (1, 'xxx') ON CONFLICT (aa) DO UPDATE SET bb = excluded.bb
-== 1015
+== 1020
 -- OK
 reset session authorization
 --
 RESET session_authorization
-== 1016
+== 1021
 select * from base_tbl
 --
 SELECT * FROM base_tbl
-== 1017
+== 1022
 set session authorization regress_view_user2
 --
 SET session_authorization TO regress_view_user2
-== 1018
+== 1023
 create view rw_view4 as select aa, bb, cc FROM rw_view1
 --
 CREATE VIEW rw_view4 AS SELECT aa, bb, cc FROM rw_view1
-== 1019
+== 1024
 insert into rw_view4 (aa,bb) values (1,'yyy')
   on conflict (aa) do update set bb = excluded.bb
 --
 INSERT INTO rw_view4 (aa, bb) VALUES (1, 'yyy') ON CONFLICT (aa) DO UPDATE SET bb = excluded.bb
-== 1020
+== 1025
 -- Not allowed
 create view rw_view5 as select aa, bb FROM rw_view1
 --
 CREATE VIEW rw_view5 AS SELECT aa, bb FROM rw_view1
-== 1021
+== 1026
 insert into rw_view5 (aa,bb) values (1,'yyy')
   on conflict (aa) do update set bb = excluded.bb
 --
 INSERT INTO rw_view5 (aa, bb) VALUES (1, 'yyy') ON CONFLICT (aa) DO UPDATE SET bb = excluded.bb
-== 1022
+== 1027
 -- OK
 reset session authorization
 --
 RESET session_authorization
-== 1023
+== 1028
 select * from base_tbl
 --
 SELECT * FROM base_tbl
-== 1024
+== 1029
 drop view rw_view5
 --
 DROP VIEW rw_view5
-== 1025
+== 1030
 drop view rw_view4
 --
 DROP VIEW rw_view4
-== 1026
+== 1031
 drop view rw_view3
 --
 DROP VIEW rw_view3
-== 1027
+== 1032
 drop view rw_view2
 --
 DROP VIEW rw_view2
-== 1028
+== 1033
 drop view rw_view1
 --
 DROP VIEW rw_view1
-== 1029
+== 1034
 drop table base_tbl
 --
 DROP TABLE base_tbl
-== 1030
+== 1035
 drop user regress_view_user1
 --
 DROP ROLE regress_view_user1
-== 1031
+== 1036
 drop user regress_view_user2
 --
 DROP ROLE regress_view_user2
-== 1032
+== 1037
 -- Test single- and multi-row inserts with table and view defaults.
 -- Table defaults should be used, unless overridden by view defaults.
 create table base_tab_def (a int, b text default 'Table default',
                            c text default 'Table default', d text, e text)
 --
 CREATE TABLE base_tab_def (a int, b text DEFAULT 'Table default', c text DEFAULT 'Table default', d text, e text)
-== 1033
+== 1038
 create view base_tab_def_view as select * from base_tab_def
 --
 CREATE VIEW base_tab_def_view AS SELECT * FROM base_tab_def
-== 1034
+== 1039
 alter view base_tab_def_view alter b set default 'View default'
 --
 ALTER VIEW base_tab_def_view ALTER COLUMN b SET DEFAULT 'View default'
-== 1035
+== 1040
 alter view base_tab_def_view alter d set default 'View default'
 --
 ALTER VIEW base_tab_def_view ALTER COLUMN d SET DEFAULT 'View default'
-== 1036
+== 1041
 insert into base_tab_def values (1)
 --
 INSERT INTO base_tab_def VALUES (1)
-== 1037
+== 1042
 insert into base_tab_def values (2), (3)
 --
 INSERT INTO base_tab_def VALUES (2), (3)
-== 1038
+== 1043
 insert into base_tab_def values (4, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (4, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1039
+== 1044
 insert into base_tab_def values (5, default, default, default, default),
                                 (6, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (5, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (6, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1040
+== 1045
 insert into base_tab_def_view values (11)
 --
 INSERT INTO base_tab_def_view VALUES (11)
-== 1041
+== 1046
 insert into base_tab_def_view values (12), (13)
 --
 INSERT INTO base_tab_def_view VALUES (12), (13)
-== 1042
+== 1047
 insert into base_tab_def_view values (14, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (14, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1043
+== 1048
 insert into base_tab_def_view values (15, default, default, default, default),
                                      (16, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (15, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (16, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1044
+== 1049
 insert into base_tab_def_view values (17), (default)
 --
 INSERT INTO base_tab_def_view VALUES (17), (DEFAULT)
-== 1045
+== 1050
 select * from base_tab_def order by a
 --
 SELECT * FROM base_tab_def ORDER BY a
-== 1046
+== 1051
 -- Adding an INSTEAD OF trigger should cause NULLs to be inserted instead of
 -- table defaults, where there are no view defaults.
 create function base_tab_def_view_instrig_func() returns trigger
@@ -5238,119 +5269,119 @@ begin
   return new;
 end;
 $$ LANGUAGE plpgsql
-== 1047
+== 1052
 create trigger base_tab_def_view_instrig instead of insert on base_tab_def_view
   for each row execute function base_tab_def_view_instrig_func()
 --
 CREATE TRIGGER base_tab_def_view_instrig INSTEAD OF INSERT ON base_tab_def_view FOR EACH ROW EXECUTE FUNCTION base_tab_def_view_instrig_func()
-== 1048
+== 1053
 truncate base_tab_def
 --
 TRUNCATE base_tab_def
-== 1049
+== 1054
 insert into base_tab_def values (1)
 --
 INSERT INTO base_tab_def VALUES (1)
-== 1050
+== 1055
 insert into base_tab_def values (2), (3)
 --
 INSERT INTO base_tab_def VALUES (2), (3)
-== 1051
+== 1056
 insert into base_tab_def values (4, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (4, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1052
+== 1057
 insert into base_tab_def values (5, default, default, default, default),
                                 (6, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (5, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (6, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1053
+== 1058
 insert into base_tab_def_view values (11)
 --
 INSERT INTO base_tab_def_view VALUES (11)
-== 1054
+== 1059
 insert into base_tab_def_view values (12), (13)
 --
 INSERT INTO base_tab_def_view VALUES (12), (13)
-== 1055
+== 1060
 insert into base_tab_def_view values (14, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (14, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1056
+== 1061
 insert into base_tab_def_view values (15, default, default, default, default),
                                      (16, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (15, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (16, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1057
+== 1062
 insert into base_tab_def_view values (17), (default)
 --
 INSERT INTO base_tab_def_view VALUES (17), (DEFAULT)
-== 1058
+== 1063
 select * from base_tab_def order by a
 --
 SELECT * FROM base_tab_def ORDER BY a
-== 1059
+== 1064
 -- Using an unconditional DO INSTEAD rule should also cause NULLs to be
 -- inserted where there are no view defaults.
 drop trigger base_tab_def_view_instrig on base_tab_def_view
 --
 DROP TRIGGER base_tab_def_view_instrig ON base_tab_def_view
-== 1060
+== 1065
 drop function base_tab_def_view_instrig_func
 --
 DROP FUNCTION base_tab_def_view_instrig_func
-== 1061
+== 1066
 create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
   do instead insert into base_tab_def values (new.a, new.b, new.c, new.d, new.e)
 --
 CREATE RULE base_tab_def_view_ins_rule AS ON INSERT TO base_tab_def_view DO INSTEAD INSERT INTO base_tab_def VALUES (new.a, new.b, new.c, new.d, new.e)
-== 1062
+== 1067
 truncate base_tab_def
 --
 TRUNCATE base_tab_def
-== 1063
+== 1068
 insert into base_tab_def values (1)
 --
 INSERT INTO base_tab_def VALUES (1)
-== 1064
+== 1069
 insert into base_tab_def values (2), (3)
 --
 INSERT INTO base_tab_def VALUES (2), (3)
-== 1065
+== 1070
 insert into base_tab_def values (4, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (4, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1066
+== 1071
 insert into base_tab_def values (5, default, default, default, default),
                                 (6, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (5, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (6, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1067
+== 1072
 insert into base_tab_def_view values (11)
 --
 INSERT INTO base_tab_def_view VALUES (11)
-== 1068
+== 1073
 insert into base_tab_def_view values (12), (13)
 --
 INSERT INTO base_tab_def_view VALUES (12), (13)
-== 1069
+== 1074
 insert into base_tab_def_view values (14, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (14, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1070
+== 1075
 insert into base_tab_def_view values (15, default, default, default, default),
                                      (16, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (15, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (16, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1071
+== 1076
 insert into base_tab_def_view values (17), (default)
 --
 INSERT INTO base_tab_def_view VALUES (17), (DEFAULT)
-== 1072
+== 1077
 select * from base_tab_def order by a
 --
 SELECT * FROM base_tab_def ORDER BY a
-== 1073
+== 1078
 -- A DO ALSO rule should cause each row to be inserted twice. The first
 -- insert should behave the same as an auto-updatable view (using table
 -- defaults, unless overridden by view defaults). The second insert should
@@ -5359,119 +5390,119 @@ SELECT * FROM base_tab_def ORDER BY a
 drop rule base_tab_def_view_ins_rule on base_tab_def_view
 --
 DROP RULE base_tab_def_view_ins_rule ON base_tab_def_view
-== 1074
+== 1079
 create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
   do also insert into base_tab_def values (new.a, new.b, new.c, new.d, new.e)
 --
 CREATE RULE base_tab_def_view_ins_rule AS ON INSERT TO base_tab_def_view DO INSERT INTO base_tab_def VALUES (new.a, new.b, new.c, new.d, new.e)
-== 1075
+== 1080
 truncate base_tab_def
 --
 TRUNCATE base_tab_def
-== 1076
+== 1081
 insert into base_tab_def values (1)
 --
 INSERT INTO base_tab_def VALUES (1)
-== 1077
+== 1082
 insert into base_tab_def values (2), (3)
 --
 INSERT INTO base_tab_def VALUES (2), (3)
-== 1078
+== 1083
 insert into base_tab_def values (4, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (4, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1079
+== 1084
 insert into base_tab_def values (5, default, default, default, default),
                                 (6, default, default, default, default)
 --
 INSERT INTO base_tab_def VALUES (5, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (6, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1080
+== 1085
 insert into base_tab_def_view values (11)
 --
 INSERT INTO base_tab_def_view VALUES (11)
-== 1081
+== 1086
 insert into base_tab_def_view values (12), (13)
 --
 INSERT INTO base_tab_def_view VALUES (12), (13)
-== 1082
+== 1087
 insert into base_tab_def_view values (14, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (14, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1083
+== 1088
 insert into base_tab_def_view values (15, default, default, default, default),
                                      (16, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (15, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (16, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1084
+== 1089
 insert into base_tab_def_view values (17), (default)
 --
 INSERT INTO base_tab_def_view VALUES (17), (DEFAULT)
-== 1085
+== 1090
 select * from base_tab_def order by a, c NULLS LAST
 --
 SELECT * FROM base_tab_def ORDER BY a, c NULLS LAST
-== 1086
+== 1091
 -- Test a DO ALSO INSERT ... SELECT rule
 drop rule base_tab_def_view_ins_rule on base_tab_def_view
 --
 DROP RULE base_tab_def_view_ins_rule ON base_tab_def_view
-== 1087
+== 1092
 create rule base_tab_def_view_ins_rule as on insert to base_tab_def_view
   do also insert into base_tab_def (a, b, e) select new.a, new.b, 'xxx'
 --
 CREATE RULE base_tab_def_view_ins_rule AS ON INSERT TO base_tab_def_view DO INSERT INTO base_tab_def (a, b, e) SELECT new.a, new.b, 'xxx'
-== 1088
+== 1093
 truncate base_tab_def
 --
 TRUNCATE base_tab_def
-== 1089
+== 1094
 insert into base_tab_def_view values (1, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (1, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1090
+== 1095
 insert into base_tab_def_view values (2, default, default, default, default),
                                      (3, default, default, default, default)
 --
 INSERT INTO base_tab_def_view VALUES (2, DEFAULT, DEFAULT, DEFAULT, DEFAULT), (3, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
-== 1091
+== 1096
 select * from base_tab_def order by a, e nulls first
 --
 SELECT * FROM base_tab_def ORDER BY a, e NULLS FIRST
-== 1092
+== 1097
 drop view base_tab_def_view
 --
 DROP VIEW base_tab_def_view
-== 1093
+== 1098
 drop table base_tab_def
 --
 DROP TABLE base_tab_def
-== 1094
+== 1099
 -- Test defaults with array assignments
 create table base_tab (a serial, b int[], c text, d text default 'Table default')
 --
 CREATE TABLE base_tab (a serial, b int[], c text, d text DEFAULT 'Table default')
-== 1095
+== 1100
 create view base_tab_view as select c, a, b from base_tab
 --
 CREATE VIEW base_tab_view AS SELECT c, a, b FROM base_tab
-== 1096
+== 1101
 alter view base_tab_view alter column c set default 'View default'
 --
 ALTER VIEW base_tab_view ALTER COLUMN c SET DEFAULT 'View default'
-== 1097
+== 1102
 insert into base_tab_view (b[1], b[2], c, b[5], b[4], a, b[3])
 values (1, 2, default, 5, 4, default, 3), (10, 11, 'C value', 14, 13, 100, 12)
 --
 INSERT INTO base_tab_view (b[1], b[2], c, b[5], b[4], a, b[3]) VALUES (1, 2, DEFAULT, 5, 4, DEFAULT, 3), (10, 11, 'C value', 14, 13, 100, 12)
-== 1098
+== 1103
 select * from base_tab order by a
 --
 SELECT * FROM base_tab ORDER BY a
-== 1099
+== 1104
 drop view base_tab_view
 --
 DROP VIEW base_tab_view
-== 1100
+== 1105
 drop table base_tab
 --
 DROP TABLE base_tab

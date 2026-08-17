@@ -60,7 +60,7 @@ select relname, relkind, relhassubclass, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-5ead7c7dc6e5aa0b
+a58909ab10a80f6f
 == 014
 drop table idxpart
 --
@@ -99,7 +99,7 @@ CREATE TABLE idxpart_two (col2 INT)
 == 022
 SELECT col2 FROM idxpart_two fk LEFT OUTER JOIN idxpart pk ON (col1 = col2)
 --
-a1a8e62ef0c5425a
+c3117c092edea4ad
 == 023
 DROP table idxpart, idxpart_two
 --
@@ -206,7 +206,7 @@ select relname, relkind, relhassubclass, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-5ead7c7dc6e5aa0b
+a58909ab10a80f6f
 == 047
 drop table idxpart
 --
@@ -463,7 +463,7 @@ select indexrelid::regclass, indrelid::regclass, inhparent::regclass
 where indexrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-129ae8eeb9a22bec
+419c2ef72d7c77d8
 == 104
 alter index idxpart2_a_idx attach partition idxpart22_a_idx
 --
@@ -474,7 +474,7 @@ select indexrelid::regclass, indrelid::regclass, inhparent::regclass
 where indexrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-129ae8eeb9a22bec
+419c2ef72d7c77d8
 == 106
 -- attaching idxpart22 is not enough to set idxpart22_a_idx valid ...
 alter index idxpart2_a_idx attach partition idxpart22_a_idx
@@ -518,7 +518,7 @@ select relname, relkind, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-18103ccdaa097a80
+24b3e465e34b019e
 == 115
 alter table idxpart attach partition idxpart1 for values from (0) to (10)
 --
@@ -529,7 +529,7 @@ select relname, relkind, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-18103ccdaa097a80
+24b3e465e34b019e
 == 117
 -- While here, also check matching when creating an index after the fact.
 create index on idxpart1 ((a+b)) where d = true
@@ -541,7 +541,7 @@ select relname, relkind, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-18103ccdaa097a80
+24b3e465e34b019e
 == 119
 create index idxparti3 on idxpart ((a+b)) where d = true
 --
@@ -552,7 +552,7 @@ select relname, relkind, inhparent::regclass
 	left join pg_inherits on (ix.indexrelid = inhrelid)
 	where relname like 'idxpart%' order by relname
 --
-18103ccdaa097a80
+24b3e465e34b019e
 == 121
 drop table idxpart
 --
@@ -617,310 +617,475 @@ drop table idxpart
 --
 f57d4c47ec16cd44
 == 134
+-- Verify that re-attaching an already-attached partition index can
+-- validate the parent index if it was still invalid, including
+-- indirect ancestors in subpartitions.
+create table idxpart (a int, b int) partition by range (a)
+--
+1a8ced3bc78e7dcc
+== 135
+create table idxpart1 partition of idxpart for values from (0) to (1000) partition by range (a)
+--
+6b6e0226be101cea
+== 136
+create table idxpart11 partition of idxpart1 for values from (0) to (500)
+--
+fcb3fce27d076adb
+== 137
+-- Partitioned table with no partitions
+create table idxpart2 partition of idxpart for values from (1000) to (2000) partition by range (a)
+--
+84a6c0616df98e88
+== 138
+-- create parent indexes
+create index on only idxpart ((a/b))
+--
+d162185fd5777f0c
+== 139
+create index on only idxpart1 ((a/b))
+--
+1e8b243cc027fc86
+== 140
+create index on only idxpart2 ((a/b))
+--
+d488c4c4eee1eef6
+== 141
+-- fail, leaves behind an invalid index on the leaf partition
+insert into idxpart11 values (1, 0)
+--
+13f64492d33d4567
+== 142
+create index concurrently on idxpart11 ((a/b))
+--
+0a3bf662d17decee
+== 143
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 144
+-- attach the indexes; parents stay invalid
+alter index idxpart1_expr_idx attach partition idxpart11_expr_idx
+--
+9fb5ee97b92f3456
+== 145
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx
+--
+9707b6d156bf662d
+== 146
+alter index idxpart_expr_idx attach partition idxpart2_expr_idx
+--
+5937b8646122f0b7
+== 147
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 148
+-- fix the index on the leaf partition
+delete from idxpart11 where b = 0
+--
+1f6d4e00bf7d670e
+== 149
+reindex index concurrently idxpart11_expr_idx
+--
+c59451027eb99f9f
+== 150
+-- reattach the leaf partition index; parents should now be valid
+alter index idxpart1_expr_idx attach partition idxpart11_expr_idx
+--
+9fb5ee97b92f3456
+== 151
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 152
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 153
+-- Verify that re-attaching does not validate the parent when another
+-- child index is still invalid.
+create table idxpart (a int, b int) partition by range (a)
+--
+1a8ced3bc78e7dcc
+== 154
+create table idxpart1 partition of idxpart for values from (0) to (500)
+--
+9b5c3e97cc2a4c69
+== 155
+create table idxpart2 partition of idxpart for values from (500) to (1000)
+--
+0db2a2048ec56b65
+== 156
+create index on only idxpart ((a/b))
+--
+d162185fd5777f0c
+== 157
+-- create invalid indexes on both children
+insert into idxpart1 values (1, 0)
+--
+1e1cb8b17664b255
+== 158
+insert into idxpart2 values (501, 0)
+--
+d982aac5e53976bb
+== 159
+create index concurrently on idxpart1 ((a/b))
+--
+d74b008cd82d609c
+== 160
+create index concurrently on idxpart2 ((a/b))
+--
+488d97e246c5fb8a
+== 161
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 162
+-- attach both; parent stays invalid
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx
+--
+9707b6d156bf662d
+== 163
+alter index idxpart_expr_idx attach partition idxpart2_expr_idx
+--
+5937b8646122f0b7
+== 164
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 165
+-- fix only idxpart1's index, leave idxpart2's still invalid
+delete from idxpart1 where b = 0
+--
+ca642d7d76e5b701
+== 166
+reindex index concurrently idxpart1_expr_idx
+--
+eacc226a20412b7b
+== 167
+-- re-attach the fixed child; parent should stay invalid
+alter index idxpart_expr_idx attach partition idxpart1_expr_idx
+--
+9707b6d156bf662d
+== 168
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+d0ecde6e176bcedb
+== 169
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 170
 -- verify dependency handling during ALTER TABLE DETACH PARTITION
 create table idxpart (a int) partition by range (a)
 --
 56dbeae3841bfa65
-== 135
+== 171
 create table idxpart1 (like idxpart)
 --
 cd29fc607c763c2c
-== 136
+== 172
 create index on idxpart1 (a)
 --
 d695b35ffc15cc86
-== 137
+== 173
 create index on idxpart (a)
 --
 5ac25ee1d40107de
-== 138
+== 174
 create table idxpart2 (like idxpart)
 --
 fcd646c8ff7dd13d
-== 139
+== 175
 alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
 --
 c54d2a13e9cdca71
-== 140
+== 176
 alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
 --
 c59de0d96a6cf426
-== 141
+== 177
 create table idxpart3 partition of idxpart for values from (2000) to (3000)
 --
 21fc8e4040fcb809
-== 142
+== 178
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 143
+== 179
 -- a) after detaching partitions, the indexes can be dropped independently
 alter table idxpart detach partition idxpart1
 --
 3ddc31b2d94a8027
-== 144
+== 180
 alter table idxpart detach partition idxpart2
 --
 73a3f7ce8d874e42
-== 145
+== 181
 alter table idxpart detach partition idxpart3
 --
 b718c42e6529b1c6
-== 146
+== 182
 drop index idxpart1_a_idx
 --
 cc96afdfe65d1ffc
-== 147
+== 183
 drop index idxpart2_a_idx
 --
 c2660c8bb504102c
-== 148
+== 184
 drop index idxpart3_a_idx
 --
 047e08fdcb3f4ab7
-== 149
+== 185
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 150
+== 186
 drop table idxpart, idxpart1, idxpart2, idxpart3
 --
 1e7c0d3163064c7c
-== 151
+== 187
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 152
+== 188
 create table idxpart (a int) partition by range (a)
 --
 56dbeae3841bfa65
-== 153
+== 189
 create table idxpart1 (like idxpart)
 --
 cd29fc607c763c2c
-== 154
+== 190
 create index on idxpart1 (a)
 --
 d695b35ffc15cc86
-== 155
+== 191
 create index on idxpart (a)
 --
 5ac25ee1d40107de
-== 156
+== 192
 create table idxpart2 (like idxpart)
 --
 fcd646c8ff7dd13d
-== 157
+== 193
 alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
 --
 c54d2a13e9cdca71
-== 158
+== 194
 alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
 --
 c59de0d96a6cf426
-== 159
+== 195
 create table idxpart3 partition of idxpart for values from (2000) to (3000)
 --
 21fc8e4040fcb809
-== 160
+== 196
 -- b) after detaching, dropping the index on parent does not remove the others
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 161
+== 197
 alter table idxpart detach partition idxpart1
 --
 3ddc31b2d94a8027
-== 162
+== 198
 alter table idxpart detach partition idxpart2
 --
 73a3f7ce8d874e42
-== 163
+== 199
 alter table idxpart detach partition idxpart3
 --
 b718c42e6529b1c6
-== 164
+== 200
 drop index idxpart_a_idx
 --
 31de6f45747114ea
-== 165
+== 201
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 166
+== 202
 drop table idxpart, idxpart1, idxpart2, idxpart3
 --
 1e7c0d3163064c7c
-== 167
+== 203
 select relname, relkind from pg_class where relname like 'idxpart%' order by relname
 --
 d853d32c70e09ac5
-== 168
+== 204
 create table idxpart (a int, b int, c int) partition by range(a)
 --
 15d6ed6fc36ceec7
-== 169
+== 205
 create index on idxpart(c)
 --
 3aacd182949bd6c3
-== 170
+== 206
 create table idxpart1 partition of idxpart for values from (0) to (250)
 --
 9b5c3e97cc2a4c69
-== 171
+== 207
 create table idxpart2 partition of idxpart for values from (250) to (500)
 --
 0db2a2048ec56b65
-== 172
+== 208
 alter table idxpart detach partition idxpart2
 --
 73a3f7ce8d874e42
-== 173
+== 209
 alter table idxpart2 drop column c
 --
 fd56993cb80612d8
-== 174
+== 210
 drop table idxpart, idxpart2
 --
 8bf67efea21d3d50
-== 175
+== 211
 -- Verify that expression indexes inherit correctly
 create table idxpart (a int, b int) partition by range (a)
 --
 1a8ced3bc78e7dcc
-== 176
+== 212
 create table idxpart1 (like idxpart)
 --
 cd29fc607c763c2c
-== 177
+== 213
 create index on idxpart1 ((a + b))
 --
 2497673acfdc8add
-== 178
+== 214
 create index on idxpart ((a + b))
 --
 034c999fb0d84065
-== 179
+== 215
 create table idxpart2 (like idxpart)
 --
 fcd646c8ff7dd13d
-== 180
+== 216
 alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
 --
 c54d2a13e9cdca71
-== 181
+== 217
 alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
 --
 c59de0d96a6cf426
-== 182
+== 218
 create table idxpart3 partition of idxpart for values from (2000) to (3000)
 --
 21fc8e4040fcb809
-== 183
+== 219
 select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
   from pg_class join pg_inherits on inhrelid = oid,
   lateral pg_get_indexdef(pg_class.oid)
   where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
 --
 cad03c0bf19aba6d
-== 184
+== 220
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 185
+== 221
 -- Verify behavior for collation (mis)matches
 create table idxpart (a text) partition by range (a)
 --
 6fa96503d934fde6
-== 186
+== 222
 create table idxpart1 (like idxpart)
 --
 cd29fc607c763c2c
-== 187
+== 223
 create table idxpart2 (like idxpart)
 --
 fcd646c8ff7dd13d
-== 188
+== 224
 create index on idxpart2 (a collate "POSIX")
 --
 a782163cef7354d5
-== 189
+== 225
 create index on idxpart2 (a)
 --
 37bb7977c552dc05
-== 190
+== 226
 create index on idxpart2 (a collate "C")
 --
 a95106949f8ef624
-== 191
+== 227
 alter table idxpart attach partition idxpart1 for values from ('aaa') to ('bbb')
 --
 c54d2a13e9cdca71
-== 192
+== 228
 alter table idxpart attach partition idxpart2 for values from ('bbb') to ('ccc')
 --
 c59de0d96a6cf426
-== 193
+== 229
 create table idxpart3 partition of idxpart for values from ('ccc') to ('ddd')
 --
 21fc8e4040fcb809
-== 194
+== 230
 create index on idxpart (a collate "C")
 --
 b629d5b4afc342ab
-== 195
+== 231
 create table idxpart4 partition of idxpart for values from ('ddd') to ('eee')
 --
 25818be4b62d3226
-== 196
+== 232
 select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
   from pg_class left join pg_inherits on inhrelid = oid,
   lateral pg_get_indexdef(pg_class.oid)
   where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
 --
 37b10eb5060f5735
-== 197
+== 233
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 198
+== 234
 -- Verify behavior for opclass (mis)matches
 create table idxpart (a text) partition by range (a)
 --
 6fa96503d934fde6
-== 199
+== 235
 create table idxpart1 (like idxpart)
 --
 cd29fc607c763c2c
-== 200
+== 236
 create table idxpart2 (like idxpart)
 --
 fcd646c8ff7dd13d
-== 201
+== 237
 create index on idxpart2 (a)
 --
 37bb7977c552dc05
-== 202
+== 238
 alter table idxpart attach partition idxpart1 for values from ('aaa') to ('bbb')
 --
 c54d2a13e9cdca71
-== 203
+== 239
 alter table idxpart attach partition idxpart2 for values from ('bbb') to ('ccc')
 --
 c59de0d96a6cf426
-== 204
+== 240
 create table idxpart3 partition of idxpart for values from ('ccc') to ('ddd')
 --
 21fc8e4040fcb809
-== 205
+== 241
 create index on idxpart (a text_pattern_ops)
 --
 fc479eaf09aa4e7c
-== 206
+== 242
 create table idxpart4 partition of idxpart for values from ('ddd') to ('eee')
 --
 25818be4b62d3226
-== 207
+== 243
 -- must *not* have attached the index we created on idxpart2
 select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
   from pg_class left join pg_inherits on inhrelid = oid,
@@ -928,97 +1093,97 @@ select relname as child, inhparent::regclass as parent, pg_get_indexdef as child
   where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
 --
 37b10eb5060f5735
-== 208
+== 244
 drop index idxpart_a_idx
 --
 31de6f45747114ea
-== 209
+== 245
 create index on only idxpart (a text_pattern_ops)
 --
 7bb5fcd21760017a
-== 210
+== 246
 -- must reject
 alter index idxpart_a_idx attach partition idxpart2_a_idx
 --
 db773e8ef9b424b1
-== 211
+== 247
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 212
+== 248
 -- Verify that attaching indexes maps attribute numbers correctly
 create table idxpart (col1 int, a int, col2 int, b int) partition by range (a)
 --
 4b9c5cd2305069b1
-== 213
+== 249
 create table idxpart1 (b int, col1 int, col2 int, col3 int, a int)
 --
 01b25ccebc7095ca
-== 214
+== 250
 alter table idxpart drop column col1, drop column col2
 --
 76d3f1958e6ddb94
-== 215
+== 251
 alter table idxpart1 drop column col1, drop column col2, drop column col3
 --
 294e95887cb47810
-== 216
+== 252
 alter table idxpart attach partition idxpart1 for values from (0) to (1000)
 --
 c54d2a13e9cdca71
-== 217
+== 253
 create index idxpart_1_idx on only idxpart (b, a)
 --
 bde4ad9b3a148c5e
-== 218
+== 254
 create index idxpart1_1_idx on idxpart1 (b, a)
 --
 df777e050abc2e0e
-== 219
+== 255
 create index idxpart1_1b_idx on idxpart1 (b)
 --
 f0b7055d1e5329e9
-== 220
+== 256
 -- test expressions and partial-index predicate, too
 create index idxpart_2_idx on only idxpart ((b + a)) where a > 1
 --
 f145ae826c46a741
-== 221
+== 257
 create index idxpart1_2_idx on idxpart1 ((b + a)) where a > 1
 --
 e51776a20aff0edf
-== 222
+== 258
 create index idxpart1_2b_idx on idxpart1 ((a + b)) where a > 1
 --
 9866e9fe5925a333
-== 223
+== 259
 create index idxpart1_2c_idx on idxpart1 ((b + a)) where b > 1
 --
 df210aed6ece747c
-== 224
+== 260
 alter index idxpart_1_idx attach partition idxpart1_1b_idx
 --
 bddea51e104420e5
-== 225
+== 261
 -- fail
 alter index idxpart_1_idx attach partition idxpart1_1_idx
 --
 2f92cc3ca77289ff
-== 226
+== 262
 alter index idxpart_2_idx attach partition idxpart1_2b_idx
 --
 9d8cd62d5769f1fa
-== 227
+== 263
 -- fail
 alter index idxpart_2_idx attach partition idxpart1_2c_idx
 --
 123cf602db30355a
-== 228
+== 264
 -- fail
 alter index idxpart_2_idx attach partition idxpart1_2_idx
 --
 e7421af923198c43
-== 229
+== 265
 -- ok
 select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
   from pg_class left join pg_inherits on inhrelid = oid,
@@ -1026,253 +1191,253 @@ select relname as child, inhparent::regclass as parent, pg_get_indexdef as child
   where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
 --
 37b10eb5060f5735
-== 230
-drop table idxpart
---
-f57d4c47ec16cd44
-== 231
--- Make sure the partition columns are mapped correctly
-create table idxpart (a int, b int, c text) partition by range (a)
---
-6a46aaeaecdc4be2
-== 232
-create index idxparti on idxpart (a)
---
-60bf455de7359463
-== 233
-create index idxparti2 on idxpart (c, b)
---
-5989e10cbc2ab284
-== 234
-create table idxpart1 (c text, a int, b int)
---
-8276039f0199eaf9
-== 235
-alter table idxpart attach partition idxpart1 for values from (0) to (10)
---
-c54d2a13e9cdca71
-== 236
-create table idxpart2 (c text, a int, b int)
---
-656ebdca9e2fd66b
-== 237
-create index on idxpart2 (a)
---
-37bb7977c552dc05
-== 238
-create index on idxpart2 (c, b)
---
-666a8565bfd6fda7
-== 239
-alter table idxpart attach partition idxpart2 for values from (10) to (20)
---
-c59de0d96a6cf426
-== 240
-select c.relname, pg_get_indexdef(indexrelid)
-  from pg_class c join pg_index i on c.oid = i.indexrelid
-  where indrelid::regclass::text like 'idxpart%'
-  order by indexrelid::regclass::text collate "C"
---
-ead2687de891c4d5
-== 241
-drop table idxpart
---
-f57d4c47ec16cd44
-== 242
--- Verify that columns are mapped correctly in expression indexes
-create table idxpart (col1 int, col2 int, a int, b int) partition by range (a)
---
-474c5f312f2a6b24
-== 243
-create table idxpart1 (col2 int, b int, col1 int, a int)
---
-ddeaec92bba0b94f
-== 244
-create table idxpart2 (col1 int, col2 int, b int, a int)
---
-099a7f77f5cbad69
-== 245
-alter table idxpart drop column col1, drop column col2
---
-76d3f1958e6ddb94
-== 246
-alter table idxpart1 drop column col1, drop column col2
---
-08903fccecea8065
-== 247
-alter table idxpart2 drop column col1, drop column col2
---
-f0b9079787d64749
-== 248
-create index on idxpart2 (abs(b))
---
-262787feef2f8848
-== 249
-alter table idxpart attach partition idxpart2 for values from (0) to (1)
---
-c59de0d96a6cf426
-== 250
-create index on idxpart (abs(b))
---
-9d158e5874d3347a
-== 251
-create index on idxpart ((b + 1))
---
-06d8fa94c850da33
-== 252
-alter table idxpart attach partition idxpart1 for values from (1) to (2)
---
-c54d2a13e9cdca71
-== 253
-select c.relname, pg_get_indexdef(indexrelid)
-  from pg_class c join pg_index i on c.oid = i.indexrelid
-  where indrelid::regclass::text like 'idxpart%'
-  order by indexrelid::regclass::text collate "C"
---
-ead2687de891c4d5
-== 254
-drop table idxpart
---
-f57d4c47ec16cd44
-== 255
--- Verify that columns are mapped correctly for WHERE in a partial index
-create table idxpart (col1 int, a int, col3 int, b int) partition by range (a)
---
-89aeaafda488ae2c
-== 256
-alter table idxpart drop column col1, drop column col3
---
-cf2736a625371158
-== 257
-create table idxpart1 (col1 int, col2 int, col3 int, col4 int, b int, a int)
---
-e51ba6e394ec1829
-== 258
-alter table idxpart1 drop column col1, drop column col2, drop column col3, drop column col4
---
-96a6116a8f068dc3
-== 259
-alter table idxpart attach partition idxpart1 for values from (0) to (1000)
---
-c54d2a13e9cdca71
-== 260
-create table idxpart2 (col1 int, col2 int, b int, a int)
---
-099a7f77f5cbad69
-== 261
-create index on idxpart2 (a) where b > 1000
---
-1fe07b53c31d05c7
-== 262
-alter table idxpart2 drop column col1, drop column col2
---
-f0b9079787d64749
-== 263
-alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
---
-c59de0d96a6cf426
-== 264
-create index on idxpart (a) where b > 1000
---
-3e8f42133c50223a
-== 265
-select c.relname, pg_get_indexdef(indexrelid)
-  from pg_class c join pg_index i on c.oid = i.indexrelid
-  where indrelid::regclass::text like 'idxpart%'
-  order by indexrelid::regclass::text collate "C"
---
-ead2687de891c4d5
 == 266
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 267
+-- Make sure the partition columns are mapped correctly
+create table idxpart (a int, b int, c text) partition by range (a)
+--
+6a46aaeaecdc4be2
+== 268
+create index idxparti on idxpart (a)
+--
+60bf455de7359463
+== 269
+create index idxparti2 on idxpart (c, b)
+--
+5989e10cbc2ab284
+== 270
+create table idxpart1 (c text, a int, b int)
+--
+8276039f0199eaf9
+== 271
+alter table idxpart attach partition idxpart1 for values from (0) to (10)
+--
+c54d2a13e9cdca71
+== 272
+create table idxpart2 (c text, a int, b int)
+--
+656ebdca9e2fd66b
+== 273
+create index on idxpart2 (a)
+--
+37bb7977c552dc05
+== 274
+create index on idxpart2 (c, b)
+--
+666a8565bfd6fda7
+== 275
+alter table idxpart attach partition idxpart2 for values from (10) to (20)
+--
+c59de0d96a6cf426
+== 276
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+813199e72da385a5
+== 277
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 278
+-- Verify that columns are mapped correctly in expression indexes
+create table idxpart (col1 int, col2 int, a int, b int) partition by range (a)
+--
+474c5f312f2a6b24
+== 279
+create table idxpart1 (col2 int, b int, col1 int, a int)
+--
+ddeaec92bba0b94f
+== 280
+create table idxpart2 (col1 int, col2 int, b int, a int)
+--
+099a7f77f5cbad69
+== 281
+alter table idxpart drop column col1, drop column col2
+--
+76d3f1958e6ddb94
+== 282
+alter table idxpart1 drop column col1, drop column col2
+--
+08903fccecea8065
+== 283
+alter table idxpart2 drop column col1, drop column col2
+--
+f0b9079787d64749
+== 284
+create index on idxpart2 (abs(b))
+--
+262787feef2f8848
+== 285
+alter table idxpart attach partition idxpart2 for values from (0) to (1)
+--
+c59de0d96a6cf426
+== 286
+create index on idxpart (abs(b))
+--
+9d158e5874d3347a
+== 287
+create index on idxpart ((b + 1))
+--
+06d8fa94c850da33
+== 288
+alter table idxpart attach partition idxpart1 for values from (1) to (2)
+--
+c54d2a13e9cdca71
+== 289
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+813199e72da385a5
+== 290
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 291
+-- Verify that columns are mapped correctly for WHERE in a partial index
+create table idxpart (col1 int, a int, col3 int, b int) partition by range (a)
+--
+89aeaafda488ae2c
+== 292
+alter table idxpart drop column col1, drop column col3
+--
+cf2736a625371158
+== 293
+create table idxpart1 (col1 int, col2 int, col3 int, col4 int, b int, a int)
+--
+e51ba6e394ec1829
+== 294
+alter table idxpart1 drop column col1, drop column col2, drop column col3, drop column col4
+--
+96a6116a8f068dc3
+== 295
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+c54d2a13e9cdca71
+== 296
+create table idxpart2 (col1 int, col2 int, b int, a int)
+--
+099a7f77f5cbad69
+== 297
+create index on idxpart2 (a) where b > 1000
+--
+1fe07b53c31d05c7
+== 298
+alter table idxpart2 drop column col1, drop column col2
+--
+f0b9079787d64749
+== 299
+alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
+--
+c59de0d96a6cf426
+== 300
+create index on idxpart (a) where b > 1000
+--
+3e8f42133c50223a
+== 301
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+813199e72da385a5
+== 302
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 303
 -- Column number mapping: dropped columns in the partition
 create table idxpart1 (drop_1 int, drop_2 int, col_keep int, drop_3 int)
 --
 4a0d8c67e1f67c34
-== 268
+== 304
 alter table idxpart1 drop column drop_1
 --
 78065e58e8a2fa61
-== 269
+== 305
 alter table idxpart1 drop column drop_2
 --
 75db2b3fcd12ea52
-== 270
+== 306
 alter table idxpart1 drop column drop_3
 --
 278eb9d334591df9
-== 271
+== 307
 create index on idxpart1 (col_keep)
 --
 ecfaeef103f9b48c
-== 272
+== 308
 create table idxpart (col_keep int) partition by range (col_keep)
 --
 afc770542e231195
-== 273
+== 309
 create index on idxpart (col_keep)
 --
 a6b1e481c0c68647
-== 274
+== 310
 alter table idxpart attach partition idxpart1 for values from (0) to (1000)
 --
 c54d2a13e9cdca71
-== 275
+== 311
 select attrelid::regclass, attname, attnum from pg_attribute
   where attrelid::regclass::text like 'idxpart%' and attnum > 0
   order by attrelid::regclass, attnum
 --
 b0a497d7f7234f4c
-== 276
+== 312
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 277
+== 313
 -- Column number mapping: dropped columns in the parent table
 create table idxpart(drop_1 int, drop_2 int, col_keep int, drop_3 int) partition by range (col_keep)
 --
 5a696456fbe900eb
-== 278
+== 314
 alter table idxpart drop column drop_1
 --
 83a7becc63f84945
-== 279
+== 315
 alter table idxpart drop column drop_2
 --
 4502b7c0e353b409
-== 280
+== 316
 alter table idxpart drop column drop_3
 --
 4b9804974bd2d6b9
-== 281
+== 317
 create table idxpart1 (col_keep int)
 --
 75ff71dc141468dd
-== 282
+== 318
 create index on idxpart1 (col_keep)
 --
 ecfaeef103f9b48c
-== 283
+== 319
 create index on idxpart (col_keep)
 --
 a6b1e481c0c68647
-== 284
+== 320
 alter table idxpart attach partition idxpart1 for values from (0) to (1000)
 --
 c54d2a13e9cdca71
-== 285
+== 321
 select attrelid::regclass, attname, attnum from pg_attribute
   where attrelid::regclass::text like 'idxpart%' and attnum > 0
   order by attrelid::regclass, attnum
 --
 b0a497d7f7234f4c
-== 286
+== 322
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 287
+== 323
 |--
 -- Constraint-related indexes
 |--
@@ -1281,367 +1446,367 @@ f57d4c47ec16cd44
 create table idxpart (a int primary key, b int) partition by range (a)
 --
 2ef38fd9edb29cb7
-== 288
+== 324
 -- multiple primary key on child should fail
 create table failpart partition of idxpart (b primary key) for values from (0) to (100)
 --
 eb2e477e05297884
-== 289
-drop table idxpart
---
-f57d4c47ec16cd44
-== 290
--- primary key on child is okay if there's no PK in the parent, though
-create table idxpart (a int) partition by range (a)
---
-56dbeae3841bfa65
-== 291
-create table idxpart1pk partition of idxpart (a primary key) for values from (0) to (100)
---
-c0a0b44ff3f585cf
-== 292
-drop table idxpart
---
-f57d4c47ec16cd44
-== 293
--- Failing to use the full partition key is not allowed
-create table idxpart (a int unique, b int) partition by range (a, b)
---
-119fcceb2320bed2
-== 294
-create table idxpart (a int, b int unique) partition by range (a, b)
---
-8a22ef93353b4d38
-== 295
-create table idxpart (a int primary key, b int) partition by range (b, a)
---
-da091f7a10c0c372
-== 296
-create table idxpart (a int, b int primary key) partition by range (b, a)
---
-9db6f628797e02a7
-== 297
--- OK if you use them in some other order
-create table idxpart (a int, b int, c text, primary key  (a, b, c)) partition by range (b, c, a)
---
-a346adbb98ae54cf
-== 298
-drop table idxpart
---
-f57d4c47ec16cd44
-== 299
--- OK to add an exclusion constraint if partitioning by its equal column
-create table idxpart (a int4range, exclude USING GIST (a with = )) partition by range (a)
---
-c841fd5f6383f13d
-== 300
-drop table idxpart
---
-f57d4c47ec16cd44
-== 301
--- OK more than one equal column
-create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a, b)
---
-c64f43493a01a882
-== 302
-drop table idxpart
---
-f57d4c47ec16cd44
-== 303
--- OK with more than one equal column: constraint is a proper superset of partition key
-create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a)
---
-97f8c99040b98698
-== 304
-drop table idxpart
---
-f57d4c47ec16cd44
-== 305
--- Not OK more than one equal column: partition keys are a proper superset of constraint
-create table idxpart (a int4range, b int4range, exclude USING GIST (a with = )) partition by range (a, b)
---
-bb1afb0f47815771
-== 306
--- Not OK with just -|-
-create table idxpart (a int4range, exclude USING GIST (a with -|- )) partition by range (a)
---
-652f53189313f897
-== 307
--- OK with equals and &&, and equals is the partition key
-create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with &&)) partition by range (a)
---
-b37e635c0b7daad3
-== 308
-drop table idxpart
---
-f57d4c47ec16cd44
-== 309
--- Not OK with equals and &&, and equals is not the partition key
-create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (b with =, c with &&)) partition by range (a)
---
-0e8f2eff2cb1fecf
-== 310
--- OK more than one equal column and a && column
-create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (a with =, b with =, c with &&)) partition by range (a, b)
---
-7768f590236b6783
-== 311
-drop table idxpart
---
-f57d4c47ec16cd44
-== 312
--- no expressions in partition key for PK/UNIQUE
-create table idxpart (a int primary key, b int) partition by range ((b + a))
---
-311478a03fb26a06
-== 313
-create table idxpart (a int unique, b int) partition by range ((b + a))
---
-9b6d82dbaeec3494
-== 314
--- use ALTER TABLE to add a primary key
-create table idxpart (a int, b int, c text) partition by range (a, b)
---
-c14c534a83f222ee
-== 315
-alter table idxpart add primary key (a)
---
-ce425e0aac0dedeb
-== 316
--- not an incomplete one though
-alter table idxpart add primary key (a, b)
---
-e3a4db458d914b40
-== 317
--- this works
-create table idxpart1 partition of idxpart for values from (0, 0) to (1000, 1000)
---
-9b5c3e97cc2a4c69
-== 318
-drop table idxpart
---
-f57d4c47ec16cd44
-== 319
--- use ALTER TABLE to add a unique constraint
-create table idxpart (a int, b int) partition by range (a, b)
---
-eaafd4c4370a34f3
-== 320
-alter table idxpart add unique (a)
---
-ec559a744946cf69
-== 321
--- not an incomplete one though
-alter table idxpart add unique (b, a)
---
-6aa50408a6ba3d1e
-== 322
--- this works
-drop table idxpart
---
-f57d4c47ec16cd44
-== 323
--- Exclusion constraints can be added if partitioning by their equal column
-create table idxpart (a int4range, b int4range) partition by range (a)
---
-76e8be7d03a0f56d
-== 324
-alter table idxpart add exclude USING GIST (a with =)
---
-66e84fccfacfc296
 == 325
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 326
--- OK more than one equal column
-create table idxpart (a int4range, b int4range) partition by range (a, b)
+-- primary key on child is okay if there's no PK in the parent, though
+create table idxpart (a int) partition by range (a)
 --
-0942aa116e354b91
+56dbeae3841bfa65
 == 327
-alter table idxpart add exclude USING GIST (a with =, b with =)
+create table idxpart1pk partition of idxpart (a primary key) for values from (0) to (100)
 --
-c5f006176afcc1c8
+c0a0b44ff3f585cf
 == 328
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 329
--- OK with more than one equal column: constraint is a proper superset of partition key
-create table idxpart (a int4range, b int4range) partition by range (a)
+-- Failing to use the full partition key is not allowed
+create table idxpart (a int unique, b int) partition by range (a, b)
 --
-76e8be7d03a0f56d
+119fcceb2320bed2
 == 330
-alter table idxpart add exclude USING GIST (a with =, b with =)
+create table idxpart (a int, b int unique) partition by range (a, b)
 --
-c5f006176afcc1c8
+8a22ef93353b4d38
 == 331
-drop table idxpart
+create table idxpart (a int primary key, b int) partition by range (b, a)
 --
-f57d4c47ec16cd44
+da091f7a10c0c372
 == 332
--- Not OK more than one equal column: partition keys are a proper superset of constraint
-create table idxpart (a int4range, b int4range) partition by range (a, b)
+create table idxpart (a int, b int primary key) partition by range (b, a)
 --
-0942aa116e354b91
+9db6f628797e02a7
 == 333
-alter table idxpart add exclude USING GIST (a with =)
+-- OK if you use them in some other order
+create table idxpart (a int, b int, c text, primary key  (a, b, c)) partition by range (b, c, a)
 --
-66e84fccfacfc296
+a346adbb98ae54cf
 == 334
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 335
--- Not OK with just -|-
-create table idxpart (a int4range, b int4range) partition by range (a, b)
+-- OK to add an exclusion constraint if partitioning by its equal column
+create table idxpart (a int4range, exclude USING GIST (a with = )) partition by range (a)
 --
-0942aa116e354b91
+c841fd5f6383f13d
 == 336
-alter table idxpart add exclude USING GIST (a with -|-)
---
-46ac09a27d9c02a6
-== 337
 drop table idxpart
 --
 f57d4c47ec16cd44
+== 337
+-- OK more than one equal column
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a, b)
+--
+c64f43493a01a882
 == 338
--- OK with equals and &&, and equals is the partition key
-create table idxpart (a int4range, b int4range) partition by range (a)
+drop table idxpart
 --
-76e8be7d03a0f56d
+f57d4c47ec16cd44
 == 339
-alter table idxpart add exclude USING GIST (a with =, b with &&)
+-- OK with more than one equal column: constraint is a proper superset of partition key
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a)
 --
-806fce87d155cf57
+97f8c99040b98698
 == 340
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 341
--- Not OK with equals and &&, and equals is not the partition key
-create table idxpart (a int4range, b int4range, c int4range) partition by range (a)
+-- Not OK more than one equal column: partition keys are a proper superset of constraint
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with = )) partition by range (a, b)
 --
-ba8b51dc80615bf1
+bb1afb0f47815771
 == 342
-alter table idxpart add exclude USING GIST (b with =, c with &&)
+-- Not OK with just -|-
+create table idxpart (a int4range, exclude USING GIST (a with -|- )) partition by range (a)
 --
-30ab7e2d2d509a8c
+652f53189313f897
 == 343
-drop table idxpart
+-- OK with equals and &&, and equals is the partition key
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with &&)) partition by range (a)
 --
-f57d4c47ec16cd44
+b37e635c0b7daad3
 == 344
--- OK more than one equal column and a && column
-create table idxpart (a int4range, b int4range, c int4range) partition by range (a, b)
---
-d3db971c1d95b14d
-== 345
-alter table idxpart add exclude USING GIST (a with =, b with =, c with &&)
---
-16a50cfeb6005223
-== 346
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 347
--- When (sub)partitions are created, they also contain the constraint
-create table idxpart (a int, b int, primary key (a, b)) partition by range (a, b)
+== 345
+-- Not OK with equals and &&, and equals is not the partition key
+create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (b with =, c with &&)) partition by range (a)
 --
-fbbc969432ba5ed8
+0e8f2eff2cb1fecf
+== 346
+-- OK more than one equal column and a && column
+create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (a with =, b with =, c with &&)) partition by range (a, b)
+--
+7768f590236b6783
+== 347
+drop table idxpart
+--
+f57d4c47ec16cd44
 == 348
-create table idxpart1 partition of idxpart for values from (1, 1) to (10, 10)
+-- no expressions in partition key for PK/UNIQUE
+create table idxpart (a int primary key, b int) partition by range ((b + a))
+--
+311478a03fb26a06
+== 349
+create table idxpart (a int unique, b int) partition by range ((b + a))
+--
+9b6d82dbaeec3494
+== 350
+-- use ALTER TABLE to add a primary key
+create table idxpart (a int, b int, c text) partition by range (a, b)
+--
+c14c534a83f222ee
+== 351
+alter table idxpart add primary key (a)
+--
+ce425e0aac0dedeb
+== 352
+-- not an incomplete one though
+alter table idxpart add primary key (a, b)
+--
+e3a4db458d914b40
+== 353
+-- this works
+create table idxpart1 partition of idxpart for values from (0, 0) to (1000, 1000)
 --
 9b5c3e97cc2a4c69
-== 349
-create table idxpart2 partition of idxpart for values from (10, 10) to (20, 20)
-  partition by range (b)
---
-6330a7191a5194b0
-== 350
-create table idxpart21 partition of idxpart2 for values from (10) to (15)
---
-713fb0056c400c02
-== 351
-create table idxpart22 partition of idxpart2 for values from (15) to (20)
---
-713fb0056c400c02
-== 352
-create table idxpart3 (b int not null, a int not null)
---
-4075d219e140e75f
-== 353
-alter table idxpart attach partition idxpart3 for values from (20, 20) to (30, 30)
---
-9a68892e3c575edf
 == 354
-select conname, contype, conrelid::regclass, conindid::regclass, conkey
-  from pg_constraint where conrelid::regclass::text like 'idxpart%'
-  order by conrelid::regclass::text, conname
---
-4338f76838d3c7c9
-== 355
 drop table idxpart
 --
 f57d4c47ec16cd44
+== 355
+-- use ALTER TABLE to add a unique constraint
+create table idxpart (a int, b int) partition by range (a, b)
+--
+eaafd4c4370a34f3
 == 356
--- Verify that multi-layer partitioning honors the requirement that all
--- columns in the partition key must appear in primary/unique key
-create table idxpart (a int, b int, primary key (a)) partition by range (a)
+alter table idxpart add unique (a)
 --
-3d5bb3c723bf3c5b
+ec559a744946cf69
 == 357
-create table idxpart2 partition of idxpart
-for values from (0) to (1000) partition by range (b)
+-- not an incomplete one though
+alter table idxpart add unique (b, a)
 --
-6330a7191a5194b0
+6aa50408a6ba3d1e
 == 358
--- fail
+-- this works
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 359
--- Ditto for the ATTACH PARTITION case
-create table idxpart (a int unique, b int) partition by range (a)
+-- Exclusion constraints can be added if partitioning by their equal column
+create table idxpart (a int4range, b int4range) partition by range (a)
 --
-ee7f1968cd287386
+76e8be7d03a0f56d
 == 360
-create table idxpart1 (a int not null, b int, unique (a, b))
-  partition by range (a, b)
+alter table idxpart add exclude USING GIST (a with =)
 --
-cc37a5c054f53aee
+66e84fccfacfc296
 == 361
-alter table idxpart attach partition idxpart1 for values from (1) to (1000)
+drop table idxpart
 --
-c54d2a13e9cdca71
+f57d4c47ec16cd44
 == 362
-DROP TABLE idxpart, idxpart1
+-- OK more than one equal column
+create table idxpart (a int4range, b int4range) partition by range (a, b)
 --
-33c7b3eb28550ca0
+0942aa116e354b91
 == 363
--- Multi-layer partitioning works correctly in this case:
-create table idxpart (a int, b int, primary key (a, b)) partition by range (a)
+alter table idxpart add exclude USING GIST (a with =, b with =)
 --
-e6607488622895d3
+c5f006176afcc1c8
 == 364
-create table idxpart2 partition of idxpart for values from (0) to (1000) partition by range (b)
+drop table idxpart
 --
-6330a7191a5194b0
+f57d4c47ec16cd44
 == 365
-create table idxpart21 partition of idxpart2 for values from (0) to (1000)
+-- OK with more than one equal column: constraint is a proper superset of partition key
+create table idxpart (a int4range, b int4range) partition by range (a)
 --
-713fb0056c400c02
+76e8be7d03a0f56d
 == 366
-select conname, contype, conrelid::regclass, conindid::regclass, conkey
-  from pg_constraint where conrelid::regclass::text like 'idxpart%'
-  order by conname
+alter table idxpart add exclude USING GIST (a with =, b with =)
 --
-c64b7b0f4f660880
+c5f006176afcc1c8
 == 367
 drop table idxpart
 --
 f57d4c47ec16cd44
 == 368
+-- Not OK more than one equal column: partition keys are a proper superset of constraint
+create table idxpart (a int4range, b int4range) partition by range (a, b)
+--
+0942aa116e354b91
+== 369
+alter table idxpart add exclude USING GIST (a with =)
+--
+66e84fccfacfc296
+== 370
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 371
+-- Not OK with just -|-
+create table idxpart (a int4range, b int4range) partition by range (a, b)
+--
+0942aa116e354b91
+== 372
+alter table idxpart add exclude USING GIST (a with -|-)
+--
+46ac09a27d9c02a6
+== 373
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 374
+-- OK with equals and &&, and equals is the partition key
+create table idxpart (a int4range, b int4range) partition by range (a)
+--
+76e8be7d03a0f56d
+== 375
+alter table idxpart add exclude USING GIST (a with =, b with &&)
+--
+806fce87d155cf57
+== 376
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 377
+-- Not OK with equals and &&, and equals is not the partition key
+create table idxpart (a int4range, b int4range, c int4range) partition by range (a)
+--
+ba8b51dc80615bf1
+== 378
+alter table idxpart add exclude USING GIST (b with =, c with &&)
+--
+30ab7e2d2d509a8c
+== 379
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 380
+-- OK more than one equal column and a && column
+create table idxpart (a int4range, b int4range, c int4range) partition by range (a, b)
+--
+d3db971c1d95b14d
+== 381
+alter table idxpart add exclude USING GIST (a with =, b with =, c with &&)
+--
+16a50cfeb6005223
+== 382
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 383
+-- When (sub)partitions are created, they also contain the constraint
+create table idxpart (a int, b int, primary key (a, b)) partition by range (a, b)
+--
+fbbc969432ba5ed8
+== 384
+create table idxpart1 partition of idxpart for values from (1, 1) to (10, 10)
+--
+9b5c3e97cc2a4c69
+== 385
+create table idxpart2 partition of idxpart for values from (10, 10) to (20, 20)
+  partition by range (b)
+--
+6330a7191a5194b0
+== 386
+create table idxpart21 partition of idxpart2 for values from (10) to (15)
+--
+713fb0056c400c02
+== 387
+create table idxpart22 partition of idxpart2 for values from (15) to (20)
+--
+713fb0056c400c02
+== 388
+create table idxpart3 (b int not null, a int not null)
+--
+f94dea1602e4d02a
+== 389
+alter table idxpart attach partition idxpart3 for values from (20, 20) to (30, 30)
+--
+9a68892e3c575edf
+== 390
+select conname, contype, conrelid::regclass, conindid::regclass, conkey
+  from pg_constraint where conrelid::regclass::text like 'idxpart%'
+  order by conrelid::regclass::text, conname
+--
+4338f76838d3c7c9
+== 391
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 392
+-- Verify that multi-layer partitioning honors the requirement that all
+-- columns in the partition key must appear in primary/unique key
+create table idxpart (a int, b int, primary key (a)) partition by range (a)
+--
+3d5bb3c723bf3c5b
+== 393
+create table idxpart2 partition of idxpart
+for values from (0) to (1000) partition by range (b)
+--
+6330a7191a5194b0
+== 394
+-- fail
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 395
+-- Ditto for the ATTACH PARTITION case
+create table idxpart (a int unique, b int) partition by range (a)
+--
+ee7f1968cd287386
+== 396
+create table idxpart1 (a int not null, b int, unique (a, b))
+  partition by range (a, b)
+--
+0f38ca6055b8fea5
+== 397
+alter table idxpart attach partition idxpart1 for values from (1) to (1000)
+--
+c54d2a13e9cdca71
+== 398
+DROP TABLE idxpart, idxpart1
+--
+33c7b3eb28550ca0
+== 399
+-- Multi-layer partitioning works correctly in this case:
+create table idxpart (a int, b int, primary key (a, b)) partition by range (a)
+--
+e6607488622895d3
+== 400
+create table idxpart2 partition of idxpart for values from (0) to (1000) partition by range (b)
+--
+6330a7191a5194b0
+== 401
+create table idxpart21 partition of idxpart2 for values from (0) to (1000)
+--
+713fb0056c400c02
+== 402
+select conname, contype, conrelid::regclass, conindid::regclass, conkey
+  from pg_constraint where conrelid::regclass::text like 'idxpart%'
+  order by conrelid::regclass::text, conname
+--
+4338f76838d3c7c9
+== 403
+drop table idxpart
+--
+f57d4c47ec16cd44
+== 404
 -- If a partitioned table has a unique/PK constraint, then it's not possible
 -- to drop the corresponding constraint in the children; nor it's possible
 -- to drop the indexes individually.  Dropping the constraint in the parent
@@ -1649,23 +1814,23 @@ f57d4c47ec16cd44
 create table idxpart (i int) partition by hash (i)
 --
 1bc10bc7ea2110f3
-== 369
+== 405
 create table idxpart0 partition of idxpart (i) for values with (modulus 2, remainder 0)
 --
 5b06b0ffac150ec3
-== 370
+== 406
 create table idxpart1 partition of idxpart (i) for values with (modulus 2, remainder 1)
 --
 3b75aa63bf0c3337
-== 371
+== 407
 alter table idxpart0 add primary key(i)
 --
 d91ac3fe3856b1ea
-== 372
+== 408
 alter table idxpart add primary key(i)
 --
 c3e6af0b08aab71f
-== 373
+== 409
 select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
   conname, conislocal, coninhcount, connoinherit, convalidated
   from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
@@ -1673,32 +1838,32 @@ select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid
   where indrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-4170c5d322f65082
-== 374
+501d38f2b71168ab
+== 410
 drop index idxpart0_pkey
 --
 c55f2d43f8085d18
-== 375
+== 411
 -- fail
 drop index idxpart1_pkey
 --
 314b7ab4d4f68984
-== 376
+== 412
 -- fail
 alter table idxpart0 drop constraint idxpart0_pkey
 --
 5e338a2d40a48753
-== 377
+== 413
 -- fail
 alter table idxpart1 drop constraint idxpart1_pkey
 --
 f42120242f7036cc
-== 378
+== 414
 -- fail
 alter table idxpart drop constraint idxpart_pkey
 --
 60748ae800cfa14f
-== 379
+== 415
 -- ok
 select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
   conname, conislocal, coninhcount, connoinherit, convalidated
@@ -1707,81 +1872,81 @@ select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid
   where indrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-4170c5d322f65082
-== 380
+501d38f2b71168ab
+== 416
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 381
+== 417
 -- If the partition to be attached already has a primary key, fail if
 -- it doesn't match the parent's PK.
 CREATE TABLE idxpart (c1 INT PRIMARY KEY, c2 INT, c3 VARCHAR(10)) PARTITION BY RANGE(c1)
 --
 cfc6db39676118f1
-== 382
+== 418
 CREATE TABLE idxpart1 (LIKE idxpart)
 --
 cd29fc607c763c2c
-== 383
+== 419
 ALTER TABLE idxpart1 ADD PRIMARY KEY (c1, c2)
 --
 7bd5e012aba9ae88
-== 384
+== 420
 ALTER TABLE idxpart ATTACH PARTITION idxpart1 FOR VALUES FROM (100) TO (200)
 --
 c54d2a13e9cdca71
-== 385
+== 421
 DROP TABLE idxpart, idxpart1
 --
 33c7b3eb28550ca0
-== 386
+== 422
 -- Ditto if there is some distance between the PKs (subpartitioning)
 create table idxpart (a int, b int, primary key (a)) partition by range (a)
 --
 3d5bb3c723bf3c5b
-== 387
+== 423
 create table idxpart1 (a int not null, b int) partition by range (a)
 --
-e6765e30c9cd28e2
-== 388
+2fbae6b85dbc2c1a
+== 424
 create table idxpart11 (a int not null, b int primary key)
 --
-40e4f5a26f906d90
-== 389
+771edfd4108f4e68
+== 425
 alter table idxpart1 attach partition idxpart11 for values from (0) to (1000)
 --
 bb5bea12e1cd018e
-== 390
+== 426
 alter table idxpart attach partition idxpart1 for values from (0) to (10000)
 --
 c54d2a13e9cdca71
-== 391
+== 427
 drop table idxpart, idxpart1, idxpart11
 --
 c6f7d41cdb22ad96
-== 392
+== 428
 -- If a partitioned table has a constraint whose index is not valid,
 -- attaching a missing partition makes it valid.
 create table idxpart (a int) partition by range (a)
 --
 56dbeae3841bfa65
-== 393
+== 429
 create table idxpart0 (like idxpart)
 --
 5fcf03b23913e189
-== 394
+== 430
 alter table idxpart0 add primary key (a)
 --
 6844831aac71bf99
-== 395
+== 431
 alter table idxpart attach partition idxpart0 for values from (0) to (1000)
 --
 be8dc8a8f20f62bc
-== 396
+== 432
 alter table only idxpart add primary key (a)
 --
 93ac5277622ce86c
-== 397
+== 433
 select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
   conname, conislocal, coninhcount, connoinherit, convalidated
   from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
@@ -1789,12 +1954,12 @@ select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid
   where indrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-4170c5d322f65082
-== 398
+501d38f2b71168ab
+== 434
 alter index idxpart_pkey attach partition idxpart0_pkey
 --
 b0ae42d66e5a311d
-== 399
+== 435
 select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
   conname, conislocal, coninhcount, connoinherit, convalidated
   from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
@@ -1802,79 +1967,74 @@ select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid
   where indrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-4170c5d322f65082
-== 400
+501d38f2b71168ab
+== 436
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 401
+== 437
 -- Related to the above scenario: ADD PRIMARY KEY on the parent mustn't
 -- automatically propagate NOT NULL to child columns.
 create table idxpart (a int) partition by range (a)
 --
 56dbeae3841bfa65
-== 402
+== 438
 create table idxpart0 (like idxpart)
 --
 5fcf03b23913e189
-== 403
+== 439
 alter table idxpart0 add unique (a)
 --
 ba6ff61a6a9cc3b9
-== 404
+== 440
 alter table idxpart attach partition idxpart0 default
 --
 3b7f5b093486f50c
-== 405
+== 441
 alter table only idxpart add primary key (a)
 --
 93ac5277622ce86c
-== 406
+== 442
 -- fail, no not-null constraint
 alter table idxpart0 alter column a set not null
 --
 478a743a9d4b3e9a
-== 407
+== 443
 alter table only idxpart add primary key (a)
 --
 93ac5277622ce86c
-== 408
+== 444
 -- now it works
 alter index idxpart_pkey attach partition idxpart0_a_key
 --
 7cf598ad05e215f4
-== 409
-alter table idxpart0 alter column a drop not null
---
-ac619d749ee512c6
-== 410
--- fail, pkey needs it
+== 445
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 411
+== 446
 -- if a partition has a unique index without a constraint, does not attach
 -- automatically; creates a new index instead.
 create table idxpart (a int, b int) partition by range (a)
 --
 1a8ced3bc78e7dcc
-== 412
+== 447
 create table idxpart1 (a int not null, b int)
 --
-c1edf5854991ecb2
-== 413
+ba88a2d4a31c4afd
+== 448
 create unique index on idxpart1 (a)
 --
 cd7065106ce0db1f
-== 414
+== 449
 alter table idxpart add primary key (a)
 --
 ce425e0aac0dedeb
-== 415
+== 450
 alter table idxpart attach partition idxpart1 for values from (1) to (1000)
 --
 c54d2a13e9cdca71
-== 416
+== 451
 select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
   conname, conislocal, coninhcount, connoinherit, convalidated
   from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
@@ -1882,500 +2042,500 @@ select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid
   where indrelid::regclass::text like 'idxpart%'
   order by indexrelid::regclass::text collate "C"
 --
-4170c5d322f65082
-== 417
+501d38f2b71168ab
+== 452
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 418
+== 453
 -- Can't attach an index without a corresponding constraint
 create table idxpart (a int, b int) partition by range (a)
 --
 1a8ced3bc78e7dcc
-== 419
+== 454
 create table idxpart1 (a int not null, b int)
 --
-c1edf5854991ecb2
-== 420
+ba88a2d4a31c4afd
+== 455
 create unique index on idxpart1 (a)
 --
 cd7065106ce0db1f
-== 421
+== 456
 alter table idxpart attach partition idxpart1 for values from (1) to (1000)
 --
 c54d2a13e9cdca71
-== 422
+== 457
 alter table only idxpart add primary key (a)
 --
 93ac5277622ce86c
-== 423
+== 458
 alter index idxpart_pkey attach partition idxpart1_a_idx
 --
 734c09a44eadfacc
-== 424
+== 459
 -- fail
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 425
+== 460
 -- Test that unique constraints are working
 create table idxpart (a int, b text, primary key (a, b)) partition by range (a)
 --
 f2151bd5f594c0eb
-== 426
+== 461
 create table idxpart1 partition of idxpart for values from (0) to (100000)
 --
 9b5c3e97cc2a4c69
-== 427
+== 462
 create table idxpart2 (c int, like idxpart)
 --
 832ae04033fee36c
-== 428
+== 463
 insert into idxpart2 (c, a, b) values (42, 572814, 'inserted first')
 --
 b9fe0401f7d6c7ca
-== 429
+== 464
 alter table idxpart2 drop column c
 --
 fd56993cb80612d8
-== 430
+== 465
 create unique index on idxpart (a)
 --
 2320e945280db0f3
-== 431
+== 466
 alter table idxpart attach partition idxpart2 for values from (100000) to (1000000)
 --
 c59de0d96a6cf426
-== 432
+== 467
 insert into idxpart values (0, 'zero'), (42, 'life'), (2^16, 'sixteen')
 --
 0ac15171dd4638db
-== 433
+== 468
 insert into idxpart select 2^g, format('two to power of %s', g) from generate_series(15, 17) g
 --
 b5b382e4a139e65e
-== 434
+== 469
 insert into idxpart values (16, 'sixteen')
 --
 13f64492d33d4567
-== 435
+== 470
 insert into idxpart (b, a) values ('one', 142857), ('two', 285714)
 --
 e6905ad26fb815ce
-== 436
+== 471
 insert into idxpart select a * 2, b || b from idxpart where a between 2^16 and 2^19
 --
 6cfb47cdc78844fc
-== 437
+== 472
 insert into idxpart values (572814, 'five')
 --
 13f64492d33d4567
-== 438
+== 473
 insert into idxpart values (857142, 'six')
 --
 13f64492d33d4567
-== 439
+== 474
 select tableoid::regclass, * from idxpart order by a
 --
 cd7060397a24259b
-== 440
+== 475
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 441
+== 476
 -- Test some other non-btree index types
 create table idxpart (a int, b text, c int[]) partition by range (a)
 --
 dfd4fcb8a8a9c08a
-== 442
+== 477
 create table idxpart1 partition of idxpart for values from (0) to (100000)
 --
 9b5c3e97cc2a4c69
-== 443
+== 478
 set enable_seqscan to off
 --
 b6355b32597ef7db
-== 444
+== 479
 create index idxpart_brin on idxpart using brin(b)
 --
 d5096892b2f0dffa
-== 445
+== 480
 explain (costs off) select * from idxpart where b = 'abcd'
 --
 d452010e18f910cd
-== 446
+== 481
 drop index idxpart_brin
 --
 83650cb9c6485d35
-== 447
+== 482
 create index idxpart_spgist on idxpart using spgist(b)
 --
 6dc97317fc7235fa
-== 448
+== 483
 explain (costs off) select * from idxpart where b = 'abcd'
 --
 d452010e18f910cd
-== 449
+== 484
 drop index idxpart_spgist
 --
 ea96512646ae7b67
-== 450
+== 485
 create index idxpart_gin on idxpart using gin(c)
 --
 fdc16014b522ee1b
-== 451
+== 486
 explain (costs off) select * from idxpart where c @> array[42]
 --
 572eeb6577f0fee1
-== 452
+== 487
 drop index idxpart_gin
 --
 85f89471f813016b
-== 453
+== 488
 reset enable_seqscan
 --
 4dec036bbc151e13
-== 454
+== 489
 drop table idxpart
 --
 f57d4c47ec16cd44
-== 455
+== 490
 -- intentionally leave some objects around
 create table idxpart (a int) partition by range (a)
 --
 56dbeae3841bfa65
-== 456
+== 491
 create table idxpart1 partition of idxpart for values from (0) to (100)
 --
 9b5c3e97cc2a4c69
-== 457
+== 492
 create table idxpart2 partition of idxpart for values from (100) to (1000)
   partition by range (a)
 --
 84a6c0616df98e88
-== 458
+== 493
 create table idxpart21 partition of idxpart2 for values from (100) to (200)
 --
 713fb0056c400c02
-== 459
+== 494
 create table idxpart22 partition of idxpart2 for values from (200) to (300)
 --
 713fb0056c400c02
-== 460
+== 495
 create index on idxpart22 (a)
 --
 5ac25ee1d40107de
-== 461
+== 496
 create index on only idxpart2 (a)
 --
 1b81c403ab6f9fc8
-== 462
+== 497
 alter index idxpart2_a_idx attach partition idxpart22_a_idx
 --
 20d835cac31cbbd8
-== 463
+== 498
 create index on idxpart (a)
 --
 5ac25ee1d40107de
-== 464
+== 499
 create table idxpart_another (a int, b int, primary key (a, b)) partition by range (a)
 --
 ae4fc305e7ce1af9
-== 465
+== 500
 create table idxpart_another_1 partition of idxpart_another for values from (0) to (100)
 --
 d407b85a4bd31428
-== 466
+== 501
 create table idxpart3 (c int, b int, a int) partition by range (a)
 --
 8669349460795a0c
-== 467
+== 502
 alter table idxpart3 drop column b, drop column c
 --
 1f48b33d8cd626f3
-== 468
+== 503
 create table idxpart31 partition of idxpart3 for values from (1000) to (1200)
 --
 64987526c3bc7083
-== 469
+== 504
 create table idxpart32 partition of idxpart3 for values from (1200) to (1400)
 --
 64987526c3bc7083
-== 470
+== 505
 alter table idxpart attach partition idxpart3 for values from (1000) to (2000)
 --
 9a68892e3c575edf
-== 471
+== 506
 -- More objects intentionally left behind, to verify some pg_dump/pg_upgrade
 -- behavior; see https://postgr.es/m/20190321204928.GA17535@alvherre.pgsql
 create schema regress_indexing
 --
 6327c9dd1e109264
-== 472
+== 507
 set search_path to regress_indexing
 --
 972eb2e22f47f95c
-== 473
+== 508
 create table pk (a int primary key) partition by range (a)
 --
 87df228d843ba3b9
-== 474
+== 509
 create table pk1 partition of pk for values from (0) to (1000)
 --
 adcd9512351c04cf
-== 475
+== 510
 create table pk2 (b int, a int)
 --
 bac6a4b92d60d2e6
-== 476
+== 511
 alter table pk2 drop column b
 --
 cf5c96bd5df7b59e
-== 477
+== 512
 alter table pk2 alter a set not null
 --
 fab9a73318e6fccf
-== 478
+== 513
 alter table pk attach partition pk2 for values from (1000) to (2000)
 --
 e65fad1d00fbb09c
-== 479
+== 514
 create table pk3 partition of pk for values from (2000) to (3000)
 --
 884a9aee4d09a448
-== 480
+== 515
 create table pk4 (like pk)
 --
 f3f601542b20b3c6
-== 481
+== 516
 alter table pk attach partition pk4 for values from (3000) to (4000)
 --
 f7a60b046e14c261
-== 482
+== 517
 create table pk5 (like pk) partition by range (a)
 --
 a9b5bff197a27663
-== 483
+== 518
 create table pk51 partition of pk5 for values from (4000) to (4500)
 --
 8b024177f032efa7
-== 484
+== 519
 create table pk52 partition of pk5 for values from (4500) to (5000)
 --
 8b024177f032efa7
-== 485
+== 520
 alter table pk attach partition pk5 for values from (4000) to (5000)
 --
 3a13186327759d16
-== 486
+== 521
 reset search_path
 --
 e97698aade82a29f
-== 487
+== 522
 -- Test that covering partitioned indexes work in various cases
 create table covidxpart (a int, b int) partition by list (a)
 --
 1dee9d7ad5326865
-== 488
+== 523
 create unique index on covidxpart (a) include (b)
 --
 d7a7ea3ea7e333eb
-== 489
+== 524
 create table covidxpart1 partition of covidxpart for values in (1)
 --
 8c66a83bf39169cf
-== 490
+== 525
 create table covidxpart2 partition of covidxpart for values in (2)
 --
 859aa31501785382
-== 491
+== 526
 insert into covidxpart values (1, 1)
 --
 ef8101396a2be1c0
-== 492
+== 527
 insert into covidxpart values (1, 1)
 --
 ef8101396a2be1c0
-== 493
+== 528
 create table covidxpart3 (b int, c int, a int)
 --
 5e1155a8154c49c2
-== 494
+== 529
 alter table covidxpart3 drop c
 --
 9bffc5e04b96b0ab
-== 495
+== 530
 alter table covidxpart attach partition covidxpart3 for values in (3)
 --
 799d0d0586493fed
-== 496
+== 531
 insert into covidxpart values (3, 1)
 --
 ef8101396a2be1c0
-== 497
+== 532
 insert into covidxpart values (3, 1)
 --
 ef8101396a2be1c0
-== 498
+== 533
 create table covidxpart4 (b int, a int)
 --
 b58798cc28dc2d71
-== 499
+== 534
 create unique index on covidxpart4 (a) include (b)
 --
 4a4377cc676a4a99
-== 500
+== 535
 create unique index on covidxpart4 (a)
 --
 268468b792da9512
-== 501
+== 536
 alter table covidxpart attach partition covidxpart4 for values in (4)
 --
 388a83a0d2f4c7e2
-== 502
+== 537
 insert into covidxpart values (4, 1)
 --
 ef8101396a2be1c0
-== 503
+== 538
 insert into covidxpart values (4, 1)
 --
 ef8101396a2be1c0
-== 504
+== 539
 create unique index on covidxpart (b) include (a)
 --
 27ca8d5b74ce5e64
-== 505
+== 540
 -- should fail
 
 -- check that detaching a partition also detaches the primary key constraint
 create table parted_pk_detach_test (a int primary key) partition by list (a)
 --
 991b383f43af8e44
-== 506
+== 541
 create table parted_pk_detach_test1 partition of parted_pk_detach_test for values in (1)
 --
 53763183e2bb85d3
-== 507
+== 542
 alter table parted_pk_detach_test1 drop constraint parted_pk_detach_test1_pkey
 --
 fa3a743ec9e0b58d
-== 508
+== 543
 -- should fail
 alter table parted_pk_detach_test detach partition parted_pk_detach_test1
 --
 f6addb97b98ddb12
-== 509
+== 544
 alter table parted_pk_detach_test1 drop constraint parted_pk_detach_test1_pkey
 --
 fa3a743ec9e0b58d
-== 510
+== 545
 drop table parted_pk_detach_test, parted_pk_detach_test1
 --
 e58189f4c61ab3a0
-== 511
+== 546
 create table parted_uniq_detach_test (a int unique) partition by list (a)
 --
 8bf9b72bf0b6e915
-== 512
+== 547
 create table parted_uniq_detach_test1 partition of parted_uniq_detach_test for values in (1)
 --
 420e7d48209907c4
-== 513
+== 548
 alter table parted_uniq_detach_test1 drop constraint parted_uniq_detach_test1_a_key
 --
 c38dbb9ee2a30b5a
-== 514
+== 549
 -- should fail
 alter table parted_uniq_detach_test detach partition parted_uniq_detach_test1
 --
 f87e401ec0fef306
-== 515
+== 550
 alter table parted_uniq_detach_test1 drop constraint parted_uniq_detach_test1_a_key
 --
 c38dbb9ee2a30b5a
-== 516
+== 551
 drop table parted_uniq_detach_test, parted_uniq_detach_test1
 --
 34c9d518ce0f6965
-== 517
+== 552
 -- check that dropping a column takes with it any partitioned indexes
 -- depending on it.
 create table parted_index_col_drop(a int, b int, c int)
   partition by list (a)
 --
 fdc2670e32e4aaf6
-== 518
+== 553
 create table parted_index_col_drop1 partition of parted_index_col_drop
   for values in (1) partition by list (a)
 --
 b2948cfb4a9388ca
-== 519
+== 554
 -- leave this partition without children.
 create table parted_index_col_drop2 partition of parted_index_col_drop
   for values in (2) partition by list (a)
 --
 daf5c6337aae2393
-== 520
+== 555
 create table parted_index_col_drop11 partition of parted_index_col_drop1
   for values in (1)
 --
 1c51e12114642fc1
-== 521
+== 556
 create index on parted_index_col_drop (b)
 --
 8e4ef68a8819fd55
-== 522
+== 557
 create index on parted_index_col_drop (c)
 --
 b6491cefae9d89d5
-== 523
+== 558
 create index on parted_index_col_drop (b, c)
 --
 2ce5ba7dfdd2fe98
-== 524
+== 559
 alter table parted_index_col_drop drop column c
 --
 7bfe3f69d0946967
-== 525
+== 560
 drop table parted_index_col_drop
 --
 c8207ee40234674d
-== 526
+== 561
 -- Check that invalid indexes are not selected when attaching a partition.
 create table parted_inval_tab (a int) partition by range (a)
 --
 e1a8465d72b964c5
-== 527
+== 562
 create index parted_inval_idx on parted_inval_tab (a)
 --
 b922c2f7cdeb40a4
-== 528
+== 563
 create table parted_inval_tab_1 (a int) partition by range (a)
 --
 4e8d80d1fd594b74
-== 529
+== 564
 create table parted_inval_tab_1_1 partition of parted_inval_tab_1
   for values from (0) to (10)
 --
 d8e6bb404b9fd8b7
-== 530
+== 565
 create table parted_inval_tab_1_2 partition of parted_inval_tab_1
   for values from (10) to (20)
 --
 7cb1aa4dff063363
-== 531
+== 566
 -- this creates an invalid index.
 create index parted_inval_ixd_1 on only parted_inval_tab_1 (a)
 --
 ae950bd12685bc39
-== 532
+== 567
 -- this creates new indexes for all the partitions of parted_inval_tab_1,
 -- discarding the invalid index created previously as what is chosen.
 alter table parted_inval_tab attach partition parted_inval_tab_1
   for values from (1) to (100)
 --
 6a096df002fbea88
-== 533
+== 568
 select indexrelid::regclass, indisvalid,
        indrelid::regclass, inhparent::regclass
   from pg_index idx left join
@@ -2383,54 +2543,54 @@ select indexrelid::regclass, indisvalid,
   where indexrelid::regclass::text like 'parted_inval%'
   order by indexrelid::regclass::text collate "C"
 --
-b549fe44b26e4c13
-== 534
+6f6855236596c4d6
+== 569
 drop table parted_inval_tab
 --
 335cf2bb319e91f2
-== 535
+== 570
 -- Check setup of indisvalid across a complex partition tree on index
 -- creation.  If one index in a partition index is invalid, so should its
 -- partitioned index.
 create table parted_isvalid_tab (a int, b int) partition by range (a)
 --
 14dc3eadd153a92c
-== 536
+== 571
 create table parted_isvalid_tab_1 partition of parted_isvalid_tab
   for values from (1) to (10) partition by range (a)
 --
 595f80059c87a491
-== 537
+== 572
 create table parted_isvalid_tab_2 partition of parted_isvalid_tab
   for values from (10) to (20) partition by range (a)
 --
 372529e317b840bf
-== 538
+== 573
 create table parted_isvalid_tab_11 partition of parted_isvalid_tab_1
   for values from (1) to (5)
 --
 37394a06d9cf8c6d
-== 539
+== 574
 create table parted_isvalid_tab_12 partition of parted_isvalid_tab_1
   for values from (5) to (10)
 --
 37394a06d9cf8c6d
-== 540
+== 575
 -- create an invalid index on one of the partitions.
 insert into parted_isvalid_tab_11 values (1, 0)
 --
 bdb9b31c5c789de8
-== 541
+== 576
 create index concurrently parted_isvalid_idx_11 on parted_isvalid_tab_11 ((a/b))
 --
 7b7de8b5d85cce52
-== 542
+== 577
 -- The previous invalid index is selected, invalidating all the indexes up to
 -- the top-most parent.
 create index parted_isvalid_idx on parted_isvalid_tab ((a/b))
 --
 f0d7e40e4528697a
-== 543
+== 578
 select indexrelid::regclass, indisvalid,
        indrelid::regclass, inhparent::regclass
   from pg_index idx left join
@@ -2438,51 +2598,51 @@ select indexrelid::regclass, indisvalid,
   where indexrelid::regclass::text like 'parted_isvalid%'
   order by indexrelid::regclass::text collate "C"
 --
-b549fe44b26e4c13
-== 544
+6f6855236596c4d6
+== 579
 drop table parted_isvalid_tab
 --
 c3cec0e03c6c1942
-== 545
+== 580
 -- Check state of replica indexes when attaching a partition.
 begin
 --
 b16b431979fc3e05
-== 546
+== 581
 create table parted_replica_tab (id int not null) partition by range (id)
 --
-54f6d18cc3e83e44
-== 547
+de84250db802a5af
+== 582
 create table parted_replica_tab_1 partition of parted_replica_tab
   for values from (1) to (10) partition by range (id)
 --
 87cfcafe9930efb0
-== 548
+== 583
 create table parted_replica_tab_11 partition of parted_replica_tab_1
   for values from (1) to (5)
 --
 323860d6510dfb4d
-== 549
+== 584
 create unique index parted_replica_idx
   on only parted_replica_tab using btree (id)
 --
 9776fc1765138483
-== 550
+== 585
 create unique index parted_replica_idx_1
   on only parted_replica_tab_1 using btree (id)
 --
 06a0b5b40b394052
-== 551
+== 586
 -- This triggers an update of pg_index.indisreplident for parted_replica_idx.
 alter table only parted_replica_tab_1 replica identity
   using index parted_replica_idx_1
 --
 33373825f66f37d3
-== 552
+== 587
 create unique index parted_replica_idx_11 on parted_replica_tab_11 USING btree (id)
 --
 c2970c7dae1c925f
-== 553
+== 588
 select indexrelid::regclass, indisvalid, indisreplident,
        indrelid::regclass, inhparent::regclass
   from pg_index idx left join
@@ -2490,14 +2650,14 @@ select indexrelid::regclass, indisvalid, indisreplident,
   where indexrelid::regclass::text like 'parted_replica%'
   order by indexrelid::regclass::text collate "C"
 --
-e24559e86ae80b21
-== 554
+587b7a6bed7cc056
+== 589
 -- parted_replica_idx is not valid yet here, because parted_replica_idx_1
 -- is not valid.
 alter index parted_replica_idx ATTACH PARTITION parted_replica_idx_1
 --
 8506573d82bf99dc
-== 555
+== 590
 select indexrelid::regclass, indisvalid, indisreplident,
        indrelid::regclass, inhparent::regclass
   from pg_index idx left join
@@ -2505,22 +2665,22 @@ select indexrelid::regclass, indisvalid, indisreplident,
   where indexrelid::regclass::text like 'parted_replica%'
   order by indexrelid::regclass::text collate "C"
 --
-e24559e86ae80b21
-== 556
+587b7a6bed7cc056
+== 591
 -- parted_replica_idx becomes valid here.
 alter index parted_replica_idx_1 ATTACH PARTITION parted_replica_idx_11
 --
 2a083ba4be82370a
-== 557
+== 592
 alter table only parted_replica_tab_1 replica identity
   using index parted_replica_idx_1
 --
 33373825f66f37d3
-== 558
+== 593
 commit
 --
 7bbcde9cfab6c79c
-== 559
+== 594
 select indexrelid::regclass, indisvalid, indisreplident,
        indrelid::regclass, inhparent::regclass
   from pg_index idx left join
@@ -2528,8 +2688,62 @@ select indexrelid::regclass, indisvalid, indisreplident,
   where indexrelid::regclass::text like 'parted_replica%'
   order by indexrelid::regclass::text collate "C"
 --
-e24559e86ae80b21
-== 560
+587b7a6bed7cc056
+== 595
 drop table parted_replica_tab
 --
 05fa73df3144e630
+== 596
+-- test that indexing commands work with TOASTed values in pg_index
+create table test_pg_index_toast_table (a int)
+--
+05de346a18dbdec3
+== 597
+create or replace function test_pg_index_toast_func (a int, b int[])
+  returns bool as $$ select true $$ language sql immutable
+--
+c5890b947b7aa40a
+== 598
+select array_agg(n) b from generate_series(1, 10000) n
+--
+279edb62cd292b8f
+== 599
+create index concurrently test_pg_index_toast_index
+  on test_pg_index_toast_table (test_pg_index_toast_func(a, :'b'))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 113
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 600
+reindex index concurrently test_pg_index_toast_index
+--
+7662009712ff18ce
+== 601
+drop index concurrently test_pg_index_toast_index
+--
+aa2f453d91914901
+== 602
+create index test_pg_index_toast_index
+  on test_pg_index_toast_table (test_pg_index_toast_func(a, :'b'))
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 100
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 603
+reindex index test_pg_index_toast_index
+--
+3ffc8a4729b92625
+== 604
+drop index test_pg_index_toast_index
+--
+c8574ae5fd5a12e1
+== 605
+drop function test_pg_index_toast_func
+--
+d3df48953793ab24
+== 606
+drop table test_pg_index_toast_table
+--
+f7b18a381cd48ac6

@@ -178,6 +178,162 @@ SELECT b.*
 SELECT b.* FROM bt_f8_heap b WHERE b.seqno = '4500'::float8
 == 029
 |--
+-- Add coverage of RowCompare quals whose row omits a column ("proargtypes")
+-- that's after the first column, but before the final column.  The scan's
+-- initial positioning strategy must become >= here (it's not the > strategy,
+-- since the absence of "proargtypes" makes that tighter constraint unsafe).
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, pronamespace) > ('abs', 0)
+ORDER BY proname, proargtypes, pronamespace LIMIT 1
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, pronamespace) > ('abs', 0) ORDER BY proname, proargtypes, pronamespace LIMIT 1
+== 030
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, pronamespace) > ('abs', 0)
+ORDER BY proname, proargtypes, pronamespace LIMIT 1
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, pronamespace) > ('abs', 0) ORDER BY proname, proargtypes, pronamespace LIMIT 1
+== 031
+|--
+-- Similar to the previous test case, but this time it's a backwards scan
+-- using a < RowCompare.  Must use the <= strategy (and not the < strategy).
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, pronamespace) < ('abs', 1_000_000)
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC LIMIT 1
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, pronamespace) < ('abs', 1000000) ORDER BY proname DESC, proargtypes DESC, pronamespace DESC LIMIT 1
+== 032
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, pronamespace) < ('abs', 1_000_000)
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC LIMIT 1
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, pronamespace) < ('abs', 1000000) ORDER BY proname DESC, proargtypes DESC, pronamespace DESC LIMIT 1
+== 033
+|--
+-- Forwards scan RowCompare qual whose row arg has a NULL that affects our
+-- initial positioning strategy
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, proargtypes) >= ('abs', NULL) AND proname <= 'abs'
+ORDER BY proname, proargtypes, pronamespace
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, proargtypes) >= ('abs', NULL) AND proname <= 'abs' ORDER BY proname, proargtypes, pronamespace
+== 034
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, proargtypes) >= ('abs', NULL) AND proname <= 'abs'
+ORDER BY proname, proargtypes, pronamespace
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, proargtypes) >= ('abs', NULL) AND proname <= 'abs' ORDER BY proname, proargtypes, pronamespace
+== 035
+|--
+-- Forwards scan RowCompare quals whose row arg has a NULL that ends scan
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname >= 'abs' AND (proname, proargtypes) < ('abs', NULL)
+ORDER BY proname, proargtypes, pronamespace
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname >= 'abs' AND (proname, proargtypes) < ('abs', NULL) ORDER BY proname, proargtypes, pronamespace
+== 036
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname >= 'abs' AND (proname, proargtypes) < ('abs', NULL)
+ORDER BY proname, proargtypes, pronamespace
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname >= 'abs' AND (proname, proargtypes) < ('abs', NULL) ORDER BY proname, proargtypes, pronamespace
+== 037
+|--
+-- Backwards scan RowCompare qual whose row arg has a NULL that affects our
+-- initial positioning strategy
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname >= 'abs' AND (proname, proargtypes) <= ('abs', NULL)
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname >= 'abs' AND (proname, proargtypes) <= ('abs', NULL) ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+== 038
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname >= 'abs' AND (proname, proargtypes) <= ('abs', NULL)
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname >= 'abs' AND (proname, proargtypes) <= ('abs', NULL) ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+== 039
+|--
+-- Backwards scan RowCompare qual whose row arg has a NULL that ends scan
+|--
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, proargtypes) > ('abs', NULL) AND proname <= 'abs'
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, proargtypes) > ('abs', NULL) AND proname <= 'abs' ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+== 040
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE (proname, proargtypes) > ('abs', NULL) AND proname <= 'abs'
+ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE (proname, proargtypes) > ('abs', NULL) AND proname <= 'abs' ORDER BY proname DESC, proargtypes DESC, pronamespace DESC
+== 041
+-- Makes B-Tree preprocessing deal with unmarking redundant keys that were
+-- initially marked required (test case relies on current row compare
+-- preprocessing limitations)
+explain (costs off)
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname = 'zzzzzz' AND (proname, proargtypes) > ('abs', NULL)
+   AND pronamespace IN (1, 2, 3) AND proargtypes IN ('26 23', '5077')
+ORDER BY proname, proargtypes, pronamespace
+--
+EXPLAIN (COSTS OFF) SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname = 'zzzzzz' AND (proname, proargtypes) > ('abs', NULL) AND pronamespace IN (1, 2, 3) AND proargtypes IN ('26 23', '5077') ORDER BY proname, proargtypes, pronamespace
+== 042
+SELECT proname, proargtypes, pronamespace
+   FROM pg_proc
+   WHERE proname = 'zzzzzz' AND (proname, proargtypes) > ('abs', NULL)
+   AND pronamespace IN (1, 2, 3) AND proargtypes IN ('26 23', '5077')
+ORDER BY proname, proargtypes, pronamespace
+--
+SELECT proname, proargtypes, pronamespace FROM pg_proc WHERE proname = 'zzzzzz' AND (proname, proargtypes) > ('abs', NULL) AND pronamespace IN (1, 2, 3) AND proargtypes IN ('26 23', '5077') ORDER BY proname, proargtypes, pronamespace
+== 043
+|--
+-- Performs a recheck of > key following array advancement on previous (left
+-- sibling) page that used a high key whose attribute value corresponding to
+-- the > key was -inf (due to being truncated when the high key was created).
+|--
+-- XXX This relies on the assumption that tenk1_thous_tenthous has a truncated
+-- high key "(183, -inf)" on the first page that we'll scan.  The test will only
+-- provide useful coverage when the default 8K BLCKSZ is in use.
+|--
+explain (costs off)
+SELECT thousand, tenthous
+  FROM tenk1
+  WHERE thousand IN (182, 183) AND tenthous > 7550
+--
+EXPLAIN (COSTS OFF) SELECT thousand, tenthous FROM tenk1 WHERE thousand IN (182, 183) AND tenthous > 7550
+== 044
+SELECT thousand, tenthous
+  FROM tenk1
+  WHERE thousand IN (182, 183) AND tenthous > 7550
+--
+SELECT thousand, tenthous FROM tenk1 WHERE thousand IN (182, 183) AND tenthous > 7550
+== 045
+|--
 -- Add coverage for optimization of backwards scan index descents
 |--
 -- Here we expect _bt_search to descend straight to a leaf page containing a
@@ -191,24 +347,24 @@ SELECT b.* FROM bt_f8_heap b WHERE b.seqno = '4500'::float8
 set enable_seqscan to false
 --
 SET enable_seqscan TO FALSE
-== 030
+== 046
 set enable_indexscan to true
 --
 SET enable_indexscan TO TRUE
-== 031
+== 047
 set enable_bitmapscan to false
 --
 SET enable_bitmapscan TO FALSE
-== 032
+== 048
 explain (costs off)
 select hundred, twenty from tenk1 where hundred < 48 order by hundred desc limit 1
 --
 EXPLAIN (COSTS OFF) SELECT hundred, twenty FROM tenk1 WHERE hundred < 48 ORDER BY hundred DESC LIMIT 1
-== 033
+== 049
 select hundred, twenty from tenk1 where hundred < 48 order by hundred desc limit 1
 --
 SELECT hundred, twenty FROM tenk1 WHERE hundred < 48 ORDER BY hundred DESC LIMIT 1
-== 034
+== 050
 -- This variant of the query need only return a single tuple located to the immediate
 -- right of the '(48, -inf)' high key.  It also only needs to scan one single
 -- leaf page (the right sibling of the page scanned by the last test case):
@@ -216,11 +372,11 @@ explain (costs off)
 select hundred, twenty from tenk1 where hundred <= 48 order by hundred desc limit 1
 --
 EXPLAIN (COSTS OFF) SELECT hundred, twenty FROM tenk1 WHERE hundred <= 48 ORDER BY hundred DESC LIMIT 1
-== 035
+== 051
 select hundred, twenty from tenk1 where hundred <= 48 order by hundred desc limit 1
 --
 SELECT hundred, twenty FROM tenk1 WHERE hundred <= 48 ORDER BY hundred DESC LIMIT 1
-== 036
+== 052
 |--
 -- Add coverage for ScalarArrayOp btree quals with pivot tuple constants
 |--
@@ -228,29 +384,29 @@ explain (costs off)
 select distinct hundred from tenk1 where hundred in (47, 48, 72, 82)
 --
 EXPLAIN (COSTS OFF) SELECT DISTINCT hundred FROM tenk1 WHERE hundred IN (47, 48, 72, 82)
-== 037
+== 053
 select distinct hundred from tenk1 where hundred in (47, 48, 72, 82)
 --
 SELECT DISTINCT hundred FROM tenk1 WHERE hundred IN (47, 48, 72, 82)
-== 038
+== 054
 explain (costs off)
 select distinct hundred from tenk1 where hundred in (47, 48, 72, 82) order by hundred desc
 --
 EXPLAIN (COSTS OFF) SELECT DISTINCT hundred FROM tenk1 WHERE hundred IN (47, 48, 72, 82) ORDER BY hundred DESC
-== 039
+== 055
 select distinct hundred from tenk1 where hundred in (47, 48, 72, 82) order by hundred desc
 --
 SELECT DISTINCT hundred FROM tenk1 WHERE hundred IN (47, 48, 72, 82) ORDER BY hundred DESC
-== 040
+== 056
 explain (costs off)
 select thousand from tenk1 where thousand in (364, 366,380) and tenthous = 200000
 --
 EXPLAIN (COSTS OFF) SELECT thousand FROM tenk1 WHERE thousand IN (364, 366, 380) AND tenthous = 200000
-== 041
+== 057
 select thousand from tenk1 where thousand in (364, 366,380) and tenthous = 200000
 --
 SELECT thousand FROM tenk1 WHERE thousand IN (364, 366, 380) AND tenthous = 200000
-== 042
+== 058
 |--
 -- Check correct optimization of LIKE (special index operator support)
 -- for both indexscan and bitmapscan cases
@@ -259,153 +415,153 @@ SELECT thousand FROM tenk1 WHERE thousand IN (364, 366, 380) AND tenthous = 2000
 set enable_seqscan to false
 --
 SET enable_seqscan TO FALSE
-== 043
+== 059
 set enable_indexscan to true
 --
 SET enable_indexscan TO TRUE
-== 044
+== 060
 set enable_bitmapscan to false
 --
 SET enable_bitmapscan TO FALSE
-== 045
+== 061
 explain (costs off)
 select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname LIKE E'RI\\_FKey%del' ORDER BY 1
-== 046
+== 062
 select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
 --
 SELECT proname FROM pg_proc WHERE proname LIKE E'RI\\_FKey%del' ORDER BY 1
-== 047
+== 063
 explain (costs off)
 select proname from pg_proc where proname ilike '00%foo' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname ILIKE '00%foo' ORDER BY 1
-== 048
+== 064
 select proname from pg_proc where proname ilike '00%foo' order by 1
 --
 SELECT proname FROM pg_proc WHERE proname ILIKE '00%foo' ORDER BY 1
-== 049
+== 065
 explain (costs off)
 select proname from pg_proc where proname ilike 'ri%foo' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname ILIKE 'ri%foo' ORDER BY 1
-== 050
+== 066
 set enable_indexscan to false
 --
 SET enable_indexscan TO FALSE
-== 051
+== 067
 set enable_bitmapscan to true
 --
 SET enable_bitmapscan TO TRUE
-== 052
+== 068
 explain (costs off)
 select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname LIKE E'RI\\_FKey%del' ORDER BY 1
-== 053
+== 069
 select proname from pg_proc where proname like E'RI\\_FKey%del' order by 1
 --
 SELECT proname FROM pg_proc WHERE proname LIKE E'RI\\_FKey%del' ORDER BY 1
-== 054
+== 070
 explain (costs off)
 select proname from pg_proc where proname ilike '00%foo' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname ILIKE '00%foo' ORDER BY 1
-== 055
+== 071
 select proname from pg_proc where proname ilike '00%foo' order by 1
 --
 SELECT proname FROM pg_proc WHERE proname ILIKE '00%foo' ORDER BY 1
-== 056
+== 072
 explain (costs off)
 select proname from pg_proc where proname ilike 'ri%foo' order by 1
 --
 EXPLAIN (COSTS OFF) SELECT proname FROM pg_proc WHERE proname ILIKE 'ri%foo' ORDER BY 1
-== 057
+== 073
 reset enable_seqscan
 --
 RESET enable_seqscan
-== 058
+== 074
 reset enable_indexscan
 --
 RESET enable_indexscan
-== 059
+== 075
 reset enable_bitmapscan
 --
 RESET enable_bitmapscan
-== 060
+== 076
 -- Also check LIKE optimization with binary-compatible cases
 
 create temp table btree_bpchar (f1 text collate "C")
 --
 CREATE TEMPORARY TABLE btree_bpchar (f1 text COLLATE "C")
-== 061
+== 077
 create index on btree_bpchar(f1 bpchar_ops) WITH (deduplicate_items=on)
 --
 CREATE INDEX ON btree_bpchar USING btree (f1 bpchar_ops) WITH (deduplicate_items=on)
-== 062
+== 078
 insert into btree_bpchar values ('foo'), ('fool'), ('bar'), ('quux')
 --
 INSERT INTO btree_bpchar VALUES ('foo'), ('fool'), ('bar'), ('quux')
-== 063
+== 079
 -- doesn't match index:
 explain (costs off)
 select * from btree_bpchar where f1 like 'foo'
 --
 EXPLAIN (COSTS OFF) SELECT * FROM btree_bpchar WHERE f1 LIKE 'foo'
-== 064
+== 080
 select * from btree_bpchar where f1 like 'foo'
 --
 SELECT * FROM btree_bpchar WHERE f1 LIKE 'foo'
-== 065
+== 081
 explain (costs off)
 select * from btree_bpchar where f1 like 'foo%'
 --
 EXPLAIN (COSTS OFF) SELECT * FROM btree_bpchar WHERE f1 LIKE 'foo%'
-== 066
+== 082
 select * from btree_bpchar where f1 like 'foo%'
 --
 SELECT * FROM btree_bpchar WHERE f1 LIKE 'foo%'
-== 067
+== 083
 -- these do match the index:
 explain (costs off)
 select * from btree_bpchar where f1::bpchar like 'foo'
 --
 EXPLAIN (COSTS OFF) SELECT * FROM btree_bpchar WHERE f1::bpchar LIKE 'foo'
-== 068
+== 084
 select * from btree_bpchar where f1::bpchar like 'foo'
 --
 SELECT * FROM btree_bpchar WHERE f1::bpchar LIKE 'foo'
-== 069
+== 085
 explain (costs off)
 select * from btree_bpchar where f1::bpchar like 'foo%'
 --
 EXPLAIN (COSTS OFF) SELECT * FROM btree_bpchar WHERE f1::bpchar LIKE 'foo%'
-== 070
+== 086
 select * from btree_bpchar where f1::bpchar like 'foo%'
 --
 SELECT * FROM btree_bpchar WHERE f1::bpchar LIKE 'foo%'
-== 071
+== 087
 -- get test coverage for "single value" deduplication strategy:
 insert into btree_bpchar select 'foo' from generate_series(1,1500)
 --
 INSERT INTO btree_bpchar SELECT 'foo' FROM generate_series(1, 1500)
-== 072
+== 088
 |--
 -- Perform unique checking, with and without the use of deduplication
 |--
 CREATE TABLE dedup_unique_test_table (a int) WITH (autovacuum_enabled=false)
 --
 CREATE TABLE dedup_unique_test_table (a int) WITH (autovacuum_enabled=false)
-== 073
+== 089
 CREATE UNIQUE INDEX dedup_unique ON dedup_unique_test_table (a) WITH (deduplicate_items=on)
 --
 CREATE UNIQUE INDEX dedup_unique ON dedup_unique_test_table USING btree (a) WITH (deduplicate_items=on)
-== 074
+== 090
 CREATE UNIQUE INDEX plain_unique ON dedup_unique_test_table (a) WITH (deduplicate_items=off)
 --
 CREATE UNIQUE INDEX plain_unique ON dedup_unique_test_table USING btree (a) WITH (deduplicate_items=off)
-== 075
+== 091
 -- Generate enough garbage tuples in index to ensure that even the unique index
 -- with deduplication enabled has to check multiple leaf pages during unique
 -- checking (at least with a BLCKSZ of 8192 or less)
@@ -424,7 +580,7 @@ BEGIN
         INSERT INTO dedup_unique_test_table SELECT 1;
     END LOOP;
 END$$
-== 076
+== 092
 -- Exercise the LP_DEAD-bit-set tuple deletion code with a posting list tuple.
 -- The implementation prefers deleting existing items to merging any duplicate
 -- tuples into a posting list, so we need an explicit test to make sure we get
@@ -432,15 +588,15 @@ END$$
 DROP INDEX plain_unique
 --
 DROP INDEX plain_unique
-== 077
+== 093
 DELETE FROM dedup_unique_test_table WHERE a = 1
 --
 DELETE FROM dedup_unique_test_table WHERE a = 1
-== 078
+== 094
 INSERT INTO dedup_unique_test_table SELECT i FROM generate_series(0,450) i
 --
 INSERT INTO dedup_unique_test_table SELECT i FROM generate_series(0, 450) i
-== 079
+== 095
 |--
 -- Test B-tree fast path (cache rightmost leaf page) optimization.
 |--
@@ -457,45 +613,89 @@ INSERT INTO dedup_unique_test_table SELECT i FROM generate_series(0, 450) i
 create table btree_tall_tbl(id int4, t text)
 --
 CREATE TABLE btree_tall_tbl (id int4, t text)
-== 080
+== 096
 alter table btree_tall_tbl alter COLUMN t set storage plain
 --
 ALTER TABLE btree_tall_tbl ALTER COLUMN t SET STORAGE plain
-== 081
+== 097
 create index btree_tall_idx on btree_tall_tbl (t, id) with (fillfactor = 10)
 --
 CREATE INDEX btree_tall_idx ON btree_tall_tbl USING btree (t, id) WITH (fillfactor=10)
-== 082
+== 098
 insert into btree_tall_tbl select g, repeat('x', 250)
 from generate_series(1, 130) g
 --
 INSERT INTO btree_tall_tbl SELECT g, repeat('x', 250) FROM generate_series(1, 130) g
-== 083
+== 099
+insert into btree_tall_tbl select g, NULL
+from generate_series(50, 60) g
+--
+INSERT INTO btree_tall_tbl SELECT g, NULL FROM generate_series(50, 60) g
+== 100
+|--
+-- Test for skip scan with type that lacks skip support (text)
+|--
+set enable_seqscan to false
+--
+SET enable_seqscan TO FALSE
+== 101
+set enable_bitmapscan to false
+--
+SET enable_bitmapscan TO FALSE
+== 102
+-- Forwards scan
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t, id
+--
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t, id
+== 103
+explain (costs off)
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t, id
+--
+EXPLAIN (COSTS OFF) SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t, id
+== 104
+-- Backwards scan
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t DESC, id DESC
+--
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t DESC, id DESC
+== 105
+explain (costs off)
+SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t DESC, id DESC
+--
+EXPLAIN (COSTS OFF) SELECT id FROM btree_tall_tbl WHERE id = 55 ORDER BY t DESC, id DESC
+== 106
+reset enable_seqscan
+--
+RESET enable_seqscan
+== 107
+reset enable_bitmapscan
+--
+RESET enable_bitmapscan
+== 108
 |--
 -- Test for multilevel page deletion
 |--
 CREATE TABLE delete_test_table (a bigint, b bigint, c bigint, d bigint)
 --
 CREATE TABLE delete_test_table (a bigint, b bigint, c bigint, d bigint)
-== 084
+== 109
 INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1,80000) i
 --
 INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1, 80000) i
-== 085
+== 110
 ALTER TABLE delete_test_table ADD PRIMARY KEY (a,b,c,d)
 --
 ALTER TABLE delete_test_table ADD PRIMARY KEY (a, b, c, d)
-== 086
+== 111
 -- Delete most entries, and vacuum, deleting internal pages and creating "fast
 -- root"
 DELETE FROM delete_test_table WHERE a < 79990
 --
 DELETE FROM delete_test_table WHERE a < 79990
-== 087
+== 112
 VACUUM delete_test_table
 --
 VACUUM delete_test_table
-== 088
+== 113
 |--
 -- Test B-tree insertion with a metapage update (XLOG_BTREE_INSERT_META
 -- WAL record type). This happens when a "fast root" page is split.  This
@@ -506,39 +706,76 @@ VACUUM delete_test_table
 INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1,1000) i
 --
 INSERT INTO delete_test_table SELECT i, 1, 2, 3 FROM generate_series(1, 1000) i
-== 089
+== 114
 -- Test unsupported btree opclass parameters
 create index on btree_tall_tbl (id int4_ops(foo=1))
 --
 CREATE INDEX ON btree_tall_tbl USING btree (id int4_ops(foo=1))
-== 090
+== 115
+-- test parallel build with immutable function.
+CREATE TABLE btree_test_expr (n int)
+--
+CREATE TABLE btree_test_expr (n int)
+== 116
+CREATE FUNCTION btree_test_func() RETURNS int LANGUAGE sql IMMUTABLE RETURN 0
+--
+CREATE FUNCTION btree_test_func() RETURNS int LANGUAGE sql IMMUTABLE RETURN 0
+== 117
+BEGIN
+--
+BEGIN
+== 118
+SET LOCAL min_parallel_table_scan_size = 0
+--
+SET LOCAL min_parallel_table_scan_size TO 0
+== 119
+SET LOCAL max_parallel_maintenance_workers = 4
+--
+SET LOCAL max_parallel_maintenance_workers TO 4
+== 120
+CREATE INDEX btree_test_expr_idx ON btree_test_expr USING btree (btree_test_func())
+--
+CREATE INDEX btree_test_expr_idx ON btree_test_expr USING btree (btree_test_func())
+== 121
+COMMIT
+--
+COMMIT
+== 122
+DROP TABLE btree_test_expr
+--
+DROP TABLE btree_test_expr
+== 123
+DROP FUNCTION btree_test_func()
+--
+DROP FUNCTION btree_test_func()
+== 124
 -- Test case of ALTER INDEX with abuse of column names for indexes.
 -- This grammar is not officially supported, but the parser allows it.
 CREATE INDEX btree_tall_idx2 ON btree_tall_tbl (id)
 --
 CREATE INDEX btree_tall_idx2 ON btree_tall_tbl USING btree (id)
-== 091
+== 125
 ALTER INDEX btree_tall_idx2 ALTER COLUMN id SET (n_distinct=100)
 --
 ALTER INDEX btree_tall_idx2 ALTER COLUMN id SET (n_distinct=100)
-== 092
+== 126
 DROP INDEX btree_tall_idx2
 --
 DROP INDEX btree_tall_idx2
-== 093
+== 127
 -- Partitioned index
 CREATE TABLE btree_part (id int4) PARTITION BY RANGE (id)
 --
 CREATE TABLE btree_part (id int4) PARTITION BY RANGE (id)
-== 094
+== 128
 CREATE INDEX btree_part_idx ON btree_part(id)
 --
 CREATE INDEX btree_part_idx ON btree_part USING btree (id)
-== 095
+== 129
 ALTER INDEX btree_part_idx ALTER COLUMN id SET (n_distinct=100)
 --
 ALTER INDEX btree_part_idx ALTER COLUMN id SET (n_distinct=100)
-== 096
+== 130
 DROP TABLE btree_part
 --
 DROP TABLE btree_part

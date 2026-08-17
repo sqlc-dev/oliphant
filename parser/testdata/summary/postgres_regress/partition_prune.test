@@ -3,52 +3,74 @@
 -- Test partitioning planner code
 |--
 
+-- Helper function which can be used for masking out portions of EXPLAIN
+-- ANALYZE which could contain information that's not consistent on all
+-- platforms.
+create function explain_analyze(query text) returns setof text
+language plpgsql as
+$$
+declare
+    ln text;
+begin
+    for ln in
+        execute format('explain (analyze, costs off, summary off, timing off, buffers off) %s',
+            query)
+    loop
+        ln := regexp_replace(ln, 'Maximum Storage: \d+', 'Maximum Storage: N');
+        return next ln;
+    end loop;
+end;
+$$
+--
+FUNCTION: name="explain_analyze" function="explain_analyze" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 002
 -- Force generic plans to be used for all prepared statements in this file.
 set plan_cache_mode = force_generic_plan
 --
 STMT: VariableSetStmt
-== 002
+== 003
 create table lp (a char) partition by list (a)
 --
 TABLE: name="lp" schema="" table="lp" ctx=DDL
 STMT: CreateStmt
-== 003
+== 004
 create table lp_default partition of lp default
 --
 TABLE: name="lp_default" schema="" table="lp_default" ctx=DDL
 STMT: CreateStmt
-== 004
+== 005
 create table lp_ef partition of lp for values in ('e', 'f')
 --
 TABLE: name="lp_ef" schema="" table="lp_ef" ctx=DDL
 STMT: CreateStmt
-== 005
+== 006
 create table lp_ad partition of lp for values in ('a', 'd')
 --
 TABLE: name="lp_ad" schema="" table="lp_ad" ctx=DDL
 STMT: CreateStmt
-== 006
+== 007
 create table lp_bc partition of lp for values in ('b', 'c')
 --
 TABLE: name="lp_bc" schema="" table="lp_bc" ctx=DDL
 STMT: CreateStmt
-== 007
+== 008
 create table lp_g partition of lp for values in ('g')
 --
 TABLE: name="lp_g" schema="" table="lp_g" ctx=DDL
 STMT: CreateStmt
-== 008
+== 009
 create table lp_null partition of lp for values in (null)
 --
 TABLE: name="lp_null" schema="" table="lp_null" ctx=DDL
 STMT: CreateStmt
-== 009
+== 010
 explain (costs off) select * from lp
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 010
+== 011
 explain (costs off) select * from lp where a > 'a' and a < 'd'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -56,7 +78,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 011
+== 012
 explain (costs off) select * from lp where a > 'a' and a <= 'd'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -64,21 +86,21 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 012
+== 013
 explain (costs off) select * from lp where a = 'a'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 013
+== 014
 explain (costs off) select * from lp where 'a' = a
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 014
+== 015
 /* commuted */
 explain (costs off) select * from lp where a is not null
 --
@@ -86,14 +108,14 @@ TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 015
+== 016
 explain (costs off) select * from lp where a is null
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 016
+== 017
 explain (costs off) select * from lp where a = 'a' or a = 'c'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -101,7 +123,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 017
+== 018
 explain (costs off) select * from lp where a is not null and (a = 'a' or a = 'c')
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -110,14 +132,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 018
+== 019
 explain (costs off) select * from lp where a <> 'g'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 019
+== 020
 explain (costs off) select * from lp where a <> 'a' and a <> 'd'
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -125,42 +147,42 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 020
+== 021
 explain (costs off) select * from lp where a not in ('a', 'd')
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 021
+== 022
 -- collation matches the partitioning collation, pruning works
 create table coll_pruning (a text collate "C") partition by list (a)
 --
 TABLE: name="coll_pruning" schema="" table="coll_pruning" ctx=DDL
 STMT: CreateStmt
-== 022
+== 023
 create table coll_pruning_a partition of coll_pruning for values in ('a')
 --
 TABLE: name="coll_pruning_a" schema="" table="coll_pruning_a" ctx=DDL
 STMT: CreateStmt
-== 023
+== 024
 create table coll_pruning_b partition of coll_pruning for values in ('b')
 --
 TABLE: name="coll_pruning_b" schema="" table="coll_pruning_b" ctx=DDL
 STMT: CreateStmt
-== 024
+== 025
 create table coll_pruning_def partition of coll_pruning default
 --
 TABLE: name="coll_pruning_def" schema="" table="coll_pruning_def" ctx=DDL
 STMT: CreateStmt
-== 025
+== 026
 explain (costs off) select * from coll_pruning where a collate "C" = 'a' collate "C"
 --
 TABLE: name="coll_pruning" schema="" table="coll_pruning" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 026
+== 027
 -- collation doesn't match the partitioning collation, no pruning occurs
 explain (costs off) select * from coll_pruning where a collate "POSIX" = 'a' collate "POSIX"
 --
@@ -168,126 +190,126 @@ TABLE: name="coll_pruning" schema="" table="coll_pruning" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 027
+== 028
 create table rlp (a int, b varchar) partition by range (a)
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=DDL
 STMT: CreateStmt
-== 028
+== 029
 create table rlp_default partition of rlp default partition by list (a)
 --
 TABLE: name="rlp_default" schema="" table="rlp_default" ctx=DDL
 STMT: CreateStmt
-== 029
+== 030
 create table rlp_default_default partition of rlp_default default
 --
 TABLE: name="rlp_default_default" schema="" table="rlp_default_default" ctx=DDL
 STMT: CreateStmt
-== 030
+== 031
 create table rlp_default_10 partition of rlp_default for values in (10)
 --
 TABLE: name="rlp_default_10" schema="" table="rlp_default_10" ctx=DDL
 STMT: CreateStmt
-== 031
+== 032
 create table rlp_default_30 partition of rlp_default for values in (30)
 --
 TABLE: name="rlp_default_30" schema="" table="rlp_default_30" ctx=DDL
 STMT: CreateStmt
-== 032
+== 033
 create table rlp_default_null partition of rlp_default for values in (null)
 --
 TABLE: name="rlp_default_null" schema="" table="rlp_default_null" ctx=DDL
 STMT: CreateStmt
-== 033
+== 034
 create table rlp1 partition of rlp for values from (minvalue) to (1)
 --
 TABLE: name="rlp1" schema="" table="rlp1" ctx=DDL
 STMT: CreateStmt
-== 034
+== 035
 create table rlp2 partition of rlp for values from (1) to (10)
 --
 TABLE: name="rlp2" schema="" table="rlp2" ctx=DDL
 STMT: CreateStmt
-== 035
+== 036
 create table rlp3 (b varchar, a int) partition by list (b varchar_ops)
 --
 TABLE: name="rlp3" schema="" table="rlp3" ctx=DDL
 STMT: CreateStmt
-== 036
+== 037
 create table rlp3_default partition of rlp3 default
 --
 TABLE: name="rlp3_default" schema="" table="rlp3_default" ctx=DDL
 STMT: CreateStmt
-== 037
+== 038
 create table rlp3abcd partition of rlp3 for values in ('ab', 'cd')
 --
 TABLE: name="rlp3abcd" schema="" table="rlp3abcd" ctx=DDL
 STMT: CreateStmt
-== 038
+== 039
 create table rlp3efgh partition of rlp3 for values in ('ef', 'gh')
 --
 TABLE: name="rlp3efgh" schema="" table="rlp3efgh" ctx=DDL
 STMT: CreateStmt
-== 039
+== 040
 create table rlp3nullxy partition of rlp3 for values in (null, 'xy')
 --
 TABLE: name="rlp3nullxy" schema="" table="rlp3nullxy" ctx=DDL
 STMT: CreateStmt
-== 040
+== 041
 alter table rlp attach partition rlp3 for values from (15) to (20)
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=DDL
 STMT: AlterTableStmt
-== 041
+== 042
 create table rlp4 partition of rlp for values from (20) to (30) partition by range (a)
 --
 TABLE: name="rlp4" schema="" table="rlp4" ctx=DDL
 STMT: CreateStmt
-== 042
+== 043
 create table rlp4_default partition of rlp4 default
 --
 TABLE: name="rlp4_default" schema="" table="rlp4_default" ctx=DDL
 STMT: CreateStmt
-== 043
+== 044
 create table rlp4_1 partition of rlp4 for values from (20) to (25)
 --
 TABLE: name="rlp4_1" schema="" table="rlp4_1" ctx=DDL
 STMT: CreateStmt
-== 044
+== 045
 create table rlp4_2 partition of rlp4 for values from (25) to (29)
 --
 TABLE: name="rlp4_2" schema="" table="rlp4_2" ctx=DDL
 STMT: CreateStmt
-== 045
+== 046
 create table rlp5 partition of rlp for values from (31) to (maxvalue) partition by range (a)
 --
 TABLE: name="rlp5" schema="" table="rlp5" ctx=DDL
 STMT: CreateStmt
-== 046
+== 047
 create table rlp5_default partition of rlp5 default
 --
 TABLE: name="rlp5_default" schema="" table="rlp5_default" ctx=DDL
 STMT: CreateStmt
-== 047
+== 048
 create table rlp5_1 partition of rlp5 for values from (31) to (40)
 --
 TABLE: name="rlp5_1" schema="" table="rlp5_1" ctx=DDL
 STMT: CreateStmt
-== 048
+== 049
 explain (costs off) select * from rlp where a < 1
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 049
+== 050
 explain (costs off) select * from rlp where 1 > a
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 050
+== 051
 /* commuted */
 explain (costs off) select * from rlp where a <= 1
 --
@@ -295,21 +317,21 @@ TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 051
+== 052
 explain (costs off) select * from rlp where a = 1
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 052
+== 053
 explain (costs off) select * from rlp where a = 1::bigint
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 053
+== 054
 /* same as above */
 explain (costs off) select * from rlp where a = 1::numeric
 --
@@ -317,7 +339,7 @@ TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 054
+== 055
 /* no pruning */
 explain (costs off) select * from rlp where a <= 10
 --
@@ -325,28 +347,28 @@ TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 055
+== 056
 explain (costs off) select * from rlp where a > 10
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 056
+== 057
 explain (costs off) select * from rlp where a < 15
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 057
+== 058
 explain (costs off) select * from rlp where a <= 15
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 058
+== 059
 explain (costs off) select * from rlp where a > 15 and b = 'ab'
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -354,14 +376,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 059
+== 060
 explain (costs off) select * from rlp where a = 16
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 060
+== 061
 explain (costs off) select * from rlp where a = 16 and b in ('not', 'in', 'here')
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -369,7 +391,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 061
+== 062
 explain (costs off) select * from rlp where a = 16 and b < 'ab'
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -377,7 +399,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 062
+== 063
 explain (costs off) select * from rlp where a = 16 and b <= 'ab'
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -385,7 +407,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 063
+== 064
 explain (costs off) select * from rlp where a = 16 and b is null
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -393,7 +415,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 064
+== 065
 explain (costs off) select * from rlp where a = 16 and b is not null
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -401,35 +423,35 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 065
+== 066
 explain (costs off) select * from rlp where a is null
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 066
+== 067
 explain (costs off) select * from rlp where a is not null
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 067
+== 068
 explain (costs off) select * from rlp where a > 30
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 068
+== 069
 explain (costs off) select * from rlp where a = 30
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 069
+== 070
 /* only default is scanned */
 explain (costs off) select * from rlp where a <= 31
 --
@@ -437,7 +459,7 @@ TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 070
+== 071
 explain (costs off) select * from rlp where a = 1 or a = 7
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -445,7 +467,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 071
+== 072
 explain (costs off) select * from rlp where a = 1 or b = 'ab'
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -453,7 +475,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 072
+== 073
 explain (costs off) select * from rlp where a > 20 and a < 27
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -461,21 +483,21 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 073
+== 074
 explain (costs off) select * from rlp where a = 29
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 074
+== 075
 explain (costs off) select * from rlp where a >= 29
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 075
+== 076
 explain (costs off) select * from rlp where a < 1 or (a > 20 and a < 25)
 --
 TABLE: name="rlp" schema="" table="rlp" ctx=Select
@@ -484,7 +506,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 076
+== 077
 -- where clause contradicts sub-partition's constraint
 explain (costs off) select * from rlp where a = 20 or a = 40
 --
@@ -493,14 +515,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 077
+== 078
 explain (costs off) select * from rlp3 where a = 20
 --
 TABLE: name="rlp3" schema="" table="rlp3" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 078
+== 079
 /* empty */
 
 -- redundant clauses are eliminated
@@ -511,7 +533,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 079
+== 080
 /* only default */
 explain (costs off) select * from rlp where a > 1 and a >=15
 --
@@ -520,7 +542,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 080
+== 081
 /* rlp3 onwards, including default */
 explain (costs off) select * from rlp where a = 1 and a = 3
 --
@@ -529,7 +551,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 081
+== 082
 /* empty */
 explain (costs off) select * from rlp where (a = 1 and a = 3) or (a > 1 and a = 15)
 --
@@ -540,65 +562,65 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 082
+== 083
 -- multi-column keys
 create table mc3p (a int, b int, c int) partition by range (a, abs(b), c)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=DDL
 STMT: CreateStmt
-== 083
+== 084
 create table mc3p_default partition of mc3p default
 --
 TABLE: name="mc3p_default" schema="" table="mc3p_default" ctx=DDL
 STMT: CreateStmt
-== 084
+== 085
 create table mc3p0 partition of mc3p for values from (minvalue, minvalue, minvalue) to (1, 1, 1)
 --
 TABLE: name="mc3p0" schema="" table="mc3p0" ctx=DDL
 STMT: CreateStmt
-== 085
+== 086
 create table mc3p1 partition of mc3p for values from (1, 1, 1) to (10, 5, 10)
 --
 TABLE: name="mc3p1" schema="" table="mc3p1" ctx=DDL
 STMT: CreateStmt
-== 086
+== 087
 create table mc3p2 partition of mc3p for values from (10, 5, 10) to (10, 10, 10)
 --
 TABLE: name="mc3p2" schema="" table="mc3p2" ctx=DDL
 STMT: CreateStmt
-== 087
+== 088
 create table mc3p3 partition of mc3p for values from (10, 10, 10) to (10, 10, 20)
 --
 TABLE: name="mc3p3" schema="" table="mc3p3" ctx=DDL
 STMT: CreateStmt
-== 088
+== 089
 create table mc3p4 partition of mc3p for values from (10, 10, 20) to (10, maxvalue, maxvalue)
 --
 TABLE: name="mc3p4" schema="" table="mc3p4" ctx=DDL
 STMT: CreateStmt
-== 089
+== 090
 create table mc3p5 partition of mc3p for values from (11, 1, 1) to (20, 10, 10)
 --
 TABLE: name="mc3p5" schema="" table="mc3p5" ctx=DDL
 STMT: CreateStmt
-== 090
+== 091
 create table mc3p6 partition of mc3p for values from (20, 10, 10) to (20, 20, 20)
 --
 TABLE: name="mc3p6" schema="" table="mc3p6" ctx=DDL
 STMT: CreateStmt
-== 091
+== 092
 create table mc3p7 partition of mc3p for values from (20, 20, 20) to (maxvalue, maxvalue, maxvalue)
 --
 TABLE: name="mc3p7" schema="" table="mc3p7" ctx=DDL
 STMT: CreateStmt
-== 092
+== 093
 explain (costs off) select * from mc3p where a = 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 093
+== 094
 explain (costs off) select * from mc3p where a = 1 and abs(b) < 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -608,7 +630,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 094
+== 095
 explain (costs off) select * from mc3p where a = 1 and abs(b) = 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -618,7 +640,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 095
+== 096
 explain (costs off) select * from mc3p where a = 1 and abs(b) = 1 and c < 8
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -629,7 +651,7 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 096
+== 097
 explain (costs off) select * from mc3p where a = 10 and abs(b) between 5 and 35
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -639,28 +661,28 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 097
+== 098
 explain (costs off) select * from mc3p where a > 10
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 098
+== 099
 explain (costs off) select * from mc3p where a >= 10
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 099
+== 100
 explain (costs off) select * from mc3p where a < 10
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 100
+== 101
 explain (costs off) select * from mc3p where a <= 10 and abs(b) < 10
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -670,7 +692,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 101
+== 102
 explain (costs off) select * from mc3p where a = 11 and abs(b) = 0
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -680,7 +702,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 102
+== 103
 explain (costs off) select * from mc3p where a = 20 and abs(b) = 10 and c = 100
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -691,21 +713,21 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 103
+== 104
 explain (costs off) select * from mc3p where a > 20
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 104
+== 105
 explain (costs off) select * from mc3p where a >= 20
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 105
+== 106
 explain (costs off) select * from mc3p where (a = 1 and abs(b) = 1 and c = 1) or (a = 10 and abs(b) = 5 and c = 10) or (a > 11 and a < 20)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -723,7 +745,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 106
+== 107
 explain (costs off) select * from mc3p where (a = 1 and abs(b) = 1 and c = 1) or (a = 10 and abs(b) = 5 and c = 10) or (a > 11 and a < 20) or a < 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -742,7 +764,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 107
+== 108
 explain (costs off) select * from mc3p where (a = 1 and abs(b) = 1 and c = 1) or (a = 10 and abs(b) = 5 and c = 10) or (a > 11 and a < 20) or a < 1 or a = 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -762,7 +784,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 108
+== 109
 explain (costs off) select * from mc3p where a = 1 or abs(b) = 1 or c = 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -773,7 +795,7 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 109
+== 110
 explain (costs off) select * from mc3p where (a = 1 and abs(b) = 1) or (a = 10 and abs(b) = 10)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -787,7 +809,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 110
+== 111
 explain (costs off) select * from mc3p where (a = 1 and abs(b) = 1) or (a = 10 and abs(b) = 9)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -801,55 +823,55 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 111
+== 112
 -- a simpler multi-column keys case
 create table mc2p (a int, b int) partition by range (a, b)
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=DDL
 STMT: CreateStmt
-== 112
+== 113
 create table mc2p_default partition of mc2p default
 --
 TABLE: name="mc2p_default" schema="" table="mc2p_default" ctx=DDL
 STMT: CreateStmt
-== 113
+== 114
 create table mc2p0 partition of mc2p for values from (minvalue, minvalue) to (1, minvalue)
 --
 TABLE: name="mc2p0" schema="" table="mc2p0" ctx=DDL
 STMT: CreateStmt
-== 114
+== 115
 create table mc2p1 partition of mc2p for values from (1, minvalue) to (1, 1)
 --
 TABLE: name="mc2p1" schema="" table="mc2p1" ctx=DDL
 STMT: CreateStmt
-== 115
+== 116
 create table mc2p2 partition of mc2p for values from (1, 1) to (2, minvalue)
 --
 TABLE: name="mc2p2" schema="" table="mc2p2" ctx=DDL
 STMT: CreateStmt
-== 116
+== 117
 create table mc2p3 partition of mc2p for values from (2, minvalue) to (2, 1)
 --
 TABLE: name="mc2p3" schema="" table="mc2p3" ctx=DDL
 STMT: CreateStmt
-== 117
+== 118
 create table mc2p4 partition of mc2p for values from (2, 1) to (2, maxvalue)
 --
 TABLE: name="mc2p4" schema="" table="mc2p4" ctx=DDL
 STMT: CreateStmt
-== 118
+== 119
 create table mc2p5 partition of mc2p for values from (2, maxvalue) to (maxvalue, maxvalue)
 --
 TABLE: name="mc2p5" schema="" table="mc2p5" ctx=DDL
 STMT: CreateStmt
-== 119
+== 120
 explain (costs off) select * from mc2p where a < 2
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 120
+== 121
 explain (costs off) select * from mc2p where a = 2 and b < 1
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
@@ -857,14 +879,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 121
+== 122
 explain (costs off) select * from mc2p where a > 1
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 122
+== 123
 explain (costs off) select * from mc2p where a = 1 and b > 1
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
@@ -872,7 +894,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 123
+== 124
 -- all partitions but the default one should be pruned
 explain (costs off) select * from mc2p where a = 1 and b is null
 --
@@ -881,7 +903,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 124
+== 125
 explain (costs off) select * from mc2p where a is null and b is null
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
@@ -889,7 +911,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 125
+== 126
 explain (costs off) select * from mc2p where a is null and b = 1
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
@@ -897,69 +919,69 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 126
+== 127
 explain (costs off) select * from mc2p where a is null
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 127
+== 128
 explain (costs off) select * from mc2p where b is null
 --
 TABLE: name="mc2p" schema="" table="mc2p" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 128
+== 129
 -- boolean partitioning
 create table boolpart (a bool) partition by list (a)
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=DDL
 STMT: CreateStmt
-== 129
+== 130
 create table boolpart_default partition of boolpart default
 --
 TABLE: name="boolpart_default" schema="" table="boolpart_default" ctx=DDL
 STMT: CreateStmt
-== 130
+== 131
 create table boolpart_t partition of boolpart for values in ('true')
 --
 TABLE: name="boolpart_t" schema="" table="boolpart_t" ctx=DDL
 STMT: CreateStmt
-== 131
+== 132
 create table boolpart_f partition of boolpart for values in ('false')
 --
 TABLE: name="boolpart_f" schema="" table="boolpart_f" ctx=DDL
 STMT: CreateStmt
-== 132
+== 133
 insert into boolpart values (true), (false), (null)
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 133
+== 134
 explain (costs off) select * from boolpart where a in (true, false)
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 134
+== 135
 explain (costs off) select * from boolpart where a = false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 135
+== 136
 explain (costs off) select * from boolpart where not a = false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 136
+== 137
 explain (costs off) select * from boolpart where a is true or a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
@@ -967,14 +989,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 137
+== 138
 explain (costs off) select * from boolpart where a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 138
+== 139
 explain (costs off) select * from boolpart where a is not true and a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
@@ -982,95 +1004,95 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 139
+== 140
 explain (costs off) select * from boolpart where a is unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 140
+== 141
 explain (costs off) select * from boolpart where a is not unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 141
+== 142
 select * from boolpart where a in (true, false)
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 142
+== 143
 select * from boolpart where a = false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 143
+== 144
 select * from boolpart where not a = false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 144
+== 145
 select * from boolpart where a is true or a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 145
+== 146
 select * from boolpart where a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 146
+== 147
 select * from boolpart where a is not true and a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 147
+== 148
 select * from boolpart where a is unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 148
+== 149
 select * from boolpart where a is not unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 149
+== 150
 -- try some other permutations with a NULL partition instead of a DEFAULT
 delete from boolpart where a is null
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=DML
 STMT: DeleteStmt
-== 150
+== 151
 create table boolpart_null partition of boolpart for values in (null)
 --
 TABLE: name="boolpart_null" schema="" table="boolpart_null" ctx=DDL
 STMT: CreateStmt
-== 151
+== 152
 insert into boolpart values(null)
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 152
+== 153
 explain (costs off) select * from boolpart where a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 153
+== 154
 explain (costs off) select * from boolpart where a is not true and a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
@@ -1078,46 +1100,46 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 154
+== 155
 explain (costs off) select * from boolpart where a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 155
+== 156
 explain (costs off) select * from boolpart where a is not unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 156
+== 157
 select * from boolpart where a is not true
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 157
+== 158
 select * from boolpart where a is not true and a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 158
+== 159
 select * from boolpart where a is not false
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 159
+== 160
 select * from boolpart where a is not unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 160
+== 161
 -- check that all partitions are pruned when faced with conflicting clauses
 explain (costs off) select * from boolpart where a is not unknown and a is unknown
 --
@@ -1126,7 +1148,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 161
+== 162
 explain (costs off) select * from boolpart where a is false and a is unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
@@ -1134,7 +1156,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 162
+== 163
 explain (costs off) select * from boolpart where a is true and a is unknown
 --
 TABLE: name="boolpart" schema="" table="boolpart" ctx=Select
@@ -1142,56 +1164,56 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 163
+== 164
 -- inverse boolean partitioning - a seemingly unlikely design, but we've got
 -- code for it, so we'd better test it.
 create table iboolpart (a bool) partition by list ((not a))
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=DDL
 STMT: CreateStmt
-== 164
+== 165
 create table iboolpart_default partition of iboolpart default
 --
 TABLE: name="iboolpart_default" schema="" table="iboolpart_default" ctx=DDL
 STMT: CreateStmt
-== 165
+== 166
 create table iboolpart_f partition of iboolpart for values in ('true')
 --
 TABLE: name="iboolpart_f" schema="" table="iboolpart_f" ctx=DDL
 STMT: CreateStmt
-== 166
+== 167
 create table iboolpart_t partition of iboolpart for values in ('false')
 --
 TABLE: name="iboolpart_t" schema="" table="iboolpart_t" ctx=DDL
 STMT: CreateStmt
-== 167
+== 168
 insert into iboolpart values (true), (false), (null)
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 168
+== 169
 explain (costs off) select * from iboolpart where a in (true, false)
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 169
+== 170
 explain (costs off) select * from iboolpart where a = false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 170
+== 171
 explain (costs off) select * from iboolpart where not a = false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 171
+== 172
 explain (costs off) select * from iboolpart where a is true or a is not true
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
@@ -1199,14 +1221,14 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 172
+== 173
 explain (costs off) select * from iboolpart where a is not true
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 173
+== 174
 explain (costs off) select * from iboolpart where a is not true and a is not false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
@@ -1214,138 +1236,138 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 174
+== 175
 explain (costs off) select * from iboolpart where a is unknown
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 175
+== 176
 explain (costs off) select * from iboolpart where a is not unknown
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 176
+== 177
 select * from iboolpart where a in (true, false)
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 177
+== 178
 select * from iboolpart where a = false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 178
+== 179
 select * from iboolpart where not a = false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 179
+== 180
 select * from iboolpart where a is true or a is not true
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 180
+== 181
 select * from iboolpart where a is not true
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 181
+== 182
 select * from iboolpart where a is not true and a is not false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 182
+== 183
 select * from iboolpart where a is unknown
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 183
+== 184
 select * from iboolpart where a is not unknown
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 184
+== 185
 -- Try some other permutations with a NULL partition instead of a DEFAULT
 delete from iboolpart where a is null
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=DML
 STMT: DeleteStmt
-== 185
+== 186
 create table iboolpart_null partition of iboolpart for values in (null)
 --
 TABLE: name="iboolpart_null" schema="" table="iboolpart_null" ctx=DDL
 STMT: CreateStmt
-== 186
+== 187
 insert into iboolpart values(null)
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 187
+== 188
 -- Pruning shouldn't take place for these.  Just check the result is correct
 select * from iboolpart where a is not true
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 188
+== 189
 select * from iboolpart where a is not true and a is not false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 189
+== 190
 select * from iboolpart where a is not false
 --
 TABLE: name="iboolpart" schema="" table="iboolpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: SelectStmt
-== 190
+== 191
 create table boolrangep (a bool, b bool, c int) partition by range (a,b,c)
 --
 TABLE: name="boolrangep" schema="" table="boolrangep" ctx=DDL
 STMT: CreateStmt
-== 191
+== 192
 create table boolrangep_tf partition of boolrangep for values from ('true', 'false', 0) to ('true', 'false', 100)
 --
 TABLE: name="boolrangep_tf" schema="" table="boolrangep_tf" ctx=DDL
 STMT: CreateStmt
-== 192
+== 193
 create table boolrangep_ft partition of boolrangep for values from ('false', 'true', 0) to ('false', 'true', 100)
 --
 TABLE: name="boolrangep_ft" schema="" table="boolrangep_ft" ctx=DDL
 STMT: CreateStmt
-== 193
+== 194
 create table boolrangep_ff1 partition of boolrangep for values from ('false', 'false', 0) to ('false', 'false', 50)
 --
 TABLE: name="boolrangep_ff1" schema="" table="boolrangep_ff1" ctx=DDL
 STMT: CreateStmt
-== 194
+== 195
 create table boolrangep_ff2 partition of boolrangep for values from ('false', 'false', 50) to ('false', 'false', 100)
 --
 TABLE: name="boolrangep_ff2" schema="" table="boolrangep_ff2" ctx=DDL
 STMT: CreateStmt
-== 195
+== 196
 create table boolrangep_null partition of boolrangep default
 --
 TABLE: name="boolrangep_null" schema="" table="boolrangep_null" ctx=DDL
 STMT: CreateStmt
-== 196
+== 197
 -- try a more complex case that's been known to trip up pruning in the past
 explain (costs off)  select * from boolrangep where not a and not b and c = 25
 --
@@ -1355,7 +1377,7 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 197
+== 198
 -- ensure we prune boolrangep_tf
 explain (costs off)  select * from boolrangep where a is not true and not b and c = 25
 --
@@ -1365,7 +1387,7 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 198
+== 199
 -- ensure we prune everything apart from boolrangep_tf and boolrangep_null
 explain (costs off)  select * from boolrangep where a is not false and not b and c = 25
 --
@@ -1375,28 +1397,28 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 199
+== 200
 -- test scalar-to-array operators
 create table coercepart (a varchar) partition by list (a)
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=DDL
 STMT: CreateStmt
-== 200
+== 201
 create table coercepart_ab partition of coercepart for values in ('ab')
 --
 TABLE: name="coercepart_ab" schema="" table="coercepart_ab" ctx=DDL
 STMT: CreateStmt
-== 201
+== 202
 create table coercepart_bc partition of coercepart for values in ('bc')
 --
 TABLE: name="coercepart_bc" schema="" table="coercepart_bc" ctx=DDL
 STMT: CreateStmt
-== 202
+== 203
 create table coercepart_cd partition of coercepart for values in ('cd')
 --
 TABLE: name="coercepart_cd" schema="" table="coercepart_cd" ctx=DDL
 STMT: CreateStmt
-== 203
+== 204
 explain (costs off) select * from coercepart where a in ('ab', to_char(125, '999'))
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
@@ -1405,151 +1427,151 @@ FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 204
+== 205
 explain (costs off) select * from coercepart where a ~ any ('{ab}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 205
+== 206
 explain (costs off) select * from coercepart where a !~ all ('{ab}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 206
+== 207
 explain (costs off) select * from coercepart where a ~ any ('{ab,bc}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 207
+== 208
 explain (costs off) select * from coercepart where a !~ all ('{ab,bc}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 208
+== 209
 explain (costs off) select * from coercepart where a = any ('{ab,bc}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 209
+== 210
 explain (costs off) select * from coercepart where a = any ('{ab,null}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 210
+== 211
 explain (costs off) select * from coercepart where a = any (null::text[])
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 211
+== 212
 explain (costs off) select * from coercepart where a = all ('{ab}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 212
+== 213
 explain (costs off) select * from coercepart where a = all ('{ab,bc}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 213
+== 214
 explain (costs off) select * from coercepart where a = all ('{ab,null}')
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 214
+== 215
 explain (costs off) select * from coercepart where a = all (null::text[])
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 215
+== 216
 drop table coercepart
 --
 TABLE: name="coercepart" schema="" table="coercepart" ctx=DDL
 STMT: DropStmt
-== 216
+== 217
 CREATE TABLE part (a INT, b INT) PARTITION BY LIST (a)
 --
 TABLE: name="part" schema="" table="part" ctx=DDL
 STMT: CreateStmt
-== 217
+== 218
 CREATE TABLE part_p1 PARTITION OF part FOR VALUES IN (-2,-1,0,1,2)
 --
 TABLE: name="part_p1" schema="" table="part_p1" ctx=DDL
 STMT: CreateStmt
-== 218
+== 219
 CREATE TABLE part_p2 PARTITION OF part DEFAULT PARTITION BY RANGE(a)
 --
 TABLE: name="part_p2" schema="" table="part_p2" ctx=DDL
 STMT: CreateStmt
-== 219
+== 220
 CREATE TABLE part_p2_p1 PARTITION OF part_p2 DEFAULT
 --
 TABLE: name="part_p2_p1" schema="" table="part_p2_p1" ctx=DDL
 STMT: CreateStmt
-== 220
+== 221
 CREATE TABLE part_rev (b INT, c INT, a INT)
 --
 TABLE: name="part_rev" schema="" table="part_rev" ctx=DDL
 STMT: CreateStmt
-== 221
+== 222
 ALTER TABLE part ATTACH PARTITION part_rev FOR VALUES IN (3)
 --
 TABLE: name="part" schema="" table="part" ctx=DDL
 STMT: AlterTableStmt
-== 222
+== 223
 -- fail
 ALTER TABLE part_rev DROP COLUMN c
 --
 TABLE: name="part_rev" schema="" table="part_rev" ctx=DDL
 STMT: AlterTableStmt
-== 223
+== 224
 ALTER TABLE part ATTACH PARTITION part_rev FOR VALUES IN (3)
 --
 TABLE: name="part" schema="" table="part" ctx=DDL
 STMT: AlterTableStmt
-== 224
+== 225
 -- now it's ok
 INSERT INTO part VALUES (-1,-1), (1,1), (2,NULL), (NULL,-2),(NULL,NULL)
 --
 TABLE: name="part" schema="" table="part" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 225
+== 226
 EXPLAIN (COSTS OFF) SELECT tableoid::regclass as part, a, b FROM part WHERE a IS NULL ORDER BY 1, 2, 3
 --
 TABLE: name="part" schema="" table="part" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 226
+== 227
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM part p(x) ORDER BY x
 --
 TABLE: name="part" schema="" table="part" ctx=Select
 ALIAS: "p"="part"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 227
+== 228
 |--
 -- some more cases
 |--
@@ -1574,7 +1596,7 @@ FILTER: schema="" table="t2" column="b"
 FILTER: schema="" table="t2" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 228
+== 229
 -- pruning should work fine, because values for a prefix of keys (a, b) are
 -- available
 explain (costs off) select * from mc2p t1, lateral (select count(*) from mc3p t2 where t2.c = t1.b and abs(t2.b) = 1 and t2.a = 1) s where t1.a = 1
@@ -1593,7 +1615,7 @@ FILTER: schema="" table="t2" column="b"
 FILTER: schema="" table="t2" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 229
+== 230
 -- also here, because values for all keys are provided
 explain (costs off) select * from mc2p t1, lateral (select count(*) from mc3p t2 where t2.a = 1 and abs(t2.b) = 1 and t2.c = 1) s where t1.a = 1
 --
@@ -1610,7 +1632,7 @@ FILTER: schema="" table="t2" column="b"
 FILTER: schema="" table="t2" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 230
+== 231
 |--
 -- pruning with clauses containing <> operator
 |--
@@ -1620,29 +1642,29 @@ create table rp (a int) partition by range (a)
 --
 TABLE: name="rp" schema="" table="rp" ctx=DDL
 STMT: CreateStmt
-== 231
+== 232
 create table rp0 partition of rp for values from (minvalue) to (1)
 --
 TABLE: name="rp0" schema="" table="rp0" ctx=DDL
 STMT: CreateStmt
-== 232
+== 233
 create table rp1 partition of rp for values from (1) to (2)
 --
 TABLE: name="rp1" schema="" table="rp1" ctx=DDL
 STMT: CreateStmt
-== 233
+== 234
 create table rp2 partition of rp for values from (2) to (maxvalue)
 --
 TABLE: name="rp2" schema="" table="rp2" ctx=DDL
 STMT: CreateStmt
-== 234
+== 235
 explain (costs off) select * from rp where a <> 1
 --
 TABLE: name="rp" schema="" table="rp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 235
+== 236
 explain (costs off) select * from rp where a <> 1 and a <> 2
 --
 TABLE: name="rp" schema="" table="rp" ctx=Select
@@ -1650,7 +1672,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 236
+== 237
 -- null partition should be eliminated due to strict <> clause.
 explain (costs off) select * from lp where a <> 'a'
 --
@@ -1658,7 +1680,7 @@ TABLE: name="lp" schema="" table="lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 237
+== 238
 -- ensure we detect contradictions in clauses; a can't be NULL and NOT NULL.
 explain (costs off) select * from lp where a <> 'a' and a is null
 --
@@ -1667,7 +1689,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 238
+== 239
 explain (costs off) select * from lp where (a <> 'a' and a <> 'd') or a is null
 --
 TABLE: name="lp" schema="" table="lp" ctx=Select
@@ -1676,7 +1698,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 239
+== 240
 -- check that it also works for a partitioned table that's not root,
 -- which in this case are partitions of rlp that are themselves
 -- list-partitioned on b
@@ -1690,7 +1712,7 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 240
+== 241
 |--
 -- different collations for different keys with same expression
 |--
@@ -1698,22 +1720,22 @@ create table coll_pruning_multi (a text) partition by range (substr(a, 1) collat
 --
 TABLE: name="coll_pruning_multi" schema="" table="coll_pruning_multi" ctx=DDL
 STMT: CreateStmt
-== 241
+== 242
 create table coll_pruning_multi1 partition of coll_pruning_multi for values from ('a', 'a') to ('a', 'e')
 --
 TABLE: name="coll_pruning_multi1" schema="" table="coll_pruning_multi1" ctx=DDL
 STMT: CreateStmt
-== 242
+== 243
 create table coll_pruning_multi2 partition of coll_pruning_multi for values from ('a', 'e') to ('a', 'z')
 --
 TABLE: name="coll_pruning_multi2" schema="" table="coll_pruning_multi2" ctx=DDL
 STMT: CreateStmt
-== 243
+== 244
 create table coll_pruning_multi3 partition of coll_pruning_multi for values from ('b', 'a') to ('b', 'e')
 --
 TABLE: name="coll_pruning_multi3" schema="" table="coll_pruning_multi3" ctx=DDL
 STMT: CreateStmt
-== 244
+== 245
 -- no pruning, because no value for the leading key
 explain (costs off) select * from coll_pruning_multi where substr(a, 1) = 'e' collate "C"
 --
@@ -1723,7 +1745,7 @@ FUNCTION: name="substr" function="substr" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 245
+== 246
 -- pruning, with a value provided for the leading key
 explain (costs off) select * from coll_pruning_multi where substr(a, 1) = 'a' collate "POSIX"
 --
@@ -1733,7 +1755,7 @@ FUNCTION: name="substr" function="substr" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 246
+== 247
 -- pruning, with values provided for both keys
 explain (costs off) select * from coll_pruning_multi where substr(a, 1) = 'e' collate "C" and substr(a, 1) = 'a' collate "POSIX"
 --
@@ -1746,7 +1768,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 247
+== 248
 |--
 -- LIKE operators don't prune
 |--
@@ -1754,24 +1776,24 @@ create table like_op_noprune (a text) partition by list (a)
 --
 TABLE: name="like_op_noprune" schema="" table="like_op_noprune" ctx=DDL
 STMT: CreateStmt
-== 248
+== 249
 create table like_op_noprune1 partition of like_op_noprune for values in ('ABC')
 --
 TABLE: name="like_op_noprune1" schema="" table="like_op_noprune1" ctx=DDL
 STMT: CreateStmt
-== 249
+== 250
 create table like_op_noprune2 partition of like_op_noprune for values in ('BCD')
 --
 TABLE: name="like_op_noprune2" schema="" table="like_op_noprune2" ctx=DDL
 STMT: CreateStmt
-== 250
+== 251
 explain (costs off) select * from like_op_noprune where a like '%BC'
 --
 TABLE: name="like_op_noprune" schema="" table="like_op_noprune" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 251
+== 252
 |--
 -- tests wherein clause value requires a cross-type comparison function
 |--
@@ -1779,39 +1801,39 @@ create table lparted_by_int2 (a smallint) partition by list (a)
 --
 TABLE: name="lparted_by_int2" schema="" table="lparted_by_int2" ctx=DDL
 STMT: CreateStmt
-== 252
+== 253
 create table lparted_by_int2_1 partition of lparted_by_int2 for values in (1)
 --
 TABLE: name="lparted_by_int2_1" schema="" table="lparted_by_int2_1" ctx=DDL
 STMT: CreateStmt
-== 253
+== 254
 create table lparted_by_int2_16384 partition of lparted_by_int2 for values in (16384)
 --
 TABLE: name="lparted_by_int2_16384" schema="" table="lparted_by_int2_16384" ctx=DDL
 STMT: CreateStmt
-== 254
+== 255
 explain (costs off) select * from lparted_by_int2 where a = 100_000_000_000_000
 --
 TABLE: name="lparted_by_int2" schema="" table="lparted_by_int2" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 255
+== 256
 create table rparted_by_int2 (a smallint) partition by range (a)
 --
 TABLE: name="rparted_by_int2" schema="" table="rparted_by_int2" ctx=DDL
 STMT: CreateStmt
-== 256
+== 257
 create table rparted_by_int2_1 partition of rparted_by_int2 for values from (1) to (10)
 --
 TABLE: name="rparted_by_int2_1" schema="" table="rparted_by_int2_1" ctx=DDL
 STMT: CreateStmt
-== 257
+== 258
 create table rparted_by_int2_16384 partition of rparted_by_int2 for values from (10) to (16384)
 --
 TABLE: name="rparted_by_int2_16384" schema="" table="rparted_by_int2_16384" ctx=DDL
 STMT: CreateStmt
-== 258
+== 259
 -- all partitions pruned
 explain (costs off) select * from rparted_by_int2 where a > 100_000_000_000_000
 --
@@ -1819,12 +1841,12 @@ TABLE: name="rparted_by_int2" schema="" table="rparted_by_int2" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 259
+== 260
 create table rparted_by_int2_maxvalue partition of rparted_by_int2 for values from (16384) to (maxvalue)
 --
 TABLE: name="rparted_by_int2_maxvalue" schema="" table="rparted_by_int2_maxvalue" ctx=DDL
 STMT: CreateStmt
-== 260
+== 261
 -- all partitions but rparted_by_int2_maxvalue pruned
 explain (costs off) select * from rparted_by_int2 where a > 100_000_000_000_000
 --
@@ -1832,7 +1854,7 @@ TABLE: name="rparted_by_int2" schema="" table="rparted_by_int2" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 261
+== 262
 drop table lp, coll_pruning, rlp, mc3p, mc2p, boolpart, iboolpart, boolrangep, rp, coll_pruning_multi, like_op_noprune, lparted_by_int2, rparted_by_int2
 --
 TABLE: name="lp" schema="" table="lp" ctx=DDL
@@ -1849,24 +1871,24 @@ TABLE: name="like_op_noprune" schema="" table="like_op_noprune" ctx=DDL
 TABLE: name="lparted_by_int2" schema="" table="lparted_by_int2" ctx=DDL
 TABLE: name="rparted_by_int2" schema="" table="rparted_by_int2" ctx=DDL
 STMT: DropStmt
-== 262
+== 263
 -- check that AlternativeSubPlan within a pruning expression gets cleaned up
 
 create table asptab (id int primary key) partition by range (id)
 --
 TABLE: name="asptab" schema="" table="asptab" ctx=DDL
 STMT: CreateStmt
-== 263
+== 264
 create table asptab0 partition of asptab for values from (0) to (1)
 --
 TABLE: name="asptab0" schema="" table="asptab0" ctx=DDL
 STMT: CreateStmt
-== 264
+== 265
 create table asptab1 partition of asptab for values from (1) to (2)
 --
 TABLE: name="asptab1" schema="" table="asptab1" ctx=DDL
 STMT: CreateStmt
-== 265
+== 266
 explain (costs off)
 select * from
   (select exists (select 1 from int4_tbl tinner where f1 = touter.f1) as b
@@ -1885,12 +1907,12 @@ FILTER: schema="" table="" column="f1"
 FILTER: schema="" table="touter" column="f1"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 266
+== 267
 drop table asptab
 --
 TABLE: name="asptab" schema="" table="asptab" ctx=DDL
 STMT: DropStmt
-== 267
+== 268
 |--
 -- Test Partition pruning for HASH partitioning
 |--
@@ -1904,68 +1926,68 @@ create table hp (a int, b text, c int)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DDL
 STMT: CreateStmt
-== 268
+== 269
 create table hp0 partition of hp for values with (modulus 4, remainder 0)
 --
 TABLE: name="hp0" schema="" table="hp0" ctx=DDL
 STMT: CreateStmt
-== 269
+== 270
 create table hp3 partition of hp for values with (modulus 4, remainder 3)
 --
 TABLE: name="hp3" schema="" table="hp3" ctx=DDL
 STMT: CreateStmt
-== 270
+== 271
 create table hp1 partition of hp for values with (modulus 4, remainder 1)
 --
 TABLE: name="hp1" schema="" table="hp1" ctx=DDL
 STMT: CreateStmt
-== 271
+== 272
 create table hp2 partition of hp for values with (modulus 4, remainder 2)
 --
 TABLE: name="hp2" schema="" table="hp2" ctx=DDL
 STMT: CreateStmt
-== 272
+== 273
 insert into hp values (null, null, 0)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 273
+== 274
 insert into hp values (1, null, 1)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 274
+== 275
 insert into hp values (1, 'xxx', 2)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 275
+== 276
 insert into hp values (null, 'xxx', 3)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 276
+== 277
 insert into hp values (2, 'xxx', 4)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 277
+== 278
 insert into hp values (1, 'abcde', 5)
 --
 TABLE: name="hp" schema="" table="hp" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 278
+== 279
 select tableoid::regclass, * from hp order by c
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
 STMT: SelectStmt
-== 279
+== 280
 -- partial keys won't prune, nor would non-equality conditions
 explain (costs off) select * from hp where a = 1
 --
@@ -1973,28 +1995,28 @@ TABLE: name="hp" schema="" table="hp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 280
+== 281
 explain (costs off) select * from hp where b = 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 281
+== 282
 explain (costs off) select * from hp where a is null
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 282
+== 283
 explain (costs off) select * from hp where b is null
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 283
+== 284
 explain (costs off) select * from hp where a < 1 and b = 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2002,7 +2024,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 284
+== 285
 explain (costs off) select * from hp where a <> 1 and b = 'yyy'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2010,7 +2032,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 285
+== 286
 explain (costs off) select * from hp where a <> 1 and b <> 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2018,7 +2040,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 286
+== 287
 -- pruning should work if either a value or a IS NULL clause is provided for
 -- each of the keys
 explain (costs off) select * from hp where a is null and b is null
@@ -2028,7 +2050,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 287
+== 288
 explain (costs off) select * from hp where a = 1 and b is null
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2036,7 +2058,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 288
+== 289
 explain (costs off) select * from hp where a = 1 and b = 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2044,7 +2066,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 289
+== 290
 explain (costs off) select * from hp where a is null and b = 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2052,7 +2074,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 290
+== 291
 explain (costs off) select * from hp where a = 2 and b = 'xxx'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2060,7 +2082,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 291
+== 292
 explain (costs off) select * from hp where a = 1 and b = 'abcde'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2068,7 +2090,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 292
+== 293
 explain (costs off) select * from hp where (a = 1 and b = 'abcde') or (a = 2 and b = 'xxx') or (a is null and b is null)
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2080,18 +2102,18 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 293
+== 294
 -- test pruning when not all the partitions exist
 drop table hp1
 --
 TABLE: name="hp1" schema="" table="hp1" ctx=DDL
 STMT: DropStmt
-== 294
+== 295
 drop table hp3
 --
 TABLE: name="hp3" schema="" table="hp3" ctx=DDL
 STMT: DropStmt
-== 295
+== 296
 explain (costs off) select * from hp where a = 1 and b = 'abcde'
 --
 TABLE: name="hp" schema="" table="hp" ctx=Select
@@ -2099,7 +2121,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 296
+== 297
 explain (costs off) select * from hp where a = 1 and b = 'abcde' and
   (c = 2 or c = 3)
 --
@@ -2110,12 +2132,12 @@ FILTER: schema="" table="" column="c"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 297
+== 298
 drop table hp2
 --
 TABLE: name="hp2" schema="" table="hp2" ctx=DDL
 STMT: DropStmt
-== 298
+== 299
 explain (costs off) select * from hp where a = 1 and b = 'abcde' and
   (c = 2 or c = 3)
 --
@@ -2126,7 +2148,7 @@ FILTER: schema="" table="" column="c"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 299
+== 300
 |--
 -- Test runtime partition pruning
 |--
@@ -2134,74 +2156,74 @@ create table ab (a int not null, b int not null) partition by list (a)
 --
 TABLE: name="ab" schema="" table="ab" ctx=DDL
 STMT: CreateStmt
-== 300
+== 301
 create table ab_a2 partition of ab for values in(2) partition by list (b)
 --
 TABLE: name="ab_a2" schema="" table="ab_a2" ctx=DDL
 STMT: CreateStmt
-== 301
+== 302
 create table ab_a2_b1 partition of ab_a2 for values in (1)
 --
 TABLE: name="ab_a2_b1" schema="" table="ab_a2_b1" ctx=DDL
 STMT: CreateStmt
-== 302
+== 303
 create table ab_a2_b2 partition of ab_a2 for values in (2)
 --
 TABLE: name="ab_a2_b2" schema="" table="ab_a2_b2" ctx=DDL
 STMT: CreateStmt
-== 303
+== 304
 create table ab_a2_b3 partition of ab_a2 for values in (3)
 --
 TABLE: name="ab_a2_b3" schema="" table="ab_a2_b3" ctx=DDL
 STMT: CreateStmt
-== 304
+== 305
 create table ab_a1 partition of ab for values in(1) partition by list (b)
 --
 TABLE: name="ab_a1" schema="" table="ab_a1" ctx=DDL
 STMT: CreateStmt
-== 305
+== 306
 create table ab_a1_b1 partition of ab_a1 for values in (1)
 --
 TABLE: name="ab_a1_b1" schema="" table="ab_a1_b1" ctx=DDL
 STMT: CreateStmt
-== 306
+== 307
 create table ab_a1_b2 partition of ab_a1 for values in (2)
 --
 TABLE: name="ab_a1_b2" schema="" table="ab_a1_b2" ctx=DDL
 STMT: CreateStmt
-== 307
+== 308
 create table ab_a1_b3 partition of ab_a1 for values in (3)
 --
 TABLE: name="ab_a1_b3" schema="" table="ab_a1_b3" ctx=DDL
 STMT: CreateStmt
-== 308
+== 309
 create table ab_a3 partition of ab for values in(3) partition by list (b)
 --
 TABLE: name="ab_a3" schema="" table="ab_a3" ctx=DDL
 STMT: CreateStmt
-== 309
+== 310
 create table ab_a3_b1 partition of ab_a3 for values in (1)
 --
 TABLE: name="ab_a3_b1" schema="" table="ab_a3_b1" ctx=DDL
 STMT: CreateStmt
-== 310
+== 311
 create table ab_a3_b2 partition of ab_a3 for values in (2)
 --
 TABLE: name="ab_a3_b2" schema="" table="ab_a3_b2" ctx=DDL
 STMT: CreateStmt
-== 311
+== 312
 create table ab_a3_b3 partition of ab_a3 for values in (3)
 --
 TABLE: name="ab_a3_b3" schema="" table="ab_a3_b3" ctx=DDL
 STMT: CreateStmt
-== 312
+== 313
 -- Disallow index only scans as concurrent transactions may stop visibility
 -- bits being set causing "Heap Fetches" to be unstable in the EXPLAIN ANALYZE
 -- output.
 set enable_indexonlyscan = off
 --
 STMT: VariableSetStmt
-== 313
+== 314
 prepare ab_q1 (int, int, int) as
 select * from ab where a between $1 and $2 and b <= $3
 --
@@ -2210,21 +2232,21 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 314
-explain (analyze, costs off, summary off, timing off) execute ab_q1 (2, 2, 3)
---
-STMT: ExplainStmt
-STMT: ExecuteStmt
 == 315
-explain (analyze, costs off, summary off, timing off) execute ab_q1 (1, 2, 3)
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q1 (2, 2, 3)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
 == 316
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q1 (1, 2, 3)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 317
 deallocate ab_q1
 --
 STMT: DeallocateStmt
-== 317
+== 318
 -- Runtime pruning after optimizer pruning
 prepare ab_q1 (int, int) as
 select a from ab where a between $1 and $2 and b < 3
@@ -2234,17 +2256,17 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 318
-explain (analyze, costs off, summary off, timing off) execute ab_q1 (2, 2)
---
-STMT: ExplainStmt
-STMT: ExecuteStmt
 == 319
-explain (analyze, costs off, summary off, timing off) execute ab_q1 (2, 4)
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q1 (2, 2)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
 == 320
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q1 (2, 4)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 321
 -- Ensure a mix of PARAM_EXTERN and PARAM_EXEC Params work together at
 -- different levels of partitioning.
 prepare ab_q2 (int, int) as
@@ -2255,12 +2277,12 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 321
-explain (analyze, costs off, summary off, timing off) execute ab_q2 (2, 2)
+== 322
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q2 (2, 2)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 322
+== 323
 -- As above, but swap the PARAM_EXEC Param to the first partition level
 prepare ab_q3 (int, int) as
 select a from ab where b between $1 and $2 and a < (select 3)
@@ -2270,12 +2292,12 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="a"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 323
-explain (analyze, costs off, summary off, timing off) execute ab_q3 (2, 2)
+== 324
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q3 (2, 2)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 324
+== 325
 |--
 -- Test runtime pruning with hash partitioned tables
 |--
@@ -2285,17 +2307,17 @@ create table hp1 partition of hp for values with (modulus 4, remainder 1)
 --
 TABLE: name="hp1" schema="" table="hp1" ctx=DDL
 STMT: CreateStmt
-== 325
+== 326
 create table hp2 partition of hp for values with (modulus 4, remainder 2)
 --
 TABLE: name="hp2" schema="" table="hp2" ctx=DDL
 STMT: CreateStmt
-== 326
+== 327
 create table hp3 partition of hp for values with (modulus 4, remainder 3)
 --
 TABLE: name="hp3" schema="" table="hp3" ctx=DDL
 STMT: CreateStmt
-== 327
+== 328
 -- Ensure we correctly prune unneeded partitions when there is an IS NULL qual
 prepare hp_q1 (text) as
 select * from hp where a is null and b = $1
@@ -2305,111 +2327,100 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 328
+== 329
 explain (costs off) execute hp_q1('xxx')
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 329
+== 330
 deallocate hp_q1
 --
 STMT: DeallocateStmt
-== 330
+== 331
 drop table hp
 --
 TABLE: name="hp" schema="" table="hp" ctx=DDL
 STMT: DropStmt
-== 331
+== 332
 -- Test a backwards Append scan
 create table list_part (a int) partition by list (a)
 --
 TABLE: name="list_part" schema="" table="list_part" ctx=DDL
 STMT: CreateStmt
-== 332
+== 333
 create table list_part1 partition of list_part for values in (1)
 --
 TABLE: name="list_part1" schema="" table="list_part1" ctx=DDL
 STMT: CreateStmt
-== 333
+== 334
 create table list_part2 partition of list_part for values in (2)
 --
 TABLE: name="list_part2" schema="" table="list_part2" ctx=DDL
 STMT: CreateStmt
-== 334
+== 335
 create table list_part3 partition of list_part for values in (3)
 --
 TABLE: name="list_part3" schema="" table="list_part3" ctx=DDL
 STMT: CreateStmt
-== 335
+== 336
 create table list_part4 partition of list_part for values in (4)
 --
 TABLE: name="list_part4" schema="" table="list_part4" ctx=DDL
 STMT: CreateStmt
-== 336
+== 337
 insert into list_part select generate_series(1,4)
 --
 TABLE: name="list_part" schema="" table="list_part" ctx=DML
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
-== 337
+== 338
 begin
 --
 STMT: TransactionStmt
-== 338
+== 339
 -- Don't select an actual value out of the table as the order of the Append's
 -- subnodes may not be stable.
 declare cur SCROLL CURSOR for select 1 from list_part where a > (select 1) and a < (select 4)
 --
 STMT: DeclareCursorStmt
-== 339
+== 340
 -- move beyond the final row
 move 3 from cur
 --
 STMT: FetchStmt
-== 340
+== 341
 -- Ensure we get two rows.
 fetch backward all from cur
 --
 STMT: FetchStmt
-== 341
+== 342
 commit
 --
 STMT: TransactionStmt
-== 342
+== 343
 begin
 --
 STMT: TransactionStmt
-== 343
+== 344
 -- Test run-time pruning using stable functions
 create function list_part_fn(int) returns int as $$ begin return $1; end;$$ language plpgsql stable
 --
 FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=DDL
 STMT: CreateFunctionStmt
-== 344
--- Ensure pruning works using a stable function containing no Vars
-explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(1)
---
-TABLE: name="list_part" schema="" table="list_part" ctx=Select
-FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
-FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
-FILTER: schema="" table="" column="a"
-STMT: ExplainStmt
-STMT: SelectStmt
 == 345
--- Ensure pruning does not take place when the function has a Var parameter
-explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(a)
+-- Ensure pruning works using a stable function containing no Vars
+explain (analyze, costs off, summary off, timing off, buffers off) select * from list_part where a = list_part_fn(1)
 --
 TABLE: name="list_part" schema="" table="list_part" ctx=Select
 FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
 FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
-FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
 == 346
--- Ensure pruning does not take place when the expression contains a Var.
-explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(1) + a
+-- Ensure pruning does not take place when the function has a Var parameter
+explain (analyze, costs off, summary off, timing off, buffers off) select * from list_part where a = list_part_fn(a)
 --
 TABLE: name="list_part" schema="" table="list_part" ctx=Select
 FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
@@ -2419,15 +2430,26 @@ FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
 == 347
+-- Ensure pruning does not take place when the expression contains a Var.
+explain (analyze, costs off, summary off, timing off, buffers off) select * from list_part where a = list_part_fn(1) + a
+--
+TABLE: name="list_part" schema="" table="list_part" ctx=Select
+FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
+FUNCTION: name="list_part_fn" function="list_part_fn" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 348
 rollback
 --
 STMT: TransactionStmt
-== 348
+== 349
 drop table list_part
 --
 TABLE: name="list_part" schema="" table="list_part" ctx=DDL
 STMT: DropStmt
-== 349
+== 350
 -- Parallel append
 
 -- Parallel queries won't necessarily get as many workers as the planner
@@ -2445,12 +2467,16 @@ declare
     ln text;
 begin
     for ln in
-        execute format('explain (analyze, costs off, summary off, timing off) %s',
+        execute format('explain (analyze, costs off, summary off, timing off, buffers off) %s',
             $1)
     loop
         ln := regexp_replace(ln, 'Workers Launched: \d+', 'Workers Launched: N');
-        ln := regexp_replace(ln, 'actual rows=\d+ loops=\d+', 'actual rows=N loops=N');
+        ln := regexp_replace(ln, 'actual rows=\d+(?:\.\d+)? loops=\d+', 'actual rows=N loops=N');
         ln := regexp_replace(ln, 'Rows Removed by Filter: \d+', 'Rows Removed by Filter: N');
+        perform regexp_matches(ln, 'Index Searches: \d+');
+        if found then
+          continue;
+        end if;
         return next ln;
     end loop;
 end;
@@ -2458,7 +2484,7 @@ $$
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=DDL
 STMT: CreateFunctionStmt
-== 350
+== 351
 prepare ab_q4 (int, int) as
 select avg(a) from ab where a between $1 and $2 and b < 4
 --
@@ -2468,29 +2494,29 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 351
+== 352
 -- Encourage use of parallel plans
 set parallel_setup_cost = 0
 --
 STMT: VariableSetStmt
-== 352
+== 353
 set parallel_tuple_cost = 0
 --
 STMT: VariableSetStmt
-== 353
+== 354
 set min_parallel_table_scan_size = 0
 --
 STMT: VariableSetStmt
-== 354
+== 355
 set max_parallel_workers_per_gather = 2
 --
 STMT: VariableSetStmt
-== 355
+== 356
 select explain_parallel_append('execute ab_q4 (2, 2)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 356
+== 357
 -- Test run-time pruning with IN lists.
 prepare ab_q5 (int, int, int) as
 select avg(a) from ab where a in($1,$2,$3) and b < 4
@@ -2501,35 +2527,35 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 357
+== 358
 select explain_parallel_append('execute ab_q5 (1, 1, 1)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 358
+== 359
 select explain_parallel_append('execute ab_q5 (2, 3, 3)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 359
+== 360
 -- Try some params whose values do not belong to any partition.
 select explain_parallel_append('execute ab_q5 (33, 44, 55)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 360
+== 361
 -- Test Parallel Append with PARAM_EXEC Params
 select explain_parallel_append('select count(*) from ab where (a = (select 1) or a = (select 3)) and b = 2')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 361
+== 362
 -- Test pruning during parallel nested loop query
 create table lprt_a (a int not null)
 --
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DDL
 STMT: CreateStmt
-== 362
+== 363
 -- Insert some values we won't find in ab
 insert into lprt_a select 0 from generate_series(1,100)
 --
@@ -2537,144 +2563,144 @@ TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DML
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
-== 363
+== 364
 -- and insert some values that we should find.
 insert into lprt_a values(1),(1)
 --
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 364
+== 365
 analyze lprt_a
 --
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DDL
 STMT: VacuumStmt
-== 365
+== 366
 create index ab_a2_b1_a_idx on ab_a2_b1 (a)
 --
 TABLE: name="ab_a2_b1" schema="" table="ab_a2_b1" ctx=DDL
 STMT: IndexStmt
-== 366
+== 367
 create index ab_a2_b2_a_idx on ab_a2_b2 (a)
 --
 TABLE: name="ab_a2_b2" schema="" table="ab_a2_b2" ctx=DDL
 STMT: IndexStmt
-== 367
+== 368
 create index ab_a2_b3_a_idx on ab_a2_b3 (a)
 --
 TABLE: name="ab_a2_b3" schema="" table="ab_a2_b3" ctx=DDL
 STMT: IndexStmt
-== 368
+== 369
 create index ab_a1_b1_a_idx on ab_a1_b1 (a)
 --
 TABLE: name="ab_a1_b1" schema="" table="ab_a1_b1" ctx=DDL
 STMT: IndexStmt
-== 369
+== 370
 create index ab_a1_b2_a_idx on ab_a1_b2 (a)
 --
 TABLE: name="ab_a1_b2" schema="" table="ab_a1_b2" ctx=DDL
 STMT: IndexStmt
-== 370
+== 371
 create index ab_a1_b3_a_idx on ab_a1_b3 (a)
 --
 TABLE: name="ab_a1_b3" schema="" table="ab_a1_b3" ctx=DDL
 STMT: IndexStmt
-== 371
+== 372
 create index ab_a3_b1_a_idx on ab_a3_b1 (a)
 --
 TABLE: name="ab_a3_b1" schema="" table="ab_a3_b1" ctx=DDL
 STMT: IndexStmt
-== 372
+== 373
 create index ab_a3_b2_a_idx on ab_a3_b2 (a)
 --
 TABLE: name="ab_a3_b2" schema="" table="ab_a3_b2" ctx=DDL
 STMT: IndexStmt
-== 373
+== 374
 create index ab_a3_b3_a_idx on ab_a3_b3 (a)
 --
 TABLE: name="ab_a3_b3" schema="" table="ab_a3_b3" ctx=DDL
 STMT: IndexStmt
-== 374
+== 375
 set enable_hashjoin = 0
 --
 STMT: VariableSetStmt
-== 375
+== 376
 set enable_mergejoin = 0
 --
 STMT: VariableSetStmt
-== 376
+== 377
 set enable_memoize = 0
 --
 STMT: VariableSetStmt
-== 377
+== 378
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a where a.a in(0, 0, 1)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 378
+== 379
 -- Ensure the same partitions are pruned when we make the nested loop
 -- parameter an Expr rather than a plain Param.
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a + 0 where a.a in(0, 0, 1)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 379
+== 380
 insert into lprt_a values(3),(3)
 --
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 380
+== 381
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a where a.a in(1, 0, 3)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 381
+== 382
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a where a.a in(1, 0, 0)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 382
+== 383
 delete from lprt_a where a = 1
 --
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DML
 STMT: DeleteStmt
-== 383
+== 384
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a where a.a in(1, 0, 0)')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 384
+== 385
 reset enable_hashjoin
 --
 STMT: VariableSetStmt
-== 385
+== 386
 reset enable_mergejoin
 --
 STMT: VariableSetStmt
-== 386
+== 387
 reset enable_memoize
 --
 STMT: VariableSetStmt
-== 387
+== 388
 reset parallel_setup_cost
 --
 STMT: VariableSetStmt
-== 388
+== 389
 reset parallel_tuple_cost
 --
 STMT: VariableSetStmt
-== 389
+== 390
 reset min_parallel_table_scan_size
 --
 STMT: VariableSetStmt
-== 390
+== 391
 reset max_parallel_workers_per_gather
 --
 STMT: VariableSetStmt
-== 391
+== 392
 -- Test run-time partition pruning with an initplan
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from ab where a = (select max(a) from lprt_a) and b = (select max(a)-1 from lprt_a)
 --
 TABLE: name="ab" schema="" table="ab" ctx=Select
@@ -2685,9 +2711,9 @@ FUNCTION: name="max" function="max" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 392
+== 393
 -- Test run-time partition pruning with UNION ALL parents
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from (select * from ab where a = 1 union all select * from ab) ab where b = (select 1)
 --
 TABLE: name="ab" schema="" table="ab" ctx=Select
@@ -2696,9 +2722,9 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 393
+== 394
 -- A case containing a UNION ALL with a non-partitioned child.
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from (select * from ab where a = 1 union all (values(10,5)) union all select * from ab) ab where b = (select 1)
 --
 TABLE: name="ab" schema="" table="ab" ctx=Select
@@ -2707,27 +2733,27 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 394
+== 395
 -- Another UNION ALL test, but containing a mix of exec init and exec run-time pruning.
 create table xy_1 (x int, y int)
 --
 TABLE: name="xy_1" schema="" table="xy_1" ctx=DDL
 STMT: CreateStmt
-== 395
+== 396
 insert into xy_1 values(100,-10)
 --
 TABLE: name="xy_1" schema="" table="xy_1" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 396
+== 397
 set enable_bitmapscan = 0
 --
 STMT: VariableSetStmt
-== 397
+== 398
 set enable_indexscan = 0
 --
 STMT: VariableSetStmt
-== 398
+== 399
 prepare ab_q6 as
 select * from (
 	select tableoid::regclass,a,b from ab
@@ -2744,257 +2770,213 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 399
+== 400
 -- Ensure the xy_1 subplan is not pruned.
-explain (analyze, costs off, summary off, timing off) execute ab_q6(1)
+explain (analyze, costs off, summary off, timing off, buffers off) execute ab_q6(1)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 400
+== 401
 -- Ensure we see just the xy_1 row.
 execute ab_q6(100)
 --
 STMT: ExecuteStmt
-== 401
+== 402
 reset enable_bitmapscan
 --
 STMT: VariableSetStmt
-== 402
+== 403
 reset enable_indexscan
 --
 STMT: VariableSetStmt
-== 403
+== 404
 deallocate ab_q1
 --
 STMT: DeallocateStmt
-== 404
+== 405
 deallocate ab_q2
 --
 STMT: DeallocateStmt
-== 405
+== 406
 deallocate ab_q3
 --
 STMT: DeallocateStmt
-== 406
+== 407
 deallocate ab_q4
 --
 STMT: DeallocateStmt
-== 407
+== 408
 deallocate ab_q5
 --
 STMT: DeallocateStmt
-== 408
+== 409
 deallocate ab_q6
 --
 STMT: DeallocateStmt
-== 409
+== 410
 -- UPDATE on a partition subtree has been seen to have problems.
 insert into ab values (1,2)
 --
 TABLE: name="ab" schema="" table="ab" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 410
-explain (analyze, costs off, summary off, timing off)
-update ab_a1 set b = 3 from ab where ab.a = 1 and ab.a = ab_a1.a
---
-TABLE: name="ab_a1" schema="" table="ab_a1" ctx=DML
-TABLE: name="ab" schema="" table="ab" ctx=Select
-STMT: ExplainStmt
-STMT: UpdateStmt
 == 411
+select explain_analyze('
+update ab_a1 set b = 3 from ab where ab.a = 1 and ab.a = ab_a1.a;')
+--
+FUNCTION: name="explain_analyze" function="explain_analyze" schema="" ctx=Call
+STMT: SelectStmt
+== 412
 table ab
 --
 TABLE: name="ab" schema="" table="ab" ctx=Select
 STMT: SelectStmt
-== 412
+== 413
 -- Test UPDATE where source relation has run-time pruning enabled
 truncate ab
 --
 TABLE: name="ab" schema="" table="ab" ctx=DDL
 STMT: TruncateStmt
-== 413
+== 414
 insert into ab values (1, 1), (1, 2), (1, 3), (2, 1)
 --
 TABLE: name="ab" schema="" table="ab" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 414
-explain (analyze, costs off, summary off, timing off)
-update ab_a1 set b = 3 from ab_a2 where ab_a2.b = (select 1)
---
-TABLE: name="ab_a1" schema="" table="ab_a1" ctx=DML
-TABLE: name="ab_a2" schema="" table="ab_a2" ctx=Select
-STMT: ExplainStmt
-STMT: UpdateStmt
-STMT: SelectStmt
 == 415
+select explain_analyze('
+update ab_a1 set b = 3 from ab_a2 where ab_a2.b = (select 1);')
+--
+FUNCTION: name="explain_analyze" function="explain_analyze" schema="" ctx=Call
+STMT: SelectStmt
+== 416
 select tableoid::regclass, * from ab
 --
 TABLE: name="ab" schema="" table="ab" ctx=Select
 STMT: SelectStmt
-== 416
+== 417
 drop table ab, lprt_a
 --
 TABLE: name="ab" schema="" table="ab" ctx=DDL
 TABLE: name="lprt_a" schema="" table="lprt_a" ctx=DDL
 STMT: DropStmt
-== 417
+== 418
 -- Join
 create table tbl1(col1 int)
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DDL
 STMT: CreateStmt
-== 418
+== 419
 insert into tbl1 values (501), (505)
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 419
+== 420
 -- Basic table
 create table tprt (col1 int) partition by range (col1)
 --
 TABLE: name="tprt" schema="" table="tprt" ctx=DDL
 STMT: CreateStmt
-== 420
+== 421
 create table tprt_1 partition of tprt for values from (1) to (501)
 --
 TABLE: name="tprt_1" schema="" table="tprt_1" ctx=DDL
 STMT: CreateStmt
-== 421
+== 422
 create table tprt_2 partition of tprt for values from (501) to (1001)
 --
 TABLE: name="tprt_2" schema="" table="tprt_2" ctx=DDL
 STMT: CreateStmt
-== 422
+== 423
 create table tprt_3 partition of tprt for values from (1001) to (2001)
 --
 TABLE: name="tprt_3" schema="" table="tprt_3" ctx=DDL
 STMT: CreateStmt
-== 423
+== 424
 create table tprt_4 partition of tprt for values from (2001) to (3001)
 --
 TABLE: name="tprt_4" schema="" table="tprt_4" ctx=DDL
 STMT: CreateStmt
-== 424
+== 425
 create table tprt_5 partition of tprt for values from (3001) to (4001)
 --
 TABLE: name="tprt_5" schema="" table="tprt_5" ctx=DDL
 STMT: CreateStmt
-== 425
+== 426
 create table tprt_6 partition of tprt for values from (4001) to (5001)
 --
 TABLE: name="tprt_6" schema="" table="tprt_6" ctx=DDL
 STMT: CreateStmt
-== 426
+== 427
 create index tprt1_idx on tprt_1 (col1)
 --
 TABLE: name="tprt_1" schema="" table="tprt_1" ctx=DDL
 STMT: IndexStmt
-== 427
+== 428
 create index tprt2_idx on tprt_2 (col1)
 --
 TABLE: name="tprt_2" schema="" table="tprt_2" ctx=DDL
 STMT: IndexStmt
-== 428
+== 429
 create index tprt3_idx on tprt_3 (col1)
 --
 TABLE: name="tprt_3" schema="" table="tprt_3" ctx=DDL
 STMT: IndexStmt
-== 429
+== 430
 create index tprt4_idx on tprt_4 (col1)
 --
 TABLE: name="tprt_4" schema="" table="tprt_4" ctx=DDL
 STMT: IndexStmt
-== 430
+== 431
 create index tprt5_idx on tprt_5 (col1)
 --
 TABLE: name="tprt_5" schema="" table="tprt_5" ctx=DDL
 STMT: IndexStmt
-== 431
+== 432
 create index tprt6_idx on tprt_6 (col1)
 --
 TABLE: name="tprt_6" schema="" table="tprt_6" ctx=DDL
 STMT: IndexStmt
-== 432
+== 433
 insert into tprt values (10), (20), (501), (502), (505), (1001), (4500)
 --
 TABLE: name="tprt" schema="" table="tprt" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 433
+== 434
 set enable_hashjoin = off
 --
 STMT: VariableSetStmt
-== 434
+== 435
 set enable_mergejoin = off
 --
 STMT: VariableSetStmt
-== 435
-explain (analyze, costs off, summary off, timing off)
+== 436
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from tbl1 join tprt on tbl1.col1 > tprt.col1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 436
-explain (analyze, costs off, summary off, timing off)
+== 437
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from tbl1 join tprt on tbl1.col1 = tprt.col1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 437
-select tbl1.col1, tprt.col1 from tbl1
-inner join tprt on tbl1.col1 > tprt.col1
-order by tbl1.col1, tprt.col1
---
-TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
-TABLE: name="tprt" schema="" table="tprt" ctx=Select
-STMT: SelectStmt
 == 438
 select tbl1.col1, tprt.col1 from tbl1
-inner join tprt on tbl1.col1 = tprt.col1
+inner join tprt on tbl1.col1 > tprt.col1
 order by tbl1.col1, tprt.col1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: SelectStmt
 == 439
--- Multiple partitions
-insert into tbl1 values (1001), (1010), (1011)
---
-TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
-STMT: InsertStmt
-STMT: SelectStmt
-== 440
-explain (analyze, costs off, summary off, timing off)
-select * from tbl1 inner join tprt on tbl1.col1 > tprt.col1
---
-TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
-TABLE: name="tprt" schema="" table="tprt" ctx=Select
-STMT: ExplainStmt
-STMT: SelectStmt
-== 441
-explain (analyze, costs off, summary off, timing off)
-select * from tbl1 inner join tprt on tbl1.col1 = tprt.col1
---
-TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
-TABLE: name="tprt" schema="" table="tprt" ctx=Select
-STMT: ExplainStmt
-STMT: SelectStmt
-== 442
-select tbl1.col1, tprt.col1 from tbl1
-inner join tprt on tbl1.col1 > tprt.col1
-order by tbl1.col1, tprt.col1
---
-TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
-TABLE: name="tprt" schema="" table="tprt" ctx=Select
-STMT: SelectStmt
-== 443
 select tbl1.col1, tprt.col1 from tbl1
 inner join tprt on tbl1.col1 = tprt.col1
 order by tbl1.col1, tprt.col1
@@ -3002,27 +2984,66 @@ order by tbl1.col1, tprt.col1
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: SelectStmt
+== 440
+-- Multiple partitions
+insert into tbl1 values (1001), (1010), (1011)
+--
+TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 441
+explain (analyze, costs off, summary off, timing off, buffers off)
+select * from tbl1 inner join tprt on tbl1.col1 > tprt.col1
+--
+TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
+TABLE: name="tprt" schema="" table="tprt" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 442
+explain (analyze, costs off, summary off, timing off, buffers off)
+select * from tbl1 inner join tprt on tbl1.col1 = tprt.col1
+--
+TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
+TABLE: name="tprt" schema="" table="tprt" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 443
+select tbl1.col1, tprt.col1 from tbl1
+inner join tprt on tbl1.col1 > tprt.col1
+order by tbl1.col1, tprt.col1
+--
+TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
+TABLE: name="tprt" schema="" table="tprt" ctx=Select
+STMT: SelectStmt
 == 444
+select tbl1.col1, tprt.col1 from tbl1
+inner join tprt on tbl1.col1 = tprt.col1
+order by tbl1.col1, tprt.col1
+--
+TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
+TABLE: name="tprt" schema="" table="tprt" ctx=Select
+STMT: SelectStmt
+== 445
 -- Last partition
 delete from tbl1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
 STMT: DeleteStmt
-== 445
+== 446
 insert into tbl1 values (4400)
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 446
-explain (analyze, costs off, summary off, timing off)
+== 447
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from tbl1 join tprt on tbl1.col1 < tprt.col1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 447
+== 448
 select tbl1.col1, tprt.col1 from tbl1
 inner join tprt on tbl1.col1 < tprt.col1
 order by tbl1.col1, tprt.col1
@@ -3030,27 +3051,27 @@ order by tbl1.col1, tprt.col1
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: SelectStmt
-== 448
+== 449
 -- No matching partition
 delete from tbl1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
 STMT: DeleteStmt
-== 449
+== 450
 insert into tbl1 values (10000)
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 450
-explain (analyze, costs off, summary off, timing off)
+== 451
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from tbl1 join tprt on tbl1.col1 = tprt.col1
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 451
+== 452
 select tbl1.col1, tprt.col1 from tbl1
 inner join tprt on tbl1.col1 = tprt.col1
 order by tbl1.col1, tprt.col1
@@ -3058,49 +3079,49 @@ order by tbl1.col1, tprt.col1
 TABLE: name="tbl1" schema="" table="tbl1" ctx=Select
 TABLE: name="tprt" schema="" table="tprt" ctx=Select
 STMT: SelectStmt
-== 452
+== 453
 drop table tbl1, tprt
 --
 TABLE: name="tbl1" schema="" table="tbl1" ctx=DDL
 TABLE: name="tprt" schema="" table="tprt" ctx=DDL
 STMT: DropStmt
-== 453
+== 454
 -- Test with columns defined in varying orders between each level
 create table part_abc (a int not null, b int not null, c int not null) partition by list (a)
 --
 TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
 STMT: CreateStmt
-== 454
+== 455
 create table part_bac (b int not null, a int not null, c int not null) partition by list (b)
 --
 TABLE: name="part_bac" schema="" table="part_bac" ctx=DDL
 STMT: CreateStmt
-== 455
+== 456
 create table part_cab (c int not null, a int not null, b int not null) partition by list (c)
 --
 TABLE: name="part_cab" schema="" table="part_cab" ctx=DDL
 STMT: CreateStmt
-== 456
+== 457
 create table part_abc_p1 (a int not null, b int not null, c int not null)
 --
 TABLE: name="part_abc_p1" schema="" table="part_abc_p1" ctx=DDL
 STMT: CreateStmt
-== 457
+== 458
 alter table part_abc attach partition part_bac for values in(1)
 --
 TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
 STMT: AlterTableStmt
-== 458
+== 459
 alter table part_bac attach partition part_cab for values in(2)
 --
 TABLE: name="part_bac" schema="" table="part_bac" ctx=DDL
 STMT: AlterTableStmt
-== 459
+== 460
 alter table part_cab attach partition part_abc_p1 for values in(3)
 --
 TABLE: name="part_cab" schema="" table="part_cab" ctx=DDL
 STMT: AlterTableStmt
-== 460
+== 461
 prepare part_abc_q1 (int, int, int) as
 select * from part_abc where a = $1 and b = $2 and c = $3
 --
@@ -3110,55 +3131,55 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 461
+== 462
 -- Single partition should be scanned.
-explain (analyze, costs off, summary off, timing off) execute part_abc_q1 (1, 2, 3)
+explain (analyze, costs off, summary off, timing off, buffers off) execute part_abc_q1 (1, 2, 3)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 462
+== 463
 deallocate part_abc_q1
 --
 STMT: DeallocateStmt
-== 463
+== 464
 drop table part_abc
 --
 TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
 STMT: DropStmt
-== 464
+== 465
 -- Ensure that an Append node properly handles a sub-partitioned table
 -- matching without any of its leaf partitions matching the clause.
 create table listp (a int, b int) partition by list (a)
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: CreateStmt
-== 465
+== 466
 create table listp_1 partition of listp for values in(1) partition by list (b)
 --
 TABLE: name="listp_1" schema="" table="listp_1" ctx=DDL
 STMT: CreateStmt
-== 466
+== 467
 create table listp_1_1 partition of listp_1 for values in(1)
 --
 TABLE: name="listp_1_1" schema="" table="listp_1_1" ctx=DDL
 STMT: CreateStmt
-== 467
+== 468
 create table listp_2 partition of listp for values in(2) partition by list (b)
 --
 TABLE: name="listp_2" schema="" table="listp_2" ctx=DDL
 STMT: CreateStmt
-== 468
+== 469
 create table listp_2_1 partition of listp_2 for values in(2)
 --
 TABLE: name="listp_2_1" schema="" table="listp_2_1" ctx=DDL
 STMT: CreateStmt
-== 469
+== 470
 select * from listp where b = 1
 --
 TABLE: name="listp" schema="" table="listp" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: SelectStmt
-== 470
+== 471
 -- Ensure that an Append node properly can handle selection of all first level
 -- partitions before finally detecting the correct set of 2nd level partitions
 -- which match the given parameter.
@@ -3168,27 +3189,27 @@ TABLE: name="listp" schema="" table="listp" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 471
-explain (analyze, costs off, summary off, timing off)  execute q1 (1,1)
---
-STMT: ExplainStmt
-STMT: ExecuteStmt
 == 472
-explain (analyze, costs off, summary off, timing off)  execute q1 (2,2)
+explain (analyze, costs off, summary off, timing off, buffers off)  execute q1 (1,1)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
 == 473
--- Try with no matching partitions.
-explain (analyze, costs off, summary off, timing off)  execute q1 (0,0)
+explain (analyze, costs off, summary off, timing off, buffers off)  execute q1 (2,2)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
 == 474
+-- Try with no matching partitions.
+explain (analyze, costs off, summary off, timing off, buffers off)  execute q1 (0,0)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 475
 deallocate q1
 --
 STMT: DeallocateStmt
-== 475
+== 476
 -- Test more complex cases where a not-equal condition further eliminates partitions.
 prepare q1 (int,int,int,int) as select * from listp where b in($1,$2) and $3 <> b and $4 <> b
 --
@@ -3198,33 +3219,33 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 476
--- Both partitions allowed by IN clause, but one disallowed by <> clause
-explain (analyze, costs off, summary off, timing off)  execute q1 (1,2,2,0)
---
-STMT: ExplainStmt
-STMT: ExecuteStmt
 == 477
--- Both partitions allowed by IN clause, then both excluded again by <> clauses.
-explain (analyze, costs off, summary off, timing off)  execute q1 (1,2,2,1)
+-- Both partitions allowed by IN clause, but one disallowed by <> clause
+explain (analyze, costs off, summary off, timing off, buffers off)  execute q1 (1,2,2,0)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
 == 478
+-- Both partitions allowed by IN clause, then both excluded again by <> clauses.
+explain (analyze, costs off, summary off, timing off, buffers off)  execute q1 (1,2,2,1)
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 479
 -- Ensure Params that evaluate to NULL properly prune away all partitions
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from listp where a = (select null::int)
 --
 TABLE: name="listp" schema="" table="listp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 479
+== 480
 drop table listp
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: DropStmt
-== 480
+== 481
 |--
 -- check that stable query clauses are only used in run-time pruning
 |--
@@ -3232,45 +3253,45 @@ create table stable_qual_pruning (a timestamp) partition by range (a)
 --
 TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=DDL
 STMT: CreateStmt
-== 481
+== 482
 create table stable_qual_pruning1 partition of stable_qual_pruning
   for values from ('2000-01-01') to ('2000-02-01')
 --
 TABLE: name="stable_qual_pruning1" schema="" table="stable_qual_pruning1" ctx=DDL
 STMT: CreateStmt
-== 482
+== 483
 create table stable_qual_pruning2 partition of stable_qual_pruning
   for values from ('2000-02-01') to ('2000-03-01')
 --
 TABLE: name="stable_qual_pruning2" schema="" table="stable_qual_pruning2" ctx=DDL
 STMT: CreateStmt
-== 483
+== 484
 create table stable_qual_pruning3 partition of stable_qual_pruning
   for values from ('3000-02-01') to ('3000-03-01')
 --
 TABLE: name="stable_qual_pruning3" schema="" table="stable_qual_pruning3" ctx=DDL
 STMT: CreateStmt
-== 484
+== 485
 -- comparison against a stable value requires run-time pruning
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning where a < localtimestamp
 --
 TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 485
+== 486
 -- timestamp < timestamptz comparison is only stable, not immutable
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning where a < '2000-02-01'::timestamptz
 --
 TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 486
+== 487
 -- check ScalarArrayOp cases
-explain (analyze, costs off, summary off, timing off)
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(array['2010-02-01', '2020-01-01']::timestamp[])
 --
@@ -3278,8 +3299,8 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 487
-explain (analyze, costs off, summary off, timing off)
+== 488
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(array['2000-02-01', '2010-01-01']::timestamp[])
 --
@@ -3287,8 +3308,8 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 488
-explain (analyze, costs off, summary off, timing off)
+== 489
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(array['2000-02-01', localtimestamp]::timestamp[])
 --
@@ -3296,8 +3317,8 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 489
-explain (analyze, costs off, summary off, timing off)
+== 490
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(array['2010-02-01', '2020-01-01']::timestamptz[])
 --
@@ -3305,8 +3326,8 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 490
-explain (analyze, costs off, summary off, timing off)
+== 491
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(array['2000-02-01', '2010-01-01']::timestamptz[])
 --
@@ -3314,8 +3335,8 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 491
-explain (analyze, costs off, summary off, timing off)
+== 492
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from stable_qual_pruning
   where a = any(null::timestamptz[])
 --
@@ -3323,12 +3344,12 @@ TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=Sele
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 492
+== 493
 drop table stable_qual_pruning
 --
 TABLE: name="stable_qual_pruning" schema="" table="stable_qual_pruning" ctx=DDL
 STMT: DropStmt
-== 493
+== 494
 |--
 -- Check that pruning with composite range partitioning works correctly when
 -- it must ignore clauses for trailing keys once it has seen a clause with
@@ -3338,32 +3359,32 @@ create table mc3p (a int, b int, c int) partition by range (a, abs(b), c)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=DDL
 STMT: CreateStmt
-== 494
+== 495
 create table mc3p0 partition of mc3p
   for values from (0, 0, 0) to (0, maxvalue, maxvalue)
 --
 TABLE: name="mc3p0" schema="" table="mc3p0" ctx=DDL
 STMT: CreateStmt
-== 495
+== 496
 create table mc3p1 partition of mc3p
   for values from (1, 1, 1) to (2, minvalue, minvalue)
 --
 TABLE: name="mc3p1" schema="" table="mc3p1" ctx=DDL
 STMT: CreateStmt
-== 496
+== 497
 create table mc3p2 partition of mc3p
   for values from (2, minvalue, minvalue) to (3, maxvalue, maxvalue)
 --
 TABLE: name="mc3p2" schema="" table="mc3p2" ctx=DDL
 STMT: CreateStmt
-== 497
+== 498
 insert into mc3p values (0, 1, 1), (1, 1, 1), (2, 1, 1)
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 498
-explain (analyze, costs off, summary off, timing off)
+== 499
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from mc3p where a < 3 and abs(b) = 1
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=Select
@@ -3373,7 +3394,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 499
+== 500
 |--
 -- Check that pruning with composite range partitioning works correctly when
 -- a combination of runtime parameters is specified, not all of whose values
@@ -3389,17 +3410,17 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 500
-explain (analyze, costs off, summary off, timing off)
+== 501
+explain (analyze, costs off, summary off, timing off, buffers off)
 execute ps1(1)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 501
+== 502
 deallocate ps1
 --
 STMT: DeallocateStmt
-== 502
+== 503
 prepare ps2 as
   select * from mc3p where a <= $1 and abs(b) < (select 3)
 --
@@ -3410,50 +3431,50 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 503
-explain (analyze, costs off, summary off, timing off)
+== 504
+explain (analyze, costs off, summary off, timing off, buffers off)
 execute ps2(1)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 504
+== 505
 deallocate ps2
 --
 STMT: DeallocateStmt
-== 505
+== 506
 drop table mc3p
 --
 TABLE: name="mc3p" schema="" table="mc3p" ctx=DDL
 STMT: DropStmt
-== 506
+== 507
 -- Ensure runtime pruning works with initplans params with boolean types
 create table boolvalues (value bool not null)
 --
 TABLE: name="boolvalues" schema="" table="boolvalues" ctx=DDL
 STMT: CreateStmt
-== 507
+== 508
 insert into boolvalues values('t'),('f')
 --
 TABLE: name="boolvalues" schema="" table="boolvalues" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 508
+== 509
 create table boolp (a bool) partition by list (a)
 --
 TABLE: name="boolp" schema="" table="boolp" ctx=DDL
 STMT: CreateStmt
-== 509
+== 510
 create table boolp_t partition of boolp for values in('t')
 --
 TABLE: name="boolp_t" schema="" table="boolp_t" ctx=DDL
 STMT: CreateStmt
-== 510
+== 511
 create table boolp_f partition of boolp for values in('f')
 --
 TABLE: name="boolp_f" schema="" table="boolp_f" ctx=DDL
 STMT: CreateStmt
-== 511
-explain (analyze, costs off, summary off, timing off)
+== 512
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from boolp where a = (select value from boolvalues where value)
 --
 TABLE: name="boolp" schema="" table="boolp" ctx=Select
@@ -3462,8 +3483,8 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="value"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 512
-explain (analyze, costs off, summary off, timing off)
+== 513
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from boolp where a = (select value from boolvalues where not value)
 --
 TABLE: name="boolp" schema="" table="boolp" ctx=Select
@@ -3472,60 +3493,60 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="value"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 513
+== 514
 drop table boolp
 --
 TABLE: name="boolp" schema="" table="boolp" ctx=DDL
 STMT: DropStmt
-== 514
+== 515
 |--
 -- Test run-time pruning of MergeAppend subnodes
 |--
 set enable_seqscan = off
 --
 STMT: VariableSetStmt
-== 515
+== 516
 set enable_sort = off
 --
 STMT: VariableSetStmt
-== 516
+== 517
 create table ma_test (a int, b int) partition by range (a)
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=DDL
 STMT: CreateStmt
-== 517
+== 518
 create table ma_test_p1 partition of ma_test for values from (0) to (10)
 --
 TABLE: name="ma_test_p1" schema="" table="ma_test_p1" ctx=DDL
 STMT: CreateStmt
-== 518
+== 519
 create table ma_test_p2 partition of ma_test for values from (10) to (20)
 --
 TABLE: name="ma_test_p2" schema="" table="ma_test_p2" ctx=DDL
 STMT: CreateStmt
-== 519
+== 520
 create table ma_test_p3 partition of ma_test for values from (20) to (30)
 --
 TABLE: name="ma_test_p3" schema="" table="ma_test_p3" ctx=DDL
 STMT: CreateStmt
-== 520
+== 521
 insert into ma_test select x,x from generate_series(0,29) t(x)
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=DML
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
-== 521
+== 522
 create index on ma_test (b)
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=DDL
 STMT: IndexStmt
-== 522
+== 523
 analyze ma_test
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=DDL
 STMT: VacuumStmt
-== 523
+== 524
 prepare mt_q1 (int) as select a from ma_test where a >= $1 and a % 10 = 5 order by b
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=Select
@@ -3533,58 +3554,58 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="a"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 524
-explain (analyze, costs off, summary off, timing off) execute mt_q1(15)
+== 525
+explain (analyze, costs off, summary off, timing off, buffers off) execute mt_q1(15)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 525
+== 526
 execute mt_q1(15)
 --
 STMT: ExecuteStmt
-== 526
-explain (analyze, costs off, summary off, timing off) execute mt_q1(25)
+== 527
+explain (analyze, costs off, summary off, timing off, buffers off) execute mt_q1(25)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 527
+== 528
 execute mt_q1(25)
 --
 STMT: ExecuteStmt
-== 528
+== 529
 -- Ensure MergeAppend behaves correctly when no subplans match
-explain (analyze, costs off, summary off, timing off) execute mt_q1(35)
+explain (analyze, costs off, summary off, timing off, buffers off) execute mt_q1(35)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 529
+== 530
 execute mt_q1(35)
 --
 STMT: ExecuteStmt
-== 530
+== 531
 deallocate mt_q1
 --
 STMT: DeallocateStmt
-== 531
+== 532
 prepare mt_q2 (int) as select * from ma_test where a >= $1 order by b limit 1
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 532
+== 533
 -- Ensure output list looks sane when the MergeAppend has no subplans.
-explain (analyze, verbose, costs off, summary off, timing off) execute mt_q2 (35)
+explain (analyze, verbose, costs off, summary off, timing off, buffers off) execute mt_q2 (35)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 533
+== 534
 deallocate mt_q2
 --
 STMT: DeallocateStmt
-== 534
+== 535
 -- ensure initplan params properly prune partitions
-explain (analyze, costs off, summary off, timing off) select * from ma_test where a >= (select min(b) from ma_test_p2) order by b
+explain (analyze, costs off, summary off, timing off, buffers off) select * from ma_test where a >= (select min(b) from ma_test_p2) order by b
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=Select
 TABLE: name="ma_test_p2" schema="" table="ma_test_p2" ctx=Select
@@ -3592,24 +3613,24 @@ FUNCTION: name="min" function="min" schema="" ctx=Call
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 535
+== 536
 reset enable_seqscan
 --
 STMT: VariableSetStmt
-== 536
+== 537
 reset enable_sort
 --
 STMT: VariableSetStmt
-== 537
+== 538
 drop table ma_test
 --
 TABLE: name="ma_test" schema="" table="ma_test" ctx=DDL
 STMT: DropStmt
-== 538
+== 539
 reset enable_indexonlyscan
 --
 STMT: VariableSetStmt
-== 539
+== 540
 |--
 -- check that pruning works properly when the partition key is of a
 -- pseudotype
@@ -3620,229 +3641,229 @@ create table pp_arrpart (a int[]) partition by list (a)
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=DDL
 STMT: CreateStmt
-== 540
+== 541
 create table pp_arrpart1 partition of pp_arrpart for values in ('{1}')
 --
 TABLE: name="pp_arrpart1" schema="" table="pp_arrpart1" ctx=DDL
 STMT: CreateStmt
-== 541
+== 542
 create table pp_arrpart2 partition of pp_arrpart for values in ('{2, 3}', '{4, 5}')
 --
 TABLE: name="pp_arrpart2" schema="" table="pp_arrpart2" ctx=DDL
 STMT: CreateStmt
-== 542
+== 543
 explain (costs off) select * from pp_arrpart where a = '{1}'
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 543
+== 544
 explain (costs off) select * from pp_arrpart where a = '{1, 2}'
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 544
+== 545
 explain (costs off) select * from pp_arrpart where a in ('{4, 5}', '{1}')
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 545
+== 546
 explain (costs off) update pp_arrpart set a = a where a = '{1}'
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 546
+== 547
 explain (costs off) delete from pp_arrpart where a = '{1}'
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=DML
 STMT: ExplainStmt
 STMT: DeleteStmt
-== 547
+== 548
 drop table pp_arrpart
 --
 TABLE: name="pp_arrpart" schema="" table="pp_arrpart" ctx=DDL
 STMT: DropStmt
-== 548
+== 549
 -- array type hash partition key
 create table pph_arrpart (a int[]) partition by hash (a)
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=DDL
 STMT: CreateStmt
-== 549
+== 550
 create table pph_arrpart1 partition of pph_arrpart for values with (modulus 2, remainder 0)
 --
 TABLE: name="pph_arrpart1" schema="" table="pph_arrpart1" ctx=DDL
 STMT: CreateStmt
-== 550
+== 551
 create table pph_arrpart2 partition of pph_arrpart for values with (modulus 2, remainder 1)
 --
 TABLE: name="pph_arrpart2" schema="" table="pph_arrpart2" ctx=DDL
 STMT: CreateStmt
-== 551
+== 552
 insert into pph_arrpart values ('{1}'), ('{1, 2}'), ('{4, 5}')
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 552
+== 553
 select tableoid::regclass, * from pph_arrpart order by 1
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=Select
 STMT: SelectStmt
-== 553
+== 554
 explain (costs off) select * from pph_arrpart where a = '{1}'
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 554
+== 555
 explain (costs off) select * from pph_arrpart where a = '{1, 2}'
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 555
+== 556
 explain (costs off) select * from pph_arrpart where a in ('{4, 5}', '{1}')
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 556
+== 557
 drop table pph_arrpart
 --
 TABLE: name="pph_arrpart" schema="" table="pph_arrpart" ctx=DDL
 STMT: DropStmt
-== 557
+== 558
 -- enum type list partition key
 create type pp_colors as enum ('green', 'blue', 'black')
 --
 STMT: CreateEnumStmt
-== 558
+== 559
 create table pp_enumpart (a pp_colors) partition by list (a)
 --
 TABLE: name="pp_enumpart" schema="" table="pp_enumpart" ctx=DDL
 STMT: CreateStmt
-== 559
+== 560
 create table pp_enumpart_green partition of pp_enumpart for values in ('green')
 --
 TABLE: name="pp_enumpart_green" schema="" table="pp_enumpart_green" ctx=DDL
 STMT: CreateStmt
-== 560
+== 561
 create table pp_enumpart_blue partition of pp_enumpart for values in ('blue')
 --
 TABLE: name="pp_enumpart_blue" schema="" table="pp_enumpart_blue" ctx=DDL
 STMT: CreateStmt
-== 561
+== 562
 explain (costs off) select * from pp_enumpart where a = 'blue'
 --
 TABLE: name="pp_enumpart" schema="" table="pp_enumpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 562
+== 563
 explain (costs off) select * from pp_enumpart where a = 'black'
 --
 TABLE: name="pp_enumpart" schema="" table="pp_enumpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 563
+== 564
 drop table pp_enumpart
 --
 TABLE: name="pp_enumpart" schema="" table="pp_enumpart" ctx=DDL
 STMT: DropStmt
-== 564
+== 565
 drop type pp_colors
 --
 STMT: DropStmt
-== 565
+== 566
 -- record type as partition key
 create type pp_rectype as (a int, b int)
 --
 STMT: CompositeTypeStmt
-== 566
+== 567
 create table pp_recpart (a pp_rectype) partition by list (a)
 --
 TABLE: name="pp_recpart" schema="" table="pp_recpart" ctx=DDL
 STMT: CreateStmt
-== 567
+== 568
 create table pp_recpart_11 partition of pp_recpart for values in ('(1,1)')
 --
 TABLE: name="pp_recpart_11" schema="" table="pp_recpart_11" ctx=DDL
 STMT: CreateStmt
-== 568
+== 569
 create table pp_recpart_23 partition of pp_recpart for values in ('(2,3)')
 --
 TABLE: name="pp_recpart_23" schema="" table="pp_recpart_23" ctx=DDL
 STMT: CreateStmt
-== 569
+== 570
 explain (costs off) select * from pp_recpart where a = '(1,1)'::pp_rectype
 --
 TABLE: name="pp_recpart" schema="" table="pp_recpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 570
+== 571
 explain (costs off) select * from pp_recpart where a = '(1,2)'::pp_rectype
 --
 TABLE: name="pp_recpart" schema="" table="pp_recpart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 571
+== 572
 drop table pp_recpart
 --
 TABLE: name="pp_recpart" schema="" table="pp_recpart" ctx=DDL
 STMT: DropStmt
-== 572
+== 573
 drop type pp_rectype
 --
 STMT: DropStmt
-== 573
+== 574
 -- range type partition key
 create table pp_intrangepart (a int4range) partition by list (a)
 --
 TABLE: name="pp_intrangepart" schema="" table="pp_intrangepart" ctx=DDL
 STMT: CreateStmt
-== 574
+== 575
 create table pp_intrangepart12 partition of pp_intrangepart for values in ('[1,2]')
 --
 TABLE: name="pp_intrangepart12" schema="" table="pp_intrangepart12" ctx=DDL
 STMT: CreateStmt
-== 575
+== 576
 create table pp_intrangepart2inf partition of pp_intrangepart for values in ('[2,)')
 --
 TABLE: name="pp_intrangepart2inf" schema="" table="pp_intrangepart2inf" ctx=DDL
 STMT: CreateStmt
-== 576
+== 577
 explain (costs off) select * from pp_intrangepart where a = '[1,2]'::int4range
 --
 TABLE: name="pp_intrangepart" schema="" table="pp_intrangepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 577
+== 578
 explain (costs off) select * from pp_intrangepart where a = '(1,2)'::int4range
 --
 TABLE: name="pp_intrangepart" schema="" table="pp_intrangepart" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 578
+== 579
 drop table pp_intrangepart
 --
 TABLE: name="pp_intrangepart" schema="" table="pp_intrangepart" ctx=DDL
 STMT: DropStmt
-== 579
+== 580
 |--
 -- Ensure the enable_partition_prune GUC properly disables partition pruning.
 |--
@@ -3851,44 +3872,44 @@ create table pp_lp (a int, value int) partition by list (a)
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DDL
 STMT: CreateStmt
-== 580
+== 581
 create table pp_lp1 partition of pp_lp for values in(1)
 --
 TABLE: name="pp_lp1" schema="" table="pp_lp1" ctx=DDL
 STMT: CreateStmt
-== 581
+== 582
 create table pp_lp2 partition of pp_lp for values in(2)
 --
 TABLE: name="pp_lp2" schema="" table="pp_lp2" ctx=DDL
 STMT: CreateStmt
-== 582
+== 583
 explain (costs off) select * from pp_lp where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 583
+== 584
 explain (costs off) update pp_lp set value = 10 where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 584
+== 585
 explain (costs off) delete from pp_lp where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: DeleteStmt
-== 585
+== 586
 set enable_partition_pruning = off
 --
 STMT: VariableSetStmt
-== 586
+== 587
 set constraint_exclusion = 'partition'
 --
 STMT: VariableSetStmt
-== 587
+== 588
 -- this should not affect the result.
 
 explain (costs off) select * from pp_lp where a = 1
@@ -3897,23 +3918,23 @@ TABLE: name="pp_lp" schema="" table="pp_lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 588
+== 589
 explain (costs off) update pp_lp set value = 10 where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 589
+== 590
 explain (costs off) delete from pp_lp where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: DeleteStmt
-== 590
+== 591
 set constraint_exclusion = 'off'
 --
 STMT: VariableSetStmt
-== 591
+== 592
 -- this should not affect the result.
 
 explain (costs off) select * from pp_lp where a = 1
@@ -3922,45 +3943,45 @@ TABLE: name="pp_lp" schema="" table="pp_lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 592
+== 593
 explain (costs off) update pp_lp set value = 10 where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 593
+== 594
 explain (costs off) delete from pp_lp where a = 1
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DML
 STMT: ExplainStmt
 STMT: DeleteStmt
-== 594
+== 595
 drop table pp_lp
 --
 TABLE: name="pp_lp" schema="" table="pp_lp" ctx=DDL
 STMT: DropStmt
-== 595
+== 596
 -- Ensure enable_partition_prune does not affect non-partitioned tables.
 
 create table inh_lp (a int, value int)
 --
 TABLE: name="inh_lp" schema="" table="inh_lp" ctx=DDL
 STMT: CreateStmt
-== 596
+== 597
 create table inh_lp1 (a int, value int, check(a = 1)) inherits (inh_lp)
 --
 TABLE: name="inh_lp1" schema="" table="inh_lp1" ctx=DDL
 STMT: CreateStmt
-== 597
+== 598
 create table inh_lp2 (a int, value int, check(a = 2)) inherits (inh_lp)
 --
 TABLE: name="inh_lp2" schema="" table="inh_lp2" ctx=DDL
 STMT: CreateStmt
-== 598
+== 599
 set constraint_exclusion = 'partition'
 --
 STMT: VariableSetStmt
-== 599
+== 600
 -- inh_lp2 should be removed in the following 3 cases.
 explain (costs off) select * from inh_lp where a = 1
 --
@@ -3968,19 +3989,19 @@ TABLE: name="inh_lp" schema="" table="inh_lp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 600
+== 601
 explain (costs off) update inh_lp set value = 10 where a = 1
 --
 TABLE: name="inh_lp" schema="" table="inh_lp" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 601
+== 602
 explain (costs off) delete from inh_lp where a = 1
 --
 TABLE: name="inh_lp" schema="" table="inh_lp" ctx=DML
 STMT: ExplainStmt
 STMT: DeleteStmt
-== 602
+== 603
 -- Ensure we don't exclude normal relations when we only expect to exclude
 -- inheritance children
 explain (costs off) update inh_lp1 set value = 10 where a = 2
@@ -3988,111 +4009,111 @@ explain (costs off) update inh_lp1 set value = 10 where a = 2
 TABLE: name="inh_lp1" schema="" table="inh_lp1" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 603
+== 604
 drop table inh_lp cascade
 --
 TABLE: name="inh_lp" schema="" table="inh_lp" ctx=DDL
 STMT: DropStmt
-== 604
+== 605
 reset enable_partition_pruning
 --
 STMT: VariableSetStmt
-== 605
+== 606
 reset constraint_exclusion
 --
 STMT: VariableSetStmt
-== 606
+== 607
 -- Check pruning for a partition tree containing only temporary relations
 create temp table pp_temp_parent (a int) partition by list (a)
 --
 TABLE: name="pp_temp_parent" schema="" table="pp_temp_parent" ctx=DDL
 STMT: CreateStmt
-== 607
+== 608
 create temp table pp_temp_part_1 partition of pp_temp_parent for values in (1)
 --
 TABLE: name="pp_temp_part_1" schema="" table="pp_temp_part_1" ctx=DDL
 STMT: CreateStmt
-== 608
+== 609
 create temp table pp_temp_part_def partition of pp_temp_parent default
 --
 TABLE: name="pp_temp_part_def" schema="" table="pp_temp_part_def" ctx=DDL
 STMT: CreateStmt
-== 609
+== 610
 explain (costs off) select * from pp_temp_parent where true
 --
 TABLE: name="pp_temp_parent" schema="" table="pp_temp_parent" ctx=Select
 STMT: ExplainStmt
 STMT: SelectStmt
-== 610
+== 611
 explain (costs off) select * from pp_temp_parent where a = 2
 --
 TABLE: name="pp_temp_parent" schema="" table="pp_temp_parent" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 611
+== 612
 drop table pp_temp_parent
 --
 TABLE: name="pp_temp_parent" schema="" table="pp_temp_parent" ctx=DDL
 STMT: DropStmt
-== 612
+== 613
 -- Stress run-time partition pruning a bit more, per bug reports
 create temp table p (a int, b int, c int) partition by list (a)
 --
 TABLE: name="p" schema="" table="p" ctx=DDL
 STMT: CreateStmt
-== 613
+== 614
 create temp table p1 partition of p for values in (1)
 --
 TABLE: name="p1" schema="" table="p1" ctx=DDL
 STMT: CreateStmt
-== 614
+== 615
 create temp table p2 partition of p for values in (2)
 --
 TABLE: name="p2" schema="" table="p2" ctx=DDL
 STMT: CreateStmt
-== 615
+== 616
 create temp table q (a int, b int, c int) partition by list (a)
 --
 TABLE: name="q" schema="" table="q" ctx=DDL
 STMT: CreateStmt
-== 616
+== 617
 create temp table q1 partition of q for values in (1) partition by list (b)
 --
 TABLE: name="q1" schema="" table="q1" ctx=DDL
 STMT: CreateStmt
-== 617
+== 618
 create temp table q11 partition of q1 for values in (1) partition by list (c)
 --
 TABLE: name="q11" schema="" table="q11" ctx=DDL
 STMT: CreateStmt
-== 618
+== 619
 create temp table q111 partition of q11 for values in (1)
 --
 TABLE: name="q111" schema="" table="q111" ctx=DDL
 STMT: CreateStmt
-== 619
+== 620
 create temp table q2 partition of q for values in (2) partition by list (b)
 --
 TABLE: name="q2" schema="" table="q2" ctx=DDL
 STMT: CreateStmt
-== 620
+== 621
 create temp table q21 partition of q2 for values in (1)
 --
 TABLE: name="q21" schema="" table="q21" ctx=DDL
 STMT: CreateStmt
-== 621
+== 622
 create temp table q22 partition of q2 for values in (2)
 --
 TABLE: name="q22" schema="" table="q22" ctx=DDL
 STMT: CreateStmt
-== 622
+== 623
 insert into q22 values (2, 2, 3)
 --
 TABLE: name="q22" schema="" table="q22" ctx=DML
 STMT: InsertStmt
 STMT: SelectStmt
-== 623
+== 624
 explain (costs off)
 select *
 from (
@@ -4111,7 +4132,7 @@ FILTER: schema="" table="s" column="b"
 FILTER: schema="" table="s" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 624
+== 625
 select *
 from (
       select * from p
@@ -4128,7 +4149,7 @@ FILTER: schema="" table="s" column="a"
 FILTER: schema="" table="s" column="b"
 FILTER: schema="" table="s" column="c"
 STMT: SelectStmt
-== 625
+== 626
 prepare q (int, int) as
 select *
 from (
@@ -4147,52 +4168,52 @@ FILTER: schema="" table="s" column="b"
 FILTER: schema="" table="s" column="c"
 STMT: PrepareStmt
 STMT: SelectStmt
-== 626
+== 627
 explain (costs off) execute q (1, 1)
 --
 STMT: ExplainStmt
 STMT: ExecuteStmt
-== 627
+== 628
 execute q (1, 1)
 --
 STMT: ExecuteStmt
-== 628
+== 629
 drop table p, q
 --
 TABLE: name="p" schema="" table="p" ctx=DDL
 TABLE: name="q" schema="" table="q" ctx=DDL
 STMT: DropStmt
-== 629
+== 630
 -- Ensure run-time pruning works correctly when we match a partitioned table
 -- on the first level but find no matching partitions on the second level.
 create table listp (a int, b int) partition by list (a)
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: CreateStmt
-== 630
+== 631
 create table listp1 partition of listp for values in(1)
 --
 TABLE: name="listp1" schema="" table="listp1" ctx=DDL
 STMT: CreateStmt
-== 631
+== 632
 create table listp2 partition of listp for values in(2) partition by list(b)
 --
 TABLE: name="listp2" schema="" table="listp2" ctx=DDL
 STMT: CreateStmt
-== 632
+== 633
 create table listp2_10 partition of listp2 for values in (10)
 --
 TABLE: name="listp2_10" schema="" table="listp2_10" ctx=DDL
 STMT: CreateStmt
-== 633
-explain (analyze, costs off, summary off, timing off)
+== 634
+explain (analyze, costs off, summary off, timing off, buffers off)
 select * from listp where a = (select 2) and b <> 10
 --
 TABLE: name="listp" schema="" table="listp" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 634
+== 635
 |--
 -- check that a partition directly accessed in a query is excluded with
 -- constraint_exclusion = on
@@ -4202,85 +4223,85 @@ STMT: SelectStmt
 set enable_partition_pruning to off
 --
 STMT: VariableSetStmt
-== 635
+== 636
 -- setting constraint_exclusion to 'partition' disables exclusion
 set constraint_exclusion to 'partition'
 --
 STMT: VariableSetStmt
-== 636
+== 637
 explain (costs off) select * from listp1 where a = 2
 --
 TABLE: name="listp1" schema="" table="listp1" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 637
+== 638
 explain (costs off) update listp1 set a = 1 where a = 2
 --
 TABLE: name="listp1" schema="" table="listp1" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 638
+== 639
 -- constraint exclusion enabled
 set constraint_exclusion to 'on'
 --
 STMT: VariableSetStmt
-== 639
+== 640
 explain (costs off) select * from listp1 where a = 2
 --
 TABLE: name="listp1" schema="" table="listp1" ctx=Select
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 640
+== 641
 explain (costs off) update listp1 set a = 1 where a = 2
 --
 TABLE: name="listp1" schema="" table="listp1" ctx=DML
 STMT: ExplainStmt
 STMT: UpdateStmt
-== 641
+== 642
 reset constraint_exclusion
 --
 STMT: VariableSetStmt
-== 642
+== 643
 reset enable_partition_pruning
 --
 STMT: VariableSetStmt
-== 643
+== 644
 drop table listp
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: DropStmt
-== 644
+== 645
 -- Ensure run-time pruning works correctly for nested Append nodes
 set parallel_setup_cost to 0
 --
 STMT: VariableSetStmt
-== 645
+== 646
 set parallel_tuple_cost to 0
 --
 STMT: VariableSetStmt
-== 646
+== 647
 create table listp (a int) partition by list(a)
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: CreateStmt
-== 647
+== 648
 create table listp_12 partition of listp for values in(1,2) partition by list(a)
 --
 TABLE: name="listp_12" schema="" table="listp_12" ctx=DDL
 STMT: CreateStmt
-== 648
+== 649
 create table listp_12_1 partition of listp_12 for values in(1)
 --
 TABLE: name="listp_12_1" schema="" table="listp_12_1" ctx=DDL
 STMT: CreateStmt
-== 649
+== 650
 create table listp_12_2 partition of listp_12 for values in(2)
 --
 TABLE: name="listp_12_2" schema="" table="listp_12_2" ctx=DDL
 STMT: CreateStmt
-== 650
+== 651
 -- Force the 2nd subnode of the Append to be non-parallel.  This results in
 -- a nested Append node because the mixed parallel / non-parallel paths cannot
 -- be pulled into the top-level Append.
@@ -4288,14 +4309,14 @@ alter table listp_12_1 set (parallel_workers = 0)
 --
 TABLE: name="listp_12_1" schema="" table="listp_12_1" ctx=DDL
 STMT: AlterTableStmt
-== 651
+== 652
 -- Ensure that listp_12_2 is not scanned.  (The nested Append is not seen in
 -- the plan as it's pulled in setref.c due to having just a single subnode).
 select explain_parallel_append('select * from listp where a = (select 1);')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 652
+== 653
 -- Like the above but throw some more complexity at the planner by adding
 -- a UNION ALL.  We expect both sides of the union not to scan the
 -- non-required partitions.
@@ -4306,80 +4327,80 @@ select * from listp where a = (select 2);')
 --
 FUNCTION: name="explain_parallel_append" function="explain_parallel_append" schema="" ctx=Call
 STMT: SelectStmt
-== 653
+== 654
 drop table listp
 --
 TABLE: name="listp" schema="" table="listp" ctx=DDL
 STMT: DropStmt
-== 654
+== 655
 reset parallel_tuple_cost
 --
 STMT: VariableSetStmt
-== 655
+== 656
 reset parallel_setup_cost
 --
 STMT: VariableSetStmt
-== 656
+== 657
 -- Test case for run-time pruning with a nested Merge Append
 set enable_sort to 0
 --
 STMT: VariableSetStmt
-== 657
+== 658
 create table rangep (a int, b int) partition by range (a)
 --
 TABLE: name="rangep" schema="" table="rangep" ctx=DDL
 STMT: CreateStmt
-== 658
+== 659
 create table rangep_0_to_100 partition of rangep for values from (0) to (100) partition by list (b)
 --
 TABLE: name="rangep_0_to_100" schema="" table="rangep_0_to_100" ctx=DDL
 STMT: CreateStmt
-== 659
+== 660
 -- We need 3 sub-partitions. 1 to validate pruning worked and another two
 -- because a single remaining partition would be pulled up to the main Append.
 create table rangep_0_to_100_1 partition of rangep_0_to_100 for values in(1)
 --
 TABLE: name="rangep_0_to_100_1" schema="" table="rangep_0_to_100_1" ctx=DDL
 STMT: CreateStmt
-== 660
+== 661
 create table rangep_0_to_100_2 partition of rangep_0_to_100 for values in(2)
 --
 TABLE: name="rangep_0_to_100_2" schema="" table="rangep_0_to_100_2" ctx=DDL
 STMT: CreateStmt
-== 661
+== 662
 create table rangep_0_to_100_3 partition of rangep_0_to_100 for values in(3)
 --
 TABLE: name="rangep_0_to_100_3" schema="" table="rangep_0_to_100_3" ctx=DDL
 STMT: CreateStmt
-== 662
+== 663
 create table rangep_100_to_200 partition of rangep for values from (100) to (200)
 --
 TABLE: name="rangep_100_to_200" schema="" table="rangep_100_to_200" ctx=DDL
 STMT: CreateStmt
-== 663
+== 664
 create index on rangep (a)
 --
 TABLE: name="rangep" schema="" table="rangep" ctx=DDL
 STMT: IndexStmt
-== 664
+== 665
 -- Ensure run-time pruning works on the nested Merge Append
-explain (analyze on, costs off, timing off, summary off)
+explain (analyze on, costs off, timing off, summary off, buffers off)
 select * from rangep where b IN((select 1),(select 2)) order by a
 --
 TABLE: name="rangep" schema="" table="rangep" ctx=Select
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 665
+== 666
 reset enable_sort
 --
 STMT: VariableSetStmt
-== 666
+== 667
 drop table rangep
 --
 TABLE: name="rangep" schema="" table="rangep" ctx=DDL
 STMT: DropStmt
-== 667
+== 668
 |--
 -- Check that gen_prune_steps_from_opexps() works well for various cases of
 -- clauses for different partition keys
@@ -4389,17 +4410,17 @@ create table rp_prefix_test1 (a int, b varchar) partition by range(a, b)
 --
 TABLE: name="rp_prefix_test1" schema="" table="rp_prefix_test1" ctx=DDL
 STMT: CreateStmt
-== 668
+== 669
 create table rp_prefix_test1_p1 partition of rp_prefix_test1 for values from (1, 'a') to (1, 'b')
 --
 TABLE: name="rp_prefix_test1_p1" schema="" table="rp_prefix_test1_p1" ctx=DDL
 STMT: CreateStmt
-== 669
+== 670
 create table rp_prefix_test1_p2 partition of rp_prefix_test1 for values from (2, 'a') to (2, 'b')
 --
 TABLE: name="rp_prefix_test1_p2" schema="" table="rp_prefix_test1_p2" ctx=DDL
 STMT: CreateStmt
-== 670
+== 671
 -- Don't call get_steps_using_prefix() with the last partition key b plus
 -- an empty prefix
 explain (costs off) select * from rp_prefix_test1 where a <= 1 and b = 'a'
@@ -4409,22 +4430,22 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 671
+== 672
 create table rp_prefix_test2 (a int, b int, c int) partition by range(a, b, c)
 --
 TABLE: name="rp_prefix_test2" schema="" table="rp_prefix_test2" ctx=DDL
 STMT: CreateStmt
-== 672
+== 673
 create table rp_prefix_test2_p1 partition of rp_prefix_test2 for values from (1, 1, 0) to (1, 1, 10)
 --
 TABLE: name="rp_prefix_test2_p1" schema="" table="rp_prefix_test2_p1" ctx=DDL
 STMT: CreateStmt
-== 673
+== 674
 create table rp_prefix_test2_p2 partition of rp_prefix_test2 for values from (2, 2, 0) to (2, 2, 10)
 --
 TABLE: name="rp_prefix_test2_p2" schema="" table="rp_prefix_test2_p2" ctx=DDL
 STMT: CreateStmt
-== 674
+== 675
 -- Don't call get_steps_using_prefix() with the last partition key c plus
 -- an invalid prefix (ie, b = 1)
 explain (costs off) select * from rp_prefix_test2 where a <= 1 and b = 1 and c >= 0
@@ -4435,22 +4456,22 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="c"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 675
+== 676
 create table rp_prefix_test3 (a int, b int, c int, d int) partition by range(a, b, c, d)
 --
 TABLE: name="rp_prefix_test3" schema="" table="rp_prefix_test3" ctx=DDL
 STMT: CreateStmt
-== 676
+== 677
 create table rp_prefix_test3_p1 partition of rp_prefix_test3 for values from (1, 1, 1, 0) to (1, 1, 1, 10)
 --
 TABLE: name="rp_prefix_test3_p1" schema="" table="rp_prefix_test3_p1" ctx=DDL
 STMT: CreateStmt
-== 677
+== 678
 create table rp_prefix_test3_p2 partition of rp_prefix_test3 for values from (2, 2, 2, 0) to (2, 2, 2, 10)
 --
 TABLE: name="rp_prefix_test3_p2" schema="" table="rp_prefix_test3_p2" ctx=DDL
 STMT: CreateStmt
-== 678
+== 679
 -- Test that get_steps_using_prefix() handles a prefix that contains multiple
 -- clauses for the partition key b (ie, b >= 1 and b >= 2)
 explain (costs off) select * from rp_prefix_test3 where a >= 1 and b >= 1 and b >= 2 and c >= 2 and d >= 0
@@ -4463,7 +4484,7 @@ FILTER: schema="" table="" column="c"
 FILTER: schema="" table="" column="d"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 679
+== 680
 -- Test that get_steps_using_prefix() handles a prefix that contains multiple
 -- clauses for the partition key b (ie, b >= 1 and b = 2)  (This also tests
 -- that the caller arranges clauses in that prefix in the required order)
@@ -4477,22 +4498,22 @@ FILTER: schema="" table="" column="c"
 FILTER: schema="" table="" column="d"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 680
+== 681
 drop table rp_prefix_test1
 --
 TABLE: name="rp_prefix_test1" schema="" table="rp_prefix_test1" ctx=DDL
 STMT: DropStmt
-== 681
+== 682
 drop table rp_prefix_test2
 --
 TABLE: name="rp_prefix_test2" schema="" table="rp_prefix_test2" ctx=DDL
 STMT: DropStmt
-== 682
+== 683
 drop table rp_prefix_test3
 --
 TABLE: name="rp_prefix_test3" schema="" table="rp_prefix_test3" ctx=DDL
 STMT: DropStmt
-== 683
+== 684
 |--
 -- Test that get_steps_using_prefix() handles IS NULL clauses correctly
 |--
@@ -4501,14 +4522,14 @@ create table hp_prefix_test (a int, b int, c int, d int)
 --
 TABLE: name="hp_prefix_test" schema="" table="hp_prefix_test" ctx=DDL
 STMT: CreateStmt
-== 684
+== 685
 -- create 8 partitions
 select 'create table hp_prefix_test_p' || x::text || ' partition of hp_prefix_test for values with (modulus 8, remainder ' || x::text || ');'
 from generate_Series(0,7) x
 --
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: SelectStmt
-== 685
+== 686
 -- insert 16 rows, one row for each test to perform.
 insert into hp_prefix_test
 select
@@ -4529,7 +4550,7 @@ FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: InsertStmt
 STMT: SelectStmt
-== 686
+== 687
 -- Ensure partition pruning works correctly for each combination of IS NULL
 -- and equality quals.  This may seem a little excessive, but there have been
 -- a number of bugs in this area over the years.  We make use of row only
@@ -4544,7 +4565,7 @@ order by g.s
 FUNCTION: name="string_agg" function="string_agg" schema="" ctx=Call
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: SelectStmt
-== 687
+== 688
 -- And ensure we get exactly 1 row from each. Again, all 16 possible combinations.
 select
   'select tableoid::regclass,* from hp_prefix_test where ' ||
@@ -4556,12 +4577,12 @@ order by g.s
 FUNCTION: name="string_agg" function="string_agg" schema="" ctx=Call
 FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
 STMT: SelectStmt
-== 688
+== 689
 drop table hp_prefix_test
 --
 TABLE: name="hp_prefix_test" schema="" table="hp_prefix_test" ctx=DDL
 STMT: DropStmt
-== 689
+== 690
 |--
 -- Check that gen_partprune_steps() detects self-contradiction from clauses
 -- regardless of the order of the clauses (Here we use a custom operator to
@@ -4577,7 +4598,7 @@ create operator === (
 )
 --
 STMT: DefineStmt
-== 690
+== 691
 create operator class part_test_int4_ops2
 for type int4
 using hash as
@@ -4585,22 +4606,22 @@ operator 1 ===,
 function 2 part_hashint4_noop(int4, int8)
 --
 STMT: CreateOpClassStmt
-== 691
+== 692
 create table hp_contradict_test (a int, b int) partition by hash (a part_test_int4_ops2, b part_test_int4_ops2)
 --
 TABLE: name="hp_contradict_test" schema="" table="hp_contradict_test" ctx=DDL
 STMT: CreateStmt
-== 692
+== 693
 create table hp_contradict_test_p1 partition of hp_contradict_test for values with (modulus 2, remainder 0)
 --
 TABLE: name="hp_contradict_test_p1" schema="" table="hp_contradict_test_p1" ctx=DDL
 STMT: CreateStmt
-== 693
+== 694
 create table hp_contradict_test_p2 partition of hp_contradict_test for values with (modulus 2, remainder 1)
 --
 TABLE: name="hp_contradict_test_p2" schema="" table="hp_contradict_test_p2" ctx=DDL
 STMT: CreateStmt
-== 694
+== 695
 explain (costs off) select * from hp_contradict_test where a is null and a === 1 and b === 1
 --
 TABLE: name="hp_contradict_test" schema="" table="hp_contradict_test" ctx=Select
@@ -4609,7 +4630,7 @@ FILTER: schema="" table="" column="a"
 FILTER: schema="" table="" column="b"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 695
+== 696
 explain (costs off) select * from hp_contradict_test where a === 1 and b === 1 and a is null
 --
 TABLE: name="hp_contradict_test" schema="" table="hp_contradict_test" ctx=Select
@@ -4618,16 +4639,492 @@ FILTER: schema="" table="" column="b"
 FILTER: schema="" table="" column="a"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 696
+== 697
 drop table hp_contradict_test
 --
 TABLE: name="hp_contradict_test" schema="" table="hp_contradict_test" ctx=DDL
 STMT: DropStmt
-== 697
+== 698
 drop operator class part_test_int4_ops2 using hash
 --
 STMT: DropStmt
-== 698
+== 699
 drop operator ===(int4, int4)
 --
+STMT: DropStmt
+== 700
+drop function explain_analyze(text)
+--
+FUNCTION: name="explain_analyze" function="explain_analyze" schema="" ctx=DDL
+STMT: DropStmt
+== 701
+-- Runtime pruning on UPDATE using WITH CHECK OPTIONS and RETURNING
+create table part_abc (a int, b text, c bool) partition by list (a)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: CreateStmt
+== 702
+create table part_abc_1 (b text, a int, c bool)
+--
+TABLE: name="part_abc_1" schema="" table="part_abc_1" ctx=DDL
+STMT: CreateStmt
+== 703
+create table part_abc_2 (a int, c bool, b text)
+--
+TABLE: name="part_abc_2" schema="" table="part_abc_2" ctx=DDL
+STMT: CreateStmt
+== 704
+alter table part_abc attach partition part_abc_1 for values in (1)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: AlterTableStmt
+== 705
+alter table part_abc attach partition part_abc_2 for values in (2)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: AlterTableStmt
+== 706
+insert into part_abc values (1, 'b', true)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 707
+insert into part_abc values (2, 'c', true)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 708
+create view part_abc_view as select * from part_abc where b <> 'a' with check option
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DDL
+TABLE: name="part_abc" schema="" table="part_abc" ctx=Select
+FILTER: schema="" table="" column="b"
+STMT: ViewStmt
+STMT: SelectStmt
+== 709
+prepare update_part_abc_view as update part_abc_view set b = $2 where a = $1 returning *
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+STMT: PrepareStmt
+STMT: UpdateStmt
+== 710
+-- Only the unpruned partition should be shown in the list of relations to be
+-- updated
+explain (verbose, costs off) execute update_part_abc_view (1, 'd')
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 711
+execute update_part_abc_view (1, 'd')
+--
+STMT: ExecuteStmt
+== 712
+explain (verbose, costs off) execute update_part_abc_view (2, 'a')
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 713
+execute update_part_abc_view (2, 'a')
+--
+STMT: ExecuteStmt
+== 714
+-- All pruned.
+explain (verbose, costs off) execute update_part_abc_view (3, 'a')
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 715
+execute update_part_abc_view (3, 'a')
+--
+STMT: ExecuteStmt
+== 716
+deallocate update_part_abc_view
+--
+STMT: DeallocateStmt
+== 717
+-- Runtime pruning on MERGE using a stable function
+create function stable_one() returns int as $$ begin return 1; end; $$ language plpgsql stable
+--
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 718
+explain (costs off)
+merge into part_abc_view pt
+using (select stable_one() as pid) as q join part_abc_1 pt1 on (q.pid = pt1.a) on pt.a = pt1.a
+when matched then delete returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+== 719
+merge into part_abc_view pt
+using (select stable_one() as pid) as q join part_abc_1 pt1 on (q.pid = pt1.a) on pt.a = pt1.a
+when matched then delete returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: MergeStmt
+STMT: SelectStmt
+== 720
+table part_abc_view
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=Select
+STMT: SelectStmt
+== 721
+-- All pruned.
+explain (costs off)
+merge into part_abc_view pt
+using (select stable_one() + 2 as pid) as q join part_abc_1 pt1 on (q.pid = pt1.a) on pt.a = pt1.a
+when matched then delete returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+== 722
+merge into part_abc_view pt
+using (select stable_one() + 2 as pid) as q join part_abc_1 pt1 on (q.pid = pt1.a) on pt.a = pt1.a
+when matched then delete returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: MergeStmt
+STMT: SelectStmt
+== 723
+table part_abc_view
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=Select
+STMT: SelectStmt
+== 724
+-- MERGE ... INSERT when all pruned from MERGE source.
+begin
+--
+STMT: TransactionStmt
+== 725
+explain (costs off)
+merge into part_abc_view pt
+using (select stable_one() + 1 as pid) as q join part_abc_2 pt2 on (q.pid = pt2.a) on pt.a = stable_one() + 2
+when not matched then insert values (1, 'd', false) returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+== 726
+merge into part_abc_view pt
+using (select stable_one() + 1 as pid) as q join part_abc_2 pt2 on (q.pid = pt2.a) on pt.a = stable_one() + 2
+when not matched then insert values (1, 'd', false) returning pt.a
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: MergeStmt
+STMT: SelectStmt
+== 727
+table part_abc_view
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=Select
+STMT: SelectStmt
+== 728
+rollback
+--
+STMT: TransactionStmt
+== 729
+-- A case with multiple ModifyTable nodes.
+begin
+--
+STMT: TransactionStmt
+== 730
+create table part_abc_log (action text, a int, b text, c bool)
+--
+TABLE: name="part_abc_log" schema="" table="part_abc_log" ctx=DDL
+STMT: CreateStmt
+== 731
+explain (costs off)
+with t as (
+  merge into part_abc_view pt
+  using (select stable_one() + 1 as pid) as q join part_abc_2 pt2 on (q.pid = pt2.a) on pt.a = stable_one() + 2
+  when not matched then insert values (1, 'd', false) returning merge_action(), pt.*
+)
+insert into part_abc_log select * from t returning *
+--
+TABLE: name="part_abc_log" schema="" table="part_abc_log" ctx=DML
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+CTE: "t"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: MergeStmt
+== 732
+with t as (
+  merge into part_abc_view pt
+  using (select stable_one() + 1 as pid) as q join part_abc_2 pt2 on (q.pid = pt2.a) on pt.a = stable_one() + 2
+  when not matched then insert values (1, 'd', false) returning merge_action(), pt.*
+)
+insert into part_abc_log select * from t returning *
+--
+TABLE: name="part_abc_log" schema="" table="part_abc_log" ctx=DML
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=DML
+ALIAS: "pt"="part_abc_view"
+CTE: "t"
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: MergeStmt
+== 733
+table part_abc_view
+--
+TABLE: name="part_abc_view" schema="" table="part_abc_view" ctx=Select
+STMT: SelectStmt
+== 734
+table part_abc_log
+--
+TABLE: name="part_abc_log" schema="" table="part_abc_log" ctx=Select
+STMT: SelectStmt
+== 735
+rollback
+--
+STMT: TransactionStmt
+== 736
+-- A case with nested MergeAppend with its own PartitionPruneInfo.
+create index on part_abc (a)
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: IndexStmt
+== 737
+alter table part_abc add d int
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: AlterTableStmt
+== 738
+create table part_abc_3 partition of part_abc for values in (3, 4) partition by range (d)
+--
+TABLE: name="part_abc_3" schema="" table="part_abc_3" ctx=DDL
+STMT: CreateStmt
+== 739
+create table part_abc_3_1 partition of part_abc_3 for values from (minvalue) to (1)
+--
+TABLE: name="part_abc_3_1" schema="" table="part_abc_3_1" ctx=DDL
+STMT: CreateStmt
+== 740
+create table part_abc_3_2 partition of part_abc_3 for values from (1) to (100)
+--
+TABLE: name="part_abc_3_2" schema="" table="part_abc_3_2" ctx=DDL
+STMT: CreateStmt
+== 741
+create table part_abc_3_3 partition of part_abc_3 for values from (100) to (maxvalue)
+--
+TABLE: name="part_abc_3_3" schema="" table="part_abc_3_3" ctx=DDL
+STMT: CreateStmt
+== 742
+explain (costs off)
+select min(a) over (partition by a order by a) from part_abc where a >= stable_one() + 1 and d <= stable_one()
+union all
+select min(a) over (partition by a order by a) from part_abc where a >= stable_one() + 1 and d >= stable_one()
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=Select
+TABLE: name="part_abc" schema="" table="part_abc" ctx=Select
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FUNCTION: name="stable_one" function="stable_one" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="d"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="d"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 743
+drop view part_abc_view
+--
+STMT: DropStmt
+== 744
+drop table part_abc
+--
+TABLE: name="part_abc" schema="" table="part_abc" ctx=DDL
+STMT: DropStmt
+== 745
+|--
+-- Check that operands wrapped in PlaceHolderVars are matched to partition
+-- keys, allowing partition pruning to occur.  PlaceHolderVars can be
+-- introduced when a subquery's output is used with grouping sets.
+|--
+create table phv_part (a int, b text) partition by list (a)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=DDL
+STMT: CreateStmt
+== 746
+create table phv_part_1 partition of phv_part for values in (1)
+--
+TABLE: name="phv_part_1" schema="" table="phv_part_1" ctx=DDL
+STMT: CreateStmt
+== 747
+create table phv_part_2 partition of phv_part for values in (2)
+--
+TABLE: name="phv_part_2" schema="" table="phv_part_2" ctx=DDL
+STMT: CreateStmt
+== 748
+create table phv_part_null partition of phv_part for values in (null)
+--
+TABLE: name="phv_part_null" schema="" table="phv_part_null" ctx=DDL
+STMT: CreateStmt
+== 749
+insert into phv_part values (1, 'one'), (2, 'two'), (null, 'null')
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 750
+-- OpExpr: PHV-wrapped operand matched via equal()
+explain (costs off)
+select * from (select a, b from phv_part) t
+  where a = 1
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 751
+select * from (select a, b from phv_part) t
+  where a = 1
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 752
+-- OpExpr with RelabelType: PHV wrapped around a casted column
+explain (costs off)
+select * from (select a::oid as x, b from phv_part) t
+  where x::int = 1
+  group by grouping sets (x, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 753
+select * from (select a::oid as x, b from phv_part) t
+  where x::int = 1
+  group by grouping sets (x, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="x"
+STMT: SelectStmt
+== 754
+-- ScalarArrayOpExpr: IN clause with PHV-wrapped operand
+explain (costs off)
+select * from (select a, b from phv_part) t
+  where a in (1, null)
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 755
+select * from (select a, b from phv_part) t
+  where a in (1, null)
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 756
+-- NullTest: IS NULL with PHV-wrapped operand
+explain (costs off)
+select * from (select a, b from phv_part) t
+  where a is null
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 757
+select * from (select a, b from phv_part) t
+  where a is null
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 758
+drop table phv_part
+--
+TABLE: name="phv_part" schema="" table="phv_part" ctx=DDL
+STMT: DropStmt
+== 759
+-- BooleanTest: IS TRUE with PHV-wrapped boolean partition key
+create table phv_boolpart (a bool, b text) partition by list (a)
+--
+TABLE: name="phv_boolpart" schema="" table="phv_boolpart" ctx=DDL
+STMT: CreateStmt
+== 760
+create table phv_boolpart_t partition of phv_boolpart for values in (true)
+--
+TABLE: name="phv_boolpart_t" schema="" table="phv_boolpart_t" ctx=DDL
+STMT: CreateStmt
+== 761
+create table phv_boolpart_f partition of phv_boolpart for values in (false)
+--
+TABLE: name="phv_boolpart_f" schema="" table="phv_boolpart_f" ctx=DDL
+STMT: CreateStmt
+== 762
+create table phv_boolpart_null partition of phv_boolpart default
+--
+TABLE: name="phv_boolpart_null" schema="" table="phv_boolpart_null" ctx=DDL
+STMT: CreateStmt
+== 763
+insert into phv_boolpart values (true, 'yes'), (false, 'no'), (null, 'unknown')
+--
+TABLE: name="phv_boolpart" schema="" table="phv_boolpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 764
+explain (costs off)
+select * from (select a, b from phv_boolpart) t
+  where a is true
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_boolpart" schema="" table="phv_boolpart" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 765
+select * from (select a, b from phv_boolpart) t
+  where a is true
+  group by grouping sets (a, b)
+--
+TABLE: name="phv_boolpart" schema="" table="phv_boolpart" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 766
+drop table phv_boolpart
+--
+TABLE: name="phv_boolpart" schema="" table="phv_boolpart" ctx=DDL
 STMT: DropStmt

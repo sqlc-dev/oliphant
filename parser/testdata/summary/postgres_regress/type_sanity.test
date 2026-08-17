@@ -13,6 +13,9 @@
 -- row in the linked-to table.  However, if we want to enforce that a link
 -- field can't be 0, we have to check it here.
 
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
 -- **************** pg_type ****************
 
 -- Look for illegal values in pg_type fields.
@@ -877,15 +880,13 @@ STMT: SelectStmt
 SELECT a1.attrelid, a1.attname
 FROM pg_attribute as a1
 WHERE a1.attrelid = 0 OR a1.atttypid = 0 OR a1.attnum = 0 OR
-    a1.attcacheoff != -1 OR a1.attinhcount < 0 OR
-    (a1.attinhcount = 0 AND NOT a1.attislocal)
+    a1.attinhcount < 0 OR (a1.attinhcount = 0 AND NOT a1.attislocal)
 --
 TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
 ALIAS: "a1"="pg_attribute"
 FILTER: schema="" table="a1" column="attrelid"
 FILTER: schema="" table="a1" column="atttypid"
 FILTER: schema="" table="a1" column="attnum"
-FILTER: schema="" table="a1" column="attcacheoff"
 FILTER: schema="" table="a1" column="attinhcount"
 FILTER: schema="" table="a1" column="attinhcount"
 FILTER: schema="" table="a1" column="attislocal"
@@ -955,6 +956,37 @@ FILTER: schema="" table="t1" column="typstorage"
 FILTER: schema="" table="a1" column="attstorage"
 STMT: SelectStmt
 == 054
+-- Look for IsCatalogTextUniqueIndexOid() omissions.
+
+CREATE FUNCTION is_catalog_text_unique_index_oid(oid) RETURNS bool
+    AS :'regresslib', 'is_catalog_text_unique_index_oid'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 129
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 055
+SELECT indexrelid::regclass
+FROM pg_index
+WHERE (is_catalog_text_unique_index_oid(indexrelid) <>
+       (indisunique AND
+        indexrelid < 16384 AND
+        EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = indexrelid AND atttypid = 'text'::regtype)))
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FUNCTION: name="is_catalog_text_unique_index_oid" function="is_catalog_text_unique_index_oid" schema="" ctx=Call
+FUNCTION: name="is_catalog_text_unique_index_oid" function="is_catalog_text_unique_index_oid" schema="" ctx=Call
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="indisunique"
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="indexrelid"
+FILTER: schema="" table="" column="atttypid"
+STMT: SelectStmt
+== 056
 -- **************** pg_range ****************
 
 -- Look for illegal values in pg_range fields.
@@ -969,7 +1001,7 @@ FILTER: schema="" table="r" column="rngtypid"
 FILTER: schema="" table="r" column="rngsubtype"
 FILTER: schema="" table="r" column="rngsubopc"
 STMT: SelectStmt
-== 055
+== 057
 -- rngcollation should be specified iff subtype is collatable
 
 SELECT r.rngtypid, r.rngsubtype, r.rngcollation, t.typcollation
@@ -983,7 +1015,7 @@ ALIAS: "t"="pg_type"
 FILTER: schema="" table="" column="rngcollation"
 FILTER: schema="" table="" column="typcollation"
 STMT: SelectStmt
-== 056
+== 058
 -- opclass had better be a btree opclass accepting the subtype.
 -- We must allow anyarray matches, cf IsBinaryCoercible()
 
@@ -1010,7 +1042,7 @@ FILTER: schema="" table="r" column="rngsubtype"
 FILTER: schema="" table="" column="typelem"
 FILTER: schema="" table="" column="typsubscript"
 STMT: SelectStmt
-== 057
+== 059
 -- canonical function, if any, had better match the range type
 
 SELECT r.rngtypid, r.rngsubtype, p.proname
@@ -1027,7 +1059,7 @@ FILTER: schema="" table="" column="rngtypid"
 FILTER: schema="" table="" column="prorettype"
 FILTER: schema="" table="" column="rngtypid"
 STMT: SelectStmt
-== 058
+== 060
 -- subdiff function, if any, had better match the subtype
 
 SELECT r.rngtypid, r.rngsubtype, p.proname
@@ -1047,7 +1079,7 @@ FILTER: schema="" table="" column="proargtypes"
 FILTER: schema="" table="" column="rngsubtype"
 FILTER: schema="" table="" column="prorettype"
 STMT: SelectStmt
-== 059
+== 061
 -- every range should have a valid multirange
 
 SELECT r.rngtypid, r.rngsubtype, r.rngmultitypid
@@ -1059,7 +1091,7 @@ ALIAS: "r"="pg_range"
 FILTER: schema="" table="r" column="rngmultitypid"
 FILTER: schema="" table="r" column="rngmultitypid"
 STMT: SelectStmt
-== 060
+== 062
 -- Create a table that holds all the known in-core data types and leave it
 -- around so as pg_upgrade is able to test their binary compatibility.
 CREATE TABLE tab_core_types AS SELECT
@@ -1132,7 +1164,7 @@ FUNCTION: name="pi" function="pi" schema="" ctx=Call
 FUNCTION: name="format" function="format" schema="" ctx=Call
 STMT: CreateTableAsStmt
 STMT: SelectStmt
-== 061
+== 063
 -- Sanity check on the previous table, checking that all core types are
 -- included in this table.
 SELECT oid, typname, typtype, typelem, typarray

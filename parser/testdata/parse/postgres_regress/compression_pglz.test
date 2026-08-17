@@ -1,0 +1,91 @@
+== 001
+|--
+-- Tests for PGLZ compression
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION test_pglz_compress(bytea)
+  RETURNS bytea
+  AS :'regresslib' LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 177
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+CREATE FUNCTION test_pglz_decompress(bytea, int4, bool)
+  RETURNS bytea
+  AS :'regresslib' LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 78
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 003
+-- Round-trip with pglz: compress then decompress.
+SELECT test_pglz_decompress(test_pglz_compress(
+    decode(repeat('abcd', 100), 'escape')), 400, false) =
+    decode(repeat('abcd', 100), 'escape') AS roundtrip_ok
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"roundtrip_ok","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_compress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":117}},{"A_Const":{"ival":{"ival":100},"location":125}}],"funcformat":"COERCE_EXPLICIT_CALL","location":110}},{"A_Const":{"sval":{"sval":"escape"},"location":131}}],"funcformat":"COERCE_EXPLICIT_CALL","location":103}}],"funcformat":"COERCE_EXPLICIT_CALL","location":79}},{"A_Const":{"ival":{"ival":400},"location":143}},{"A_Const":{"boolval":{},"location":148}}],"funcformat":"COERCE_EXPLICIT_CALL","location":58}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":175}},{"A_Const":{"ival":{"ival":100},"location":183}}],"funcformat":"COERCE_EXPLICIT_CALL","location":168}},{"A_Const":{"sval":{"sval":"escape"},"location":189}}],"funcformat":"COERCE_EXPLICIT_CALL","location":161}},"location":155}},"location":58}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":51}]}
+== 004
+SELECT test_pglz_decompress(test_pglz_compress(
+    decode(repeat('abcd', 100), 'escape')), 400, true) =
+    decode(repeat('abcd', 100), 'escape') AS roundtrip_ok
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"roundtrip_ok","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_compress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":66}},{"A_Const":{"ival":{"ival":100},"location":74}}],"funcformat":"COERCE_EXPLICIT_CALL","location":59}},{"A_Const":{"sval":{"sval":"escape"},"location":80}}],"funcformat":"COERCE_EXPLICIT_CALL","location":52}}],"funcformat":"COERCE_EXPLICIT_CALL","location":28}},{"A_Const":{"ival":{"ival":400},"location":92}},{"A_Const":{"boolval":{"boolval":true},"location":97}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"rexpr":{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":123}},{"A_Const":{"ival":{"ival":100},"location":131}}],"funcformat":"COERCE_EXPLICIT_CALL","location":116}},{"A_Const":{"sval":{"sval":"escape"},"location":137}}],"funcformat":"COERCE_EXPLICIT_CALL","location":109}},"location":103}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 005
+-- Decompression with rawsize too large, fails to fill the destination
+-- buffer.
+SELECT test_pglz_decompress(test_pglz_compress(
+    decode(repeat('abcd', 100), 'escape')), 500, true)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_compress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":148}},{"A_Const":{"ival":{"ival":100},"location":156}}],"funcformat":"COERCE_EXPLICIT_CALL","location":141}},{"A_Const":{"sval":{"sval":"escape"},"location":162}}],"funcformat":"COERCE_EXPLICIT_CALL","location":134}}],"funcformat":"COERCE_EXPLICIT_CALL","location":110}},{"A_Const":{"ival":{"ival":500},"location":174}},{"A_Const":{"boolval":{"boolval":true},"location":179}}],"funcformat":"COERCE_EXPLICIT_CALL","location":89}},"location":89}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":82}]}
+== 006
+-- Decompression with rawsize too small, fails with source not fully
+-- consumed.
+SELECT test_pglz_decompress(test_pglz_compress(
+    decode(repeat('abcd', 100), 'escape')), 100, true)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_compress"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"decode"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"abcd"},"location":148}},{"A_Const":{"ival":{"ival":100},"location":156}}],"funcformat":"COERCE_EXPLICIT_CALL","location":141}},{"A_Const":{"sval":{"sval":"escape"},"location":162}}],"funcformat":"COERCE_EXPLICIT_CALL","location":134}}],"funcformat":"COERCE_EXPLICIT_CALL","location":110}},{"A_Const":{"ival":{"ival":100},"location":174}},{"A_Const":{"boolval":{"boolval":true},"location":179}}],"funcformat":"COERCE_EXPLICIT_CALL","location":89}},"location":89}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":82}]}
+== 007
+-- Corrupted compressed data.  Set control bit with read of a match tag,
+-- no data follows.
+SELECT length(test_pglz_decompress('\x01'::bytea, 1024, false)) AS ctrl_only_len
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"ctrl_only_len","val":{"FuncCall":{"funcname":[{"String":{"sval":"length"}}],"args":[{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x01"},"location":128}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":136},"location":134}},{"A_Const":{"ival":{"ival":1024},"location":143}},{"A_Const":{"boolval":{},"location":149}}],"funcformat":"COERCE_EXPLICIT_CALL","location":107}}],"funcformat":"COERCE_EXPLICIT_CALL","location":100}},"location":100}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":93}]}
+== 008
+SELECT test_pglz_decompress('\x01'::bytea, 1024, true)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x01"},"location":28}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":36},"location":34}},{"A_Const":{"ival":{"ival":1024},"location":43}},{"A_Const":{"boolval":{"boolval":true},"location":49}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 009
+-- Corrupted compressed data.  Set control bit with read of a match tag,
+-- 1 byte follows.
+SELECT test_pglz_decompress('\x01ff'::bytea, 1024, false)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x01ff"},"location":120}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":130},"location":128}},{"A_Const":{"ival":{"ival":1024},"location":137}},{"A_Const":{"boolval":{},"location":143}}],"funcformat":"COERCE_EXPLICIT_CALL","location":99}},"location":99}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":92}]}
+== 010
+SELECT test_pglz_decompress('\x01ff'::bytea, 1024, true)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x01ff"},"location":28}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":38},"location":36}},{"A_Const":{"ival":{"ival":1024},"location":45}},{"A_Const":{"boolval":{"boolval":true},"location":51}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 011
+-- Corrupted compressed data.  Set control bit with match tag where length
+-- nibble is 3 bytes (extended length), no data follows.
+SELECT test_pglz_decompress('\x010f01'::bytea, 1024, false)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x010f01"},"location":160}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":172},"location":170}},{"A_Const":{"ival":{"ival":1024},"location":179}},{"A_Const":{"boolval":{},"location":185}}],"funcformat":"COERCE_EXPLICIT_CALL","location":139}},"location":139}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":132}]}
+== 012
+SELECT test_pglz_decompress('\x010f01'::bytea, 1024, true)
+--
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"test_pglz_decompress"}}],"args":[{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"\\x010f01"},"location":28}},"typeName":{"names":[{"String":{"sval":"bytea"}}],"typemod":-1,"location":40},"location":38}},{"A_Const":{"ival":{"ival":1024},"location":47}},{"A_Const":{"boolval":{"boolval":true},"location":53}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 013
+-- Clean up
+DROP FUNCTION test_pglz_compress
+--
+{"version":180004,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"test_pglz_compress"}}],"args_unspecified":true}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}},"stmt_location":12}]}
+== 014
+DROP FUNCTION test_pglz_decompress
+--
+{"version":180004,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"test_pglz_decompress"}}],"args_unspecified":true}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}

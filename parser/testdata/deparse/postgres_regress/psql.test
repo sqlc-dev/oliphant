@@ -35,29 +35,64 @@ SELECT 3 as three, 4 as four \gx
 SELECT 1 as one, 2 as two \g (format=csv csv_fieldsep='\t')
 SELECT 1 as one, 2 as two \gx (title='foo bar')
 
--- \bind (extended query protocol)
+-- \parse (extended query protocol)
+SELECT 1 \parse ''
+SELECT 2 \parse stmt1
+SELECT $1 \parse stmt2
+SELECT $1, $2 \parse stmt3
 
-SELECT 1 \bind
+-- \bind_named (extended query protocol)
+-- Repeated calls.  The second call generates an error, cleaning up the
+-- statement name set by the first call.
+-- Last \bind_named wins
+-- Multiple ;
+
+-- \close_prepared (extended query protocol)
+SELECT name, statement FROM pg_prepared_statements ORDER BY name
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 30
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
 == 004
+-- \bind (extended query protocol)
+SELECT 1 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 45
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 005
 SELECT $1 \bind 'foo'
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 11
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 005
+== 006
 SELECT $1, $2 \bind 'foo' 'bar'
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 15
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 006
+== 007
+-- last \bind wins
+select $1::int as col \bind 'foo' \bind 2
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 42
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+-- Multiple ;
+select $1::int as col \bind 1
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 37
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
 -- errors
 -- parse error
 SELECT foo \bind
@@ -66,7 +101,7 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 37
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 007
+== 010
 -- tcop error
 SELECT 1 \
 --
@@ -74,14 +109,14 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 24
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 008
+== 011
 SELECT 2 \bind
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 10
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 009
+== 012
 -- bind error
 SELECT $1, $2 \bind 'foo'
 --
@@ -89,13 +124,15 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 29
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 010
+== 013
+-- bind_named error
+
 -- ;
 
 select 10 as test01, 20 as test02, 'Hello' as test03
 --
 SELECT 10 AS test01, 20 AS test02, 'Hello' AS test03
-== 011
+== 014
 -- should fail: bad variable name
 select 10 as "bad name"
 
@@ -105,61 +142,61 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 60
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 012
+== 015
 -- multiple backslash commands in one line
 select 1 as x, 2 as y
 --
 SELECT 1 AS x, 2 AS y
-== 013
+== 016
 select 3 as x, 4 as y
 --
 SELECT 3 AS x, 4 AS y
-== 014
+== 017
 select 5 as x, 6 as y
 --
 SELECT 5 AS x, 6 AS y
-== 015
+== 018
 select 7 as x, 8 as y
 --
 SELECT 7 AS x, 8 AS y
-== 016
+== 019
 -- NULL should unset the variable
 select 1 as var1, NULL as var2, 3 as var3
 --
 SELECT 1 AS var1, NULL AS var2, 3 AS var3
-== 017
+== 020
 -- ;
 select 10 as test01, 20 as test02 from generate_series(1,3)
 --
 SELECT 10 AS test01, 20 AS test02 FROM generate_series(1, 3)
-== 018
+== 021
 select 10 as test01, 20 as test02 from generate_series(1,0)
 --
 SELECT 10 AS test01, 20 AS test02 FROM generate_series(1, 0)
-== 019
+== 022
 -- ;
 select a from generate_series(1, 10) as a where a = 11
 --
 SELECT a FROM generate_series(1, 10) a WHERE a = 11
-== 020
+== 023
 -- ;
 
 select 1 as x, 2 as y
 --
 SELECT 1 AS x, 2 AS y
-== 021
+== 024
 select 3 as x, 4 as y
 --
 SELECT 3 AS x, 4 AS y
-== 022
+== 025
 select 10 as test01, 20 as test02 from generate_series(1,3)
 --
 SELECT 10 AS test01, 20 AS test02 FROM generate_series(1, 3)
-== 023
+== 026
 select 10 as test01, 20 as test02 from generate_series(1,0)
 --
 SELECT 10 AS test01, 20 AS test02 FROM generate_series(1, 0)
-== 024
+== 027
 -- ;
 
 SELECT
@@ -179,15 +216,15 @@ ERROR: syntax error at or near "PREPARE"
 CURSORPOS: 239
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 025
+== 028
 EXECUTE test
 --
 EXECUTE test
-== 026
+== 029
 EXPLAIN EXECUTE test
 --
 EXPLAIN EXECUTE test
-== 027
+== 030
 -- should fail cleanly - syntax error
 SELECT 1 +
 --
@@ -195,21 +232,21 @@ ERROR: syntax error at end of input
 CURSORPOS: 49
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 028
+== 031
 -- check behavior with empty results
 SELECT
 --
 SELECT
-== 029
+== 032
 CREATE TABLE bububu(a int)
 --
 CREATE TABLE bububu (a int)
-== 030
+== 033
 -- subject command should not have executed
 TABLE bububu
 --
 SELECT * FROM bububu
-== 031
+== 034
 -- fail
 
 -- query buffer should remain unchanged
@@ -222,26 +259,26 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 123
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 032
+== 035
 -- test for server bug #17983 with empty statement in aborted transaction
 set search_path = default
 --
 SET search_path TO DEFAULT
-== 033
+== 036
 begin
 --
 BEGIN
-== 034
+== 037
 rollback
 --
 ROLLBACK
-== 035
+== 038
 -- ;
 
 create temporary table gexec_test(a int, b text, c date, d float)
 --
 CREATE TEMPORARY TABLE gexec_test (a int, b text, c date, d double precision)
-== 036
+== 039
 select format('create index on gexec_test(%I)', attname)
 from pg_attribute
 where attrelid = 'gexec_test'::regclass and attnum > 0
@@ -276,18 +313,6 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 233
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 037
-execute q
---
-EXECUTE q
-== 038
-execute q
---
-EXECUTE q
-== 039
-execute q
---
-EXECUTE q
 == 040
 execute q
 --
@@ -421,26 +446,26 @@ execute q
 --
 EXECUTE q
 == 073
-deallocate q
+execute q
 --
-DEALLOCATE q
+EXECUTE q
 == 074
--- test single-line header and data
-prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
+execute q
 --
-PREPARE q AS SELECT repeat('x', 2 * n) AS "0123456789abcdef", repeat('y', 20 - (2 * n)) AS "0123456789" FROM generate_series(1, 10) n
+EXECUTE q
 == 075
 execute q
 --
 EXECUTE q
 == 076
-execute q
+deallocate q
 --
-EXECUTE q
+DEALLOCATE q
 == 077
-execute q
+-- test single-line header and data
+prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
 --
-EXECUTE q
+PREPARE q AS SELECT repeat('x', 2 * n) AS "0123456789abcdef", repeat('y', 20 - (2 * n)) AS "0123456789" FROM generate_series(1, 10) n
 == 078
 execute q
 --
@@ -610,16 +635,28 @@ execute q
 --
 EXECUTE q
 == 120
+execute q
+--
+EXECUTE q
+== 121
+execute q
+--
+EXECUTE q
+== 122
+execute q
+--
+EXECUTE q
+== 123
 deallocate q
 --
 DEALLOCATE q
-== 121
+== 124
 -- support table for output-format tests (useful to create a footer)
 
 create table psql_serial_tab (id serial)
 --
 CREATE TABLE psql_serial_tab (id serial)
-== 122
+== 125
 -- test header/footer/tuples_only behavior in aligned/unaligned/wrapped cases
 
 
@@ -627,72 +664,73 @@ CREATE TABLE psql_serial_tab (id serial)
 select 1 where false
 --
 SELECT 1 WHERE false
-== 123
+== 126
 -- check conditional am display
 
 CREATE SCHEMA tableam_display
 --
 CREATE SCHEMA tableam_display
-== 124
-CREATE ROLE regress_display_role
---
-CREATE ROLE regress_display_role
-== 125
-ALTER SCHEMA tableam_display OWNER TO regress_display_role
---
-ALTER SCHEMA tableam_display OWNER TO regress_display_role
-== 126
-SET search_path TO tableam_display
---
-SET search_path TO tableam_display
 == 127
+CREATE ROLE regress_display_role
+--
+CREATE ROLE regress_display_role
+== 128
+ALTER SCHEMA tableam_display OWNER TO regress_display_role
+--
+ALTER SCHEMA tableam_display OWNER TO regress_display_role
+== 129
+SET search_path TO tableam_display
+--
+SET search_path TO tableam_display
+== 130
 CREATE ACCESS METHOD heap_psql TYPE TABLE HANDLER heap_tableam_handler
 --
 CREATE ACCESS METHOD heap_psql TYPE TABLE HANDLER heap_tableam_handler
-== 128
+== 131
 SET ROLE TO regress_display_role
 --
 SET role TO regress_display_role
-== 129
+== 132
 -- Use only relations with a physical size of zero.
 CREATE TABLE tbl_heap_psql(f1 int, f2 char(100)) using heap_psql
 --
 CREATE TABLE tbl_heap_psql (f1 int, f2 char(100)) USING heap_psql
-== 130
+== 133
 CREATE TABLE tbl_heap(f1 int, f2 char(100)) using heap
 --
 CREATE TABLE tbl_heap (f1 int, f2 char(100)) USING heap
-== 131
+== 134
 CREATE VIEW view_heap_psql AS SELECT f1 from tbl_heap_psql
 --
 CREATE VIEW view_heap_psql AS SELECT f1 FROM tbl_heap_psql
-== 132
+== 135
 CREATE MATERIALIZED VIEW mat_view_heap_psql USING heap_psql AS SELECT f1 from tbl_heap_psql
 --
 CREATE MATERIALIZED VIEW mat_view_heap_psql USING heap_psql AS SELECT f1 FROM tbl_heap_psql
-== 133
+== 136
 -- AM is displayed for tables, indexes and materialized views.
 -- But not for views and sequences.
+-- \d with 'x' enables expanded mode, but only without a pattern
 RESET ROLE
 --
 RESET role
-== 134
-RESET search_path
---
-RESET search_path
-== 135
-DROP SCHEMA tableam_display CASCADE
---
-DROP SCHEMA tableam_display CASCADE
-== 136
-DROP ACCESS METHOD heap_psql
---
-DROP ACCESS METHOD heap_psql
 == 137
+RESET search_path
+--
+RESET search_path
+== 138
+DROP SCHEMA tableam_display CASCADE
+--
+DROP SCHEMA tableam_display CASCADE
+== 139
+DROP ACCESS METHOD heap_psql
+--
+DROP ACCESS METHOD heap_psql
+== 140
 DROP ROLE regress_display_role
 --
 DROP ROLE regress_display_role
-== 138
+== 141
 -- test numericlocale (as best we can without control of psql's locale)
 
 
@@ -700,7 +738,7 @@ select n, -n as m, n * 111 as x, '1e90'::float8 as f
 from generate_series(0,3) n
 --
 SELECT n, - n AS m, n * 111 AS x, '1e90'::float8 AS f FROM generate_series(0, 3) n
-== 139
+== 142
 -- test asciidoc output format
 
 
@@ -710,18 +748,6 @@ prepare q as
   from generate_series(1,2) as n
 --
 PREPARE q AS SELECT 'some|text' AS "a|title", '        ' AS "empty ", n AS "int" FROM generate_series(1, 2) n
-== 140
-execute q
---
-EXECUTE q
-== 141
-execute q
---
-EXECUTE q
-== 142
-execute q
---
-EXECUTE q
 == 143
 execute q
 --
@@ -735,10 +761,22 @@ execute q
 --
 EXECUTE q
 == 146
+execute q
+--
+EXECUTE q
+== 147
+execute q
+--
+EXECUTE q
+== 148
+execute q
+--
+EXECUTE q
+== 149
 deallocate q
 --
 DEALLOCATE q
-== 147
+== 150
 -- test csv output format
 
 
@@ -750,36 +788,36 @@ prepare q as
 --
 PREPARE q AS SELECT 'some"text' AS "a""title", '  <foo>
 <bar>' AS junk, '   ' AS empty, n AS "int" FROM generate_series(1, 2) n
-== 148
+== 151
 execute q
 --
 EXECUTE q
-== 149
+== 152
 execute q
 --
 EXECUTE q
-== 150
+== 153
 deallocate q
 --
 DEALLOCATE q
-== 151
+== 154
 -- special cases
 select 'comma,comma' as comma, 'semi;semi' as semi
 --
 SELECT 'comma,comma' AS comma, 'semi;semi' AS semi
-== 152
+== 155
 select 'comma,comma' as comma, 'semi;semi' as semi
 --
 SELECT 'comma,comma' AS comma, 'semi;semi' AS semi
-== 153
+== 156
 select '\.' as data
 --
 SELECT E'\\.' AS data
-== 154
+== 157
 select '\' as d1, '' as d2
 --
 SELECT E'\\' AS d1, '' AS d2
-== 155
+== 158
 -- illegal csv separators
 
 
@@ -794,18 +832,6 @@ prepare q as
 --
 PREPARE q AS SELECT 'some"text' AS "a&title", '  <foo>
 <bar>' AS junk, '   ' AS empty, n AS "int" FROM generate_series(1, 2) n
-== 156
-execute q
---
-EXECUTE q
-== 157
-execute q
---
-EXECUTE q
-== 158
-execute q
---
-EXECUTE q
 == 159
 execute q
 --
@@ -819,10 +845,22 @@ execute q
 --
 EXECUTE q
 == 162
+execute q
+--
+EXECUTE q
+== 163
+execute q
+--
+EXECUTE q
+== 164
+execute q
+--
+EXECUTE q
+== 165
 deallocate q
 --
 DEALLOCATE q
-== 163
+== 166
 -- test latex output format
 
 
@@ -834,18 +872,6 @@ prepare q as
 --
 PREPARE q AS SELECT E'some\\more_text' AS "a$title", '  #<foo>%&^~|
 {bar}' AS junk, '   ' AS empty, n AS "int" FROM generate_series(1, 2) n
-== 164
-execute q
---
-EXECUTE q
-== 165
-execute q
---
-EXECUTE q
-== 166
-execute q
---
-EXECUTE q
 == 167
 execute q
 --
@@ -867,10 +893,22 @@ execute q
 --
 EXECUTE q
 == 172
+execute q
+--
+EXECUTE q
+== 173
+execute q
+--
+EXECUTE q
+== 174
+execute q
+--
+EXECUTE q
+== 175
 deallocate q
 --
 DEALLOCATE q
-== 173
+== 176
 -- test latex-longtable output format
 
 
@@ -882,18 +920,6 @@ prepare q as
 --
 PREPARE q AS SELECT E'some\\more_text' AS "a$title", '  #<foo>%&^~|
 {bar}' AS junk, '   ' AS empty, n AS "int" FROM generate_series(1, 2) n
-== 174
-execute q
---
-EXECUTE q
-== 175
-execute q
---
-EXECUTE q
-== 176
-execute q
---
-EXECUTE q
 == 177
 execute q
 --
@@ -923,10 +949,22 @@ execute q
 --
 EXECUTE q
 == 184
+execute q
+--
+EXECUTE q
+== 185
+execute q
+--
+EXECUTE q
+== 186
+execute q
+--
+EXECUTE q
+== 187
 deallocate q
 --
 DEALLOCATE q
-== 185
+== 188
 -- test troff-ms output format
 
 
@@ -938,18 +976,6 @@ prepare q as
 --
 PREPARE q AS SELECT E'some\\text' AS "a\title", '  <foo>
 <bar>' AS junk, '   ' AS empty, n AS "int" FROM generate_series(1, 2) n
-== 186
-execute q
---
-EXECUTE q
-== 187
-execute q
---
-EXECUTE q
-== 188
-execute q
---
-EXECUTE q
 == 189
 execute q
 --
@@ -963,10 +989,22 @@ execute q
 --
 EXECUTE q
 == 192
+execute q
+--
+EXECUTE q
+== 193
+execute q
+--
+EXECUTE q
+== 194
+execute q
+--
+EXECUTE q
+== 195
 deallocate q
 --
 DEALLOCATE q
-== 193
+== 196
 -- check ambiguous format requests
 
 
@@ -975,7 +1013,7 @@ DEALLOCATE q
 drop table psql_serial_tab
 --
 DROP TABLE psql_serial_tab
-== 194
+== 197
 -- \echo and allied features
 
 
@@ -987,11 +1025,11 @@ DROP TABLE psql_serial_tab
   select 'okay'
 --
 SELECT 'okay'
-== 195
+== 198
 select 'still okay'
 --
 SELECT 'still okay'
-== 196
+== 199
 not okay
 --
 ERROR: syntax error at or near "not"

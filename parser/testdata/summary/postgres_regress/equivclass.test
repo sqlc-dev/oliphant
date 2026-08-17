@@ -605,6 +605,44 @@ FILTER: schema="" table="" column="unique2"
 STMT: ExplainStmt
 STMT: SelectStmt
 == 076
+-- Test that broken ECs are processed correctly during self join removal.
+-- Disable merge joins so that we don't get an error about missing commutator.
+-- Test both orientations of the join clause, because only one of them breaks
+-- the EC.
+set enable_mergejoin to off
+--
+STMT: VariableSetStmt
+== 077
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on m.ff + n.ff = p.f1
+--
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec1" schema="" table="ec1" ctx=Select
+ALIAS: "m"="ec0"
+ALIAS: "n"="ec0"
+ALIAS: "p"="ec1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 078
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on p.f1::int8 = (m.ff + n.ff)::int8alias1
+--
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec1" schema="" table="ec1" ctx=Select
+ALIAS: "m"="ec0"
+ALIAS: "n"="ec0"
+ALIAS: "p"="ec1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 079
+reset enable_mergejoin
+--
+STMT: VariableSetStmt
+== 080
 -- this could be converted, but isn't at present
 explain (costs off)
   select * from tenk1 where unique1 = unique1 or unique2 = unique2
@@ -616,13 +654,13 @@ FILTER: schema="" table="" column="unique2"
 FILTER: schema="" table="" column="unique2"
 STMT: ExplainStmt
 STMT: SelectStmt
-== 077
+== 081
 -- check that we recognize equivalence with dummy domains in the way
 create temp table undername (f1 name, f2 int)
 --
 TABLE: name="undername" schema="" table="undername" ctx=DDL
 STMT: CreateStmt
-== 078
+== 082
 create temp view overview as
   select f1::information_schema.sql_identifier as sqli, f2 from undername
 --
@@ -630,7 +668,7 @@ TABLE: name="overview" schema="" table="overview" ctx=DDL
 TABLE: name="undername" schema="" table="undername" ctx=Select
 STMT: ViewStmt
 STMT: SelectStmt
-== 079
+== 083
 explain (costs off)  -- this should not require a sort
   select * from overview where sqli = 'foo' order by sqli
 --
@@ -638,3 +676,83 @@ TABLE: name="overview" schema="" table="overview" ctx=Select
 FILTER: schema="" table="" column="sqli"
 STMT: ExplainStmt
 STMT: SelectStmt
+== 084
+|--
+-- test handling of merge/hash clauses that do not have valid commutators
+|--
+
+-- There are not (and should not be) any such operators built into Postgres
+-- that are mergejoinable or hashable but have no commutators; so we leverage
+-- the alias type 'int8alias1' created in this file to conduct the tests.
+-- That's why this test is included here rather than in join.sql.
+
+begin
+--
+STMT: TransactionStmt
+== 085
+create table tbl_nocom(a int8, b int8alias1)
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=DDL
+STMT: CreateStmt
+== 086
+-- check that non-commutable merge clauses do not lead to error
+set enable_hashjoin to off
+--
+STMT: VariableSetStmt
+== 087
+set enable_mergejoin to on
+--
+STMT: VariableSetStmt
+== 088
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+ALIAS: "t1"="tbl_nocom"
+ALIAS: "t2"="tbl_nocom"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 089
+-- check that non-commutable hash clauses do not lead to error
+alter operator = (int8, int8alias1) set (hashes)
+--
+STMT: AlterOperatorStmt
+== 090
+alter operator family integer_ops using hash add
+  operator 1 = (int8, int8alias1)
+--
+STMT: AlterOpFamilyStmt
+== 091
+create function hashint8alias1(int8alias1) returns int
+  strict immutable language internal as 'hashint8'
+--
+FUNCTION: name="hashint8alias1" function="hashint8alias1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 092
+alter operator family integer_ops using hash add
+  function 1 hashint8alias1(int8alias1)
+--
+STMT: AlterOpFamilyStmt
+== 093
+set enable_hashjoin to on
+--
+STMT: VariableSetStmt
+== 094
+set enable_mergejoin to off
+--
+STMT: VariableSetStmt
+== 095
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+ALIAS: "t1"="tbl_nocom"
+ALIAS: "t2"="tbl_nocom"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 096
+abort
+--
+STMT: TransactionStmt

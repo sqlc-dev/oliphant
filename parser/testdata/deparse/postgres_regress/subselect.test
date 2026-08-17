@@ -573,6 +573,20 @@ select * from (
 SELECT * FROM (SELECT min(unique1) FROM tenk1 a WHERE NOT EXISTS (SELECT 1 FROM tenk1 b WHERE b.unique2 = 10000)) ss
 == 099
 |--
+-- Test cases for interactions between PARAM_EXEC, subplans and array
+-- subscripts
+|--
+
+-- check that array subscription doesn't conflict with PARAM_EXEC (see #19370)
+SELECT (array[1,2])[(SELECT g.i)] FROM generate_series(1, 1) g(i)
+--
+SELECT (ARRAY[1, 2])[(SELECT g.i)] FROM generate_series(1, 1) g(i)
+== 100
+SELECT (array[1,2])[(SELECT g.i):(SELECT g.i + 1)] FROM generate_series(1, 1) g(i)
+--
+SELECT (ARRAY[1, 2])[(SELECT g.i):(SELECT g.i + 1)] FROM generate_series(1, 1) g(i)
+== 101
+|--
 -- Test that an IN implemented using a UniquePath does unique-ification
 -- with the right semantics, as per bug #4113.  (Unfortunately we have
 -- no simple way to ensure that this test case actually chooses that type
@@ -584,29 +598,29 @@ SELECT * FROM (SELECT min(unique1) FROM tenk1 a WHERE NOT EXISTS (SELECT 1 FROM 
 create temp table numeric_table (num_col numeric)
 --
 CREATE TEMPORARY TABLE numeric_table (num_col numeric)
-== 100
+== 102
 insert into numeric_table values (1), (1.000000000000000000001), (2), (3)
 --
 INSERT INTO numeric_table VALUES (1), (1.000000000000000000001), (2), (3)
-== 101
+== 103
 create temp table float_table (float_col float8)
 --
 CREATE TEMPORARY TABLE float_table (float_col float8)
-== 102
+== 104
 insert into float_table values (1), (2), (3)
 --
 INSERT INTO float_table VALUES (1), (2), (3)
-== 103
+== 105
 select * from float_table
   where float_col in (select num_col from numeric_table)
 --
 SELECT * FROM float_table WHERE float_col IN (SELECT num_col FROM numeric_table)
-== 104
+== 106
 select * from numeric_table
   where num_col in (select float_col from float_table)
 --
 SELECT * FROM numeric_table WHERE num_col IN (SELECT float_col FROM float_table)
-== 105
+== 107
 |--
 -- Test case for bug #4290: bogus calculation of subplan param sets
 |--
@@ -614,54 +628,54 @@ SELECT * FROM numeric_table WHERE num_col IN (SELECT float_col FROM float_table)
 create temp table ta (id int primary key, val int)
 --
 CREATE TEMPORARY TABLE ta (id int PRIMARY KEY, val int)
-== 106
+== 108
 insert into ta values(1,1)
 --
 INSERT INTO ta VALUES (1, 1)
-== 107
+== 109
 insert into ta values(2,2)
 --
 INSERT INTO ta VALUES (2, 2)
-== 108
+== 110
 create temp table tb (id int primary key, aval int)
 --
 CREATE TEMPORARY TABLE tb (id int PRIMARY KEY, aval int)
-== 109
+== 111
 insert into tb values(1,1)
 --
 INSERT INTO tb VALUES (1, 1)
-== 110
+== 112
 insert into tb values(2,1)
 --
 INSERT INTO tb VALUES (2, 1)
-== 111
+== 113
 insert into tb values(3,2)
 --
 INSERT INTO tb VALUES (3, 2)
-== 112
+== 114
 insert into tb values(4,2)
 --
 INSERT INTO tb VALUES (4, 2)
-== 113
+== 115
 create temp table tc (id int primary key, aid int)
 --
 CREATE TEMPORARY TABLE tc (id int PRIMARY KEY, aid int)
-== 114
+== 116
 insert into tc values(1,1)
 --
 INSERT INTO tc VALUES (1, 1)
-== 115
+== 117
 insert into tc values(2,2)
 --
 INSERT INTO tc VALUES (2, 2)
-== 116
+== 118
 select
   ( select min(tb.id) from tb
     where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
 from tc
 --
 SELECT (SELECT min(tb.id) FROM tb WHERE tb.aval = (SELECT ta.val FROM ta WHERE ta.id = tc.aid)) AS min_tb_id FROM tc
-== 117
+== 119
 |--
 -- Test case for 8.3 "failed to locate grouping columns" bug
 |--
@@ -669,14 +683,14 @@ SELECT (SELECT min(tb.id) FROM tb WHERE tb.aval = (SELECT ta.val FROM ta WHERE t
 create temp table t1 (f1 numeric(14,0), f2 varchar(30))
 --
 CREATE TEMPORARY TABLE t1 (f1 numeric(14, 0), f2 varchar(30))
-== 118
+== 120
 select * from
   (select distinct f1, f2, (select f2 from t1 x where x.f1 = up.f1) as fs
    from t1 up) ss
 group by f1,f2,fs
 --
 SELECT * FROM (SELECT DISTINCT f1, f2, (SELECT f2 FROM t1 x WHERE x.f1 = up.f1) AS fs FROM t1 up) ss GROUP BY f1, f2, fs
-== 119
+== 121
 |--
 -- Test case for bug #5514 (mishandling of whole-row Vars in subselects)
 |--
@@ -684,31 +698,31 @@ SELECT * FROM (SELECT DISTINCT f1, f2, (SELECT f2 FROM t1 x WHERE x.f1 = up.f1) 
 create temp table table_a(id integer)
 --
 CREATE TEMPORARY TABLE table_a (id int)
-== 120
+== 122
 insert into table_a values (42)
 --
 INSERT INTO table_a VALUES (42)
-== 121
+== 123
 create temp view view_a as select * from table_a
 --
 CREATE TEMPORARY VIEW view_a AS SELECT * FROM table_a
-== 122
+== 124
 select view_a from view_a
 --
 SELECT view_a FROM view_a
-== 123
+== 125
 select (select view_a) from view_a
 --
 SELECT (SELECT view_a) FROM view_a
-== 124
+== 126
 select (select (select view_a)) from view_a
 --
 SELECT (SELECT (SELECT view_a)) FROM view_a
-== 125
+== 127
 select (select (a.*)::text) from view_a a
 --
 SELECT (SELECT a.*::text) FROM view_a a
-== 126
+== 128
 |--
 -- Test case for bug #19037: no relation entry for relid N
 |--
@@ -717,11 +731,11 @@ explain (costs off)
 select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
 --
 EXPLAIN (COSTS OFF) SELECT 1 = ANY(array_agg(f1)) = ANY (SELECT false) FROM int4_tbl
-== 127
+== 129
 select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
 --
 SELECT 1 = ANY(array_agg(f1)) = ANY (SELECT false) FROM int4_tbl
-== 128
+== 130
 |--
 -- Check that whole-row Vars reading the result of a subselect don't include
 -- any junk columns therein
@@ -730,12 +744,12 @@ SELECT 1 = ANY(array_agg(f1)) = ANY (SELECT false) FROM int4_tbl
 select q from (select max(f1) from int4_tbl group by f1 order by f1) q
 --
 SELECT q FROM (SELECT max(f1) FROM int4_tbl GROUP BY f1 ORDER BY f1) q
-== 129
+== 131
 with q as (select max(f1) from int4_tbl group by f1 order by f1)
   select q from q
 --
 WITH q AS (SELECT max(f1) FROM int4_tbl GROUP BY f1 ORDER BY f1) SELECT q FROM q
-== 130
+== 132
 |--
 -- Test case for sublinks pulled up into joinaliasvars lists in an
 -- inherited update/delete query
@@ -744,7 +758,7 @@ WITH q AS (SELECT max(f1) FROM int4_tbl GROUP BY f1 ORDER BY f1) SELECT q FROM q
 begin
 --
 BEGIN
-== 131
+== 133
 --  this shouldn't delete anything, but be safe
 
 delete from road
@@ -757,11 +771,11 @@ where exists (
   where road.name = ss.f1 )
 --
 DELETE FROM road WHERE EXISTS (SELECT 1 FROM int4_tbl CROSS JOIN (SELECT f1, ARRAY(SELECT q1 FROM int8_tbl) AS arr FROM text_tbl) ss WHERE road.name = ss.f1)
-== 132
+== 134
 rollback
 --
 ROLLBACK
-== 133
+== 135
 |--
 -- Test case for sublinks pushed down into subselects via join alias expansion
 |--
@@ -775,33 +789,33 @@ from
   int4_tbl i4 on dummy = i4.f1
 --
 SELECT (SELECT sq1) AS qq1 FROM (SELECT EXISTS (SELECT 1 FROM int4_tbl WHERE f1 = q2) AS sq1, 42 AS dummy FROM int8_tbl) sq0 JOIN int4_tbl i4 ON dummy = i4.f1
-== 134
+== 136
 |--
 -- Test case for subselect within UPDATE of INSERT...ON CONFLICT DO UPDATE
 |--
 create temp table upsert(key int4 primary key, val text)
 --
 CREATE TEMPORARY TABLE upsert (key int4 PRIMARY KEY, val text)
-== 135
+== 137
 insert into upsert values(1, 'val') on conflict (key) do update set val = 'not seen'
 --
 INSERT INTO upsert VALUES (1, 'val') ON CONFLICT (key) DO UPDATE SET val = 'not seen'
-== 136
+== 138
 insert into upsert values(1, 'val') on conflict (key) do update set val = 'seen with subselect ' || (select f1 from int4_tbl where f1 != 0 limit 1)::text
 --
 INSERT INTO upsert VALUES (1, 'val') ON CONFLICT (key) DO UPDATE SET val = 'seen with subselect ' || (SELECT f1 FROM int4_tbl WHERE f1 <> 0 LIMIT 1)::text
-== 137
+== 139
 select * from upsert
 --
 SELECT * FROM upsert
-== 138
+== 140
 with aa as (select 'int4_tbl' u from int4_tbl limit 1)
 insert into upsert values (1, 'x'), (999, 'y')
 on conflict (key) do update set val = (select u from aa)
 returning *
 --
 WITH aa AS (SELECT 'int4_tbl' AS u FROM int4_tbl LIMIT 1) INSERT INTO upsert VALUES (1, 'x'), (999, 'y') ON CONFLICT (key) DO UPDATE SET val = (SELECT u FROM aa) RETURNING *
-== 139
+== 141
 |--
 -- Test case for cross-type partial matching in hashed subplan (bug #7597)
 |--
@@ -809,35 +823,35 @@ WITH aa AS (SELECT 'int4_tbl' AS u FROM int4_tbl LIMIT 1) INSERT INTO upsert VAL
 create temp table outer_7597 (f1 int4, f2 int4)
 --
 CREATE TEMPORARY TABLE outer_7597 (f1 int4, f2 int4)
-== 140
+== 142
 insert into outer_7597 values (0, 0)
 --
 INSERT INTO outer_7597 VALUES (0, 0)
-== 141
+== 143
 insert into outer_7597 values (1, 0)
 --
 INSERT INTO outer_7597 VALUES (1, 0)
-== 142
+== 144
 insert into outer_7597 values (0, null)
 --
 INSERT INTO outer_7597 VALUES (0, NULL)
-== 143
+== 145
 insert into outer_7597 values (1, null)
 --
 INSERT INTO outer_7597 VALUES (1, NULL)
-== 144
+== 146
 create temp table inner_7597(c1 int8, c2 int8)
 --
 CREATE TEMPORARY TABLE inner_7597 (c1 int8, c2 int8)
-== 145
+== 147
 insert into inner_7597 values(0, null)
 --
 INSERT INTO inner_7597 VALUES (0, NULL)
-== 146
+== 148
 select * from outer_7597 where (f1, f2) not in (select * from inner_7597)
 --
 SELECT * FROM outer_7597 WHERE NOT (f1, f2) IN (SELECT * FROM inner_7597)
-== 147
+== 149
 |--
 -- Similar test case using text that verifies that collation
 -- information is passed through by execTuplesEqual() in nodeSubplan.c
@@ -847,39 +861,39 @@ SELECT * FROM outer_7597 WHERE NOT (f1, f2) IN (SELECT * FROM inner_7597)
 create temp table outer_text (f1 text, f2 text)
 --
 CREATE TEMPORARY TABLE outer_text (f1 text, f2 text)
-== 148
+== 150
 insert into outer_text values ('a', 'a')
 --
 INSERT INTO outer_text VALUES ('a', 'a')
-== 149
+== 151
 insert into outer_text values ('b', 'a')
 --
 INSERT INTO outer_text VALUES ('b', 'a')
-== 150
+== 152
 insert into outer_text values ('a', null)
 --
 INSERT INTO outer_text VALUES ('a', NULL)
-== 151
+== 153
 insert into outer_text values ('b', null)
 --
 INSERT INTO outer_text VALUES ('b', NULL)
-== 152
+== 154
 create temp table inner_text (c1 text, c2 text)
 --
 CREATE TEMPORARY TABLE inner_text (c1 text, c2 text)
-== 153
+== 155
 insert into inner_text values ('a', null)
 --
 INSERT INTO inner_text VALUES ('a', NULL)
-== 154
+== 156
 insert into inner_text values ('123', '456')
 --
 INSERT INTO inner_text VALUES ('123', '456')
-== 155
+== 157
 select * from outer_text where (f1, f2) not in (select * from inner_text)
 --
 SELECT * FROM outer_text WHERE NOT (f1, f2) IN (SELECT * FROM inner_text)
-== 156
+== 158
 |--
 -- Another test case for cross-type hashed subplans: comparison of
 -- inner-side values must be done with appropriate operator
@@ -889,11 +903,11 @@ explain (verbose, costs off)
 select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT 'foo'::text IN (SELECT 'bar'::name UNION ALL SELECT 'bar'::name)
-== 157
+== 159
 select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
 --
 SELECT 'foo'::text IN (SELECT 'bar'::name UNION ALL SELECT 'bar'::name)
-== 158
+== 160
 |--
 -- Test that we don't try to hash nested records (bug #17363)
 -- (Hashing could be supported, but for now we don't)
@@ -903,11 +917,11 @@ explain (verbose, costs off)
 select row(row(row(1))) = any (select row(row(1)))
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT ROW(ROW(ROW(1))) = ANY (SELECT ROW(ROW(1)))
-== 159
+== 161
 select row(row(row(1))) = any (select row(row(1)))
 --
 SELECT ROW(ROW(ROW(1))) = ANY (SELECT ROW(ROW(1)))
-== 160
+== 162
 |--
 -- Test case for premature memory release during hashing of subplan output
 |--
@@ -915,7 +929,7 @@ SELECT ROW(ROW(ROW(1))) = ANY (SELECT ROW(ROW(1)))
 select '1'::text in (select '1'::name union all select '1'::name)
 --
 SELECT '1'::text IN (SELECT '1'::name UNION ALL SELECT '1'::name)
-== 161
+== 163
 |--
 -- Test that we don't try to use a hashed subplan if the simplified
 -- testexpr isn't of the right shape
@@ -925,66 +939,66 @@ SELECT '1'::text IN (SELECT '1'::name UNION ALL SELECT '1'::name)
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 162
+== 164
 begin
 --
 BEGIN
-== 163
+== 165
 -- make an operator to allow it to succeed
 create function bogus_int8_text_eq(int8, text) returns boolean
 language sql as 'select $1::text = $2'
 --
 CREATE FUNCTION bogus_int8_text_eq(int8, text) RETURNS boolean LANGUAGE sql AS $$select $1::text = $2$$
-== 164
+== 166
 create operator = (procedure=bogus_int8_text_eq, leftarg=int8, rightarg=text)
 --
 CREATE OPERATOR = (procedure = bogus_int8_text_eq, leftarg = int8, rightarg = text)
-== 165
+== 167
 explain (costs off)
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 166
+== 168
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 167
+== 169
 -- inlining of this function results in unusual number of hash clauses,
 -- which we can still cope with
 create or replace function bogus_int8_text_eq(int8, text) returns boolean
 language sql as 'select $1::text = $2 and $1::text = $2'
 --
 CREATE OR REPLACE FUNCTION bogus_int8_text_eq(int8, text) RETURNS boolean LANGUAGE sql AS $$select $1::text = $2 and $1::text = $2$$
-== 168
+== 170
 explain (costs off)
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 169
+== 171
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 170
+== 172
 -- inlining of this function causes LHS and RHS to be switched,
 -- which we can't cope with, so hashing should be abandoned
 create or replace function bogus_int8_text_eq(int8, text) returns boolean
 language sql as 'select $2 = $1::text'
 --
 CREATE OR REPLACE FUNCTION bogus_int8_text_eq(int8, text) RETURNS boolean LANGUAGE sql AS $$select $2 = $1::text$$
-== 171
+== 173
 explain (costs off)
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 172
+== 174
 select * from int8_tbl where q1 in (select c1 from inner_text)
 --
 SELECT * FROM int8_tbl WHERE q1 IN (SELECT c1 FROM inner_text)
-== 173
+== 175
 rollback
 --
 ROLLBACK
-== 174
+== 176
 -- to get rid of the bogus operator
 
 |--
@@ -995,57 +1009,57 @@ select count(*) from tenk1 t
 where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
 --
 EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t WHERE EXISTS (SELECT 1 FROM tenk1 k WHERE k.unique1 = t.unique2) OR ten < 0
-== 175
+== 177
 select count(*) from tenk1 t
 where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
 --
 SELECT count(*) FROM tenk1 t WHERE EXISTS (SELECT 1 FROM tenk1 k WHERE k.unique1 = t.unique2) OR ten < 0
-== 176
+== 178
 explain (costs off)
 select count(*) from tenk1 t
 where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
   and thousand = 1
 --
 EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t WHERE (EXISTS (SELECT 1 FROM tenk1 k WHERE k.unique1 = t.unique2) OR ten < 0) AND thousand = 1
-== 177
+== 179
 select count(*) from tenk1 t
 where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
   and thousand = 1
 --
 SELECT count(*) FROM tenk1 t WHERE (EXISTS (SELECT 1 FROM tenk1 k WHERE k.unique1 = t.unique2) OR ten < 0) AND thousand = 1
-== 178
+== 180
 -- It's possible for the same EXISTS to get resolved both ways
 create temp table exists_tbl (c1 int, c2 int, c3 int) partition by list (c1)
 --
 CREATE TEMPORARY TABLE exists_tbl (c1 int, c2 int, c3 int) PARTITION BY LIST (c1)
-== 179
+== 181
 create temp table exists_tbl_null partition of exists_tbl for values in (null)
 --
 CREATE TEMPORARY TABLE exists_tbl_null PARTITION OF exists_tbl FOR VALUES IN (NULL)
-== 180
+== 182
 create temp table exists_tbl_def partition of exists_tbl default
 --
 CREATE TEMPORARY TABLE exists_tbl_def PARTITION OF exists_tbl DEFAULT
-== 181
+== 183
 insert into exists_tbl select x, x/2, x+1 from generate_series(0,10) x
 --
 INSERT INTO exists_tbl SELECT x, x / 2, x + 1 FROM generate_series(0, 10) x
-== 182
+== 184
 analyze exists_tbl
 --
 ANALYZE exists_tbl
-== 183
+== 185
 explain (costs off)
 select * from exists_tbl t1
   where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM exists_tbl t1 WHERE EXISTS (SELECT 1 FROM exists_tbl t2 WHERE t1.c1 = t2.c2) OR c3 < 0
-== 184
+== 186
 select * from exists_tbl t1
   where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
 --
 SELECT * FROM exists_tbl t1 WHERE EXISTS (SELECT 1 FROM exists_tbl t2 WHERE t1.c1 = t2.c2) OR c3 < 0
-== 185
+== 187
 |--
 -- Test case for planner bug with nested EXISTS handling
 |--
@@ -1056,7 +1070,7 @@ where a.thousand = b.thousand
                                     where a.thousand = d.thousand ) )
 --
 SELECT a.thousand FROM tenk1 a, tenk1 b WHERE a.thousand = b.thousand AND EXISTS (SELECT 1 FROM tenk1 c WHERE b.hundred = c.hundred AND NOT EXISTS (SELECT 1 FROM tenk1 d WHERE a.thousand = d.thousand))
-== 186
+== 188
 |--
 -- Check that nested sub-selects are not pulled up if they contain volatiles
 |--
@@ -1065,25 +1079,25 @@ explain (verbose, costs off)
     (select (select now()) as x from (values(1),(2)) v(y)) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT x, x FROM (SELECT (SELECT now()) AS x FROM (VALUES (1), (2)) v(y)) ss
-== 187
+== 189
 explain (verbose, costs off)
   select x, x from
     (select (select random()) as x from (values(1),(2)) v(y)) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT x, x FROM (SELECT (SELECT random()) AS x FROM (VALUES (1), (2)) v(y)) ss
-== 188
+== 190
 explain (verbose, costs off)
   select x, x from
     (select (select now() where y=y) as x from (values(1),(2)) v(y)) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT x, x FROM (SELECT (SELECT now() WHERE y = y) AS x FROM (VALUES (1), (2)) v(y)) ss
-== 189
+== 191
 explain (verbose, costs off)
   select x, x from
     (select (select random() where y=y) as x from (values(1),(2)) v(y)) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT x, x FROM (SELECT (SELECT random() WHERE y = y) AS x FROM (VALUES (1), (2)) v(y)) ss
-== 190
+== 192
 |--
 -- Test rescan of a hashed subplan (the use of random() is to prevent the
 -- sub-select from being pulled up, which would result in not hashing)
@@ -1097,7 +1111,7 @@ select sum(ss.tst::int) from
 where o.ten = 0
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT sum(ss.tst::int) FROM onek o CROSS JOIN LATERAL (SELECT i.ten IN (SELECT f1 FROM int4_tbl WHERE f1 <= o.hundred) AS tst, random() AS r FROM onek i WHERE i.unique1 = o.unique1) ss WHERE o.ten = 0
-== 191
+== 193
 select sum(ss.tst::int) from
   onek o cross join lateral (
   select i.ten in (select f1 from int4_tbl where f1 <= o.hundred) as tst,
@@ -1106,10 +1120,18 @@ select sum(ss.tst::int) from
 where o.ten = 0
 --
 SELECT sum(ss.tst::int) FROM onek o CROSS JOIN LATERAL (SELECT i.ten IN (SELECT f1 FROM int4_tbl WHERE f1 <= o.hundred) AS tst, random() AS r FROM onek i WHERE i.unique1 = o.unique1) ss WHERE o.ten = 0
-== 192
+== 194
 |--
--- Test rescan of a SetOp node
+-- Test rescan of a hashed SetOp node
 |--
+begin
+--
+BEGIN
+== 195
+set local enable_sort = off
+--
+SET LOCAL enable_sort TO OFF
+== 196
 explain (costs off)
 select count(*) from
   onek o cross join lateral (
@@ -1120,7 +1142,7 @@ select count(*) from
 where o.ten = 1
 --
 EXPLAIN (COSTS OFF) SELECT count(*) FROM onek o CROSS JOIN LATERAL (SELECT * FROM onek i1 WHERE i1.unique1 = o.unique1 EXCEPT SELECT * FROM onek i2 WHERE i2.unique1 = o.unique2) ss WHERE o.ten = 1
-== 193
+== 197
 select count(*) from
   onek o cross join lateral (
     select * from onek i1 where i1.unique1 = o.unique1
@@ -1130,7 +1152,47 @@ select count(*) from
 where o.ten = 1
 --
 SELECT count(*) FROM onek o CROSS JOIN LATERAL (SELECT * FROM onek i1 WHERE i1.unique1 = o.unique1 EXCEPT SELECT * FROM onek i2 WHERE i2.unique1 = o.unique2) ss WHERE o.ten = 1
-== 194
+== 198
+rollback
+--
+ROLLBACK
+== 199
+|--
+-- Test rescan of a sorted SetOp node
+|--
+begin
+--
+BEGIN
+== 200
+set local enable_hashagg = off
+--
+SET LOCAL enable_hashagg TO OFF
+== 201
+explain (costs off)
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+EXPLAIN (COSTS OFF) SELECT count(*) FROM onek o CROSS JOIN LATERAL (SELECT * FROM onek i1 WHERE i1.unique1 = o.unique1 EXCEPT SELECT * FROM onek i2 WHERE i2.unique1 = o.unique2) ss WHERE o.ten = 1
+== 202
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+SELECT count(*) FROM onek o CROSS JOIN LATERAL (SELECT * FROM onek i1 WHERE i1.unique1 = o.unique1 EXCEPT SELECT * FROM onek i2 WHERE i2.unique1 = o.unique2) ss WHERE o.ten = 1
+== 203
+rollback
+--
+ROLLBACK
+== 204
 |--
 -- Test rescan of a RecursiveUnion node
 |--
@@ -1147,7 +1209,7 @@ select sum(o.four), sum(ss.a) from
 where o.ten = 1
 --
 EXPLAIN (COSTS OFF) SELECT sum(o.four), sum(ss.a) FROM onek o CROSS JOIN LATERAL (WITH RECURSIVE x(a) AS (SELECT o.four AS a UNION SELECT a + 1 FROM x WHERE a < 10) SELECT * FROM x) ss WHERE o.ten = 1
-== 195
+== 205
 select sum(o.four), sum(ss.a) from
   onek o cross join lateral (
     with recursive x(a) as
@@ -1160,37 +1222,37 @@ select sum(o.four), sum(ss.a) from
 where o.ten = 1
 --
 SELECT sum(o.four), sum(ss.a) FROM onek o CROSS JOIN LATERAL (WITH RECURSIVE x(a) AS (SELECT o.four AS a UNION SELECT a + 1 FROM x WHERE a < 10) SELECT * FROM x) ss WHERE o.ten = 1
-== 196
+== 206
 |--
 -- Check we don't misoptimize a NOT IN where the subquery returns no rows.
 |--
 create temp table notinouter (a int)
 --
 CREATE TEMPORARY TABLE notinouter (a int)
-== 197
+== 207
 create temp table notininner (b int not null)
 --
 CREATE TEMPORARY TABLE notininner (b int NOT NULL)
-== 198
+== 208
 insert into notinouter values (null), (1)
 --
 INSERT INTO notinouter VALUES (NULL), (1)
-== 199
+== 209
 select * from notinouter where a not in (select b from notininner)
 --
 SELECT * FROM notinouter WHERE NOT a IN (SELECT b FROM notininner)
-== 200
+== 210
 |--
 -- Check we behave sanely in corner case of empty SELECT list (bug #8648)
 |--
 create temp table nocolumns()
 --
 CREATE TEMPORARY TABLE nocolumns ()
-== 201
+== 211
 select exists(select * from nocolumns)
 --
 SELECT EXISTS (SELECT * FROM nocolumns)
-== 202
+== 212
 |--
 -- Check behavior with a SubPlan in VALUES (bug #14924)
 |--
@@ -1202,7 +1264,7 @@ select val.x
 where s.i < 10 and (select val.x) < 110
 --
 SELECT val.x FROM generate_series(1, 10) s(i), LATERAL (VALUES ((SELECT s.i + 1)), (s.i + 101)) val(x) WHERE s.i < 10 AND (SELECT val.x) < 110
-== 203
+== 213
 -- another variant of that (bug #16213)
 explain (verbose, costs off)
 select * from
@@ -1212,7 +1274,7 @@ select * from
 ) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (VALUES (NOT 3 IN (SELECT * FROM (VALUES (1), (2)) ss1)), (false)) ss
-== 204
+== 214
 select * from
 (values
   (3 not in (select * from (values (1), (2)) ss1)),
@@ -1220,7 +1282,7 @@ select * from
 ) ss
 --
 SELECT * FROM (VALUES (NOT 3 IN (SELECT * FROM (VALUES (1), (2)) ss1)), (false)) ss
-== 205
+== 215
 |--
 -- Check sane behavior with nested IN SubLinks
 |--
@@ -1230,13 +1292,13 @@ select * from int4_tbl where
   (select ten from tenk1 b)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM int4_tbl WHERE CASE WHEN f1 IN (SELECT unique1 FROM tenk1 a) THEN f1 ELSE NULL END IN (SELECT ten FROM tenk1 b)
-== 206
+== 216
 select * from int4_tbl where
   (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
   (select ten from tenk1 b)
 --
 SELECT * FROM int4_tbl WHERE CASE WHEN f1 IN (SELECT unique1 FROM tenk1 a) THEN f1 ELSE NULL END IN (SELECT ten FROM tenk1 b)
-== 207
+== 217
 |--
 -- Check for incorrect optimization when IN subquery contains a SRF
 |--
@@ -1245,12 +1307,12 @@ select * from int4_tbl o where (f1, f1) in
   (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM int4_tbl o WHERE (f1, f1) IN (SELECT f1, generate_series(1, 50) / 10 AS g FROM int4_tbl i GROUP BY f1)
-== 208
+== 218
 select * from int4_tbl o where (f1, f1) in
   (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
 --
 SELECT * FROM int4_tbl o WHERE (f1, f1) IN (SELECT f1, generate_series(1, 50) / 10 AS g FROM int4_tbl i GROUP BY f1)
-== 209
+== 219
 |--
 -- check for over-optimization of whole-row Var referencing an Append plan
 |--
@@ -1262,7 +1324,7 @@ select (select q from
 from int4_tbl
 --
 SELECT (SELECT q FROM (SELECT 1, 2, 3 WHERE f1 > 0 UNION ALL SELECT 4, 5, 6.0 WHERE f1 <= 0) q) FROM int4_tbl
-== 210
+== 220
 |--
 -- Check for sane handling of a lateral reference in a subquery's quals
 -- (most of the complication here is to prevent the test case from being
@@ -1280,7 +1342,7 @@ select * from
 where b and f1 >= 0
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM int4_tbl i4, LATERAL (SELECT i4.f1 > 1 AS b, 1 AS id FROM (SELECT random() ORDER BY 1) t1 UNION ALL SELECT true AS b, 2 AS id) t2 WHERE b AND f1 >= 0
-== 211
+== 221
 select * from
     int4_tbl i4,
     lateral (
@@ -1292,7 +1354,7 @@ select * from
 where b and f1 >= 0
 --
 SELECT * FROM int4_tbl i4, LATERAL (SELECT i4.f1 > 1 AS b, 1 AS id FROM (SELECT random() ORDER BY 1) t1 UNION ALL SELECT true AS b, 2 AS id) t2 WHERE b AND f1 >= 0
-== 212
+== 222
 |--
 -- Check that volatile quals aren't pushed down past a DISTINCT:
 -- nextval() should not be called more than the nominal number of times
@@ -1300,18 +1362,18 @@ SELECT * FROM int4_tbl i4, LATERAL (SELECT i4.f1 > 1 AS b, 1 AS id FROM (SELECT 
 create temp sequence ts1
 --
 CREATE TEMPORARY SEQUENCE ts1
-== 213
+== 223
 select * from
   (select distinct ten from tenk1) ss
   where ten < 10 + nextval('ts1')
   order by 1
 --
 SELECT * FROM (SELECT DISTINCT ten FROM tenk1) ss WHERE ten < (10 + nextval('ts1')) ORDER BY 1
-== 214
+== 224
 select nextval('ts1')
 --
 SELECT nextval('ts1')
-== 215
+== 225
 |--
 -- Check that volatile quals aren't pushed down past a set-returning function;
 -- while a nonvolatile qual can be, if it doesn't reference the SRF.
@@ -1328,38 +1390,38 @@ begin
   raise notice 'x = %, y = %', x, y;
   return x > y;
 end$$
-== 216
+== 226
 explain (verbose, costs off)
 select * from
   (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
   where tattle(x, 8)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, 8)
-== 217
+== 227
 select * from
   (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
   where tattle(x, 8)
 --
 SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, 8)
-== 218
+== 228
 -- if we pretend it's stable, we get different results:
 alter function tattle(x int, y int) stable
 --
 ALTER FUNCTION tattle(x int, y int) STABLE
-== 219
+== 229
 explain (verbose, costs off)
 select * from
   (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
   where tattle(x, 8)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, 8)
-== 220
+== 230
 select * from
   (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
   where tattle(x, 8)
 --
 SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, 8)
-== 221
+== 231
 -- although even a stable qual should not be pushed down if it references SRF
 explain (verbose, costs off)
 select * from
@@ -1367,17 +1429,73 @@ select * from
   where tattle(x, u)
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, u)
-== 222
+== 232
 select * from
   (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
   where tattle(x, u)
 --
 SELECT * FROM (SELECT 9 AS x, unnest(ARRAY[1, 2, 3, 11, 12, 13]) AS u) ss WHERE tattle(x, u)
-== 223
+== 233
+|--
+-- check that an upper-level qual is not pushed down if it references a grouped
+-- Var whose underlying expression contains SRFs
+|--
+explain (verbose, costs off)
+select * from
+  (select generate_series(1, ten) as g, count(*) from tenk1 group by 1) ss
+  where ss.g = 1
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT generate_series(1, ten) AS g, count(*) FROM tenk1 GROUP BY 1) ss WHERE ss.g = 1
+== 234
+select * from
+  (select generate_series(1, ten) as g, count(*) from tenk1 group by 1) ss
+  where ss.g = 1
+--
+SELECT * FROM (SELECT generate_series(1, ten) AS g, count(*) FROM tenk1 GROUP BY 1) ss WHERE ss.g = 1
+== 235
+|--
+-- check that an upper-level qual is not pushed down if it references a grouped
+-- Var whose underlying expression contains volatile functions
+|--
+alter function tattle(x int, y int) volatile
+--
+ALTER FUNCTION tattle(x int, y int) VOLATILE
+== 236
+explain (verbose, costs off)
+select * from
+  (select tattle(3, ten) as v, count(*) from tenk1 where unique1 < 3 group by 1) ss
+  where ss.v
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT tattle(3, ten) AS v, count(*) FROM tenk1 WHERE unique1 < 3 GROUP BY 1) ss WHERE ss.v
+== 237
+select * from
+  (select tattle(3, ten) as v, count(*) from tenk1 where unique1 < 3 group by 1) ss
+  where ss.v
+--
+SELECT * FROM (SELECT tattle(3, ten) AS v, count(*) FROM tenk1 WHERE unique1 < 3 GROUP BY 1) ss WHERE ss.v
+== 238
+-- if we pretend it's stable, we get different results:
+alter function tattle(x int, y int) stable
+--
+ALTER FUNCTION tattle(x int, y int) STABLE
+== 239
+explain (verbose, costs off)
+select * from
+  (select tattle(3, ten) as v, count(*) from tenk1 where unique1 < 3 group by 1) ss
+  where ss.v
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM (SELECT tattle(3, ten) AS v, count(*) FROM tenk1 WHERE unique1 < 3 GROUP BY 1) ss WHERE ss.v
+== 240
+select * from
+  (select tattle(3, ten) as v, count(*) from tenk1 where unique1 < 3 group by 1) ss
+  where ss.v
+--
+SELECT * FROM (SELECT tattle(3, ten) AS v, count(*) FROM tenk1 WHERE unique1 < 3 GROUP BY 1) ss WHERE ss.v
+== 241
 drop function tattle(x int, y int)
 --
 DROP FUNCTION tattle(x int, y int)
-== 224
+== 242
 |--
 -- Test that LIMIT can be pushed to SORT through a subquery that just projects
 -- columns.  We check for that having happened by looking to see if EXPLAIN
@@ -1387,7 +1505,7 @@ DROP FUNCTION tattle(x int, y int)
 create table sq_limit (pk int primary key, c1 int, c2 int)
 --
 CREATE TABLE sq_limit (pk int PRIMARY KEY, c1 int, c2 int)
-== 225
+== 243
 insert into sq_limit values
     (1, 1, 1),
     (2, 2, 2),
@@ -1399,13 +1517,13 @@ insert into sq_limit values
     (8, 4, 4)
 --
 INSERT INTO sq_limit VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 1, 1), (6, 2, 2), (7, 3, 3), (8, 4, 4)
-== 226
+== 244
 create function explain_sq_limit() returns setof text language plpgsql as
 $$
 declare ln text;
 begin
     for ln in
-        explain (analyze, summary off, timing off, costs off)
+        explain (analyze, summary off, timing off, costs off, buffers off)
         select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
     loop
         ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
@@ -1418,7 +1536,7 @@ CREATE FUNCTION explain_sq_limit() RETURNS SETOF text LANGUAGE plpgsql AS $$
 declare ln text;
 begin
     for ln in
-        explain (analyze, summary off, timing off, costs off)
+        explain (analyze, summary off, timing off, costs off, buffers off)
         select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
     loop
         ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
@@ -1426,23 +1544,23 @@ begin
     end loop;
 end;
 $$
-== 227
+== 245
 select * from explain_sq_limit()
 --
 SELECT * FROM explain_sq_limit()
-== 228
+== 246
 select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
 --
 SELECT * FROM (SELECT pk, c2 FROM sq_limit ORDER BY c1, pk) x LIMIT 3
-== 229
+== 247
 drop function explain_sq_limit()
 --
 DROP FUNCTION explain_sq_limit()
-== 230
+== 248
 drop table sq_limit
 --
 DROP TABLE sq_limit
-== 231
+== 249
 |--
 -- Ensure that backward scan direction isn't propagated into
 -- expression subqueries (bug #15336)
@@ -1451,25 +1569,25 @@ DROP TABLE sq_limit
 begin
 --
 BEGIN
-== 232
+== 250
 declare c1 scroll cursor for
  select * from generate_series(1,4) i
   where i <> all (values (2),(3))
 --
 DECLARE c1 SCROLL CURSOR FOR SELECT * FROM generate_series(1, 4) i WHERE i <> ALL (VALUES (2), (3))
-== 233
+== 251
 move forward all in c1
 --
 MOVE ALL c1
-== 234
+== 252
 fetch backward all in c1
 --
 FETCH BACKWARD ALL c1
-== 235
+== 253
 commit
 --
 COMMIT
-== 236
+== 254
 |--
 -- Check that JsonConstructorExpr is treated as non-strict, and thus can be
 -- wrapped in a PlaceHolderVar
@@ -1478,28 +1596,28 @@ COMMIT
 begin
 --
 BEGIN
-== 237
+== 255
 create temp table json_tab (a int)
 --
 CREATE TEMPORARY TABLE json_tab (a int)
-== 238
+== 256
 insert into json_tab values (1)
 --
 INSERT INTO json_tab VALUES (1)
-== 239
+== 257
 explain (verbose, costs off)
 select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM json_tab t1 LEFT JOIN (SELECT JSON_ARRAY(1, a) FROM json_tab t2) s ON false
-== 240
+== 258
 select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
 --
 SELECT * FROM json_tab t1 LEFT JOIN (SELECT JSON_ARRAY(1, a) FROM json_tab t2) s ON false
-== 241
+== 259
 rollback
 --
 ROLLBACK
-== 242
+== 260
 |--
 -- Verify that we correctly flatten cases involving a subquery output
 -- expression that doesn't need to be wrapped in a PlaceHolderVar
@@ -1513,7 +1631,7 @@ select relname::information_schema.sql_identifier as tname, * from
 where tname = 'tenk1' and attnum = 1
 --
 EXPLAIN (COSTS OFF) SELECT tname, attname FROM (SELECT relname::information_schema.sql_identifier AS tname, * FROM (SELECT * FROM pg_class c) ss1) ss2 RIGHT JOIN pg_attribute a ON a.attrelid = ss2.oid WHERE tname = 'tenk1' AND attnum = 1
-== 243
+== 261
 select tname, attname from (
 select relname::information_schema.sql_identifier as tname, * from
   (select * from pg_class c) ss1) ss2
@@ -1521,7 +1639,7 @@ select relname::information_schema.sql_identifier as tname, * from
 where tname = 'tenk1' and attnum = 1
 --
 SELECT tname, attname FROM (SELECT relname::information_schema.sql_identifier AS tname, * FROM (SELECT * FROM pg_class c) ss1) ss2 RIGHT JOIN pg_attribute a ON a.attrelid = ss2.oid WHERE tname = 'tenk1' AND attnum = 1
-== 244
+== 262
 -- Check behavior when there's a lateral reference in the output expression
 explain (verbose, costs off)
 select t1.ten, sum(x) from
@@ -1532,7 +1650,7 @@ group by t1.ten
 order by t1.ten
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.ten, sum(x) FROM tenk1 t1 LEFT JOIN LATERAL (SELECT t1.ten + t2.ten AS x, t2.fivethous FROM tenk1 t2) ss ON t1.unique1 = ss.fivethous GROUP BY t1.ten ORDER BY t1.ten
-== 245
+== 263
 select t1.ten, sum(x) from
   tenk1 t1 left join lateral (
     select t1.ten + t2.ten as x, t2.fivethous from tenk1 t2
@@ -1541,7 +1659,7 @@ group by t1.ten
 order by t1.ten
 --
 SELECT t1.ten, sum(x) FROM tenk1 t1 LEFT JOIN LATERAL (SELECT t1.ten + t2.ten AS x, t2.fivethous FROM tenk1 t2) ss ON t1.unique1 = ss.fivethous GROUP BY t1.ten ORDER BY t1.ten
-== 246
+== 264
 explain (verbose, costs off)
 select t1.q1, x from
   int8_tbl t1 left join
@@ -1551,7 +1669,7 @@ select t1.q1, x from
 order by 1, 2
 --
 EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q1 + t3.q1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
-== 247
+== 265
 select t1.q1, x from
   int8_tbl t1 left join
   (int8_tbl t2 left join
@@ -1560,7 +1678,134 @@ select t1.q1, x from
 order by 1, 2
 --
 SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q1 + t3.q1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
-== 248
+== 266
+-- strict expressions containing variables of rels under the same lowest
+-- nulling outer join can escape being wrapped
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 inner join
+   lateral (select t2.q1+1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 JOIN LATERAL (SELECT t2.q1 + 1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
+== 267
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 inner join
+   lateral (select t2.q1+1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 JOIN LATERAL (SELECT t2.q1 + 1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
+== 268
+-- otherwise we need to wrap the strict expressions
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q1 + 1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
+== 269
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q1 + 1 AS x, * FROM int8_tbl t3) t3 ON t2.q2 = t3.q2) ON t1.q2 = t2.q2 ORDER BY 1, 2
+== 270
+-- lateral references for simple Vars can escape being wrapped if the
+-- referenced rel is under the same lowest nulling outer join
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 inner join
+   lateral (select t2.q2 as x, * from int8_tbl t3) ss on t2.q2 = ss.q1)
+  on t1.q1 = t2.q1
+order by 1, 2
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 JOIN LATERAL (SELECT t2.q2 AS x, * FROM int8_tbl t3) ss ON t2.q2 = ss.q1) ON t1.q1 = t2.q1 ORDER BY 1, 2
+== 271
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 inner join
+   lateral (select t2.q2 as x, * from int8_tbl t3) ss on t2.q2 = ss.q1)
+  on t1.q1 = t2.q1
+order by 1, 2
+--
+SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 JOIN LATERAL (SELECT t2.q2 AS x, * FROM int8_tbl t3) ss ON t2.q2 = ss.q1) ON t1.q1 = t2.q1 ORDER BY 1, 2
+== 272
+-- otherwise we need to wrap the Vars
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q2 as x, * from int8_tbl t3) ss on t2.q2 = ss.q1)
+  on t1.q1 = t2.q1
+order by 1, 2
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q2 AS x, * FROM int8_tbl t3) ss ON t2.q2 = ss.q1) ON t1.q1 = t2.q1 ORDER BY 1, 2
+== 273
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q2 as x, * from int8_tbl t3) ss on t2.q2 = ss.q1)
+  on t1.q1 = t2.q1
+order by 1, 2
+--
+SELECT t1.q1, x FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN LATERAL (SELECT t2.q2 AS x, * FROM int8_tbl t3) ss ON t2.q2 = ss.q1) ON t1.q1 = t2.q1 ORDER BY 1, 2
+== 274
+-- lateral references for PHVs can also escape being wrapped if the
+-- referenced rel is under the same lowest nulling outer join
+explain (verbose, costs off)
+select ss2.* from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   (select coalesce(q1) as x, * from int8_tbl t3) ss1 on t2.q1 = ss1.q2 inner join
+   lateral (select ss1.x as y, * from int8_tbl t4) ss2 on t2.q2 = ss2.q1)
+  on t1.q2 = ss2.q1
+order by 1, 2, 3
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT ss2.* FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN (SELECT COALESCE(q1) AS x, * FROM int8_tbl t3) ss1 ON t2.q1 = ss1.q2 JOIN LATERAL (SELECT ss1.x AS y, * FROM int8_tbl t4) ss2 ON t2.q2 = ss2.q1) ON t1.q2 = ss2.q1 ORDER BY 1, 2, 3
+== 275
+select ss2.* from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   (select coalesce(q1) as x, * from int8_tbl t3) ss1 on t2.q1 = ss1.q2 inner join
+   lateral (select ss1.x as y, * from int8_tbl t4) ss2 on t2.q2 = ss2.q1)
+  on t1.q2 = ss2.q1
+order by 1, 2, 3
+--
+SELECT ss2.* FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN (SELECT COALESCE(q1) AS x, * FROM int8_tbl t3) ss1 ON t2.q1 = ss1.q2 JOIN LATERAL (SELECT ss1.x AS y, * FROM int8_tbl t4) ss2 ON t2.q2 = ss2.q1) ON t1.q2 = ss2.q1 ORDER BY 1, 2, 3
+== 276
+-- otherwise we need to wrap the PHVs
+explain (verbose, costs off)
+select ss2.* from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   (select coalesce(q1) as x, * from int8_tbl t3) ss1 on t2.q1 = ss1.q2 left join
+   lateral (select ss1.x as y, * from int8_tbl t4) ss2 on t2.q2 = ss2.q1)
+  on t1.q2 = ss2.q1
+order by 1, 2, 3
+--
+EXPLAIN (VERBOSE, COSTS OFF) SELECT ss2.* FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN (SELECT COALESCE(q1) AS x, * FROM int8_tbl t3) ss1 ON t2.q1 = ss1.q2 LEFT JOIN LATERAL (SELECT ss1.x AS y, * FROM int8_tbl t4) ss2 ON t2.q2 = ss2.q1) ON t1.q2 = ss2.q1 ORDER BY 1, 2, 3
+== 277
+select ss2.* from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   (select coalesce(q1) as x, * from int8_tbl t3) ss1 on t2.q1 = ss1.q2 left join
+   lateral (select ss1.x as y, * from int8_tbl t4) ss2 on t2.q2 = ss2.q1)
+  on t1.q2 = ss2.q1
+order by 1, 2, 3
+--
+SELECT ss2.* FROM int8_tbl t1 LEFT JOIN (int8_tbl t2 LEFT JOIN (SELECT COALESCE(q1) AS x, * FROM int8_tbl t3) ss1 ON t2.q1 = ss1.q2 LEFT JOIN LATERAL (SELECT ss1.x AS y, * FROM int8_tbl t4) ss2 ON t2.q2 = ss2.q1) ON t1.q2 = ss2.q1 ORDER BY 1, 2, 3
+== 278
 |--
 -- Tests for CTE inlining behavior
 |--
@@ -1571,48 +1816,48 @@ with x as (select * from (select f1 from subselect_tbl) ss)
 select * from x where f1 = 1
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM (SELECT f1 FROM subselect_tbl) ss) SELECT * FROM x WHERE f1 = 1
-== 249
+== 279
 -- Explicitly request materialization
 explain (verbose, costs off)
 with x as materialized (select * from (select f1 from subselect_tbl) ss)
 select * from x where f1 = 1
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS MATERIALIZED (SELECT * FROM (SELECT f1 FROM subselect_tbl) ss) SELECT * FROM x WHERE f1 = 1
-== 250
+== 280
 -- Stable functions are safe to inline
 explain (verbose, costs off)
 with x as (select * from (select f1, now() from subselect_tbl) ss)
 select * from x where f1 = 1
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM (SELECT f1, now() FROM subselect_tbl) ss) SELECT * FROM x WHERE f1 = 1
-== 251
+== 281
 -- Volatile functions prevent inlining
 explain (verbose, costs off)
 with x as (select * from (select f1, random() from subselect_tbl) ss)
 select * from x where f1 = 1
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM (SELECT f1, random() FROM subselect_tbl) ss) SELECT * FROM x WHERE f1 = 1
-== 252
+== 282
 -- SELECT FOR UPDATE cannot be inlined
 explain (verbose, costs off)
 with x as (select * from (select f1 from subselect_tbl for update) ss)
 select * from x where f1 = 1
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM (SELECT f1 FROM subselect_tbl FOR UPDATE) ss) SELECT * FROM x WHERE f1 = 1
-== 253
+== 283
 -- Multiply-referenced CTEs are inlined only when requested
 explain (verbose, costs off)
 with x as (select * from (select f1, now() as n from subselect_tbl) ss)
 select * from x, x x2 where x.n = x2.n
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM (SELECT f1, now() AS n FROM subselect_tbl) ss) SELECT * FROM x, x x2 WHERE x.n = x2.n
-== 254
+== 284
 explain (verbose, costs off)
 with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)
 select * from x, x x2 where x.n = x2.n
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS NOT MATERIALIZED (SELECT * FROM (SELECT f1, now() AS n FROM subselect_tbl) ss) SELECT * FROM x, x x2 WHERE x.n = x2.n
-== 255
+== 285
 -- Multiply-referenced CTEs can't be inlined if they contain outer self-refs
 explain (verbose, costs off)
 with recursive x(a) as
@@ -1624,7 +1869,7 @@ with recursive x(a) as
 select * from x
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE x(a) AS (VALUES ('a'), ('b') UNION ALL (WITH z AS NOT MATERIALIZED (SELECT * FROM x) SELECT z.a || z1.a AS a FROM z CROSS JOIN z z1 WHERE length(z.a || z1.a) < 5)) SELECT * FROM x
-== 256
+== 286
 with recursive x(a) as
   ((values ('a'), ('b'))
    union all
@@ -1634,7 +1879,7 @@ with recursive x(a) as
 select * from x
 --
 WITH RECURSIVE x(a) AS (VALUES ('a'), ('b') UNION ALL (WITH z AS NOT MATERIALIZED (SELECT * FROM x) SELECT z.a || z1.a AS a FROM z CROSS JOIN z z1 WHERE length(z.a || z1.a) < 5)) SELECT * FROM x
-== 257
+== 287
 explain (verbose, costs off)
 with recursive x(a) as
   ((values ('a'), ('b'))
@@ -1645,7 +1890,7 @@ with recursive x(a) as
 select * from x
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE x(a) AS (VALUES ('a'), ('b') UNION ALL (WITH z AS NOT MATERIALIZED (SELECT * FROM x) SELECT z.a || z.a AS a FROM z WHERE length(z.a || z.a) < 5)) SELECT * FROM x
-== 258
+== 288
 with recursive x(a) as
   ((values ('a'), ('b'))
    union all
@@ -1655,20 +1900,20 @@ with recursive x(a) as
 select * from x
 --
 WITH RECURSIVE x(a) AS (VALUES ('a'), ('b') UNION ALL (WITH z AS NOT MATERIALIZED (SELECT * FROM x) SELECT z.a || z.a AS a FROM z WHERE length(z.a || z.a) < 5)) SELECT * FROM x
-== 259
+== 289
 -- Check handling of outer references
 explain (verbose, costs off)
 with x as (select * from int4_tbl)
 select * from (with y as (select * from x) select * from y) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM int4_tbl) SELECT * FROM (WITH y AS (SELECT * FROM x) SELECT * FROM y) ss
-== 260
+== 290
 explain (verbose, costs off)
 with x as materialized (select * from int4_tbl)
 select * from (with y as (select * from x) select * from y) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS MATERIALIZED (SELECT * FROM int4_tbl) SELECT * FROM (WITH y AS (SELECT * FROM x) SELECT * FROM y) ss
-== 261
+== 291
 -- Ensure that we inline the correct CTE when there are
 -- multiple CTEs with the same name
 explain (verbose, costs off)
@@ -1676,20 +1921,20 @@ with x as (select 1 as y)
 select * from (with x as (select 2 as y) select * from x) ss
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT 1 AS y) SELECT * FROM (WITH x AS (SELECT 2 AS y) SELECT * FROM x) ss
-== 262
+== 292
 -- Row marks are not pushed into CTEs
 explain (verbose, costs off)
 with x as (select * from subselect_tbl)
 select * from x for update
 --
 EXPLAIN (VERBOSE, COSTS OFF) WITH x AS (SELECT * FROM subselect_tbl) SELECT * FROM x FOR UPDATE
-== 263
+== 293
 -- Pull up direct-correlated ANY_SUBLINKs
 explain (costs off)
 select * from tenk1 A where hundred in (select hundred from tenk2 B where B.odd = A.odd)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a WHERE hundred IN (SELECT hundred FROM tenk2 b WHERE b.odd = a.odd)
-== 264
+== 294
 explain (costs off)
 select * from tenk1 A where exists
 (select 1 from tenk2 B
@@ -1697,7 +1942,7 @@ where A.hundred in (select C.hundred FROM tenk2 C
 WHERE c.odd = b.odd))
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a WHERE EXISTS (SELECT 1 FROM tenk2 b WHERE a.hundred IN (SELECT c.hundred FROM tenk2 c WHERE c.odd = b.odd))
-== 265
+== 295
 -- we should only try to pull up the sublink into RHS of a left join
 -- but a.hundred is not available.
 explain (costs off)
@@ -1705,7 +1950,7 @@ SELECT * FROM tenk1 A LEFT JOIN tenk2 B
 ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a LEFT JOIN tenk2 b ON a.hundred IN (SELECT c.hundred FROM tenk2 c WHERE c.odd = b.odd)
-== 266
+== 296
 -- we should only try to pull up the sublink into RHS of a left join
 -- but a.odd is not available for this.
 explain (costs off)
@@ -1713,14 +1958,14 @@ SELECT * FROM tenk1 A LEFT JOIN tenk2 B
 ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = a.odd)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a LEFT JOIN tenk2 b ON b.hundred IN (SELECT c.hundred FROM tenk2 c WHERE c.odd = a.odd)
-== 267
+== 297
 -- should be able to pull up since all the references are available.
 explain (costs off)
 SELECT * FROM tenk1 A LEFT JOIN tenk2 B
 ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a LEFT JOIN tenk2 b ON b.hundred IN (SELECT c.hundred FROM tenk2 c WHERE c.odd = b.odd)
-== 268
+== 298
 -- we can pull up the sublink into the inner JoinExpr.
 explain (costs off)
 SELECT * FROM tenk1 A INNER JOIN tenk2 B
@@ -1728,10 +1973,177 @@ ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
 WHERE a.thousand < 750
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a JOIN tenk2 b ON a.hundred IN (SELECT c.hundred FROM tenk2 c WHERE c.odd = b.odd) WHERE a.thousand < 750
-== 269
+== 299
 -- we can pull up the aggregate sublink into RHS of a left join.
 explain (costs off)
 SELECT * FROM tenk1 A LEFT JOIN tenk2 B
 ON B.hundred in (SELECT min(c.hundred) FROM tenk2 C WHERE c.odd = b.odd)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 a LEFT JOIN tenk2 b ON b.hundred IN (SELECT min(c.hundred) FROM tenk2 c WHERE c.odd = b.odd)
+== 300
+|--
+-- Test VALUES to ARRAY (VtA) transformation
+|--
+
+-- VtA transformation for joined VALUES is not supported
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek, (VALUES('RFAAAA'), ('VJAAAA')) AS v (i)
+  WHERE onek.stringu1 = v.i
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek, (VALUES ('RFAAAA'), ('VJAAAA')) v(i) WHERE onek.stringu1 = v.i
+== 301
+-- VtA transformation for a composite argument is not supported
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek
+  WHERE (unique1,ten) IN (VALUES (1,1), (20,0), (99,9), (17,99))
+  ORDER BY unique1
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek WHERE (unique1, ten) IN (VALUES (1, 1), (20, 0), (99, 9), (17, 99)) ORDER BY unique1
+== 302
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek
+    WHERE unique1 IN (VALUES(10000), (2), (389), (1000), (2000), (10029))
+    ORDER BY unique1
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek WHERE unique1 IN (VALUES (10000), (2), (389), (1000), (2000), (10029)) ORDER BY unique1
+== 303
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek
+    WHERE unique1 IN (VALUES(1200), (1))
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek WHERE unique1 IN (VALUES (1200), (1))
+== 304
+-- Recursive evaluation of constant queries is not yet supported
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek
+  WHERE unique1 IN (SELECT x * x FROM (VALUES(1200), (1)) AS x(x))
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek WHERE unique1 IN (SELECT x * x FROM (VALUES (1200), (1)) x(x))
+== 305
+EXPLAIN (COSTS OFF)
+SELECT unique1, stringu1 FROM onek WHERE stringu1::name IN (VALUES('RFAAAA'), ('VJAAAA'))
+--
+EXPLAIN (COSTS OFF) SELECT unique1, stringu1 FROM onek WHERE stringu1::name IN (VALUES ('RFAAAA'), ('VJAAAA'))
+== 306
+EXPLAIN (COSTS OFF)
+SELECT unique1, stringu1 FROM onek WHERE stringu1::text IN (VALUES('RFAAAA'), ('VJAAAA'))
+--
+EXPLAIN (COSTS OFF) SELECT unique1, stringu1 FROM onek WHERE stringu1::text IN (VALUES ('RFAAAA'), ('VJAAAA'))
+== 307
+EXPLAIN (COSTS OFF)
+SELECT * from onek WHERE unique1 in (VALUES(1200::bigint), (1))
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek WHERE unique1 IN (VALUES (1200::bigint), (1))
+== 308
+-- VtA shouldn't depend on the side of the join probing with the VALUES expression.
+EXPLAIN (COSTS OFF)
+SELECT c.unique1,c.ten FROM tenk1 c JOIN onek a USING (ten)
+WHERE a.ten IN (VALUES (1), (2))
+--
+EXPLAIN (COSTS OFF) SELECT c.unique1, c.ten FROM tenk1 c JOIN onek a USING (ten) WHERE a.ten IN (VALUES (1), (2))
+== 309
+EXPLAIN (COSTS OFF)
+SELECT c.unique1,c.ten FROM tenk1 c JOIN onek a USING (ten)
+WHERE c.ten IN (VALUES (1), (2))
+--
+EXPLAIN (COSTS OFF) SELECT c.unique1, c.ten FROM tenk1 c JOIN onek a USING (ten) WHERE c.ten IN (VALUES (1), (2))
+== 310
+-- Constant expressions are simplified
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek WHERE sin(two ) +four IN (VALUES (sin(0.5)), (2))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek WHERE sin(two) + four IN (VALUES (sin(0.5)), (2))
+== 311
+EXPLAIN (COSTS OFF)
+
+-- VtA allows NULLs in the list
+SELECT ten FROM onek WHERE sin(two)+four IN (VALUES (sin(0.5)), (NULL), (2))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek WHERE sin(two) + four IN (VALUES (sin(0.5)), (NULL), (2))
+== 312
+-- VtA is supported for custom plans where params are substituted with
+-- constants.  VtA is not supported with generic plans where params prevent
+-- us from building a constant array.
+PREPARE test (int, numeric, text) AS
+  SELECT ten FROM onek WHERE sin(two) * four / ($3::real) IN (VALUES (sin($2)), (2), ($1))
+--
+PREPARE test(int, numeric, text) AS SELECT ten FROM onek WHERE (sin(two) * four) / $3::real IN (VALUES (sin($2)), (2), ($1))
+== 313
+EXPLAIN (COSTS OFF) EXECUTE test(42, 3.14, '-1.5')
+--
+EXPLAIN (COSTS OFF) EXECUTE test(42, 3.14, '-1.5')
+== 314
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, NULL)
+--
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, NULL)
+== 315
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, '-1.5')
+--
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, '-1.5')
+== 316
+SET plan_cache_mode = 'force_generic_plan'
+--
+SET plan_cache_mode TO force_generic_plan
+== 317
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, '-1.5')
+--
+EXPLAIN (COSTS OFF) EXECUTE test(NULL, 3.14, '-1.5')
+== 318
+RESET plan_cache_mode
+--
+RESET plan_cache_mode
+== 319
+--  VtA doesn't support LIMIT, OFFSET, and ORDER BY clauses
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) OFFSET 1)
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) OFFSET 1)
+== 320
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) ORDER BY 1)
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) ORDER BY 1)
+== 321
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) LIMIT 1)
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek WHERE unique1 IN (VALUES (1), (2) LIMIT 1)
+== 322
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek t
+WHERE unique1 IN (VALUES (0), ((2 IN (SELECT unique2 FROM onek c
+  WHERE c.unique2 = t.unique1))::integer))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), (2 IN (SELECT unique2 FROM onek c WHERE c.unique2 = t.unique1)::int))
+== 323
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek t
+WHERE unique1 IN (VALUES (0), ((2 IN (SELECT unique2 FROM onek c
+  WHERE c.unique2 IN (VALUES (sin(0.5)), (2))))::integer))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), (2 IN (SELECT unique2 FROM onek c WHERE c.unique2 IN (VALUES (sin(0.5)), (2)))::int))
+== 324
+-- VtA is not allowed with subqueries
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), ((2 IN
+  (SELECT (3)))::integer)
+)
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), (2 IN (SELECT 3)::int))
+== 325
+-- VtA is not allowed with non-constant expressions
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), (unique2))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek t WHERE unique1 IN (VALUES (0), (unique2))
+== 326
+EXPLAIN (COSTS OFF)
+SELECT * FROM onek t1, lateral (SELECT * FROM onek t2 WHERE t2.ten IN (values (t1.ten), (1)))
+--
+EXPLAIN (COSTS OFF) SELECT * FROM onek t1, LATERAL (SELECT * FROM onek t2 WHERE t2.ten IN (VALUES (t1.ten), (1)))
+== 327
+-- VtA causes the whole expression to be evaluated as a constant
+EXPLAIN (COSTS OFF)
+SELECT ten FROM onek t WHERE 1.0::integer IN ((VALUES (1), (3)))
+--
+EXPLAIN (COSTS OFF) SELECT ten FROM onek t WHERE (1.0)::int IN (VALUES (1), (3))

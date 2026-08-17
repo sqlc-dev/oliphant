@@ -2,109 +2,157 @@
 -- directory paths and dlsuffix are passed to us in environment variables
 
 
+-- Function to assist with verifying EXPLAIN which includes costs.  A series
+-- of bool flags allows control over which portions are masked out
+CREATE FUNCTION explain_mask_costs(query text, do_analyze bool,
+    hide_costs bool, hide_row_est bool, hide_width bool) RETURNS setof text
+LANGUAGE plpgsql AS
+$$
+DECLARE
+    ln text;
+    analyze_str text;
+BEGIN
+    IF do_analyze = true THEN
+        analyze_str := 'on';
+    ELSE
+        analyze_str := 'off';
+    END IF;
+
+    -- avoid jit related output by disabling it
+    SET LOCAL jit = 0;
+
+    FOR ln IN
+        EXECUTE format('explain (analyze %s, costs on, summary off, timing off, buffers off) %s',
+            analyze_str, query)
+    LOOP
+        IF hide_costs = true THEN
+            ln := regexp_replace(ln, 'cost=\d+\.\d\d\.\.\d+\.\d\d', 'cost=N..N');
+        END IF;
+
+        IF hide_row_est = true THEN
+            -- don't use 'g' so that we leave the actual rows intact
+            ln := regexp_replace(ln, 'rows=\d+', 'rows=N');
+        END IF;
+
+        IF hide_width = true THEN
+            ln := regexp_replace(ln, 'width=\d+', 'width=N');
+        END IF;
+
+        RETURN NEXT ln;
+    END LOOP;
+END;
+$$
+--
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+-- Function to assist with verifying EXPLAIN which includes costs.  A series
+-- of bool flags allows control over which portions are masked out
+CREATE FUNCTION explain_mask_costs(query text, do_analyze bool,
+    hide_costs bool, hide_row_est bool, hide_width bool) RETURNS setof text
+LANGUAGE plpgsql AS
+$1
+== 002
 |--
 -- num_nulls()
 |--
 
 SELECT num_nonnulls(NULL)
 --
--- directory paths and dlsuffix are passed to us in environment variables
-
-
 |--
 -- num_nulls()
 |--
 
 SELECT num_nonnulls($1)
-== 002
+== 003
 SELECT num_nonnulls('1')
 --
 SELECT num_nonnulls($1)
-== 003
+== 004
 SELECT num_nonnulls(NULL::text)
 --
 SELECT num_nonnulls($1::text)
-== 004
+== 005
 SELECT num_nonnulls(NULL::text, NULL::int)
 --
 SELECT num_nonnulls($1::text, $2::int)
-== 005
+== 006
 SELECT num_nonnulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 SELECT num_nonnulls($1, $2, $3::text, $4::point, $5, int8 $6, $7 / $8)
-== 006
+== 007
 SELECT num_nonnulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 SELECT num_nonnulls(VARIADIC $1::int[])
-== 007
+== 008
 SELECT num_nonnulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 SELECT num_nonnulls(VARIADIC $1::text[])
-== 008
+== 009
 SELECT num_nonnulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 SELECT num_nonnulls(VARIADIC ARRAY(SELECT CASE WHEN i <> $1 THEN i END FROM generate_series($2, $3) i))
-== 009
+== 010
 SELECT num_nulls(NULL)
 --
 SELECT num_nulls($1)
-== 010
+== 011
 SELECT num_nulls('1')
 --
 SELECT num_nulls($1)
-== 011
+== 012
 SELECT num_nulls(NULL::text)
 --
 SELECT num_nulls($1::text)
-== 012
+== 013
 SELECT num_nulls(NULL::text, NULL::int)
 --
 SELECT num_nulls($1::text, $2::int)
-== 013
+== 014
 SELECT num_nulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 SELECT num_nulls($1, $2, $3::text, $4::point, $5, int8 $6, $7 / $8)
-== 014
+== 015
 SELECT num_nulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 SELECT num_nulls(VARIADIC $1::int[])
-== 015
+== 016
 SELECT num_nulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 SELECT num_nulls(VARIADIC $1::text[])
-== 016
+== 017
 SELECT num_nulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 SELECT num_nulls(VARIADIC ARRAY(SELECT CASE WHEN i <> $1 THEN i END FROM generate_series($2, $3) i))
-== 017
+== 018
 -- special cases
 SELECT num_nonnulls(VARIADIC NULL::text[])
 --
 -- special cases
 SELECT num_nonnulls(VARIADIC $1::text[])
-== 018
+== 019
 SELECT num_nonnulls(VARIADIC '{}'::int[])
 --
 SELECT num_nonnulls(VARIADIC $1::int[])
-== 019
+== 020
 SELECT num_nulls(VARIADIC NULL::text[])
 --
 SELECT num_nulls(VARIADIC $1::text[])
-== 020
+== 021
 SELECT num_nulls(VARIADIC '{}'::int[])
 --
 SELECT num_nulls(VARIADIC $1::int[])
-== 021
--- should fail, one or more arguments is required
-SELECT num_nonnulls()
---
--- should fail, one or more arguments is required
-SELECT num_nonnulls()
 == 022
+-- should fail, one or more arguments is required
+SELECT num_nonnulls()
+--
+-- should fail, one or more arguments is required
+SELECT num_nonnulls()
+== 023
 SELECT num_nulls()
 --
 SELECT num_nulls()
-== 023
+== 024
 |--
 -- canonicalize_path()
 |--
@@ -118,95 +166,95 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 98
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 024
+== 025
 SELECT test_canonicalize_path('/')
 --
 SELECT test_canonicalize_path($1)
-== 025
+== 026
 SELECT test_canonicalize_path('/./abc/def/')
 --
 SELECT test_canonicalize_path($1)
-== 026
+== 027
 SELECT test_canonicalize_path('/./../abc/def')
 --
 SELECT test_canonicalize_path($1)
-== 027
+== 028
 SELECT test_canonicalize_path('/./../../abc/def/')
 --
 SELECT test_canonicalize_path($1)
-== 028
+== 029
 SELECT test_canonicalize_path('/abc/.././def/ghi')
 --
 SELECT test_canonicalize_path($1)
-== 029
+== 030
 SELECT test_canonicalize_path('/abc/./../def/ghi//')
 --
 SELECT test_canonicalize_path($1)
-== 030
+== 031
 SELECT test_canonicalize_path('/abc/def/../..')
 --
 SELECT test_canonicalize_path($1)
-== 031
+== 032
 SELECT test_canonicalize_path('/abc/def/../../..')
 --
 SELECT test_canonicalize_path($1)
-== 032
+== 033
 SELECT test_canonicalize_path('/abc/def/../../../../ghi/jkl')
 --
 SELECT test_canonicalize_path($1)
-== 033
+== 034
 SELECT test_canonicalize_path('.')
 --
 SELECT test_canonicalize_path($1)
-== 034
+== 035
 SELECT test_canonicalize_path('./')
 --
 SELECT test_canonicalize_path($1)
-== 035
+== 036
 SELECT test_canonicalize_path('./abc/..')
 --
 SELECT test_canonicalize_path($1)
-== 036
+== 037
 SELECT test_canonicalize_path('abc/../')
 --
 SELECT test_canonicalize_path($1)
-== 037
+== 038
 SELECT test_canonicalize_path('abc/../def')
 --
 SELECT test_canonicalize_path($1)
-== 038
+== 039
 SELECT test_canonicalize_path('..')
 --
 SELECT test_canonicalize_path($1)
-== 039
+== 040
 SELECT test_canonicalize_path('../abc/def')
 --
 SELECT test_canonicalize_path($1)
-== 040
+== 041
 SELECT test_canonicalize_path('../abc/..')
 --
 SELECT test_canonicalize_path($1)
-== 041
+== 042
 SELECT test_canonicalize_path('../abc/../def')
 --
 SELECT test_canonicalize_path($1)
-== 042
+== 043
 SELECT test_canonicalize_path('../abc/../../def/ghi')
 --
 SELECT test_canonicalize_path($1)
-== 043
+== 044
 SELECT test_canonicalize_path('./abc/./def/.')
 --
 SELECT test_canonicalize_path($1)
-== 044
+== 045
 SELECT test_canonicalize_path('./abc/././def/.')
 --
 SELECT test_canonicalize_path($1)
-== 045
+== 046
 SELECT test_canonicalize_path('./abc/./def/.././ghi/../../../jkl/mno')
 --
 SELECT test_canonicalize_path($1)
-== 046
+== 047
 |--
 -- pg_log_backend_memory_contexts()
 |--
@@ -228,39 +276,39 @@ SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 |--
 
 SELECT pg_log_backend_memory_contexts(pg_backend_pid())
-== 047
+== 048
 SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity
   WHERE backend_type = 'checkpointer'
 --
 SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity
   WHERE backend_type = $1
-== 048
-CREATE ROLE regress_log_memory
---
-CREATE ROLE regress_log_memory
 == 049
-SELECT has_function_privilege('regress_log_memory',
-  'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
+CREATE ROLE regress_log_memory
 --
-SELECT has_function_privilege($1,
-  $2, $3)
+CREATE ROLE regress_log_memory
 == 050
--- no
-
-GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
-  TO regress_log_memory
---
--- no
-
-GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
-  TO regress_log_memory
-== 051
 SELECT has_function_privilege('regress_log_memory',
   'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
 --
 SELECT has_function_privilege($1,
   $2, $3)
+== 051
+-- no
+
+GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
+  TO regress_log_memory
+--
+-- no
+
+GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
+  TO regress_log_memory
 == 052
+SELECT has_function_privilege('regress_log_memory',
+  'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
+--
+SELECT has_function_privilege($1,
+  $2, $3)
+== 053
 -- yes
 
 SET ROLE regress_log_memory
@@ -268,25 +316,25 @@ SET ROLE regress_log_memory
 -- yes
 
 SET ROLE $1
-== 053
-SELECT pg_log_backend_memory_contexts(pg_backend_pid())
---
-SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 == 054
-RESET ROLE
+SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 --
-RESET ROLE
+SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 == 055
-REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
-  FROM regress_log_memory
+RESET ROLE
 --
-REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
-  FROM regress_log_memory
+RESET ROLE
 == 056
+REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
+  FROM regress_log_memory
+--
+REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
+  FROM regress_log_memory
+== 057
 DROP ROLE regress_log_memory
 --
 DROP ROLE regress_log_memory
-== 057
+== 058
 |--
 -- Test some built-in SRFs
 |--
@@ -302,23 +350,23 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 256
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 058
+== 059
 -- Test ProjectSet as well as FunctionScan
 select count(*) > 0 as ok from (select pg_ls_waldir()) ss
 --
 -- Test ProjectSet as well as FunctionScan
 select count(*) > $1 as ok from (select pg_ls_waldir()) ss
-== 059
+== 060
 -- Test not-run-to-completion cases.
 select * from pg_ls_waldir() limit 0
 --
 -- Test not-run-to-completion cases.
 select * from pg_ls_waldir() limit $1
-== 060
+== 061
 select count(*) > 0 as ok from (select * from pg_ls_waldir() limit 1) ss
 --
 select count(*) > $1 as ok from (select * from pg_ls_waldir() limit $2) ss
-== 061
+== 062
 select (w).size = :segsize as ok
 from (select pg_ls_waldir() w) ss where length((w).name) = 24 limit 1
 --
@@ -326,33 +374,37 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 19
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 062
+== 063
 select count(*) >= 0 as ok from pg_ls_archive_statusdir()
 --
 select count(*) >= $1 as ok from pg_ls_archive_statusdir()
-== 063
+== 064
+select count(*) >= 0 as ok from pg_ls_summariesdir()
+--
+select count(*) >= $1 as ok from pg_ls_summariesdir()
+== 065
 -- pg_read_file()
 select length(pg_read_file('postmaster.pid')) > 20
 --
 -- pg_read_file()
 select length(pg_read_file($1)) > $2
-== 064
+== 066
 select length(pg_read_file('postmaster.pid', 1, 20))
 --
 select length(pg_read_file($1, $2, $3))
-== 065
+== 067
 -- Test missing_ok
 select pg_read_file('does not exist')
 --
 -- Test missing_ok
 select pg_read_file($1)
-== 066
+== 068
 -- error
 select pg_read_file('does not exist', true) IS NULL
 --
 -- error
 select pg_read_file($1, $2) IS NULL
-== 067
+== 069
 -- ok
 -- Test invalid argument
 select pg_read_file('does not exist', 0, -1)
@@ -360,13 +412,13 @@ select pg_read_file('does not exist', 0, -1)
 -- ok
 -- Test invalid argument
 select pg_read_file($1, $2, $3)
-== 068
+== 070
 -- error
 select pg_read_file('does not exist', 0, -1, true)
 --
 -- error
 select pg_read_file($1, $2, $3, $4)
-== 069
+== 071
 -- error
 
 -- pg_read_binary_file()
@@ -376,23 +428,23 @@ select length(pg_read_binary_file('postmaster.pid')) > 20
 
 -- pg_read_binary_file()
 select length(pg_read_binary_file($1)) > $2
-== 070
+== 072
 select length(pg_read_binary_file('postmaster.pid', 1, 20))
 --
 select length(pg_read_binary_file($1, $2, $3))
-== 071
+== 073
 -- Test missing_ok
 select pg_read_binary_file('does not exist')
 --
 -- Test missing_ok
 select pg_read_binary_file($1)
-== 072
+== 074
 -- error
 select pg_read_binary_file('does not exist', true) IS NULL
 --
 -- error
 select pg_read_binary_file($1, $2) IS NULL
-== 073
+== 075
 -- ok
 -- Test invalid argument
 select pg_read_binary_file('does not exist', 0, -1)
@@ -400,13 +452,13 @@ select pg_read_binary_file('does not exist', 0, -1)
 -- ok
 -- Test invalid argument
 select pg_read_binary_file($1, $2, $3)
-== 074
+== 076
 -- error
 select pg_read_binary_file('does not exist', 0, -1, true)
 --
 -- error
 select pg_read_binary_file($1, $2, $3, $4)
-== 075
+== 077
 -- error
 
 -- pg_stat_file()
@@ -416,25 +468,25 @@ select size > 20, isdir from pg_stat_file('postmaster.pid')
 
 -- pg_stat_file()
 select size > $1, isdir from pg_stat_file($2)
-== 076
+== 078
 -- pg_ls_dir()
 select * from (select pg_ls_dir('.') a) a where a = 'base' limit 1
 --
 -- pg_ls_dir()
 select * from (select pg_ls_dir($1) a) a where a = $2 limit $3
-== 077
+== 079
 -- Test missing_ok (second argument)
 select pg_ls_dir('does not exist', false, false)
 --
 -- Test missing_ok (second argument)
 select pg_ls_dir($1, $2, $3)
-== 078
+== 080
 -- error
 select pg_ls_dir('does not exist', true, false)
 --
 -- error
 select pg_ls_dir($1, $2, $3)
-== 079
+== 081
 -- ok
 -- Test include_dot_dirs (third argument)
 select count(*) = 1 as dot_found
@@ -444,19 +496,19 @@ select count(*) = 1 as dot_found
 -- Test include_dot_dirs (third argument)
 select count(*) = $1 as dot_found
   from pg_ls_dir($2, $3, $4) as ls where ls = $5
-== 080
+== 082
 select count(*) = 1 as dot_found
   from pg_ls_dir('.', false, false) as ls where ls = '.'
 --
 select count(*) = $1 as dot_found
   from pg_ls_dir($2, $3, $4) as ls where ls = $5
-== 081
+== 083
 -- pg_timezone_names()
 select * from (select (pg_timezone_names()).name) ptn where name='UTC' limit 1
 --
 -- pg_timezone_names()
 select * from (select (pg_timezone_names()).name) ptn where name=$1 limit $2
-== 082
+== 084
 -- pg_tablespace_databases()
 select count(*) > 0 from
   (select pg_tablespace_databases(oid) as pts from pg_tablespace
@@ -468,7 +520,7 @@ select count(*) > $1 from
   (select pg_tablespace_databases(oid) as pts from pg_tablespace
    where spcname = $2) pts
   join pg_database db on pts.pts = db.oid
-== 083
+== 085
 |--
 -- Test replication slot directory functions
 |--
@@ -478,31 +530,31 @@ CREATE ROLE regress_slot_dir_funcs
 -- Test replication slot directory functions
 |--
 CREATE ROLE regress_slot_dir_funcs
-== 084
+== 086
 -- Not available by default.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
 --
 -- Not available by default.
-SELECT has_function_privilege($1,
-  $2, $3)
-== 085
-SELECT has_function_privilege('regress_slot_dir_funcs',
-  'pg_ls_logicalmapdir()', 'EXECUTE')
---
-SELECT has_function_privilege($1,
-  $2, $3)
-== 086
-SELECT has_function_privilege('regress_slot_dir_funcs',
-  'pg_ls_replslotdir(text)', 'EXECUTE')
---
 SELECT has_function_privilege($1,
   $2, $3)
 == 087
+SELECT has_function_privilege('regress_slot_dir_funcs',
+  'pg_ls_logicalmapdir()', 'EXECUTE')
+--
+SELECT has_function_privilege($1,
+  $2, $3)
+== 088
+SELECT has_function_privilege('regress_slot_dir_funcs',
+  'pg_ls_replslotdir(text)', 'EXECUTE')
+--
+SELECT has_function_privilege($1,
+  $2, $3)
+== 089
 GRANT pg_monitor TO regress_slot_dir_funcs
 --
 GRANT pg_monitor TO regress_slot_dir_funcs
-== 088
+== 090
 -- Role is now part of pg_monitor, so these are available.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
@@ -510,23 +562,23 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 -- Role is now part of pg_monitor, so these are available.
 SELECT has_function_privilege($1,
   $2, $3)
-== 089
+== 091
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalmapdir()', 'EXECUTE')
 --
 SELECT has_function_privilege($1,
   $2, $3)
-== 090
+== 092
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_replslotdir(text)', 'EXECUTE')
 --
 SELECT has_function_privilege($1,
   $2, $3)
-== 091
+== 093
 DROP ROLE regress_slot_dir_funcs
 --
 DROP ROLE regress_slot_dir_funcs
-== 092
+== 094
 |--
 -- Test adding a support function to a subject function
 |--
@@ -542,7 +594,7 @@ CREATE FUNCTION my_int_eq(int, int) RETURNS bool
 CREATE FUNCTION my_int_eq(int, int) RETURNS bool
   LANGUAGE internal STRICT IMMUTABLE PARALLEL SAFE
   AS $1
-== 093
+== 095
 -- By default, planner does not think that's selective
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
@@ -552,7 +604,7 @@ WHERE my_int_eq(a.unique2, 42)
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
 WHERE my_int_eq(a.unique2, $1)
-== 094
+== 096
 -- With support function that knows it's int4eq, we get a different plan
 CREATE FUNCTION test_support_func(internal)
     RETURNS internal
@@ -563,11 +615,11 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 146
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 095
+== 097
 ALTER FUNCTION my_int_eq(int, int) SUPPORT test_support_func
 --
 ALTER FUNCTION my_int_eq(int, int) SUPPORT test_support_func
-== 096
+== 098
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
 WHERE my_int_eq(a.unique2, 42)
@@ -575,7 +627,7 @@ WHERE my_int_eq(a.unique2, 42)
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
 WHERE my_int_eq(a.unique2, $1)
-== 097
+== 099
 -- Also test non-default rowcount estimate
 CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
   LANGUAGE internal STRICT IMMUTABLE PARALLEL SAFE
@@ -587,59 +639,211 @@ CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
   LANGUAGE internal STRICT IMMUTABLE PARALLEL SAFE
   AS $1
   SUPPORT test_support_func
-== 098
+== 100
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,1000) g ON a.unique1 = g
 --
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series($1,$2) g ON a.unique1 = g
-== 099
+== 101
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,10) g ON a.unique1 = g
 --
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series($1,$2) g ON a.unique1 = g
-== 100
+== 102
+|--
+-- Test the SupportRequestRows support function for generate_series_timestamp()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+|--
+-- Test the SupportRequestRows support function for generate_series_timestamp()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 103
+-- As above but with generate_series_timestamp
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMP '2024-02-01', TIMESTAMP '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+-- As above but with generate_series_timestamp
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 104
+-- As above but with generate_series_timestamptz_at_zone()
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day', 'UTC') g(s);$$,
+true, true, false, true)
+--
+-- As above but with generate_series_timestamptz_at_zone()
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 105
+-- Ensure the estimated and actual row counts match when the range isn't
+-- evenly divisible by the step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '7 day') g(s);$$,
+true, true, false, true)
+--
+-- Ensure the estimated and actual row counts match when the range isn't
+-- evenly divisible by the step
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 106
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '-1 day') g(s);$$,
+true, true, false, true)
+--
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 107
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 108
+-- Ensure we get the default row estimate for infinity values
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '-infinity', TIMESTAMPTZ 'infinity', INTERVAL '1 day') g(s);$$,
+false, true, false, true)
+--
+-- Ensure we get the default row estimate for infinity values
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 109
+-- Ensure the row estimate behaves correctly when step size is zero.
+-- We expect generate_series_timestamp() to throw the error rather than in
+-- the support function.
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '0 day') g(s)
+--
+-- Ensure the row estimate behaves correctly when step size is zero.
+-- We expect generate_series_timestamp() to throw the error rather than in
+-- the support function.
+SELECT * FROM generate_series(TIMESTAMPTZ $1, TIMESTAMPTZ $2, INTERVAL $3) g(s)
+== 110
+|--
+-- Test the SupportRequestRows support function for generate_series_numeric()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0) g(s);$$,
+true, true, false, true)
+--
+|--
+-- Test the SupportRequestRows support function for generate_series_numeric()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 111
+-- As above but with non-default step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 2.0) g(s);$$,
+true, true, false, true)
+--
+-- As above but with non-default step
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 112
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, -1.0) g(s);$$,
+true, true, false, true)
+--
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 113
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, 1.0) g(s);$$,
+true, true, false, true)
+--
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 114
+-- Ensure we get the default row estimate for error cases (infinity/NaN values
+-- and zero step size)
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series('-infinity'::NUMERIC, 'infinity'::NUMERIC, 1.0) g(s);$$,
+false, true, false, true)
+--
+-- Ensure we get the default row estimate for error cases (infinity/NaN values
+-- and zero step size)
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 115
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 'NaN'::NUMERIC) g(s);$$,
+false, true, false, true)
+--
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 116
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 2.0, 0.0) g(s);$$,
+false, true, false, true)
+--
+SELECT explain_mask_costs($1,
+$2, $3, $4, $5)
+== 117
 -- Test functions for control data
 SELECT count(*) > 0 AS ok FROM pg_control_checkpoint()
 --
 -- Test functions for control data
 SELECT count(*) > $1 AS ok FROM pg_control_checkpoint()
-== 101
+== 118
 SELECT count(*) > 0 AS ok FROM pg_control_init()
 --
 SELECT count(*) > $1 AS ok FROM pg_control_init()
-== 102
+== 119
 SELECT count(*) > 0 AS ok FROM pg_control_recovery()
 --
 SELECT count(*) > $1 AS ok FROM pg_control_recovery()
-== 103
+== 120
 SELECT count(*) > 0 AS ok FROM pg_control_system()
 --
 SELECT count(*) > $1 AS ok FROM pg_control_system()
-== 104
+== 121
 -- pg_split_walfile_name, pg_walfile_name & pg_walfile_name_offset
 SELECT * FROM pg_split_walfile_name(NULL)
 --
 -- pg_split_walfile_name, pg_walfile_name & pg_walfile_name_offset
 SELECT * FROM pg_split_walfile_name($1)
-== 105
+== 122
 SELECT * FROM pg_split_walfile_name('invalid')
 --
 SELECT * FROM pg_split_walfile_name($1)
-== 106
+== 123
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('000000010000000100000000')
 --
 SELECT segment_number > $1 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name($2)
-== 107
+== 124
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('ffffffFF00000001000000af')
 --
 SELECT segment_number > $1 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name($2)
-== 108
+== 125
 SELECT setting::int8 AS segment_size
 FROM pg_settings
 WHERE name = 'wal_segment_size'
@@ -651,7 +855,7 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 87
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 109
+== 126
 SELECT segment_number, file_offset
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size + 1),
      pg_split_walfile_name(file_name)
@@ -660,7 +864,7 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 80
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 110
+== 127
 SELECT segment_number, file_offset = :segment_size - 1
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size - 1),
      pg_split_walfile_name(file_name)
@@ -669,13 +873,13 @@ ERROR: syntax error at or near ":"
 CURSORPOS: 38
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 111
+== 128
 -- pg_current_logfile
 CREATE ROLE regress_current_logfile
 --
 -- pg_current_logfile
 CREATE ROLE regress_current_logfile
-== 112
+== 129
 -- not available by default
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
@@ -683,11 +887,11 @@ SELECT has_function_privilege('regress_current_logfile',
 -- not available by default
 SELECT has_function_privilege($1,
   $2, $3)
-== 113
+== 130
 GRANT pg_monitor TO regress_current_logfile
 --
 GRANT pg_monitor TO regress_current_logfile
-== 114
+== 131
 -- role has privileges of pg_monitor and can execute the function
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
@@ -695,21 +899,21 @@ SELECT has_function_privilege('regress_current_logfile',
 -- role has privileges of pg_monitor and can execute the function
 SELECT has_function_privilege($1,
   $2, $3)
-== 115
+== 132
 DROP ROLE regress_current_logfile
 --
 DROP ROLE regress_current_logfile
-== 116
+== 133
 -- pg_column_toast_chunk_id
 CREATE TABLE test_chunk_id (a TEXT, b TEXT STORAGE EXTERNAL)
 --
 -- pg_column_toast_chunk_id
 CREATE TABLE test_chunk_id (a TEXT, b TEXT STORAGE EXTERNAL)
-== 117
+== 134
 INSERT INTO test_chunk_id VALUES ('x', repeat('x', 8192))
 --
 INSERT INTO test_chunk_id VALUES ($1, repeat($2, $3))
-== 118
+== 135
 SELECT t.relname AS toastrel FROM pg_class c
   LEFT JOIN pg_class t ON c.reltoastrelid = t.oid
   WHERE c.relname = 'test_chunk_id'
@@ -721,7 +925,42 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 132
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 119
+== 136
 DROP TABLE test_chunk_id
 --
 DROP TABLE test_chunk_id
+== 137
+DROP FUNCTION explain_mask_costs(text, bool, bool, bool, bool)
+--
+DROP FUNCTION explain_mask_costs(text, bool, bool, bool, bool)
+== 138
+-- test stratnum translation support functions
+SELECT gist_translate_cmptype_common(7)
+--
+-- test stratnum translation support functions
+SELECT gist_translate_cmptype_common($1)
+== 139
+SELECT gist_translate_cmptype_common(3)
+--
+SELECT gist_translate_cmptype_common($1)
+== 140
+-- relpath tests
+CREATE FUNCTION test_relpath()
+    RETURNS void
+    AS :'regresslib'
+    LANGUAGE C
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 73
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 141
+SELECT test_relpath()
+--
+SELECT test_relpath()
+== 142
+-- pg_replication_origin.roname limit
+SELECT pg_replication_origin_create('regress_' || repeat('a', 505))
+--
+-- pg_replication_origin.roname limit
+SELECT pg_replication_origin_create($1 || repeat($2, $3))

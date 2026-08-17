@@ -756,6 +756,52 @@ STMT: SelectStmt
 TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM tenk1 WHERE unique1 = unique1 AND unique2 = unique2"
 == 076
 -- truncate_limit: 100
+-- Test that broken ECs are processed correctly during self join removal.
+-- Disable merge joins so that we don't get an error about missing commutator.
+-- Test both orientations of the join clause, because only one of them breaks
+-- the EC.
+set enable_mergejoin to off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 077
+-- truncate_limit: 100
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on m.ff + n.ff = p.f1
+--
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec1" schema="" table="ec1" ctx=Select
+ALIAS: "m"="ec0"
+ALIAS: "n"="ec0"
+ALIAS: "p"="ec1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM ec0 m JOIN ec0 n ON m.ff = n.ff JOIN ec1 p ON (m.ff + n.ff) = p.f1"
+== 078
+-- truncate_limit: 100
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on p.f1::int8 = (m.ff + n.ff)::int8alias1
+--
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec0" schema="" table="ec0" ctx=Select
+TABLE: name="ec1" schema="" table="ec1" ctx=Select
+ALIAS: "m"="ec0"
+ALIAS: "n"="ec0"
+ALIAS: "p"="ec1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM ec0 m JOIN ec0 n ON m.ff = n.ff JOIN ec1 p ON p.f1::int8 = (m.f..."
+== 079
+-- truncate_limit: 100
+reset enable_mergejoin
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_mergejoin"
+== 080
+-- truncate_limit: 100
 -- this could be converted, but isn't at present
 explain (costs off)
   select * from tenk1 where unique1 = unique1 or unique2 = unique2
@@ -768,7 +814,7 @@ FILTER: schema="" table="" column="unique2"
 STMT: ExplainStmt
 STMT: SelectStmt
 TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM tenk1 WHERE unique1 = unique1 OR unique2 = unique2"
-== 077
+== 081
 -- truncate_limit: 100
 -- check that we recognize equivalence with dummy domains in the way
 create temp table undername (f1 name, f2 int)
@@ -776,7 +822,7 @@ create temp table undername (f1 name, f2 int)
 TABLE: name="undername" schema="" table="undername" ctx=DDL
 STMT: CreateStmt
 TRUNCATED: "CREATE TEMPORARY TABLE undername (f1 name, f2 int)"
-== 078
+== 082
 -- truncate_limit: 100
 create temp view overview as
   select f1::information_schema.sql_identifier as sqli, f2 from undername
@@ -786,7 +832,7 @@ TABLE: name="undername" schema="" table="undername" ctx=Select
 STMT: ViewStmt
 STMT: SelectStmt
 TRUNCATED: "CREATE TEMPORARY VIEW overview AS SELECT f1::information_schema.sql_identifier AS sqli, f2 FROM u..."
-== 079
+== 083
 -- truncate_limit: 100
 explain (costs off)  -- this should not require a sort
   select * from overview where sqli = 'foo' order by sqli
@@ -796,3 +842,109 @@ FILTER: schema="" table="" column="sqli"
 STMT: ExplainStmt
 STMT: SelectStmt
 TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM overview WHERE sqli = 'foo' ORDER BY sqli"
+== 084
+-- truncate_limit: 100
+|--
+-- test handling of merge/hash clauses that do not have valid commutators
+|--
+
+-- There are not (and should not be) any such operators built into Postgres
+-- that are mergejoinable or hashable but have no commutators; so we leverage
+-- the alias type 'int8alias1' created in this file to conduct the tests.
+-- That's why this test is included here rather than in join.sql.
+
+begin
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 085
+-- truncate_limit: 100
+create table tbl_nocom(a int8, b int8alias1)
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE tbl_nocom (a int8, b int8alias1)"
+== 086
+-- truncate_limit: 100
+-- check that non-commutable merge clauses do not lead to error
+set enable_hashjoin to off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_hashjoin TO OFF"
+== 087
+-- truncate_limit: 100
+set enable_mergejoin to on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO ON"
+== 088
+-- truncate_limit: 100
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+ALIAS: "t1"="tbl_nocom"
+ALIAS: "t2"="tbl_nocom"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM tbl_nocom t1 FULL JOIN tbl_nocom t2 ON t2.a = t1.b"
+== 089
+-- truncate_limit: 100
+-- check that non-commutable hash clauses do not lead to error
+alter operator = (int8, int8alias1) set (hashes)
+--
+STMT: AlterOperatorStmt
+TRUNCATED: "ALTER OPERATOR =(int8, int8alias1) SET (hashes = NONE)"
+== 090
+-- truncate_limit: 100
+alter operator family integer_ops using hash add
+  operator 1 = (int8, int8alias1)
+--
+STMT: AlterOpFamilyStmt
+TRUNCATED: "ALTER OPERATOR FAMILY integer_ops USING hash ADD OPERATOR 1 =(int8, int8alias1)"
+== 091
+-- truncate_limit: 100
+create function hashint8alias1(int8alias1) returns int
+  strict immutable language internal as 'hashint8'
+--
+FUNCTION: name="hashint8alias1" function="hashint8alias1" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION hashint8alias1(int8alias1) RETURNS int RETURNS NULL ON NULL INPUT IMMUTABLE LANGU..."
+== 092
+-- truncate_limit: 100
+alter operator family integer_ops using hash add
+  function 1 hashint8alias1(int8alias1)
+--
+STMT: AlterOpFamilyStmt
+TRUNCATED: "ALTER OPERATOR FAMILY integer_ops USING hash ADD FUNCTION 1 hashint8alias1(int8alias1)"
+== 093
+-- truncate_limit: 100
+set enable_hashjoin to on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_hashjoin TO ON"
+== 094
+-- truncate_limit: 100
+set enable_mergejoin to off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 095
+-- truncate_limit: 100
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+TABLE: name="tbl_nocom" schema="" table="tbl_nocom" ctx=Select
+ALIAS: "t1"="tbl_nocom"
+ALIAS: "t2"="tbl_nocom"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM tbl_nocom t1 FULL JOIN tbl_nocom t2 ON t2.a = t1.b"
+== 096
+-- truncate_limit: 100
+abort
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"

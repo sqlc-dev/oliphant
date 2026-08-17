@@ -2,22 +2,92 @@
 -- directory paths and dlsuffix are passed to us in environment variables
 
 
+-- Function to assist with verifying EXPLAIN which includes costs.  A series
+-- of bool flags allows control over which portions are masked out
+CREATE FUNCTION explain_mask_costs(query text, do_analyze bool,
+    hide_costs bool, hide_row_est bool, hide_width bool) RETURNS setof text
+LANGUAGE plpgsql AS
+$$
+DECLARE
+    ln text;
+    analyze_str text;
+BEGIN
+    IF do_analyze = true THEN
+        analyze_str := 'on';
+    ELSE
+        analyze_str := 'off';
+    END IF;
+
+    -- avoid jit related output by disabling it
+    SET LOCAL jit = 0;
+
+    FOR ln IN
+        EXECUTE format('explain (analyze %s, costs on, summary off, timing off, buffers off) %s',
+            analyze_str, query)
+    LOOP
+        IF hide_costs = true THEN
+            ln := regexp_replace(ln, 'cost=\d+\.\d\d\.\.\d+\.\d\d', 'cost=N..N');
+        END IF;
+
+        IF hide_row_est = true THEN
+            -- don't use 'g' so that we leave the actual rows intact
+            ln := regexp_replace(ln, 'rows=\d+', 'rows=N');
+        END IF;
+
+        IF hide_width = true THEN
+            ln := regexp_replace(ln, 'width=\d+', 'width=N');
+        END IF;
+
+        RETURN NEXT ln;
+    END LOOP;
+END;
+$$
+--
+0 73 SQL_COMMENT NO_KEYWORD
+76 152 SQL_COMMENT NO_KEYWORD
+153 219 SQL_COMMENT NO_KEYWORD
+220 226 CREATE RESERVED_KEYWORD
+227 235 FUNCTION UNRESERVED_KEYWORD
+236 254 IDENT NO_KEYWORD
+254 255 ASCII_40 NO_KEYWORD
+255 260 IDENT NO_KEYWORD
+261 265 TEXT_P UNRESERVED_KEYWORD
+265 266 ASCII_44 NO_KEYWORD
+267 277 IDENT NO_KEYWORD
+278 282 IDENT NO_KEYWORD
+282 283 ASCII_44 NO_KEYWORD
+288 298 IDENT NO_KEYWORD
+299 303 IDENT NO_KEYWORD
+303 304 ASCII_44 NO_KEYWORD
+305 317 IDENT NO_KEYWORD
+318 322 IDENT NO_KEYWORD
+322 323 ASCII_44 NO_KEYWORD
+324 334 IDENT NO_KEYWORD
+335 339 IDENT NO_KEYWORD
+339 340 ASCII_41 NO_KEYWORD
+341 348 RETURNS UNRESERVED_KEYWORD
+349 354 SETOF COL_NAME_KEYWORD
+355 359 TEXT_P UNRESERVED_KEYWORD
+360 368 LANGUAGE UNRESERVED_KEYWORD
+369 376 IDENT NO_KEYWORD
+377 379 AS RESERVED_KEYWORD
+380 1241 SCONST NO_KEYWORD
+== 002
 |--
 -- num_nulls()
 |--
 
 SELECT num_nonnulls(NULL)
 --
-0 73 SQL_COMMENT NO_KEYWORD
-76 78 SQL_COMMENT NO_KEYWORD
-79 93 SQL_COMMENT NO_KEYWORD
-94 96 SQL_COMMENT NO_KEYWORD
-98 104 SELECT RESERVED_KEYWORD
-105 117 IDENT NO_KEYWORD
-117 118 ASCII_40 NO_KEYWORD
-118 122 NULL_P RESERVED_KEYWORD
-122 123 ASCII_41 NO_KEYWORD
-== 002
+0 2 SQL_COMMENT NO_KEYWORD
+3 17 SQL_COMMENT NO_KEYWORD
+18 20 SQL_COMMENT NO_KEYWORD
+22 28 SELECT RESERVED_KEYWORD
+29 41 IDENT NO_KEYWORD
+41 42 ASCII_40 NO_KEYWORD
+42 46 NULL_P RESERVED_KEYWORD
+46 47 ASCII_41 NO_KEYWORD
+== 003
 SELECT num_nonnulls('1')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -25,7 +95,7 @@ SELECT num_nonnulls('1')
 19 20 ASCII_40 NO_KEYWORD
 20 23 SCONST NO_KEYWORD
 23 24 ASCII_41 NO_KEYWORD
-== 003
+== 004
 SELECT num_nonnulls(NULL::text)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -35,7 +105,7 @@ SELECT num_nonnulls(NULL::text)
 24 26 TYPECAST NO_KEYWORD
 26 30 TEXT_P UNRESERVED_KEYWORD
 30 31 ASCII_41 NO_KEYWORD
-== 004
+== 005
 SELECT num_nonnulls(NULL::text, NULL::int)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -49,7 +119,7 @@ SELECT num_nonnulls(NULL::text, NULL::int)
 36 38 TYPECAST NO_KEYWORD
 38 41 INT_P COL_NAME_KEYWORD
 41 42 ASCII_41 NO_KEYWORD
-== 005
+== 006
 SELECT num_nonnulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -76,7 +146,7 @@ SELECT num_nonnulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 69 70 ASCII_47 NO_KEYWORD
 71 75 NULL_P RESERVED_KEYWORD
 75 76 ASCII_41 NO_KEYWORD
-== 006
+== 007
 SELECT num_nonnulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -89,7 +159,7 @@ SELECT num_nonnulls(VARIADIC '{1,2,NULL,3}'::int[])
 48 49 ASCII_91 NO_KEYWORD
 49 50 ASCII_93 NO_KEYWORD
 50 51 ASCII_41 NO_KEYWORD
-== 007
+== 008
 SELECT num_nonnulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -102,7 +172,7 @@ SELECT num_nonnulls(VARIADIC '{"1","2","3","4"}'::text[])
 54 55 ASCII_91 NO_KEYWORD
 55 56 ASCII_93 NO_KEYWORD
 56 57 ASCII_41 NO_KEYWORD
-== 008
+== 009
 SELECT num_nonnulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -130,7 +200,7 @@ SELECT num_nonnulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM gene
 100 101 IDENT NO_KEYWORD
 101 102 ASCII_41 NO_KEYWORD
 102 103 ASCII_41 NO_KEYWORD
-== 009
+== 010
 SELECT num_nulls(NULL)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -138,7 +208,7 @@ SELECT num_nulls(NULL)
 16 17 ASCII_40 NO_KEYWORD
 17 21 NULL_P RESERVED_KEYWORD
 21 22 ASCII_41 NO_KEYWORD
-== 010
+== 011
 SELECT num_nulls('1')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -146,7 +216,7 @@ SELECT num_nulls('1')
 16 17 ASCII_40 NO_KEYWORD
 17 20 SCONST NO_KEYWORD
 20 21 ASCII_41 NO_KEYWORD
-== 011
+== 012
 SELECT num_nulls(NULL::text)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -156,7 +226,7 @@ SELECT num_nulls(NULL::text)
 21 23 TYPECAST NO_KEYWORD
 23 27 TEXT_P UNRESERVED_KEYWORD
 27 28 ASCII_41 NO_KEYWORD
-== 012
+== 013
 SELECT num_nulls(NULL::text, NULL::int)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -170,7 +240,7 @@ SELECT num_nulls(NULL::text, NULL::int)
 33 35 TYPECAST NO_KEYWORD
 35 38 INT_P COL_NAME_KEYWORD
 38 39 ASCII_41 NO_KEYWORD
-== 013
+== 014
 SELECT num_nulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -197,7 +267,7 @@ SELECT num_nulls(1, 2, NULL::text, NULL::point, '', int8 '9', 1.0 / NULL)
 66 67 ASCII_47 NO_KEYWORD
 68 72 NULL_P RESERVED_KEYWORD
 72 73 ASCII_41 NO_KEYWORD
-== 014
+== 015
 SELECT num_nulls(VARIADIC '{1,2,NULL,3}'::int[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -210,7 +280,7 @@ SELECT num_nulls(VARIADIC '{1,2,NULL,3}'::int[])
 45 46 ASCII_91 NO_KEYWORD
 46 47 ASCII_93 NO_KEYWORD
 47 48 ASCII_41 NO_KEYWORD
-== 015
+== 016
 SELECT num_nulls(VARIADIC '{"1","2","3","4"}'::text[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -223,7 +293,7 @@ SELECT num_nulls(VARIADIC '{"1","2","3","4"}'::text[])
 51 52 ASCII_91 NO_KEYWORD
 52 53 ASCII_93 NO_KEYWORD
 53 54 ASCII_41 NO_KEYWORD
-== 016
+== 017
 SELECT num_nulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generate_series(1, 100) i))
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -251,7 +321,7 @@ SELECT num_nulls(VARIADIC ARRAY(SELECT CASE WHEN i <> 40 THEN i END FROM generat
 97 98 IDENT NO_KEYWORD
 98 99 ASCII_41 NO_KEYWORD
 99 100 ASCII_41 NO_KEYWORD
-== 017
+== 018
 -- special cases
 SELECT num_nonnulls(VARIADIC NULL::text[])
 --
@@ -266,7 +336,7 @@ SELECT num_nonnulls(VARIADIC NULL::text[])
 56 57 ASCII_91 NO_KEYWORD
 57 58 ASCII_93 NO_KEYWORD
 58 59 ASCII_41 NO_KEYWORD
-== 018
+== 019
 SELECT num_nonnulls(VARIADIC '{}'::int[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -279,7 +349,7 @@ SELECT num_nonnulls(VARIADIC '{}'::int[])
 38 39 ASCII_91 NO_KEYWORD
 39 40 ASCII_93 NO_KEYWORD
 40 41 ASCII_41 NO_KEYWORD
-== 019
+== 020
 SELECT num_nulls(VARIADIC NULL::text[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -292,7 +362,7 @@ SELECT num_nulls(VARIADIC NULL::text[])
 36 37 ASCII_91 NO_KEYWORD
 37 38 ASCII_93 NO_KEYWORD
 38 39 ASCII_41 NO_KEYWORD
-== 020
+== 021
 SELECT num_nulls(VARIADIC '{}'::int[])
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -305,7 +375,7 @@ SELECT num_nulls(VARIADIC '{}'::int[])
 35 36 ASCII_91 NO_KEYWORD
 36 37 ASCII_93 NO_KEYWORD
 37 38 ASCII_41 NO_KEYWORD
-== 021
+== 022
 -- should fail, one or more arguments is required
 SELECT num_nonnulls()
 --
@@ -314,14 +384,14 @@ SELECT num_nonnulls()
 57 69 IDENT NO_KEYWORD
 69 70 ASCII_40 NO_KEYWORD
 70 71 ASCII_41 NO_KEYWORD
-== 022
+== 023
 SELECT num_nulls()
 --
 0 6 SELECT RESERVED_KEYWORD
 7 16 IDENT NO_KEYWORD
 16 17 ASCII_40 NO_KEYWORD
 17 18 ASCII_41 NO_KEYWORD
-== 023
+== 024
 |--
 -- canonicalize_path()
 |--
@@ -349,7 +419,7 @@ CREATE FUNCTION test_canonicalize_path(text)
 123 124 IDENT NO_KEYWORD
 125 131 STRICT_P UNRESERVED_KEYWORD
 132 141 IMMUTABLE UNRESERVED_KEYWORD
-== 024
+== 025
 SELECT test_canonicalize_path('/')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -357,7 +427,7 @@ SELECT test_canonicalize_path('/')
 29 30 ASCII_40 NO_KEYWORD
 30 33 SCONST NO_KEYWORD
 33 34 ASCII_41 NO_KEYWORD
-== 025
+== 026
 SELECT test_canonicalize_path('/./abc/def/')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -365,7 +435,7 @@ SELECT test_canonicalize_path('/./abc/def/')
 29 30 ASCII_40 NO_KEYWORD
 30 43 SCONST NO_KEYWORD
 43 44 ASCII_41 NO_KEYWORD
-== 026
+== 027
 SELECT test_canonicalize_path('/./../abc/def')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -373,7 +443,7 @@ SELECT test_canonicalize_path('/./../abc/def')
 29 30 ASCII_40 NO_KEYWORD
 30 45 SCONST NO_KEYWORD
 45 46 ASCII_41 NO_KEYWORD
-== 027
+== 028
 SELECT test_canonicalize_path('/./../../abc/def/')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -381,7 +451,7 @@ SELECT test_canonicalize_path('/./../../abc/def/')
 29 30 ASCII_40 NO_KEYWORD
 30 49 SCONST NO_KEYWORD
 49 50 ASCII_41 NO_KEYWORD
-== 028
+== 029
 SELECT test_canonicalize_path('/abc/.././def/ghi')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -389,7 +459,7 @@ SELECT test_canonicalize_path('/abc/.././def/ghi')
 29 30 ASCII_40 NO_KEYWORD
 30 49 SCONST NO_KEYWORD
 49 50 ASCII_41 NO_KEYWORD
-== 029
+== 030
 SELECT test_canonicalize_path('/abc/./../def/ghi//')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -397,7 +467,7 @@ SELECT test_canonicalize_path('/abc/./../def/ghi//')
 29 30 ASCII_40 NO_KEYWORD
 30 51 SCONST NO_KEYWORD
 51 52 ASCII_41 NO_KEYWORD
-== 030
+== 031
 SELECT test_canonicalize_path('/abc/def/../..')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -405,7 +475,7 @@ SELECT test_canonicalize_path('/abc/def/../..')
 29 30 ASCII_40 NO_KEYWORD
 30 46 SCONST NO_KEYWORD
 46 47 ASCII_41 NO_KEYWORD
-== 031
+== 032
 SELECT test_canonicalize_path('/abc/def/../../..')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -413,7 +483,7 @@ SELECT test_canonicalize_path('/abc/def/../../..')
 29 30 ASCII_40 NO_KEYWORD
 30 49 SCONST NO_KEYWORD
 49 50 ASCII_41 NO_KEYWORD
-== 032
+== 033
 SELECT test_canonicalize_path('/abc/def/../../../../ghi/jkl')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -421,7 +491,7 @@ SELECT test_canonicalize_path('/abc/def/../../../../ghi/jkl')
 29 30 ASCII_40 NO_KEYWORD
 30 60 SCONST NO_KEYWORD
 60 61 ASCII_41 NO_KEYWORD
-== 033
+== 034
 SELECT test_canonicalize_path('.')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -429,7 +499,7 @@ SELECT test_canonicalize_path('.')
 29 30 ASCII_40 NO_KEYWORD
 30 33 SCONST NO_KEYWORD
 33 34 ASCII_41 NO_KEYWORD
-== 034
+== 035
 SELECT test_canonicalize_path('./')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -437,7 +507,7 @@ SELECT test_canonicalize_path('./')
 29 30 ASCII_40 NO_KEYWORD
 30 34 SCONST NO_KEYWORD
 34 35 ASCII_41 NO_KEYWORD
-== 035
+== 036
 SELECT test_canonicalize_path('./abc/..')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -445,7 +515,7 @@ SELECT test_canonicalize_path('./abc/..')
 29 30 ASCII_40 NO_KEYWORD
 30 40 SCONST NO_KEYWORD
 40 41 ASCII_41 NO_KEYWORD
-== 036
+== 037
 SELECT test_canonicalize_path('abc/../')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -453,7 +523,7 @@ SELECT test_canonicalize_path('abc/../')
 29 30 ASCII_40 NO_KEYWORD
 30 39 SCONST NO_KEYWORD
 39 40 ASCII_41 NO_KEYWORD
-== 037
+== 038
 SELECT test_canonicalize_path('abc/../def')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -461,7 +531,7 @@ SELECT test_canonicalize_path('abc/../def')
 29 30 ASCII_40 NO_KEYWORD
 30 42 SCONST NO_KEYWORD
 42 43 ASCII_41 NO_KEYWORD
-== 038
+== 039
 SELECT test_canonicalize_path('..')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -469,7 +539,7 @@ SELECT test_canonicalize_path('..')
 29 30 ASCII_40 NO_KEYWORD
 30 34 SCONST NO_KEYWORD
 34 35 ASCII_41 NO_KEYWORD
-== 039
+== 040
 SELECT test_canonicalize_path('../abc/def')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -477,7 +547,7 @@ SELECT test_canonicalize_path('../abc/def')
 29 30 ASCII_40 NO_KEYWORD
 30 42 SCONST NO_KEYWORD
 42 43 ASCII_41 NO_KEYWORD
-== 040
+== 041
 SELECT test_canonicalize_path('../abc/..')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -485,7 +555,7 @@ SELECT test_canonicalize_path('../abc/..')
 29 30 ASCII_40 NO_KEYWORD
 30 41 SCONST NO_KEYWORD
 41 42 ASCII_41 NO_KEYWORD
-== 041
+== 042
 SELECT test_canonicalize_path('../abc/../def')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -493,7 +563,7 @@ SELECT test_canonicalize_path('../abc/../def')
 29 30 ASCII_40 NO_KEYWORD
 30 45 SCONST NO_KEYWORD
 45 46 ASCII_41 NO_KEYWORD
-== 042
+== 043
 SELECT test_canonicalize_path('../abc/../../def/ghi')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -501,7 +571,7 @@ SELECT test_canonicalize_path('../abc/../../def/ghi')
 29 30 ASCII_40 NO_KEYWORD
 30 52 SCONST NO_KEYWORD
 52 53 ASCII_41 NO_KEYWORD
-== 043
+== 044
 SELECT test_canonicalize_path('./abc/./def/.')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -509,7 +579,7 @@ SELECT test_canonicalize_path('./abc/./def/.')
 29 30 ASCII_40 NO_KEYWORD
 30 45 SCONST NO_KEYWORD
 45 46 ASCII_41 NO_KEYWORD
-== 044
+== 045
 SELECT test_canonicalize_path('./abc/././def/.')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -517,7 +587,7 @@ SELECT test_canonicalize_path('./abc/././def/.')
 29 30 ASCII_40 NO_KEYWORD
 30 47 SCONST NO_KEYWORD
 47 48 ASCII_41 NO_KEYWORD
-== 045
+== 046
 SELECT test_canonicalize_path('./abc/./def/.././ghi/../../../jkl/mno')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -525,7 +595,7 @@ SELECT test_canonicalize_path('./abc/./def/.././ghi/../../../jkl/mno')
 29 30 ASCII_40 NO_KEYWORD
 30 69 SCONST NO_KEYWORD
 69 70 ASCII_41 NO_KEYWORD
-== 046
+== 047
 |--
 -- pg_log_backend_memory_contexts()
 |--
@@ -552,7 +622,7 @@ SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 345 346 ASCII_40 NO_KEYWORD
 346 347 ASCII_41 NO_KEYWORD
 347 348 ASCII_41 NO_KEYWORD
-== 047
+== 048
 SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity
   WHERE backend_type = 'checkpointer'
 --
@@ -567,13 +637,13 @@ SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity
 73 85 IDENT NO_KEYWORD
 86 87 ASCII_61 NO_KEYWORD
 88 102 SCONST NO_KEYWORD
-== 048
+== 049
 CREATE ROLE regress_log_memory
 --
 0 6 CREATE RESERVED_KEYWORD
 7 11 ROLE UNRESERVED_KEYWORD
 12 30 IDENT NO_KEYWORD
-== 049
+== 050
 SELECT has_function_privilege('regress_log_memory',
   'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
 --
@@ -586,7 +656,7 @@ SELECT has_function_privilege('regress_log_memory',
 95 96 ASCII_44 NO_KEYWORD
 97 106 SCONST NO_KEYWORD
 106 107 ASCII_41 NO_KEYWORD
-== 050
+== 051
 -- no
 
 GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
@@ -603,7 +673,7 @@ GRANT EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
 71 72 ASCII_41 NO_KEYWORD
 75 77 TO RESERVED_KEYWORD
 78 96 IDENT NO_KEYWORD
-== 051
+== 052
 SELECT has_function_privilege('regress_log_memory',
   'pg_log_backend_memory_contexts(integer)', 'EXECUTE')
 --
@@ -616,7 +686,7 @@ SELECT has_function_privilege('regress_log_memory',
 95 96 ASCII_44 NO_KEYWORD
 97 106 SCONST NO_KEYWORD
 106 107 ASCII_41 NO_KEYWORD
-== 052
+== 053
 -- yes
 
 SET ROLE regress_log_memory
@@ -625,7 +695,7 @@ SET ROLE regress_log_memory
 8 11 SET UNRESERVED_KEYWORD
 12 16 ROLE UNRESERVED_KEYWORD
 17 35 IDENT NO_KEYWORD
-== 053
+== 054
 SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -635,12 +705,12 @@ SELECT pg_log_backend_memory_contexts(pg_backend_pid())
 52 53 ASCII_40 NO_KEYWORD
 53 54 ASCII_41 NO_KEYWORD
 54 55 ASCII_41 NO_KEYWORD
-== 054
+== 055
 RESET ROLE
 --
 0 5 RESET UNRESERVED_KEYWORD
 6 10 ROLE UNRESERVED_KEYWORD
-== 055
+== 056
 REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
   FROM regress_log_memory
 --
@@ -654,13 +724,13 @@ REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer)
 65 66 ASCII_41 NO_KEYWORD
 69 73 FROM RESERVED_KEYWORD
 74 92 IDENT NO_KEYWORD
-== 056
+== 057
 DROP ROLE regress_log_memory
 --
 0 4 DROP UNRESERVED_KEYWORD
 5 9 ROLE UNRESERVED_KEYWORD
 10 28 IDENT NO_KEYWORD
-== 057
+== 058
 |--
 -- Test some built-in SRFs
 |--
@@ -701,7 +771,7 @@ select count(*) > 0 as ok from pg_ls_waldir()
 286 298 IDENT NO_KEYWORD
 298 299 ASCII_40 NO_KEYWORD
 299 300 ASCII_41 NO_KEYWORD
-== 058
+== 059
 -- Test ProjectSet as well as FunctionScan
 select count(*) > 0 as ok from (select pg_ls_waldir()) ss
 --
@@ -723,7 +793,7 @@ select count(*) > 0 as ok from (select pg_ls_waldir()) ss
 95 96 ASCII_41 NO_KEYWORD
 96 97 ASCII_41 NO_KEYWORD
 98 100 IDENT NO_KEYWORD
-== 059
+== 060
 -- Test not-run-to-completion cases.
 select * from pg_ls_waldir() limit 0
 --
@@ -736,7 +806,7 @@ select * from pg_ls_waldir() limit 0
 64 65 ASCII_41 NO_KEYWORD
 66 71 LIMIT RESERVED_KEYWORD
 72 73 ICONST NO_KEYWORD
-== 060
+== 061
 select count(*) > 0 as ok from (select * from pg_ls_waldir() limit 1) ss
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -760,7 +830,7 @@ select count(*) > 0 as ok from (select * from pg_ls_waldir() limit 1) ss
 67 68 ICONST NO_KEYWORD
 68 69 ASCII_41 NO_KEYWORD
 70 72 IDENT NO_KEYWORD
-== 061
+== 062
 select (w).size = :segsize as ok
 from (select pg_ls_waldir() w) ss where length((w).name) = 24 limit 1
 --
@@ -797,7 +867,7 @@ from (select pg_ls_waldir() w) ss where length((w).name) = 24 limit 1
 92 94 ICONST NO_KEYWORD
 95 100 LIMIT RESERVED_KEYWORD
 101 102 ICONST NO_KEYWORD
-== 062
+== 063
 select count(*) >= 0 as ok from pg_ls_archive_statusdir()
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -813,7 +883,23 @@ select count(*) >= 0 as ok from pg_ls_archive_statusdir()
 32 55 IDENT NO_KEYWORD
 55 56 ASCII_40 NO_KEYWORD
 56 57 ASCII_41 NO_KEYWORD
-== 063
+== 064
+select count(*) >= 0 as ok from pg_ls_summariesdir()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 12 IDENT NO_KEYWORD
+12 13 ASCII_40 NO_KEYWORD
+13 14 ASCII_42 NO_KEYWORD
+14 15 ASCII_41 NO_KEYWORD
+16 18 GREATER_EQUALS NO_KEYWORD
+19 20 ICONST NO_KEYWORD
+21 23 AS RESERVED_KEYWORD
+24 26 IDENT NO_KEYWORD
+27 31 FROM RESERVED_KEYWORD
+32 50 IDENT NO_KEYWORD
+50 51 ASCII_40 NO_KEYWORD
+51 52 ASCII_41 NO_KEYWORD
+== 065
 -- pg_read_file()
 select length(pg_read_file('postmaster.pid')) > 20
 --
@@ -828,7 +914,7 @@ select length(pg_read_file('postmaster.pid')) > 20
 62 63 ASCII_41 NO_KEYWORD
 64 65 ASCII_62 NO_KEYWORD
 66 68 ICONST NO_KEYWORD
-== 064
+== 066
 select length(pg_read_file('postmaster.pid', 1, 20))
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -843,7 +929,7 @@ select length(pg_read_file('postmaster.pid', 1, 20))
 48 50 ICONST NO_KEYWORD
 50 51 ASCII_41 NO_KEYWORD
 51 52 ASCII_41 NO_KEYWORD
-== 065
+== 067
 -- Test missing_ok
 select pg_read_file('does not exist')
 --
@@ -853,7 +939,7 @@ select pg_read_file('does not exist')
 38 39 ASCII_40 NO_KEYWORD
 39 55 SCONST NO_KEYWORD
 55 56 ASCII_41 NO_KEYWORD
-== 066
+== 068
 -- error
 select pg_read_file('does not exist', true) IS NULL
 --
@@ -867,7 +953,7 @@ select pg_read_file('does not exist', true) IS NULL
 51 52 ASCII_41 NO_KEYWORD
 53 55 IS TYPE_FUNC_NAME_KEYWORD
 56 60 NULL_P RESERVED_KEYWORD
-== 067
+== 069
 -- ok
 -- Test invalid argument
 select pg_read_file('does not exist', 0, -1)
@@ -884,7 +970,7 @@ select pg_read_file('does not exist', 0, -1)
 72 73 ASCII_45 NO_KEYWORD
 73 74 ICONST NO_KEYWORD
 74 75 ASCII_41 NO_KEYWORD
-== 068
+== 070
 -- error
 select pg_read_file('does not exist', 0, -1, true)
 --
@@ -901,7 +987,7 @@ select pg_read_file('does not exist', 0, -1, true)
 52 53 ASCII_44 NO_KEYWORD
 54 58 TRUE_P RESERVED_KEYWORD
 58 59 ASCII_41 NO_KEYWORD
-== 069
+== 071
 -- error
 
 -- pg_read_binary_file()
@@ -919,7 +1005,7 @@ select length(pg_read_binary_file('postmaster.pid')) > 20
 86 87 ASCII_41 NO_KEYWORD
 88 89 ASCII_62 NO_KEYWORD
 90 92 ICONST NO_KEYWORD
-== 070
+== 072
 select length(pg_read_binary_file('postmaster.pid', 1, 20))
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -934,7 +1020,7 @@ select length(pg_read_binary_file('postmaster.pid', 1, 20))
 55 57 ICONST NO_KEYWORD
 57 58 ASCII_41 NO_KEYWORD
 58 59 ASCII_41 NO_KEYWORD
-== 071
+== 073
 -- Test missing_ok
 select pg_read_binary_file('does not exist')
 --
@@ -944,7 +1030,7 @@ select pg_read_binary_file('does not exist')
 45 46 ASCII_40 NO_KEYWORD
 46 62 SCONST NO_KEYWORD
 62 63 ASCII_41 NO_KEYWORD
-== 072
+== 074
 -- error
 select pg_read_binary_file('does not exist', true) IS NULL
 --
@@ -958,7 +1044,7 @@ select pg_read_binary_file('does not exist', true) IS NULL
 58 59 ASCII_41 NO_KEYWORD
 60 62 IS TYPE_FUNC_NAME_KEYWORD
 63 67 NULL_P RESERVED_KEYWORD
-== 073
+== 075
 -- ok
 -- Test invalid argument
 select pg_read_binary_file('does not exist', 0, -1)
@@ -975,7 +1061,7 @@ select pg_read_binary_file('does not exist', 0, -1)
 79 80 ASCII_45 NO_KEYWORD
 80 81 ICONST NO_KEYWORD
 81 82 ASCII_41 NO_KEYWORD
-== 074
+== 076
 -- error
 select pg_read_binary_file('does not exist', 0, -1, true)
 --
@@ -992,7 +1078,7 @@ select pg_read_binary_file('does not exist', 0, -1, true)
 59 60 ASCII_44 NO_KEYWORD
 61 65 TRUE_P RESERVED_KEYWORD
 65 66 ASCII_41 NO_KEYWORD
-== 075
+== 077
 -- error
 
 -- pg_stat_file()
@@ -1011,7 +1097,7 @@ select size > 20, isdir from pg_stat_file('postmaster.pid')
 69 70 ASCII_40 NO_KEYWORD
 70 86 SCONST NO_KEYWORD
 86 87 ASCII_41 NO_KEYWORD
-== 076
+== 078
 -- pg_ls_dir()
 select * from (select pg_ls_dir('.') a) a where a = 'base' limit 1
 --
@@ -1034,7 +1120,7 @@ select * from (select pg_ls_dir('.') a) a where a = 'base' limit 1
 67 73 SCONST NO_KEYWORD
 74 79 LIMIT RESERVED_KEYWORD
 80 81 ICONST NO_KEYWORD
-== 077
+== 079
 -- Test missing_ok (second argument)
 select pg_ls_dir('does not exist', false, false)
 --
@@ -1048,7 +1134,7 @@ select pg_ls_dir('does not exist', false, false)
 77 78 ASCII_44 NO_KEYWORD
 79 84 FALSE_P RESERVED_KEYWORD
 84 85 ASCII_41 NO_KEYWORD
-== 078
+== 080
 -- error
 select pg_ls_dir('does not exist', true, false)
 --
@@ -1062,7 +1148,7 @@ select pg_ls_dir('does not exist', true, false)
 48 49 ASCII_44 NO_KEYWORD
 50 55 FALSE_P RESERVED_KEYWORD
 55 56 ASCII_41 NO_KEYWORD
-== 079
+== 081
 -- ok
 -- Test include_dot_dirs (third argument)
 select count(*) = 1 as dot_found
@@ -1094,7 +1180,7 @@ select count(*) = 1 as dot_found
 128 130 IDENT NO_KEYWORD
 131 132 ASCII_61 NO_KEYWORD
 133 136 SCONST NO_KEYWORD
-== 080
+== 082
 select count(*) = 1 as dot_found
   from pg_ls_dir('.', false, false) as ls where ls = '.'
 --
@@ -1122,7 +1208,7 @@ select count(*) = 1 as dot_found
 81 83 IDENT NO_KEYWORD
 84 85 ASCII_61 NO_KEYWORD
 86 89 SCONST NO_KEYWORD
-== 081
+== 083
 -- pg_timezone_names()
 select * from (select (pg_timezone_names()).name) ptn where name='UTC' limit 1
 --
@@ -1147,7 +1233,7 @@ select * from (select (pg_timezone_names()).name) ptn where name='UTC' limit 1
 88 93 SCONST NO_KEYWORD
 94 99 LIMIT RESERVED_KEYWORD
 100 101 ICONST NO_KEYWORD
-== 082
+== 084
 -- pg_tablespace_databases()
 select count(*) > 0 from
   (select pg_tablespace_databases(oid) as pts from pg_tablespace
@@ -1190,7 +1276,7 @@ select count(*) > 0 from
 191 193 IDENT NO_KEYWORD
 193 194 ASCII_46 NO_KEYWORD
 194 197 IDENT NO_KEYWORD
-== 083
+== 085
 |--
 -- Test replication slot directory functions
 |--
@@ -1202,7 +1288,7 @@ CREATE ROLE regress_slot_dir_funcs
 51 57 CREATE RESERVED_KEYWORD
 58 62 ROLE UNRESERVED_KEYWORD
 63 85 IDENT NO_KEYWORD
-== 084
+== 086
 -- Not available by default.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
@@ -1217,7 +1303,7 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 111 112 ASCII_44 NO_KEYWORD
 113 122 SCONST NO_KEYWORD
 122 123 ASCII_41 NO_KEYWORD
-== 085
+== 087
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalmapdir()', 'EXECUTE')
 --
@@ -1230,7 +1316,7 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 81 82 ASCII_44 NO_KEYWORD
 83 92 SCONST NO_KEYWORD
 92 93 ASCII_41 NO_KEYWORD
-== 086
+== 088
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_replslotdir(text)', 'EXECUTE')
 --
@@ -1243,14 +1329,14 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 83 84 ASCII_44 NO_KEYWORD
 85 94 SCONST NO_KEYWORD
 94 95 ASCII_41 NO_KEYWORD
-== 087
+== 089
 GRANT pg_monitor TO regress_slot_dir_funcs
 --
 0 5 GRANT RESERVED_KEYWORD
 6 16 IDENT NO_KEYWORD
 17 19 TO RESERVED_KEYWORD
 20 42 IDENT NO_KEYWORD
-== 088
+== 090
 -- Role is now part of pg_monitor, so these are available.
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalsnapdir()', 'EXECUTE')
@@ -1265,7 +1351,7 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 141 142 ASCII_44 NO_KEYWORD
 143 152 SCONST NO_KEYWORD
 152 153 ASCII_41 NO_KEYWORD
-== 089
+== 091
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_logicalmapdir()', 'EXECUTE')
 --
@@ -1278,7 +1364,7 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 81 82 ASCII_44 NO_KEYWORD
 83 92 SCONST NO_KEYWORD
 92 93 ASCII_41 NO_KEYWORD
-== 090
+== 092
 SELECT has_function_privilege('regress_slot_dir_funcs',
   'pg_ls_replslotdir(text)', 'EXECUTE')
 --
@@ -1291,13 +1377,13 @@ SELECT has_function_privilege('regress_slot_dir_funcs',
 83 84 ASCII_44 NO_KEYWORD
 85 94 SCONST NO_KEYWORD
 94 95 ASCII_41 NO_KEYWORD
-== 091
+== 093
 DROP ROLE regress_slot_dir_funcs
 --
 0 4 DROP UNRESERVED_KEYWORD
 5 9 ROLE UNRESERVED_KEYWORD
 10 32 IDENT NO_KEYWORD
-== 092
+== 094
 |--
 -- Test adding a support function to a subject function
 |--
@@ -1327,7 +1413,7 @@ CREATE FUNCTION my_int_eq(int, int) RETURNS bool
 158 162 IDENT NO_KEYWORD
 165 167 AS RESERVED_KEYWORD
 168 178 SCONST NO_KEYWORD
-== 093
+== 095
 -- By default, planner does not think that's selective
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
@@ -1364,7 +1450,7 @@ WHERE my_int_eq(a.unique2, 42)
 160 161 ASCII_44 NO_KEYWORD
 162 164 ICONST NO_KEYWORD
 164 165 ASCII_41 NO_KEYWORD
-== 094
+== 096
 -- With support function that knows it's int4eq, we get a different plan
 CREATE FUNCTION test_support_func(internal)
     RETURNS internal
@@ -1388,7 +1474,7 @@ CREATE FUNCTION test_support_func(internal)
 184 192 LANGUAGE UNRESERVED_KEYWORD
 193 194 IDENT NO_KEYWORD
 195 201 STRICT_P UNRESERVED_KEYWORD
-== 095
+== 097
 ALTER FUNCTION my_int_eq(int, int) SUPPORT test_support_func
 --
 0 5 ALTER UNRESERVED_KEYWORD
@@ -1401,7 +1487,7 @@ ALTER FUNCTION my_int_eq(int, int) SUPPORT test_support_func
 33 34 ASCII_41 NO_KEYWORD
 35 42 SUPPORT UNRESERVED_KEYWORD
 43 60 IDENT NO_KEYWORD
-== 096
+== 098
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN tenk1 b ON a.unique1 = b.unique1
 WHERE my_int_eq(a.unique2, 42)
@@ -1436,7 +1522,7 @@ WHERE my_int_eq(a.unique2, 42)
 105 106 ASCII_44 NO_KEYWORD
 107 109 ICONST NO_KEYWORD
 109 110 ASCII_41 NO_KEYWORD
-== 097
+== 099
 -- Also test non-default rowcount estimate
 CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
   LANGUAGE internal STRICT IMMUTABLE PARALLEL SAFE
@@ -1465,7 +1551,7 @@ CREATE FUNCTION my_gen_series(int, int) RETURNS SETOF integer
 161 185 SCONST NO_KEYWORD
 188 195 SUPPORT UNRESERVED_KEYWORD
 196 213 IDENT NO_KEYWORD
-== 098
+== 100
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,1000) g ON a.unique1 = g
 --
@@ -1493,7 +1579,7 @@ SELECT * FROM tenk1 a JOIN my_gen_series(1,1000) g ON a.unique1 = g
 76 83 IDENT NO_KEYWORD
 84 85 ASCII_61 NO_KEYWORD
 86 87 IDENT NO_KEYWORD
-== 099
+== 101
 EXPLAIN (COSTS OFF)
 SELECT * FROM tenk1 a JOIN my_gen_series(1,10) g ON a.unique1 = g
 --
@@ -1521,7 +1607,328 @@ SELECT * FROM tenk1 a JOIN my_gen_series(1,10) g ON a.unique1 = g
 74 81 IDENT NO_KEYWORD
 82 83 ASCII_61 NO_KEYWORD
 84 85 IDENT NO_KEYWORD
-== 100
+== 102
+|--
+-- Test the SupportRequestRows support function for generate_series_timestamp()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 82 SQL_COMMENT NO_KEYWORD
+83 85 SQL_COMMENT NO_KEYWORD
+87 137 SQL_COMMENT NO_KEYWORD
+138 144 SELECT RESERVED_KEYWORD
+145 163 IDENT NO_KEYWORD
+163 164 ASCII_40 NO_KEYWORD
+164 274 SCONST NO_KEYWORD
+274 275 ASCII_44 NO_KEYWORD
+276 280 TRUE_P RESERVED_KEYWORD
+280 281 ASCII_44 NO_KEYWORD
+282 286 TRUE_P RESERVED_KEYWORD
+286 287 ASCII_44 NO_KEYWORD
+288 293 FALSE_P RESERVED_KEYWORD
+293 294 ASCII_44 NO_KEYWORD
+295 299 TRUE_P RESERVED_KEYWORD
+299 300 ASCII_41 NO_KEYWORD
+== 103
+-- As above but with generate_series_timestamp
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMP '2024-02-01', TIMESTAMP '2024-03-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+0 46 SQL_COMMENT NO_KEYWORD
+47 53 SELECT RESERVED_KEYWORD
+54 72 IDENT NO_KEYWORD
+72 73 ASCII_40 NO_KEYWORD
+73 179 SCONST NO_KEYWORD
+179 180 ASCII_44 NO_KEYWORD
+181 185 TRUE_P RESERVED_KEYWORD
+185 186 ASCII_44 NO_KEYWORD
+187 191 TRUE_P RESERVED_KEYWORD
+191 192 ASCII_44 NO_KEYWORD
+193 198 FALSE_P RESERVED_KEYWORD
+198 199 ASCII_44 NO_KEYWORD
+200 204 TRUE_P RESERVED_KEYWORD
+204 205 ASCII_41 NO_KEYWORD
+== 104
+-- As above but with generate_series_timestamptz_at_zone()
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '1 day', 'UTC') g(s);$$,
+true, true, false, true)
+--
+0 58 SQL_COMMENT NO_KEYWORD
+59 65 SELECT RESERVED_KEYWORD
+66 84 IDENT NO_KEYWORD
+84 85 ASCII_40 NO_KEYWORD
+85 202 SCONST NO_KEYWORD
+202 203 ASCII_44 NO_KEYWORD
+204 208 TRUE_P RESERVED_KEYWORD
+208 209 ASCII_44 NO_KEYWORD
+210 214 TRUE_P RESERVED_KEYWORD
+214 215 ASCII_44 NO_KEYWORD
+216 221 FALSE_P RESERVED_KEYWORD
+221 222 ASCII_44 NO_KEYWORD
+223 227 TRUE_P RESERVED_KEYWORD
+227 228 ASCII_41 NO_KEYWORD
+== 105
+-- Ensure the estimated and actual row counts match when the range isn't
+-- evenly divisible by the step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '7 day') g(s);$$,
+true, true, false, true)
+--
+0 72 SQL_COMMENT NO_KEYWORD
+73 104 SQL_COMMENT NO_KEYWORD
+105 111 SELECT RESERVED_KEYWORD
+112 130 IDENT NO_KEYWORD
+130 131 ASCII_40 NO_KEYWORD
+131 241 SCONST NO_KEYWORD
+241 242 ASCII_44 NO_KEYWORD
+243 247 TRUE_P RESERVED_KEYWORD
+247 248 ASCII_44 NO_KEYWORD
+249 253 TRUE_P RESERVED_KEYWORD
+253 254 ASCII_44 NO_KEYWORD
+255 260 FALSE_P RESERVED_KEYWORD
+260 261 ASCII_44 NO_KEYWORD
+262 266 TRUE_P RESERVED_KEYWORD
+266 267 ASCII_41 NO_KEYWORD
+== 106
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '-1 day') g(s);$$,
+true, true, false, true)
+--
+0 53 SQL_COMMENT NO_KEYWORD
+54 60 SELECT RESERVED_KEYWORD
+61 79 IDENT NO_KEYWORD
+79 80 ASCII_40 NO_KEYWORD
+80 191 SCONST NO_KEYWORD
+191 192 ASCII_44 NO_KEYWORD
+193 197 TRUE_P RESERVED_KEYWORD
+197 198 ASCII_44 NO_KEYWORD
+199 203 TRUE_P RESERVED_KEYWORD
+203 204 ASCII_44 NO_KEYWORD
+205 210 FALSE_P RESERVED_KEYWORD
+210 211 ASCII_44 NO_KEYWORD
+212 216 TRUE_P RESERVED_KEYWORD
+216 217 ASCII_41 NO_KEYWORD
+== 107
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-03-01', TIMESTAMPTZ '2024-02-01', INTERVAL '1 day') g(s);$$,
+true, true, false, true)
+--
+0 40 SQL_COMMENT NO_KEYWORD
+41 47 SELECT RESERVED_KEYWORD
+48 66 IDENT NO_KEYWORD
+66 67 ASCII_40 NO_KEYWORD
+67 177 SCONST NO_KEYWORD
+177 178 ASCII_44 NO_KEYWORD
+179 183 TRUE_P RESERVED_KEYWORD
+183 184 ASCII_44 NO_KEYWORD
+185 189 TRUE_P RESERVED_KEYWORD
+189 190 ASCII_44 NO_KEYWORD
+191 196 FALSE_P RESERVED_KEYWORD
+196 197 ASCII_44 NO_KEYWORD
+198 202 TRUE_P RESERVED_KEYWORD
+202 203 ASCII_41 NO_KEYWORD
+== 108
+-- Ensure we get the default row estimate for infinity values
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(TIMESTAMPTZ '-infinity', TIMESTAMPTZ 'infinity', INTERVAL '1 day') g(s);$$,
+false, true, false, true)
+--
+0 61 SQL_COMMENT NO_KEYWORD
+62 68 SELECT RESERVED_KEYWORD
+69 87 IDENT NO_KEYWORD
+87 88 ASCII_40 NO_KEYWORD
+88 195 SCONST NO_KEYWORD
+195 196 ASCII_44 NO_KEYWORD
+197 202 FALSE_P RESERVED_KEYWORD
+202 203 ASCII_44 NO_KEYWORD
+204 208 TRUE_P RESERVED_KEYWORD
+208 209 ASCII_44 NO_KEYWORD
+210 215 FALSE_P RESERVED_KEYWORD
+215 216 ASCII_44 NO_KEYWORD
+217 221 TRUE_P RESERVED_KEYWORD
+221 222 ASCII_41 NO_KEYWORD
+== 109
+-- Ensure the row estimate behaves correctly when step size is zero.
+-- We expect generate_series_timestamp() to throw the error rather than in
+-- the support function.
+SELECT * FROM generate_series(TIMESTAMPTZ '2024-02-01', TIMESTAMPTZ '2024-03-01', INTERVAL '0 day') g(s)
+--
+0 68 SQL_COMMENT NO_KEYWORD
+69 143 SQL_COMMENT NO_KEYWORD
+144 168 SQL_COMMENT NO_KEYWORD
+169 175 SELECT RESERVED_KEYWORD
+176 177 ASCII_42 NO_KEYWORD
+178 182 FROM RESERVED_KEYWORD
+183 198 IDENT NO_KEYWORD
+198 199 ASCII_40 NO_KEYWORD
+199 210 IDENT NO_KEYWORD
+211 223 SCONST NO_KEYWORD
+223 224 ASCII_44 NO_KEYWORD
+225 236 IDENT NO_KEYWORD
+237 249 SCONST NO_KEYWORD
+249 250 ASCII_44 NO_KEYWORD
+251 259 INTERVAL COL_NAME_KEYWORD
+260 267 SCONST NO_KEYWORD
+267 268 ASCII_41 NO_KEYWORD
+269 270 IDENT NO_KEYWORD
+270 271 ASCII_40 NO_KEYWORD
+271 272 IDENT NO_KEYWORD
+272 273 ASCII_41 NO_KEYWORD
+== 110
+|--
+-- Test the SupportRequestRows support function for generate_series_numeric()
+|--
+
+-- Ensure the row estimate matches the actual rows
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0) g(s);$$,
+true, true, false, true)
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 80 SQL_COMMENT NO_KEYWORD
+81 83 SQL_COMMENT NO_KEYWORD
+85 135 SQL_COMMENT NO_KEYWORD
+136 142 SELECT RESERVED_KEYWORD
+143 161 IDENT NO_KEYWORD
+161 162 ASCII_40 NO_KEYWORD
+162 213 SCONST NO_KEYWORD
+213 214 ASCII_44 NO_KEYWORD
+215 219 TRUE_P RESERVED_KEYWORD
+219 220 ASCII_44 NO_KEYWORD
+221 225 TRUE_P RESERVED_KEYWORD
+225 226 ASCII_44 NO_KEYWORD
+227 232 FALSE_P RESERVED_KEYWORD
+232 233 ASCII_44 NO_KEYWORD
+234 238 TRUE_P RESERVED_KEYWORD
+238 239 ASCII_41 NO_KEYWORD
+== 111
+-- As above but with non-default step
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 2.0) g(s);$$,
+true, true, false, true)
+--
+0 37 SQL_COMMENT NO_KEYWORD
+38 44 SELECT RESERVED_KEYWORD
+45 63 IDENT NO_KEYWORD
+63 64 ASCII_40 NO_KEYWORD
+64 120 SCONST NO_KEYWORD
+120 121 ASCII_44 NO_KEYWORD
+122 126 TRUE_P RESERVED_KEYWORD
+126 127 ASCII_44 NO_KEYWORD
+128 132 TRUE_P RESERVED_KEYWORD
+132 133 ASCII_44 NO_KEYWORD
+134 139 FALSE_P RESERVED_KEYWORD
+139 140 ASCII_44 NO_KEYWORD
+141 145 TRUE_P RESERVED_KEYWORD
+145 146 ASCII_41 NO_KEYWORD
+== 112
+-- Ensure the estimates match when step is decreasing
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, -1.0) g(s);$$,
+true, true, false, true)
+--
+0 53 SQL_COMMENT NO_KEYWORD
+54 60 SELECT RESERVED_KEYWORD
+61 79 IDENT NO_KEYWORD
+79 80 ASCII_40 NO_KEYWORD
+80 137 SCONST NO_KEYWORD
+137 138 ASCII_44 NO_KEYWORD
+139 143 TRUE_P RESERVED_KEYWORD
+143 144 ASCII_44 NO_KEYWORD
+145 149 TRUE_P RESERVED_KEYWORD
+149 150 ASCII_44 NO_KEYWORD
+151 156 FALSE_P RESERVED_KEYWORD
+156 157 ASCII_44 NO_KEYWORD
+158 162 TRUE_P RESERVED_KEYWORD
+162 163 ASCII_41 NO_KEYWORD
+== 113
+-- Ensure an empty range estimates 1 row
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 1.0, 1.0) g(s);$$,
+true, true, false, true)
+--
+0 40 SQL_COMMENT NO_KEYWORD
+41 47 SELECT RESERVED_KEYWORD
+48 66 IDENT NO_KEYWORD
+66 67 ASCII_40 NO_KEYWORD
+67 123 SCONST NO_KEYWORD
+123 124 ASCII_44 NO_KEYWORD
+125 129 TRUE_P RESERVED_KEYWORD
+129 130 ASCII_44 NO_KEYWORD
+131 135 TRUE_P RESERVED_KEYWORD
+135 136 ASCII_44 NO_KEYWORD
+137 142 FALSE_P RESERVED_KEYWORD
+142 143 ASCII_44 NO_KEYWORD
+144 148 TRUE_P RESERVED_KEYWORD
+148 149 ASCII_41 NO_KEYWORD
+== 114
+-- Ensure we get the default row estimate for error cases (infinity/NaN values
+-- and zero step size)
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series('-infinity'::NUMERIC, 'infinity'::NUMERIC, 1.0) g(s);$$,
+false, true, false, true)
+--
+0 78 SQL_COMMENT NO_KEYWORD
+79 101 SQL_COMMENT NO_KEYWORD
+102 108 SELECT RESERVED_KEYWORD
+109 127 IDENT NO_KEYWORD
+127 128 ASCII_40 NO_KEYWORD
+128 216 SCONST NO_KEYWORD
+216 217 ASCII_44 NO_KEYWORD
+218 223 FALSE_P RESERVED_KEYWORD
+223 224 ASCII_44 NO_KEYWORD
+225 229 TRUE_P RESERVED_KEYWORD
+229 230 ASCII_44 NO_KEYWORD
+231 236 FALSE_P RESERVED_KEYWORD
+236 237 ASCII_44 NO_KEYWORD
+238 242 TRUE_P RESERVED_KEYWORD
+242 243 ASCII_41 NO_KEYWORD
+== 115
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(1.0, 25.0, 'NaN'::NUMERIC) g(s);$$,
+false, true, false, true)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 25 IDENT NO_KEYWORD
+25 26 ASCII_40 NO_KEYWORD
+26 93 SCONST NO_KEYWORD
+93 94 ASCII_44 NO_KEYWORD
+95 100 FALSE_P RESERVED_KEYWORD
+100 101 ASCII_44 NO_KEYWORD
+102 106 TRUE_P RESERVED_KEYWORD
+106 107 ASCII_44 NO_KEYWORD
+108 113 FALSE_P RESERVED_KEYWORD
+113 114 ASCII_44 NO_KEYWORD
+115 119 TRUE_P RESERVED_KEYWORD
+119 120 ASCII_41 NO_KEYWORD
+== 116
+SELECT explain_mask_costs($$
+SELECT * FROM generate_series(25.0, 2.0, 0.0) g(s);$$,
+false, true, false, true)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 25 IDENT NO_KEYWORD
+25 26 ASCII_40 NO_KEYWORD
+26 82 SCONST NO_KEYWORD
+82 83 ASCII_44 NO_KEYWORD
+84 89 FALSE_P RESERVED_KEYWORD
+89 90 ASCII_44 NO_KEYWORD
+91 95 TRUE_P RESERVED_KEYWORD
+95 96 ASCII_44 NO_KEYWORD
+97 102 FALSE_P RESERVED_KEYWORD
+102 103 ASCII_44 NO_KEYWORD
+104 108 TRUE_P RESERVED_KEYWORD
+108 109 ASCII_41 NO_KEYWORD
+== 117
 -- Test functions for control data
 SELECT count(*) > 0 AS ok FROM pg_control_checkpoint()
 --
@@ -1539,7 +1946,7 @@ SELECT count(*) > 0 AS ok FROM pg_control_checkpoint()
 66 87 IDENT NO_KEYWORD
 87 88 ASCII_40 NO_KEYWORD
 88 89 ASCII_41 NO_KEYWORD
-== 101
+== 118
 SELECT count(*) > 0 AS ok FROM pg_control_init()
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -1555,7 +1962,7 @@ SELECT count(*) > 0 AS ok FROM pg_control_init()
 31 46 IDENT NO_KEYWORD
 46 47 ASCII_40 NO_KEYWORD
 47 48 ASCII_41 NO_KEYWORD
-== 102
+== 119
 SELECT count(*) > 0 AS ok FROM pg_control_recovery()
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -1571,7 +1978,7 @@ SELECT count(*) > 0 AS ok FROM pg_control_recovery()
 31 50 IDENT NO_KEYWORD
 50 51 ASCII_40 NO_KEYWORD
 51 52 ASCII_41 NO_KEYWORD
-== 103
+== 120
 SELECT count(*) > 0 AS ok FROM pg_control_system()
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -1587,7 +1994,7 @@ SELECT count(*) > 0 AS ok FROM pg_control_system()
 31 48 IDENT NO_KEYWORD
 48 49 ASCII_40 NO_KEYWORD
 49 50 ASCII_41 NO_KEYWORD
-== 104
+== 121
 -- pg_split_walfile_name, pg_walfile_name & pg_walfile_name_offset
 SELECT * FROM pg_split_walfile_name(NULL)
 --
@@ -1599,7 +2006,7 @@ SELECT * FROM pg_split_walfile_name(NULL)
 102 103 ASCII_40 NO_KEYWORD
 103 107 NULL_P RESERVED_KEYWORD
 107 108 ASCII_41 NO_KEYWORD
-== 105
+== 122
 SELECT * FROM pg_split_walfile_name('invalid')
 --
 0 6 SELECT RESERVED_KEYWORD
@@ -1609,7 +2016,7 @@ SELECT * FROM pg_split_walfile_name('invalid')
 35 36 ASCII_40 NO_KEYWORD
 36 45 SCONST NO_KEYWORD
 45 46 ASCII_41 NO_KEYWORD
-== 106
+== 123
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('000000010000000100000000')
 --
@@ -1626,7 +2033,7 @@ SELECT segment_number > 0 AS ok_segment_number, timeline_id
 88 89 ASCII_40 NO_KEYWORD
 89 115 SCONST NO_KEYWORD
 115 116 ASCII_41 NO_KEYWORD
-== 107
+== 124
 SELECT segment_number > 0 AS ok_segment_number, timeline_id
   FROM pg_split_walfile_name('ffffffFF00000001000000af')
 --
@@ -1643,7 +2050,7 @@ SELECT segment_number > 0 AS ok_segment_number, timeline_id
 88 89 ASCII_40 NO_KEYWORD
 89 115 SCONST NO_KEYWORD
 115 116 ASCII_41 NO_KEYWORD
-== 108
+== 125
 SELECT setting::int8 AS segment_size
 FROM pg_settings
 WHERE name = 'wal_segment_size'
@@ -1682,7 +2089,7 @@ FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size),
 207 208 ASCII_40 NO_KEYWORD
 208 217 IDENT NO_KEYWORD
 217 218 ASCII_41 NO_KEYWORD
-== 109
+== 126
 SELECT segment_number, file_offset
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size + 1),
      pg_split_walfile_name(file_name)
@@ -1708,7 +2115,7 @@ FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size + 1),
 125 126 ASCII_40 NO_KEYWORD
 126 135 IDENT NO_KEYWORD
 135 136 ASCII_41 NO_KEYWORD
-== 110
+== 127
 SELECT segment_number, file_offset = :segment_size - 1
 FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size - 1),
      pg_split_walfile_name(file_name)
@@ -1739,7 +2146,7 @@ FROM pg_walfile_name_offset('0/0'::pg_lsn + :segment_size - 1),
 145 146 ASCII_40 NO_KEYWORD
 146 155 IDENT NO_KEYWORD
 155 156 ASCII_41 NO_KEYWORD
-== 111
+== 128
 -- pg_current_logfile
 CREATE ROLE regress_current_logfile
 --
@@ -1747,7 +2154,7 @@ CREATE ROLE regress_current_logfile
 22 28 CREATE RESERVED_KEYWORD
 29 33 ROLE UNRESERVED_KEYWORD
 34 57 IDENT NO_KEYWORD
-== 112
+== 129
 -- not available by default
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
@@ -1762,14 +2169,14 @@ SELECT has_function_privilege('regress_current_logfile',
 109 110 ASCII_44 NO_KEYWORD
 111 120 SCONST NO_KEYWORD
 120 121 ASCII_41 NO_KEYWORD
-== 113
+== 130
 GRANT pg_monitor TO regress_current_logfile
 --
 0 5 GRANT RESERVED_KEYWORD
 6 16 IDENT NO_KEYWORD
 17 19 TO RESERVED_KEYWORD
 20 43 IDENT NO_KEYWORD
-== 114
+== 131
 -- role has privileges of pg_monitor and can execute the function
 SELECT has_function_privilege('regress_current_logfile',
   'pg_current_logfile()', 'EXECUTE')
@@ -1784,13 +2191,13 @@ SELECT has_function_privilege('regress_current_logfile',
 147 148 ASCII_44 NO_KEYWORD
 149 158 SCONST NO_KEYWORD
 158 159 ASCII_41 NO_KEYWORD
-== 115
+== 132
 DROP ROLE regress_current_logfile
 --
 0 4 DROP UNRESERVED_KEYWORD
 5 9 ROLE UNRESERVED_KEYWORD
 10 33 IDENT NO_KEYWORD
-== 116
+== 133
 -- pg_column_toast_chunk_id
 CREATE TABLE test_chunk_id (a TEXT, b TEXT STORAGE EXTERNAL)
 --
@@ -1807,7 +2214,7 @@ CREATE TABLE test_chunk_id (a TEXT, b TEXT STORAGE EXTERNAL)
 71 78 STORAGE UNRESERVED_KEYWORD
 79 87 EXTERNAL UNRESERVED_KEYWORD
 87 88 ASCII_41 NO_KEYWORD
-== 117
+== 134
 INSERT INTO test_chunk_id VALUES ('x', repeat('x', 8192))
 --
 0 6 INSERT UNRESERVED_KEYWORD
@@ -1824,7 +2231,7 @@ INSERT INTO test_chunk_id VALUES ('x', repeat('x', 8192))
 51 55 ICONST NO_KEYWORD
 55 56 ASCII_41 NO_KEYWORD
 56 57 ASCII_41 NO_KEYWORD
-== 118
+== 135
 SELECT t.relname AS toastrel FROM pg_class c
   LEFT JOIN pg_class t ON c.reltoastrelid = t.oid
   WHERE c.relname = 'test_chunk_id'
@@ -1883,9 +2290,88 @@ SELECT pg_column_toast_chunk_id(a) IS NULL,
 248 249 ASCII_41 NO_KEYWORD
 252 256 FROM RESERVED_KEYWORD
 257 270 IDENT NO_KEYWORD
-== 119
+== 136
 DROP TABLE test_chunk_id
 --
 0 4 DROP UNRESERVED_KEYWORD
 5 10 TABLE RESERVED_KEYWORD
 11 24 IDENT NO_KEYWORD
+== 137
+DROP FUNCTION explain_mask_costs(text, bool, bool, bool, bool)
+--
+0 4 DROP UNRESERVED_KEYWORD
+5 13 FUNCTION UNRESERVED_KEYWORD
+14 32 IDENT NO_KEYWORD
+32 33 ASCII_40 NO_KEYWORD
+33 37 TEXT_P UNRESERVED_KEYWORD
+37 38 ASCII_44 NO_KEYWORD
+39 43 IDENT NO_KEYWORD
+43 44 ASCII_44 NO_KEYWORD
+45 49 IDENT NO_KEYWORD
+49 50 ASCII_44 NO_KEYWORD
+51 55 IDENT NO_KEYWORD
+55 56 ASCII_44 NO_KEYWORD
+57 61 IDENT NO_KEYWORD
+61 62 ASCII_41 NO_KEYWORD
+== 138
+-- test stratnum translation support functions
+SELECT gist_translate_cmptype_common(7)
+--
+0 46 SQL_COMMENT NO_KEYWORD
+47 53 SELECT RESERVED_KEYWORD
+54 83 IDENT NO_KEYWORD
+83 84 ASCII_40 NO_KEYWORD
+84 85 ICONST NO_KEYWORD
+85 86 ASCII_41 NO_KEYWORD
+== 139
+SELECT gist_translate_cmptype_common(3)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 36 IDENT NO_KEYWORD
+36 37 ASCII_40 NO_KEYWORD
+37 38 ICONST NO_KEYWORD
+38 39 ASCII_41 NO_KEYWORD
+== 140
+-- relpath tests
+CREATE FUNCTION test_relpath()
+    RETURNS void
+    AS :'regresslib'
+    LANGUAGE C
+--
+0 16 SQL_COMMENT NO_KEYWORD
+17 23 CREATE RESERVED_KEYWORD
+24 32 FUNCTION UNRESERVED_KEYWORD
+33 45 IDENT NO_KEYWORD
+45 46 ASCII_40 NO_KEYWORD
+46 47 ASCII_41 NO_KEYWORD
+52 59 RETURNS UNRESERVED_KEYWORD
+60 64 IDENT NO_KEYWORD
+69 71 AS RESERVED_KEYWORD
+72 73 ASCII_58 NO_KEYWORD
+73 85 SCONST NO_KEYWORD
+90 98 LANGUAGE UNRESERVED_KEYWORD
+99 100 IDENT NO_KEYWORD
+== 141
+SELECT test_relpath()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 19 IDENT NO_KEYWORD
+19 20 ASCII_40 NO_KEYWORD
+20 21 ASCII_41 NO_KEYWORD
+== 142
+-- pg_replication_origin.roname limit
+SELECT pg_replication_origin_create('regress_' || repeat('a', 505))
+--
+0 37 SQL_COMMENT NO_KEYWORD
+38 44 SELECT RESERVED_KEYWORD
+45 73 IDENT NO_KEYWORD
+73 74 ASCII_40 NO_KEYWORD
+74 84 SCONST NO_KEYWORD
+85 87 Op NO_KEYWORD
+88 94 IDENT NO_KEYWORD
+94 95 ASCII_40 NO_KEYWORD
+95 98 SCONST NO_KEYWORD
+98 99 ASCII_44 NO_KEYWORD
+100 103 ICONST NO_KEYWORD
+103 104 ASCII_41 NO_KEYWORD
+104 105 ASCII_41 NO_KEYWORD

@@ -862,3 +862,277 @@ STMT: SelectStmt
 PREPARE TRANSACTION 'twophase_search'
 --
 STMT: TransactionStmt
+== 163
+-- Tests to verify we recover correctly from exhausting buffer pins and
+-- related matters.
+
+-- use lower possible buffer limit to make the test cheaper
+SET temp_buffers = 100
+--
+STMT: VariableSetStmt
+== 164
+CREATE TEMPORARY TABLE test_temp(a int not null unique, b TEXT not null, cnt int not null)
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: CreateStmt
+== 165
+INSERT INTO test_temp SELECT generate_series(1, 10000) as id, repeat('a', 200), 0
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 166
+-- should be at least 2x as large than temp_buffers
+SELECT pg_relation_size('test_temp') / current_setting('block_size')::int8 > 200
+--
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+FUNCTION: name="current_setting" function="current_setting" schema="" ctx=Call
+STMT: SelectStmt
+== 167
+-- Don't want cursor names and plpgsql function lines in the error messages
+
+/* helper function to create cursors for each page in [p_start, p_end] */
+CREATE FUNCTION test_temp_pin(p_start int, p_end int)
+RETURNS void
+LANGUAGE plpgsql
+AS $f$
+  DECLARE
+      cursorname text;
+      query text;
+  BEGIN
+    FOR i IN p_start..p_end LOOP
+       cursorname = 'c_'||i;
+       query = format($q$DECLARE %I CURSOR FOR SELECT ctid FROM test_temp WHERE ctid >= '( %s, 1)'::tid $q$, cursorname, i);
+       EXECUTE query;
+       EXECUTE 'FETCH NEXT FROM '||cursorname;
+       -- for test development
+       -- RAISE NOTICE '%: %', cursorname, query;
+    END LOOP;
+  END;
+$f$
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 168
+-- Test overflow of temp table buffers is handled correctly
+BEGIN
+--
+STMT: TransactionStmt
+== 169
+-- should work, below max
+SELECT test_temp_pin(0, 9)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 170
+-- should fail, too many buffers pinned
+SELECT test_temp_pin(10, 105)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 171
+ROLLBACK
+--
+STMT: TransactionStmt
+== 172
+BEGIN
+--
+STMT: TransactionStmt
+== 173
+-- have some working cursors to test after errors
+SELECT test_temp_pin(0, 9)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 174
+FETCH NEXT FROM c_3
+--
+STMT: FetchStmt
+== 175
+-- exhaust buffer pins in subtrans, check things work after
+SAVEPOINT rescue_me
+--
+STMT: TransactionStmt
+== 176
+SELECT test_temp_pin(10, 105)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 177
+ROLLBACK TO SAVEPOINT rescue_me
+--
+STMT: TransactionStmt
+== 178
+-- pre-subtrans cursors continue to work
+FETCH NEXT FROM c_3
+--
+STMT: FetchStmt
+== 179
+-- new cursors with pins can be created after subtrans rollback
+SELECT test_temp_pin(10, 94)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 180
+-- Check that read streams deal with lower number of pins available
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 181
+ROLLBACK
+--
+STMT: TransactionStmt
+== 182
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+STMT: TransactionStmt
+== 183
+SELECT test_temp_pin(0, 1)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 184
+DROP TABLE test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: DropStmt
+== 185
+COMMIT
+--
+STMT: TransactionStmt
+== 186
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+STMT: TransactionStmt
+== 187
+SELECT test_temp_pin(0, 1)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=Call
+STMT: SelectStmt
+== 188
+TRUNCATE test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: TruncateStmt
+== 189
+COMMIT
+--
+STMT: TransactionStmt
+== 190
+-- Check that temp tables that are dropped in transaction that's rolled back
+-- preserve buffer contents
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 191
+INSERT INTO test_temp(a, b, cnt) VALUES (-1, '', 0)
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 192
+BEGIN
+--
+STMT: TransactionStmt
+== 193
+INSERT INTO test_temp(a, b, cnt) VALUES (-2, '', 0)
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 194
+DROP TABLE test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: DropStmt
+== 195
+ROLLBACK
+--
+STMT: TransactionStmt
+== 196
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 197
+-- Check that temp table drop is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DML
+STMT: UpdateStmt
+== 198
+BEGIN
+--
+STMT: TransactionStmt
+== 199
+DROP TABLE test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: DropStmt
+== 200
+ROLLBACK
+--
+STMT: TransactionStmt
+== 201
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 202
+-- Check that temp table truncation is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DML
+STMT: UpdateStmt
+== 203
+BEGIN
+--
+STMT: TransactionStmt
+== 204
+TRUNCATE test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=DDL
+STMT: TruncateStmt
+== 205
+ROLLBACK
+--
+STMT: TransactionStmt
+== 206
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+TABLE: name="test_temp" schema="" table="test_temp" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 207
+-- cleanup
+DROP FUNCTION test_temp_pin(int, int)
+--
+FUNCTION: name="test_temp_pin" function="test_temp_pin" schema="" ctx=DDL
+STMT: DropStmt

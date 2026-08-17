@@ -813,3 +813,253 @@ SELECT current_schema() ~ $1 AS is_temp_schema
 PREPARE TRANSACTION 'twophase_search'
 --
 PREPARE TRANSACTION 'twophase_search'
+== 163
+-- Tests to verify we recover correctly from exhausting buffer pins and
+-- related matters.
+
+-- use lower possible buffer limit to make the test cheaper
+SET temp_buffers = 100
+--
+-- Tests to verify we recover correctly from exhausting buffer pins and
+-- related matters.
+
+-- use lower possible buffer limit to make the test cheaper
+SET temp_buffers = $1
+== 164
+CREATE TEMPORARY TABLE test_temp(a int not null unique, b TEXT not null, cnt int not null)
+--
+CREATE TEMPORARY TABLE test_temp(a int not null unique, b TEXT not null, cnt int not null)
+== 165
+INSERT INTO test_temp SELECT generate_series(1, 10000) as id, repeat('a', 200), 0
+--
+INSERT INTO test_temp SELECT generate_series($1, $2) as id, repeat($3, $4), $5
+== 166
+-- should be at least 2x as large than temp_buffers
+SELECT pg_relation_size('test_temp') / current_setting('block_size')::int8 > 200
+--
+-- should be at least 2x as large than temp_buffers
+SELECT pg_relation_size($1) / current_setting($2)::int8 > $3
+== 167
+-- Don't want cursor names and plpgsql function lines in the error messages
+
+/* helper function to create cursors for each page in [p_start, p_end] */
+CREATE FUNCTION test_temp_pin(p_start int, p_end int)
+RETURNS void
+LANGUAGE plpgsql
+AS $f$
+  DECLARE
+      cursorname text;
+      query text;
+  BEGIN
+    FOR i IN p_start..p_end LOOP
+       cursorname = 'c_'||i;
+       query = format($q$DECLARE %I CURSOR FOR SELECT ctid FROM test_temp WHERE ctid >= '( %s, 1)'::tid $q$, cursorname, i);
+       EXECUTE query;
+       EXECUTE 'FETCH NEXT FROM '||cursorname;
+       -- for test development
+       -- RAISE NOTICE '%: %', cursorname, query;
+    END LOOP;
+  END;
+$f$
+--
+-- Don't want cursor names and plpgsql function lines in the error messages
+
+/* helper function to create cursors for each page in [p_start, p_end] */
+CREATE FUNCTION test_temp_pin(p_start int, p_end int)
+RETURNS void
+LANGUAGE plpgsql
+AS $1
+== 168
+-- Test overflow of temp table buffers is handled correctly
+BEGIN
+--
+-- Test overflow of temp table buffers is handled correctly
+BEGIN
+== 169
+-- should work, below max
+SELECT test_temp_pin(0, 9)
+--
+-- should work, below max
+SELECT test_temp_pin($1, $2)
+== 170
+-- should fail, too many buffers pinned
+SELECT test_temp_pin(10, 105)
+--
+-- should fail, too many buffers pinned
+SELECT test_temp_pin($1, $2)
+== 171
+ROLLBACK
+--
+ROLLBACK
+== 172
+BEGIN
+--
+BEGIN
+== 173
+-- have some working cursors to test after errors
+SELECT test_temp_pin(0, 9)
+--
+-- have some working cursors to test after errors
+SELECT test_temp_pin($1, $2)
+== 174
+FETCH NEXT FROM c_3
+--
+FETCH NEXT FROM c_3
+== 175
+-- exhaust buffer pins in subtrans, check things work after
+SAVEPOINT rescue_me
+--
+-- exhaust buffer pins in subtrans, check things work after
+SAVEPOINT rescue_me
+== 176
+SELECT test_temp_pin(10, 105)
+--
+SELECT test_temp_pin($1, $2)
+== 177
+ROLLBACK TO SAVEPOINT rescue_me
+--
+ROLLBACK TO SAVEPOINT rescue_me
+== 178
+-- pre-subtrans cursors continue to work
+FETCH NEXT FROM c_3
+--
+-- pre-subtrans cursors continue to work
+FETCH NEXT FROM c_3
+== 179
+-- new cursors with pins can be created after subtrans rollback
+SELECT test_temp_pin(10, 94)
+--
+-- new cursors with pins can be created after subtrans rollback
+SELECT test_temp_pin($1, $2)
+== 180
+-- Check that read streams deal with lower number of pins available
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+-- Check that read streams deal with lower number of pins available
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+== 181
+ROLLBACK
+--
+ROLLBACK
+== 182
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+== 183
+SELECT test_temp_pin(0, 1)
+--
+SELECT test_temp_pin($1, $2)
+== 184
+DROP TABLE test_temp
+--
+DROP TABLE test_temp
+== 185
+COMMIT
+--
+COMMIT
+== 186
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+== 187
+SELECT test_temp_pin(0, 1)
+--
+SELECT test_temp_pin($1, $2)
+== 188
+TRUNCATE test_temp
+--
+TRUNCATE test_temp
+== 189
+COMMIT
+--
+COMMIT
+== 190
+-- Check that temp tables that are dropped in transaction that's rolled back
+-- preserve buffer contents
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+-- Check that temp tables that are dropped in transaction that's rolled back
+-- preserve buffer contents
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+== 191
+INSERT INTO test_temp(a, b, cnt) VALUES (-1, '', 0)
+--
+INSERT INTO test_temp(a, b, cnt) VALUES ($1, $2, $3)
+== 192
+BEGIN
+--
+BEGIN
+== 193
+INSERT INTO test_temp(a, b, cnt) VALUES (-2, '', 0)
+--
+INSERT INTO test_temp(a, b, cnt) VALUES ($1, $2, $3)
+== 194
+DROP TABLE test_temp
+--
+DROP TABLE test_temp
+== 195
+ROLLBACK
+--
+ROLLBACK
+== 196
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+== 197
+-- Check that temp table drop is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+-- Check that temp table drop is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + $1 WHERE a = $2
+== 198
+BEGIN
+--
+BEGIN
+== 199
+DROP TABLE test_temp
+--
+DROP TABLE test_temp
+== 200
+ROLLBACK
+--
+ROLLBACK
+== 201
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+== 202
+-- Check that temp table truncation is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+-- Check that temp table truncation is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + $1 WHERE a = $2
+== 203
+BEGIN
+--
+BEGIN
+== 204
+TRUNCATE test_temp
+--
+TRUNCATE test_temp
+== 205
+ROLLBACK
+--
+ROLLBACK
+== 206
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+== 207
+-- cleanup
+DROP FUNCTION test_temp_pin(int, int)
+--
+-- cleanup
+DROP FUNCTION test_temp_pin(int, int)

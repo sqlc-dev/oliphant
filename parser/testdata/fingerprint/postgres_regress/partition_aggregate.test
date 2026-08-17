@@ -155,16 +155,26 @@ SELECT a FROM pagg_tab WHERE a < 3 GROUP BY a ORDER BY 1
 --
 0bdce503421c6354
 == 031
+-- Test partitionwise aggregation with ordered append path built from fractional paths
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM pagg_tab GROUP BY c ORDER BY c LIMIT 1
+--
+892a55cd0c56b573
+== 032
+SELECT count(*) FROM pagg_tab GROUP BY c ORDER BY c LIMIT 1
+--
+d24281a59adc6dff
+== 033
 RESET enable_hashagg
 --
 b056ae859e494ea7
-== 032
+== 034
 -- ROLLUP, partitionwise aggregation does not apply
 EXPLAIN (COSTS OFF)
 SELECT c, sum(a) FROM pagg_tab GROUP BY rollup(c) ORDER BY 1, 2
 --
 dd682d73a662d517
-== 033
+== 035
 -- ORDERED SET within the aggregate.
 -- Full aggregation; since all the rows that belong to the same group come
 -- from the same partition, having an ORDER BY within the aggregate doesn't
@@ -173,7 +183,7 @@ EXPLAIN (COSTS OFF)
 SELECT c, sum(b order by a) FROM pagg_tab GROUP BY c ORDER BY 1, 2
 --
 42e019fbc09643b3
-== 034
+== 036
 -- Since GROUP BY clause does not match with PARTITION KEY; we need to do
 -- partial aggregation. However, ORDERED SET are not partial safe and thus
 -- partitionwise aggregation plan is not generated.
@@ -181,102 +191,102 @@ EXPLAIN (COSTS OFF)
 SELECT a, sum(b order by a) FROM pagg_tab GROUP BY a ORDER BY 1, 2
 --
 afd90a8060f6ad95
-== 035
+== 037
 -- JOIN query
 
 CREATE TABLE pagg_tab1(x int, y int) PARTITION BY RANGE(x)
 --
 cdd24e7a58f3a0a0
-== 036
+== 038
 CREATE TABLE pagg_tab1_p1 PARTITION OF pagg_tab1 FOR VALUES FROM (0) TO (10)
 --
 76c686f718080d2c
-== 037
+== 039
 CREATE TABLE pagg_tab1_p2 PARTITION OF pagg_tab1 FOR VALUES FROM (10) TO (20)
 --
 fb8925453d3b2f24
-== 038
+== 040
 CREATE TABLE pagg_tab1_p3 PARTITION OF pagg_tab1 FOR VALUES FROM (20) TO (30)
 --
 2b753f39fd11ed50
-== 039
+== 041
 CREATE TABLE pagg_tab2(x int, y int) PARTITION BY RANGE(y)
 --
 aa207f7a4377cc39
-== 040
+== 042
 CREATE TABLE pagg_tab2_p1 PARTITION OF pagg_tab2 FOR VALUES FROM (0) TO (10)
 --
 f22c36207b717792
-== 041
+== 043
 CREATE TABLE pagg_tab2_p2 PARTITION OF pagg_tab2 FOR VALUES FROM (10) TO (20)
 --
 215a92af00055710
-== 042
+== 044
 CREATE TABLE pagg_tab2_p3 PARTITION OF pagg_tab2 FOR VALUES FROM (20) TO (30)
 --
 be2e1a561529393d
-== 043
+== 045
 INSERT INTO pagg_tab1 SELECT i % 30, i % 20 FROM generate_series(0, 299, 2) i
 --
 25f4d9df9fe85e03
-== 044
+== 046
 INSERT INTO pagg_tab2 SELECT i % 20, i % 30 FROM generate_series(0, 299, 3) i
 --
 784945624c0f947a
-== 045
+== 047
 ANALYZE pagg_tab1
 --
 f5ed77576f24abb4
-== 046
+== 048
 ANALYZE pagg_tab2
 --
 ff4e14fcd51e98b2
-== 047
+== 049
 -- When GROUP BY clause matches; full aggregation is performed for each partition.
 EXPLAIN (COSTS OFF)
 SELECT t1.x, sum(t1.y), count(*) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.x ORDER BY 1, 2, 3
 --
-27a32acb1f0ef7bf
-== 048
+696fe703ecfa3ab7
+== 050
 SELECT t1.x, sum(t1.y), count(*) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.x ORDER BY 1, 2, 3
 --
-b472212ea67df71c
-== 049
+d1c6eaf767d3bfdd
+== 051
 -- Check with whole-row reference; partitionwise aggregation does not apply
 EXPLAIN (COSTS OFF)
 SELECT t1.x, sum(t1.y), count(t1) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.x ORDER BY 1, 2, 3
 --
-9bbc1d4891cfbd8b
-== 050
+f676d2f2e635da8e
+== 052
 SELECT t1.x, sum(t1.y), count(t1) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.x ORDER BY 1, 2, 3
 --
-9827aa9487ef5e81
-== 051
+2b629f632b7e0973
+== 053
 -- GROUP BY having other matching key
 EXPLAIN (COSTS OFF)
 SELECT t2.y, sum(t1.y), count(*) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t2.y ORDER BY 1, 2, 3
 --
-43f3bd098abbd6bd
-== 052
+e63b27dc23d05759
+== 054
 -- When GROUP BY clause does not match; partial aggregation is performed for each partition.
 -- Also test GroupAggregate paths by disabling hash aggregates.
 SET enable_hashagg TO false
 --
 a83598b3841af185
-== 053
+== 055
 EXPLAIN (COSTS OFF)
 SELECT t1.y, sum(t1.x), count(*) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.y HAVING avg(t1.x) > 10 ORDER BY 1, 2, 3
 --
-0659b7bd1bc5713c
-== 054
+aaf7cc40cf8afae5
+== 056
 SELECT t1.y, sum(t1.x), count(*) FROM pagg_tab1 t1, pagg_tab2 t2 WHERE t1.x = t2.y GROUP BY t1.y HAVING avg(t1.x) > 10 ORDER BY 1, 2, 3
 --
-e25e6c6b0a41d88c
-== 055
+631e7a385ddddc65
+== 057
 RESET enable_hashagg
 --
 b056ae859e494ea7
-== 056
+== 058
 -- Check with LEFT/RIGHT/FULL OUTER JOINs which produces NULL values for
 -- aggregation
 
@@ -285,34 +295,34 @@ b056ae859e494ea7
 EXPLAIN (COSTS OFF)
 SELECT b.y, sum(a.y) FROM pagg_tab1 a LEFT JOIN pagg_tab2 b ON a.x = b.y GROUP BY b.y ORDER BY 1 NULLS LAST
 --
-41cdc00b89476c1e
-== 057
+ee40054a78561ea1
+== 059
 SELECT b.y, sum(a.y) FROM pagg_tab1 a LEFT JOIN pagg_tab2 b ON a.x = b.y GROUP BY b.y ORDER BY 1 NULLS LAST
 --
-cc737bfb9dcdbde7
-== 058
+9fccb917d3f8858d
+== 060
 -- RIGHT JOIN, should produce full partitionwise aggregation plan as
 -- GROUP BY is on non-nullable column
 EXPLAIN (COSTS OFF)
 SELECT b.y, sum(a.y) FROM pagg_tab1 a RIGHT JOIN pagg_tab2 b ON a.x = b.y GROUP BY b.y ORDER BY 1 NULLS LAST
 --
-bf0f28dec59e8b30
-== 059
+8591bd916f9c8c14
+== 061
 SELECT b.y, sum(a.y) FROM pagg_tab1 a RIGHT JOIN pagg_tab2 b ON a.x = b.y GROUP BY b.y ORDER BY 1 NULLS LAST
 --
-929a55b8a5ec0da3
-== 060
+44d2b01946ddda4a
+== 062
 -- FULL JOIN, should produce partial partitionwise aggregation plan as
 -- GROUP BY is on nullable column
 EXPLAIN (COSTS OFF)
 SELECT a.x, sum(b.x) FROM pagg_tab1 a FULL OUTER JOIN pagg_tab2 b ON a.x = b.y GROUP BY a.x ORDER BY 1 NULLS LAST
 --
-26bf9dbafeb4d53d
-== 061
+d411df67fe54644b
+== 063
 SELECT a.x, sum(b.x) FROM pagg_tab1 a FULL OUTER JOIN pagg_tab2 b ON a.x = b.y GROUP BY a.x ORDER BY 1 NULLS LAST
 --
-6990b763d3b1679e
-== 062
+fd05be1eb72f9161
+== 064
 -- LEFT JOIN, with dummy relation on right side, ideally
 -- should produce full partitionwise aggregation plan as GROUP BY is on
 -- non-nullable columns.
@@ -321,11 +331,11 @@ EXPLAIN (COSTS OFF)
 SELECT a.x, b.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x < 20) a LEFT JOIN (SELECT * FROM pagg_tab2 WHERE y > 10) b ON a.x = b.y WHERE a.x > 5 or b.y < 20  GROUP BY a.x, b.y ORDER BY 1, 2
 --
 25e2adcfe8291937
-== 063
+== 065
 SELECT a.x, b.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x < 20) a LEFT JOIN (SELECT * FROM pagg_tab2 WHERE y > 10) b ON a.x = b.y WHERE a.x > 5 or b.y < 20  GROUP BY a.x, b.y ORDER BY 1, 2
 --
 774f00560c904f55
-== 064
+== 066
 -- FULL JOIN, with dummy relations on both sides, ideally
 -- should produce partial partitionwise aggregation plan as GROUP BY is on
 -- nullable columns.
@@ -334,137 +344,137 @@ EXPLAIN (COSTS OFF)
 SELECT a.x, b.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x < 20) a FULL JOIN (SELECT * FROM pagg_tab2 WHERE y > 10) b ON a.x = b.y WHERE a.x > 5 or b.y < 20  GROUP BY a.x, b.y ORDER BY 1, 2
 --
 ad90622e3f0d1010
-== 065
+== 067
 SELECT a.x, b.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x < 20) a FULL JOIN (SELECT * FROM pagg_tab2 WHERE y > 10) b ON a.x = b.y WHERE a.x > 5 or b.y < 20 GROUP BY a.x, b.y ORDER BY 1, 2
 --
 28b399fb2b9e9797
-== 066
+== 068
 -- Empty join relation because of empty outer side, no partitionwise agg plan
 EXPLAIN (COSTS OFF)
 SELECT a.x, a.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x = 1 AND x = 2) a LEFT JOIN pagg_tab2 b ON a.x = b.y GROUP BY a.x, a.y ORDER BY 1, 2
 --
-7e51bbb16b43b750
-== 067
+d6468a18fd1e2a88
+== 069
 SELECT a.x, a.y, count(*) FROM (SELECT * FROM pagg_tab1 WHERE x = 1 AND x = 2) a LEFT JOIN pagg_tab2 b ON a.x = b.y GROUP BY a.x, a.y ORDER BY 1, 2
 --
-a76908bd3ac5aadf
-== 068
+b86b6d35a88d6fb1
+== 070
 -- Partition by multiple columns
 
 CREATE TABLE pagg_tab_m (a int, b int, c int) PARTITION BY RANGE(a, ((a+b)/2))
 --
 99ae2df6fa9a9c7f
-== 069
+== 071
 CREATE TABLE pagg_tab_m_p1 PARTITION OF pagg_tab_m FOR VALUES FROM (0, 0) TO (12, 12)
 --
 465871f1d1b282e3
-== 070
+== 072
 CREATE TABLE pagg_tab_m_p2 PARTITION OF pagg_tab_m FOR VALUES FROM (12, 12) TO (22, 22)
 --
 b389ed0b164e3b8f
-== 071
+== 073
 CREATE TABLE pagg_tab_m_p3 PARTITION OF pagg_tab_m FOR VALUES FROM (22, 22) TO (30, 30)
 --
 5d6c9e44cb347f5c
-== 072
+== 074
 INSERT INTO pagg_tab_m SELECT i % 30, i % 40, i % 50 FROM generate_series(0, 2999) i
 --
 d417e196aa459ec5
-== 073
+== 075
 ANALYZE pagg_tab_m
 --
 2216e232122d3598
-== 074
+== 076
 -- Partial aggregation as GROUP BY clause does not match with PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT a, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY a HAVING avg(c) < 22 ORDER BY 1, 2, 3
 --
 81960e74649c5ad8
-== 075
+== 077
 SELECT a, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY a HAVING avg(c) < 22 ORDER BY 1, 2, 3
 --
 1b39ed9bcc3bcef5
-== 076
+== 078
 -- Full aggregation as GROUP BY clause matches with PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT a, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY a, (a+b)/2 HAVING sum(b) < 50 ORDER BY 1, 2, 3
 --
 cfbf2faf7bb39b7b
-== 077
+== 079
 SELECT a, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY a, (a+b)/2 HAVING sum(b) < 50 ORDER BY 1, 2, 3
 --
 b70bf3a84f659430
-== 078
+== 080
 -- Full aggregation as PARTITION KEY is part of GROUP BY clause
 EXPLAIN (COSTS OFF)
 SELECT a, c, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY (a+b)/2, 2, 1 HAVING sum(b) = 50 AND avg(c) > 25 ORDER BY 1, 2, 3
 --
 c47867539c73340b
-== 079
+== 081
 SELECT a, c, sum(b), avg(c), count(*) FROM pagg_tab_m GROUP BY (a+b)/2, 2, 1 HAVING sum(b) = 50 AND avg(c) > 25 ORDER BY 1, 2, 3
 --
 a5267eb9b00e96c3
-== 080
+== 082
 -- Test with multi-level partitioning scheme
 
 CREATE TABLE pagg_tab_ml (a int, b int, c text) PARTITION BY RANGE(a)
 --
 587f1451f4445cd0
-== 081
+== 083
 CREATE TABLE pagg_tab_ml_p1 PARTITION OF pagg_tab_ml FOR VALUES FROM (0) TO (12)
 --
 31830a0787a18857
-== 082
+== 084
 CREATE TABLE pagg_tab_ml_p2 PARTITION OF pagg_tab_ml FOR VALUES FROM (12) TO (20) PARTITION BY LIST (c)
 --
 5dc85c3417198c00
-== 083
+== 085
 CREATE TABLE pagg_tab_ml_p2_s1 PARTITION OF pagg_tab_ml_p2 FOR VALUES IN ('0000', '0001', '0002')
 --
 2fdcdbd0c127beb4
-== 084
+== 086
 CREATE TABLE pagg_tab_ml_p2_s2 PARTITION OF pagg_tab_ml_p2 FOR VALUES IN ('0003')
 --
 2103f302f27f77a1
-== 085
+== 087
 -- This level of partitioning has different column positions than the parent
 CREATE TABLE pagg_tab_ml_p3(b int, c text, a int) PARTITION BY RANGE (b)
 --
 0040157441ff7d6a
-== 086
+== 088
 CREATE TABLE pagg_tab_ml_p3_s1(c text, a int, b int)
 --
 71e886a7cedd90d9
-== 087
+== 089
 CREATE TABLE pagg_tab_ml_p3_s2 PARTITION OF pagg_tab_ml_p3 FOR VALUES FROM (7) TO (10)
 --
 059308afda93280d
-== 088
+== 090
 ALTER TABLE pagg_tab_ml_p3 ATTACH PARTITION pagg_tab_ml_p3_s1 FOR VALUES FROM (0) TO (7)
 --
 72cda3ccb3e10194
-== 089
+== 091
 ALTER TABLE pagg_tab_ml ATTACH PARTITION pagg_tab_ml_p3 FOR VALUES FROM (20) TO (30)
 --
 12c0bf16621f88fb
-== 090
+== 092
 INSERT INTO pagg_tab_ml SELECT i % 30, i % 10, to_char(i % 4, 'FM0000') FROM generate_series(0, 29999) i
 --
 29fe9b5be4db2538
-== 091
+== 093
 ANALYZE pagg_tab_ml
 --
 1e07ccf5ceee8ec3
-== 092
+== 094
 -- For Parallel Append
 SET max_parallel_workers_per_gather TO 2
 --
 c21d759ba810645f
-== 093
+== 095
 SET parallel_setup_cost = 0
 --
 bdfd9b27ecb1a774
-== 094
+== 096
 -- Full aggregation at level 1 as GROUP BY clause matches with PARTITION KEY
 -- for level 1 only. For subpartitions, GROUP BY clause does not match with
 -- PARTITION KEY, but still we do not see a partial aggregation as array_agg()
@@ -473,21 +483,21 @@ EXPLAIN (COSTS OFF)
 SELECT a, sum(b), array_agg(distinct c), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 af24bb8074452bac
-== 095
+== 097
 SELECT a, sum(b), array_agg(distinct c), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 492f1aa6d4d820d8
-== 096
+== 098
 -- Without ORDER BY clause, to test Gather at top-most path
 EXPLAIN (COSTS OFF)
 SELECT a, sum(b), array_agg(distinct c), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3
 --
 49654f0c09a942a4
-== 097
+== 099
 RESET parallel_setup_cost
 --
 45802239c7135b18
-== 098
+== 100
 -- Full aggregation at level 1 as GROUP BY clause matches with PARTITION KEY
 -- for level 1 only. For subpartitions, GROUP BY clause does not match with
 -- PARTITION KEY, thus we will have a partial aggregation for them.
@@ -495,42 +505,42 @@ EXPLAIN (COSTS OFF)
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 518c2999c97ba933
-== 099
+== 101
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 4b8fa8cc87ff13e2
-== 100
+== 102
 -- Partial aggregation at all levels as GROUP BY clause does not match with
 -- PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT b, sum(a), count(*) FROM pagg_tab_ml GROUP BY b ORDER BY 1, 2, 3
 --
 48f4ba28e8ede2e5
-== 101
+== 103
 SELECT b, sum(a), count(*) FROM pagg_tab_ml GROUP BY b HAVING avg(a) < 15 ORDER BY 1, 2, 3
 --
 bbecf58ff1549d48
-== 102
+== 104
 -- Full aggregation at all levels as GROUP BY clause matches with PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a, b, c HAVING avg(b) > 7 ORDER BY 1, 2, 3
 --
 b06498619347db90
-== 103
+== 105
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a, b, c HAVING avg(b) > 7 ORDER BY 1, 2, 3
 --
 cc5173768821038a
-== 104
+== 106
 -- Parallelism within partitionwise aggregates
 
 SET min_parallel_table_scan_size TO '8kB'
 --
 91a2578235f79133
-== 105
+== 107
 SET parallel_setup_cost TO 0
 --
 bdfd9b27ecb1a774
-== 106
+== 108
 -- Full aggregation at level 1 as GROUP BY clause matches with PARTITION KEY
 -- for level 1 only. For subpartitions, GROUP BY clause does not match with
 -- PARTITION KEY, thus we will have a partial aggregation for them.
@@ -538,32 +548,32 @@ EXPLAIN (COSTS OFF)
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 518c2999c97ba933
-== 107
+== 109
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a HAVING avg(b) < 3 ORDER BY 1, 2, 3
 --
 4b8fa8cc87ff13e2
-== 108
+== 110
 -- Partial aggregation at all levels as GROUP BY clause does not match with
 -- PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT b, sum(a), count(*) FROM pagg_tab_ml GROUP BY b ORDER BY 1, 2, 3
 --
 48f4ba28e8ede2e5
-== 109
+== 111
 SELECT b, sum(a), count(*) FROM pagg_tab_ml GROUP BY b HAVING avg(a) < 15 ORDER BY 1, 2, 3
 --
 bbecf58ff1549d48
-== 110
+== 112
 -- Full aggregation at all levels as GROUP BY clause matches with PARTITION KEY
 EXPLAIN (COSTS OFF)
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a, b, c HAVING avg(b) > 7 ORDER BY 1, 2, 3
 --
 b06498619347db90
-== 111
+== 113
 SELECT a, sum(b), count(*) FROM pagg_tab_ml GROUP BY a, b, c HAVING avg(b) > 7 ORDER BY 1, 2, 3
 --
 cc5173768821038a
-== 112
+== 114
 -- Parallelism within partitionwise aggregates (single level)
 
 -- Add few parallel setup cost, so that we will see a plan which gathers
@@ -576,105 +586,105 @@ cc5173768821038a
 SET parallel_setup_cost TO 10
 --
 bdfd9b27ecb1a774
-== 113
+== 115
 CREATE TABLE pagg_tab_para(x int, y int) PARTITION BY RANGE(x)
 --
 27387385804ef93e
-== 114
+== 116
 CREATE TABLE pagg_tab_para_p1 PARTITION OF pagg_tab_para FOR VALUES FROM (0) TO (12)
 --
 eedcc7b7859d510d
-== 115
+== 117
 CREATE TABLE pagg_tab_para_p2 PARTITION OF pagg_tab_para FOR VALUES FROM (12) TO (22)
 --
 7f0890aec16bd020
-== 116
+== 118
 CREATE TABLE pagg_tab_para_p3 PARTITION OF pagg_tab_para FOR VALUES FROM (22) TO (30)
 --
 621d4cb6884a7c66
-== 117
+== 119
 INSERT INTO pagg_tab_para SELECT i % 30, i % 20 FROM generate_series(0, 29999) i
 --
 0acce07ee1f18756
-== 118
+== 120
 ANALYZE pagg_tab_para
 --
 6f8620a75128bf38
-== 119
+== 121
 -- When GROUP BY clause matches; full aggregation is performed for each partition.
 EXPLAIN (COSTS OFF)
 SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 547496d0784fe87e
-== 120
+== 122
 SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 cdfb56bfeb59bd96
-== 121
+== 123
 -- When GROUP BY clause does not match; partial aggregation is performed for each partition.
 EXPLAIN (COSTS OFF)
 SELECT y, sum(x), avg(x), count(*) FROM pagg_tab_para GROUP BY y HAVING avg(x) < 12 ORDER BY 1, 2, 3
 --
 f587b74b2f418026
-== 122
+== 124
 SELECT y, sum(x), avg(x), count(*) FROM pagg_tab_para GROUP BY y HAVING avg(x) < 12 ORDER BY 1, 2, 3
 --
 16bd526b061c2dbe
-== 123
+== 125
 -- Test when parent can produce parallel paths but not any (or some) of its children
 -- (Use one more aggregate to tilt the cost estimates for the plan we want)
 ALTER TABLE pagg_tab_para_p1 SET (parallel_workers = 0)
 --
 4b670e0ebcc097a8
-== 124
+== 126
 ALTER TABLE pagg_tab_para_p3 SET (parallel_workers = 0)
 --
 8c9a7671fa0b3955
-== 125
+== 127
 ANALYZE pagg_tab_para
 --
 6f8620a75128bf38
-== 126
+== 128
 EXPLAIN (COSTS OFF)
 SELECT x, sum(y), avg(y), sum(x+y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 4483810da3c4f63e
-== 127
+== 129
 SELECT x, sum(y), avg(y), sum(x+y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 7b225857aee4142f
-== 128
+== 130
 ALTER TABLE pagg_tab_para_p2 SET (parallel_workers = 0)
 --
 1ce384cf992aafa7
-== 129
+== 131
 ANALYZE pagg_tab_para
 --
 6f8620a75128bf38
-== 130
+== 132
 EXPLAIN (COSTS OFF)
 SELECT x, sum(y), avg(y), sum(x+y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 4483810da3c4f63e
-== 131
+== 133
 SELECT x, sum(y), avg(y), sum(x+y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 7b225857aee4142f
-== 132
+== 134
 -- Reset parallelism parameters to get partitionwise aggregation plan.
 RESET min_parallel_table_scan_size
 --
 5182ee3580baeecb
-== 133
+== 135
 RESET parallel_setup_cost
 --
 45802239c7135b18
-== 134
+== 136
 EXPLAIN (COSTS OFF)
 SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 547496d0784fe87e
-== 135
+== 137
 SELECT x, sum(y), avg(y), count(*) FROM pagg_tab_para GROUP BY x HAVING avg(y) < 7 ORDER BY 1, 2, 3
 --
 cdfb56bfeb59bd96

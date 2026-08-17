@@ -43,7 +43,7 @@ SELECT DISTINCT two, string4, ten
 |--
 SELECT DISTINCT p.age FROM person* p ORDER BY age using >
 --
-1cc373bcdc5a579c
+04c0b27d0215d972
 == 006
 |--
 -- Check mentioning same column more than once
@@ -400,3 +400,121 @@ SELECT 2 IS NOT DISTINCT FROM null as "no"
 SELECT null IS NOT DISTINCT FROM null as "yes"
 --
 9afbdf054ebfe1fc
+== 077
+|--
+-- Test the planner's ability to reorder the distinctClause Pathkeys to match
+-- the input path's ordering
+|--
+
+CREATE TABLE distinct_tbl (x int, y int)
+--
+fbda1ca12be7059a
+== 078
+INSERT INTO distinct_tbl SELECT i%10, i%10 FROM generate_series(1, 1000) AS i
+--
+3159cbfc0c4fd3e1
+== 079
+CREATE INDEX distinct_tbl_x_y_idx ON distinct_tbl (x, y)
+--
+c647d9439d5e04a1
+== 080
+ANALYZE distinct_tbl
+--
+b1f88665559f0899
+== 081
+-- Produce results with sorting.
+SET enable_hashagg TO OFF
+--
+a83598b3841af185
+== 082
+-- Ensure we avoid the need to re-sort by reordering the distinctClause
+-- Pathkeys to match the ordering of the input path
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT y, x FROM distinct_tbl
+--
+84664bae846063d3
+== 083
+SELECT DISTINCT y, x FROM distinct_tbl
+--
+5634d3a09680f8d2
+== 084
+-- Ensure we leverage incremental-sort by reordering the distinctClause
+-- Pathkeys to partially match the ordering of the input path
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT y, x FROM (SELECT * FROM distinct_tbl ORDER BY x) s
+--
+757fcb78d391e0bc
+== 085
+SELECT DISTINCT y, x FROM (SELECT * FROM distinct_tbl ORDER BY x) s
+--
+ca129798df9c2c2c
+== 086
+-- Ensure we avoid the need to re-sort in partial distinct by reordering the
+-- distinctClause Pathkeys to match the ordering of the input path
+SET parallel_tuple_cost=0
+--
+f62405e932b2ca70
+== 087
+SET parallel_setup_cost=0
+--
+bdfd9b27ecb1a774
+== 088
+SET min_parallel_table_scan_size=0
+--
+91a2578235f79133
+== 089
+SET min_parallel_index_scan_size=0
+--
+e9936b84d4c94a30
+== 090
+SET max_parallel_workers_per_gather=2
+--
+c21d759ba810645f
+== 091
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT y, x FROM distinct_tbl limit 10
+--
+ac897e0707d98caa
+== 092
+SELECT DISTINCT y, x FROM distinct_tbl limit 10
+--
+1980643ada37ffd0
+== 093
+RESET max_parallel_workers_per_gather
+--
+be4431a58b98cb8c
+== 094
+RESET min_parallel_index_scan_size
+--
+1ef464b89e37b72a
+== 095
+RESET min_parallel_table_scan_size
+--
+5182ee3580baeecb
+== 096
+RESET parallel_setup_cost
+--
+45802239c7135b18
+== 097
+RESET parallel_tuple_cost
+--
+c669a6b2c1770679
+== 098
+-- Ensure we reorder the distinctClause Pathkeys to match the ordering of the
+-- input path even if there is ORDER BY clause
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT y, x FROM distinct_tbl ORDER BY y
+--
+ffa8adbdf29577e9
+== 099
+SELECT DISTINCT y, x FROM distinct_tbl ORDER BY y
+--
+33776982311e6539
+== 100
+RESET enable_hashagg
+--
+b056ae859e494ea7
+== 101
+DROP TABLE distinct_tbl
+--
+8bdd4fbaa26b691f
