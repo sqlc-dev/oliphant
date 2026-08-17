@@ -373,6 +373,13 @@ func (p *parser) parseDefACLPrivilegeTarget() ast.ObjectType {
 	case ast.Token_SCHEMAS:
 		p.next()
 		return ast.ObjectType_OBJECT_SCHEMA
+	case ast.Token_LARGE_P:
+		// LARGE_P OBJECTS_P (PG 18)
+		if p.kindN(1) == ast.Token_OBJECTS_P {
+			p.next()
+			p.next()
+			return ast.ObjectType_OBJECT_LARGEOBJECT
+		}
 	}
 	p.syntaxErrorAt()
 	return 0

@@ -1,4 +1,4 @@
-// raw_expression_tree_walker (src/backend/nodes/nodeFuncs.c, PostgreSQL 17)
+// raw_expression_tree_walker (src/backend/nodes/nodeFuncs.c, PostgreSQL 18)
 // ported over the protobuf tree. Every WALK(child) goes back through
 // state.walk, so the const_record_walker interceptions (A_Const, ParamRef,
 // TypeName, SelectStmt, DefElem, …) apply at every level, exactly as the C
@@ -18,7 +18,8 @@ func (s *state) rawWalk(n *ast.Node) bool {
 	case *ast.Node_JsonFormat, *ast.Node_SetToDefault, *ast.Node_CurrentOfExpr,
 		*ast.Node_SqlvalueFunction, *ast.Node_Integer, *ast.Node_Float,
 		*ast.Node_Boolean, *ast.Node_String_, *ast.Node_BitString,
-		*ast.Node_AStar, *ast.Node_MergeSupportFunc:
+		*ast.Node_AStar, *ast.Node_MergeSupportFunc,
+		*ast.Node_ReturningOption:
 		// primitive node types with no subnodes
 		return false
 	case *ast.Node_Alias:
@@ -184,7 +185,7 @@ func (s *state) rawWalk(n *ast.Node) bool {
 		if s.walkOnConflictClause(stmt.OnConflictClause) {
 			return true
 		}
-		if s.walkList(stmt.ReturningList) {
+		if s.walkReturningClause(stmt.ReturningClause) {
 			return true
 		}
 		return s.walkWithClause(stmt.WithClause)
@@ -199,7 +200,7 @@ func (s *state) rawWalk(n *ast.Node) bool {
 		if s.walk(stmt.WhereClause) {
 			return true
 		}
-		if s.walkList(stmt.ReturningList) {
+		if s.walkReturningClause(stmt.ReturningClause) {
 			return true
 		}
 		return s.walkWithClause(stmt.WithClause)
@@ -217,7 +218,7 @@ func (s *state) rawWalk(n *ast.Node) bool {
 		if s.walkList(stmt.FromClause) {
 			return true
 		}
-		if s.walkList(stmt.ReturningList) {
+		if s.walkReturningClause(stmt.ReturningClause) {
 			return true
 		}
 		return s.walkWithClause(stmt.WithClause)
@@ -235,7 +236,7 @@ func (s *state) rawWalk(n *ast.Node) bool {
 		if s.walkList(stmt.MergeWhenClauses) {
 			return true
 		}
-		if s.walkList(stmt.ReturningList) {
+		if s.walkReturningClause(stmt.ReturningClause) {
 			return true
 		}
 		return s.walkWithClause(stmt.WithClause)
@@ -444,8 +445,20 @@ func (s *state) walkIntoClause(into *ast.IntoClause) bool {
 		return true
 	}
 	// colNames, options are deemed uninteresting
-	// viewQuery should be null in raw parsetree, but check it
-	return s.walk(into.ViewQuery)
+	// viewQuery should be null in raw parsetree, but check it. Its PG 18
+	// proto type is Query, which the walker does not know — a non-NULL value
+	// would hit the C switch's default arm and not descend.
+	return false
+}
+
+func (s *state) walkReturningClause(rc *ast.ReturningClause) bool {
+	if rc == nil {
+		return false
+	}
+	if s.walkList(rc.Options) {
+		return true
+	}
+	return s.walkList(rc.Exprs)
 }
 
 func (s *state) walkWithClause(w *ast.WithClause) bool {

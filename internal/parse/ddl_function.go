@@ -86,12 +86,14 @@ func (p *parser) parseCreateFunctionStmt(replace bool) *ast.Node {
 	return &ast.Node{Node: &ast.Node_CreateFunctionStmt{CreateFunctionStmt: n}}
 }
 
-// parseTableFuncColumn is gram.y's table_func_column.
+// parseTableFuncColumn is gram.y's table_func_column (location = @1).
 func (p *parser) parseTableFuncColumn() *ast.Node {
+	loc := p.loc()
 	return nFunctionParameter(&ast.FunctionParameter{
-		Name:    p.paramName(),
-		ArgType: p.parseFuncType(),
-		Mode:    ast.FunctionParameterMode_FUNC_PARAM_TABLE,
+		Name:     p.paramName(),
+		ArgType:  p.parseFuncType(),
+		Mode:     ast.FunctionParameterMode_FUNC_PARAM_TABLE,
+		Location: loc,
 	})
 }
 

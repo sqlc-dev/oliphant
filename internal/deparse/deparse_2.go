@@ -1,4 +1,4 @@
-// Ported from postgres_deparse.c (libpg_query 17-6.2.2).
+// Ported from postgres_deparse.c (libpg_query 18.0.0).
 // FROM/WHERE clauses, SELECT, function calls, window definitions, A_Expr.
 package deparse
 
@@ -328,6 +328,8 @@ func deparsePrivilegeTarget(st *state, targtype ast.GrantTargetType, objtype ast
 			st.appendString("TYPES")
 		case ast.ObjectType_OBJECT_SCHEMA:
 			st.appendString("SCHEMAS")
+		case ast.ObjectType_OBJECT_LARGEOBJECT:
+			st.appendString("LARGE OBJECTS")
 		default:
 			// Other types are not supported here
 		}

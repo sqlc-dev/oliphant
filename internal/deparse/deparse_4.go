@@ -1,4 +1,4 @@
-// Ported from postgres_deparse.c (libpg_query 17-6.2.2).
+// Ported from postgres_deparse.c (libpg_query 18.0.0).
 // DDL: operator families, CREATE TABLE, constraints, indexes, DROP.
 package deparse
 
@@ -138,7 +138,7 @@ func deparseCreateDomainStmt(st *state, create_domain_stmt *ast.CreateDomainStmt
 	}
 
 	for _, item := range create_domain_stmt.Constraints {
-		deparseConstraint(st, item.GetConstraint())
+		deparseConstraint(st, item.GetConstraint(), contextNone)
 		st.appendChar(' ')
 	}
 
@@ -174,7 +174,7 @@ func deparseCreateExtensionStmt(st *state, create_extension_stmt *ast.CreateExte
 	st.removeTrailingSpace()
 }
 
-func deparseConstraint(st *state, constraint *ast.Constraint) {
+func deparseConstraint(st *state, constraint *ast.Constraint, context nodeContext) {
 	if constraint.Conname != "" {
 		st.appendString("CONSTRAINT ")
 		st.appendString(quoteIdentifier(constraint.Conname))
@@ -203,7 +203,12 @@ func deparseConstraint(st *state, constraint *ast.Constraint) {
 	case ast.ConstrType_CONSTR_GENERATED:
 		st.appendString("GENERATED ALWAYS AS (")
 		deparseExpr(st, constraint.RawExpr, contextAExpr)
-		st.appendString(") STORED ")
+		st.appendString(") ")
+		if constraint.GeneratedKind == "s" {
+			st.appendString("STORED ")
+		} else {
+			st.appendString("VIRTUAL ")
+		}
 	case ast.ConstrType_CONSTR_CHECK:
 		st.appendString("CHECK (")
 		deparseExpr(st, constraint.RawExpr, contextAExpr)
@@ -250,26 +255,51 @@ func deparseConstraint(st *state, constraint *ast.Constraint) {
 		st.appendString("INITIALLY DEFERRED ")
 	case ast.ConstrType_CONSTR_ATTR_IMMEDIATE:
 		st.appendString("INITIALLY IMMEDIATE ")
+	case ast.ConstrType_CONSTR_ATTR_ENFORCED:
+		st.appendString("ENFORCED ")
+	case ast.ConstrType_CONSTR_ATTR_NOT_ENFORCED:
+		st.appendString("NOT ENFORCED ")
 	}
 
 	if len(constraint.Keys) > 0 {
-		valueOnly := false
+		emitKeys := true
+		needsParens := true
 
 		if len(constraint.Keys) == 1 {
-			firstKey := constraint.Keys[0]
-			valueOnly = firstKey.GetString_() != nil && firstKey.GetString_().Sval == "value"
+			key := constraint.Keys[0]
+			if context == contextAlterDomain {
+				emitKeys = !(key.GetString_() != nil && key.GetString_().Sval == "value")
+			}
+			needsParens = constraint.Contype != ast.ConstrType_CONSTR_NULL &&
+				constraint.Contype != ast.ConstrType_CONSTR_NOTNULL
 		}
 
-		if !valueOnly {
+		if needsParens {
 			st.appendChar('(')
-			deparseColumnList(st, constraint.Keys)
-			st.appendString(") ")
 		}
+
+		if emitKeys {
+			deparseColumnList(st, constraint.Keys)
+		}
+
+		if constraint.WithoutOverlaps {
+			st.appendString(" WITHOUT OVERLAPS")
+		}
+
+		if needsParens {
+			st.appendChar(')')
+		}
+
+		st.appendChar(' ')
 	}
 
 	if len(constraint.FkAttrs) > 0 {
 		st.appendChar('(')
-		deparseColumnList(st, constraint.FkAttrs)
+		if constraint.FkWithPeriod {
+			deparseColumnListWithPeriod(st, constraint.FkAttrs)
+		} else {
+			deparseColumnList(st, constraint.FkAttrs)
+		}
 		st.appendString(") ")
 	}
 
@@ -279,7 +309,11 @@ func deparseConstraint(st *state, constraint *ast.Constraint) {
 		st.appendChar(' ')
 		if len(constraint.PkAttrs) > 0 {
 			st.appendChar('(')
-			deparseColumnList(st, constraint.PkAttrs)
+			if constraint.PkWithPeriod {
+				deparseColumnListWithPeriod(st, constraint.PkAttrs)
+			} else {
+				deparseColumnList(st, constraint.PkAttrs)
+			}
 			st.appendString(") ")
 		}
 	}
@@ -373,6 +407,11 @@ func deparseConstraint(st *state, constraint *ast.Constraint) {
 
 	if constraint.IsNoInherit {
 		st.appendString("NO INHERIT ")
+	}
+
+	if (constraint.Contype == ast.ConstrType_CONSTR_FOREIGN ||
+		constraint.Contype == ast.ConstrType_CONSTR_CHECK) && !constraint.IsEnforced {
+		st.appendString("NOT ENFORCED ")
 	}
 
 	if constraint.SkipValidation {
@@ -670,7 +709,7 @@ func deparseTableElement(st *state, node *ast.Node) {
 	case node.GetTableLikeClause() != nil:
 		deparseTableLikeClause(st, node.GetTableLikeClause())
 	case node.GetConstraint() != nil:
-		deparseConstraint(st, node.GetConstraint())
+		deparseConstraint(st, node.GetConstraint(), contextNone)
 	default:
 	}
 }
@@ -982,7 +1021,7 @@ func deparseSecLabelStmt(st *state, sec_label_stmt *ast.SecLabelStmt) {
 
 	st.appendString(" IS ")
 
-	if sec_label_stmt.Label != "" {
+	if sec_label_stmt.Label != "" || st.empties[sec_label_stmt] {
 		deparseStringLiteral(st, sec_label_stmt.Label)
 	} else {
 		st.appendString("NULL")

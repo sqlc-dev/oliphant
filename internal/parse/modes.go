@@ -42,6 +42,9 @@ func ParseWithMode(input string, mode Mode) (res *ast.ParseResult, err *lexer.Er
 
 	res = &ast.ParseResult{Version: pgVersionNum}
 	var stmt *ast.Node
+	// makeRawStmt($2, @2): the location of the expression's first token
+	// (PG 18; previously 0).
+	stmtStart := p.loc()
 	switch mode {
 	case ModePlpgsqlExpr:
 		// parse_toplevel: MODE_PLPGSQL_EXPR PLpgSQL_Expr
@@ -60,7 +63,7 @@ func ParseWithMode(input string, mode Mode) (res *ast.ParseResult, err *lexer.Er
 		p.syntaxError(tok)
 	}
 
-	res.Stmts = []*ast.RawStmt{{Stmt: stmt, StmtLocation: 0}}
+	res.Stmts = []*ast.RawStmt{{Stmt: stmt, StmtLocation: stmtStart}}
 	return res, nil
 }
 
@@ -171,4 +174,26 @@ func (p *parser) parsePLAssignStmt(nnames int32) *ast.Node {
 	n.Val = val.GetSelectStmt()
 
 	return &ast.Node{Node: &ast.Node_PlassignStmt{PlassignStmt: n}}
+}
+
+// ParseTypeName is raw_parser for RAW_PARSE_TYPE_NAME:
+// parse_toplevel: MODE_TYPE_NAME Typename. The result is the bare TypeName
+// (libpg_query's plpgsql support calls this through typeStringToTypeName).
+func ParseTypeName(input string) (res *ast.TypeName, err *lexer.Error) {
+	s := lexer.New(input)
+	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
+	defer func() {
+		if r := recover(); r != nil {
+			if b, ok := r.(bail); ok {
+				res, err = nil, b.err
+				return
+			}
+			panic(r)
+		}
+	}()
+	tn := p.parseTypename()
+	if tok := p.peek(); tok.Kind != 0 {
+		p.syntaxError(tok)
+	}
+	return tn, nil
 }

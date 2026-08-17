@@ -1,4 +1,4 @@
-// Ported from postgres_deparse.c (libpg_query 17-6.2.2).
+// Ported from postgres_deparse.c (libpg_query 18.0.0).
 // ALTER statement long tail, publications/subscriptions, triggers, JSON aggregates.
 package deparse
 
@@ -397,7 +397,7 @@ func deparseCommentStmt(st *state, comment_stmt *ast.CommentStmt) {
 
 	st.appendString(" IS ")
 
-	if comment_stmt.Comment != "" {
+	if comment_stmt.Comment != "" || st.empties[comment_stmt] {
 		deparseStringLiteral(st, comment_stmt.Comment)
 	} else {
 		st.appendString("NULL")

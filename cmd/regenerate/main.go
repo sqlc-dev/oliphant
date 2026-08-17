@@ -1,8 +1,8 @@
 // Command regenerate derives every golden in parser/testdata from the pinned
-// oracle (libpg_query 17-6.2.2 via pg_query_go v6.2.2, cgo). It is the only
+// oracle (libpg_query 18.0.0 via pg_query_go v6.2.2, cgo). It is the only
 // writer of that tree; expected outputs are NEVER edited by hand.
 //
-//	go run ./cmd/regenerate -libpg-query <checkout@17-6.2.2> -pg-query-go <checkout@v6.2.2>
+//	go run ./cmd/regenerate -libpg-query <checkout@18.0.0> -pg-query-go <checkout@v6.2.2>
 //
 // Corpus tiers extracted:
 //
@@ -34,7 +34,7 @@ import (
 var stats struct{ files, cases int }
 
 func main() {
-	libpgQuery := flag.String("libpg-query", "", "path to a libpg_query checkout at tag 17-6.2.2")
+	libpgQuery := flag.String("libpg-query", "", "path to a libpg_query checkout at tag 18.0.0")
 	pgQueryGo := flag.String("pg-query-go", "", "path to a pg_query_go checkout at tag v6.2.2")
 	oracleBin := flag.String("oracle", "", "prebuilt oracle binary (default: go build ./oracle)")
 	out := flag.String("out", "parser/testdata", "output corpus root")
@@ -197,7 +197,10 @@ func main() {
 	}
 	fpData, err := os.ReadFile(filepath.Join(*pgQueryGo, "testdata", "fingerprint.json"))
 	check(err)
-	check(json.Unmarshal(fpData, &fpCases))
+	// libpg_query 18.0.0's fingerprint.json carries a // line comment
+	// ("disableOnMsvc": true, // Doesn't work because of C2026), which
+	// encoding/json rejects; strip comments outside strings before decoding.
+	check(json.Unmarshal(stripJSONLineComments(fpData), &fpCases))
 	var fpInputs []string
 	for _, c := range fpCases {
 		fpInputs = append(fpInputs, c.Input)
@@ -426,4 +429,43 @@ func check(err error) {
 		fmt.Fprintln(os.Stderr, "regenerate:", err)
 		os.Exit(1)
 	}
+}
+
+// stripJSONLineComments removes // comments (to end of line) that appear
+// outside string literals, leaving everything else byte-intact. JSON string
+// escapes are honored so a "//" inside an input query survives.
+func stripJSONLineComments(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	inStr, esc := false, false
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if inStr {
+			out = append(out, c)
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		if c == '"' {
+			inStr = true
+			out = append(out, c)
+			continue
+		}
+		if c == '/' && i+1 < len(b) && b[i+1] == '/' {
+			for i < len(b) && b[i] != '\n' {
+				i++
+			}
+			if i < len(b) {
+				out = append(out, '\n')
+			}
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }

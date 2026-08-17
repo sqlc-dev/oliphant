@@ -14,7 +14,7 @@
 
 SELECT 1 as one, 2 as two
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"one","val":{"A_Const":{"ival":{"ival":1},"location":235}},"location":235}},{"ResTarget":{"name":"two","val":{"A_Const":{"ival":{"ival":2},"location":245}},"location":245}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"one","val":{"A_Const":{"ival":{"ival":1},"location":235}},"location":235}},{"ResTarget":{"name":"two","val":{"A_Const":{"ival":{"ival":2},"location":245}},"location":245}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":228}]}
 == 002
 SELECT 3 as three, 4 as four \gx
 
@@ -35,29 +35,64 @@ SELECT 3 as three, 4 as four \gx
 SELECT 1 as one, 2 as two \g (format=csv csv_fieldsep='\t')
 SELECT 1 as one, 2 as two \gx (title='foo bar')
 
--- \bind (extended query protocol)
+-- \parse (extended query protocol)
+SELECT 1 \parse ''
+SELECT 2 \parse stmt1
+SELECT $1 \parse stmt2
+SELECT $1, $2 \parse stmt3
 
-SELECT 1 \bind
+-- \bind_named (extended query protocol)
+-- Repeated calls.  The second call generates an error, cleaning up the
+-- statement name set by the first call.
+-- Last \bind_named wins
+-- Multiple ;
+
+-- \close_prepared (extended query protocol)
+SELECT name, statement FROM pg_prepared_statements ORDER BY name
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 30
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
 == 004
+-- \bind (extended query protocol)
+SELECT 1 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 45
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 005
 SELECT $1 \bind 'foo'
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 11
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 005
+== 006
 SELECT $1, $2 \bind 'foo' 'bar'
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 15
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 006
+== 007
+-- last \bind wins
+select $1::int as col \bind 'foo' \bind 2
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 42
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+-- Multiple ;
+select $1::int as col \bind 1
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 37
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
 -- errors
 -- parse error
 SELECT foo \bind
@@ -66,7 +101,7 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 37
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 007
+== 010
 -- tcop error
 SELECT 1 \
 --
@@ -74,14 +109,14 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 24
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 008
+== 011
 SELECT 2 \bind
 --
 ERROR: syntax error at or near "\"
 CURSORPOS: 10
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 009
+== 012
 -- bind error
 SELECT $1, $2 \bind 'foo'
 --
@@ -89,13 +124,15 @@ ERROR: syntax error at or near "\"
 CURSORPOS: 29
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 010
+== 013
+-- bind_named error
+
 -- ;
 
 select 10 as test01, 20 as test02, 'Hello' as test03
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":13}},"location":13}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":27}},"location":27}},{"ResTarget":{"name":"test03","val":{"A_Const":{"sval":{"sval":"Hello"},"location":41}},"location":41}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 011
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":34}},"location":34}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":48}},"location":48}},{"ResTarget":{"name":"test03","val":{"A_Const":{"sval":{"sval":"Hello"},"location":62}},"location":62}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":27}]}
+== 014
 -- should fail: bad variable name
 select 10 as "bad name"
 
@@ -105,61 +142,61 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 60
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 012
+== 015
 -- multiple backslash commands in one line
 select 1 as x, 2 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":1},"location":50}},"location":50}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":2},"location":58}},"location":58}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 013
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":1},"location":50}},"location":50}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":2},"location":58}},"location":58}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":43}]}
+== 016
 select 3 as x, 4 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":3},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":4},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 014
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":3},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":4},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 017
 select 5 as x, 6 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":5},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":6},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 015
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":5},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":6},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 018
 select 7 as x, 8 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":7},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":8},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 016
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":7},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":8},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 019
 -- NULL should unset the variable
 select 1 as var1, NULL as var2, 3 as var3
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"var1","val":{"A_Const":{"ival":{"ival":1},"location":41}},"location":41}},{"ResTarget":{"name":"var2","val":{"A_Const":{"isnull":true,"location":52}},"location":52}},{"ResTarget":{"name":"var3","val":{"A_Const":{"ival":{"ival":3},"location":66}},"location":66}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 017
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"var1","val":{"A_Const":{"ival":{"ival":1},"location":41}},"location":41}},{"ResTarget":{"name":"var2","val":{"A_Const":{"isnull":true,"location":52}},"location":52}},{"ResTarget":{"name":"var3","val":{"A_Const":{"ival":{"ival":3},"location":66}},"location":66}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":34}]}
+== 020
 -- ;
 select 10 as test01, 20 as test02 from generate_series(1,3)
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":12}},"location":12}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":26}},"location":26}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":60}},{"A_Const":{"ival":{"ival":3},"location":62}}],"funcformat":"COERCE_EXPLICIT_CALL","location":44}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 018
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":12}},"location":12}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":26}},"location":26}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":60}},{"A_Const":{"ival":{"ival":3},"location":62}}],"funcformat":"COERCE_EXPLICIT_CALL","location":44}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":5}]}
+== 021
 select 10 as test01, 20 as test02 from generate_series(1,0)
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 019
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 022
 -- ;
 select a from generate_series(1, 10) as a where a = 11
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":12}},"location":12}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":35}},{"A_Const":{"ival":{"ival":10},"location":38}}],"funcformat":"COERCE_EXPLICIT_CALL","location":19}},{}]}}],"alias":{"aliasname":"a"}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":53}},"rexpr":{"A_Const":{"ival":{"ival":11},"location":57}},"location":55}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 020
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":12}},"location":12}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":35}},{"A_Const":{"ival":{"ival":10},"location":38}}],"funcformat":"COERCE_EXPLICIT_CALL","location":19}},{}]}}],"alias":{"aliasname":"a"}}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":53}},"rexpr":{"A_Const":{"ival":{"ival":11},"location":57}},"location":55}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":5}]}
+== 023
 -- ;
 
 select 1 as x, 2 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":1},"location":13}},"location":13}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":2},"location":21}},"location":21}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 021
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":1},"location":13}},"location":13}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":2},"location":21}},"location":21}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":6}]}
+== 024
 select 3 as x, 4 as y
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":3},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":4},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 022
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"x","val":{"A_Const":{"ival":{"ival":3},"location":7}},"location":7}},{"ResTarget":{"name":"y","val":{"A_Const":{"ival":{"ival":4},"location":15}},"location":15}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 025
 select 10 as test01, 20 as test02 from generate_series(1,3)
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{"ival":3},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 023
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{"ival":3},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 026
 select 10 as test01, 20 as test02 from generate_series(1,0)
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 024
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"test01","val":{"A_Const":{"ival":{"ival":10},"location":7}},"location":7}},{"ResTarget":{"name":"test02","val":{"A_Const":{"ival":{"ival":20},"location":21}},"location":21}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":55}},{"A_Const":{"ival":{},"location":57}}],"funcformat":"COERCE_EXPLICIT_CALL","location":39}},{}]}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 027
 -- ;
 
 SELECT
@@ -179,15 +216,15 @@ ERROR: syntax error at or near "PREPARE"
 CURSORPOS: 239
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 025
+== 028
 EXECUTE test
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"test"}}}]}
-== 026
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"test"}}}]}
+== 029
 EXPLAIN EXECUTE test
 --
-{"version":170007,"stmts":[{"stmt":{"ExplainStmt":{"query":{"ExecuteStmt":{"name":"test"}}}}}]}
-== 027
+{"version":180004,"stmts":[{"stmt":{"ExplainStmt":{"query":{"ExecuteStmt":{"name":"test"}}}}}]}
+== 030
 -- should fail cleanly - syntax error
 SELECT 1 +
 --
@@ -195,21 +232,21 @@ ERROR: syntax error at end of input
 CURSORPOS: 49
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 028
+== 031
 -- check behavior with empty results
 SELECT
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 029
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":37}]}
+== 032
 CREATE TABLE bububu(a int)
 --
-{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"bububu","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":22},"is_local":true,"location":20}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
-== 030
+{"version":180004,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"bububu","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":22},"is_local":true,"location":20}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 033
 -- subject command should not have executed
 TABLE bububu
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":-1}},"location":-1}}],"fromClause":[{"RangeVar":{"relname":"bububu","inh":true,"relpersistence":"p","location":50}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 031
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":-1}},"location":-1}}],"fromClause":[{"RangeVar":{"relname":"bububu","inh":true,"relpersistence":"p","location":50}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":44}]}
+== 034
 -- fail
 
 -- query buffer should remain unchanged
@@ -222,26 +259,26 @@ ERROR: syntax error at or near "SELECT"
 CURSORPOS: 123
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 032
+== 035
 -- test for server bug #17983 with empty statement in aborted transaction
 set search_path = default
 --
-{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_DEFAULT","name":"search_path"}}}]}
-== 033
+{"version":180004,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_DEFAULT","name":"search_path","location":-1}},"stmt_location":74}]}
+== 036
 begin
 --
-{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
-== 034
+{"version":180004,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 037
 rollback
 --
-{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
-== 035
+{"version":180004,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}
+== 038
 -- ;
 
 create temporary table gexec_test(a int, b text, c date, d float)
 --
-{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"gexec_test","inh":true,"relpersistence":"t","location":29},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":42},"is_local":true,"location":40}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":49},"is_local":true,"location":47}},{"ColumnDef":{"colname":"c","typeName":{"names":[{"String":{"sval":"date"}}],"typemod":-1,"location":57},"is_local":true,"location":55}},{"ColumnDef":{"colname":"d","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"float8"}}],"typemod":-1,"location":65},"is_local":true,"location":63}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
-== 036
+{"version":180004,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"gexec_test","inh":true,"relpersistence":"t","location":29},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":42},"is_local":true,"location":40}},{"ColumnDef":{"colname":"b","typeName":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":49},"is_local":true,"location":47}},{"ColumnDef":{"colname":"c","typeName":{"names":[{"String":{"sval":"date"}}],"typemod":-1,"location":57},"is_local":true,"location":55}},{"ColumnDef":{"colname":"d","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"float8"}}],"typemod":-1,"location":65},"is_local":true,"location":63}}],"oncommit":"ONCOMMIT_NOOP"}},"stmt_location":6}]}
+== 039
 select format('create index on gexec_test(%I)', attname)
 from pg_attribute
 where attrelid = 'gexec_test'::regclass and attnum > 0
@@ -276,431 +313,432 @@ ERROR: syntax error at or near "select"
 CURSORPOS: 233
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 037
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 038
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 039
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 040
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 041
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 042
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 043
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 044
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 045
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 046
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 047
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 048
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 049
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 050
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 051
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 052
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 053
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 054
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 055
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 056
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 057
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 058
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 059
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 060
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 061
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 062
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 063
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 064
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 065
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 066
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 067
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 068
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 069
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 070
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 071
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 072
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 073
-deallocate q
+execute q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 074
--- test single-line header and data
-prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
+execute q
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"0123456789abcdef","val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"x"},"location":63}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"A_Const":{"ival":{"ival":2},"location":67}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":69}},"location":68}}],"funcformat":"COERCE_EXPLICIT_CALL","location":56}},"location":56}},{"ResTarget":{"name":"0123456789","val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"y"},"location":102}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":20},"location":106}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"A_Const":{"ival":{"ival":2},"location":109}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":111}},"location":110}},"location":108}}],"funcformat":"COERCE_EXPLICIT_CALL","location":95}},"location":95}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":151}},{"A_Const":{"ival":{"ival":10},"location":153}}],"funcformat":"COERCE_EXPLICIT_CALL","location":135}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 075
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 076
-execute q
+deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
 == 077
-execute q
+-- test single-line header and data
+prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"0123456789abcdef","val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"x"},"location":63}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"A_Const":{"ival":{"ival":2},"location":67}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":69}},"location":68}}],"funcformat":"COERCE_EXPLICIT_CALL","location":56}},"location":56}},{"ResTarget":{"name":"0123456789","val":{"FuncCall":{"funcname":[{"String":{"sval":"repeat"}}],"args":[{"A_Const":{"sval":{"sval":"y"},"location":102}},{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"lexpr":{"A_Const":{"ival":{"ival":20},"location":106}},"rexpr":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"A_Const":{"ival":{"ival":2},"location":109}},"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":111}},"location":110}},"location":108}}],"funcformat":"COERCE_EXPLICIT_CALL","location":95}},"location":95}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":151}},{"A_Const":{"ival":{"ival":10},"location":153}}],"funcformat":"COERCE_EXPLICIT_CALL","location":135}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":36}]}
 == 078
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 079
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 080
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 081
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 082
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 083
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 084
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 085
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 086
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 087
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 088
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 089
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 090
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 091
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 092
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 093
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 094
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 095
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 096
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 097
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 098
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 099
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 100
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 101
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 102
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 103
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 104
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 105
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 106
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 107
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 108
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 109
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 110
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 111
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 112
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 113
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 114
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 115
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 116
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 117
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 118
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 119
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 120
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 121
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 122
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 123
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 121
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 124
 -- support table for output-format tests (useful to create a footer)
 
 create table psql_serial_tab (id serial)
 --
-{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"psql_serial_tab","inh":true,"relpersistence":"p","location":83},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":103},"is_local":true,"location":100}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
-== 122
+{"version":180004,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"psql_serial_tab","inh":true,"relpersistence":"p","location":83},"tableElts":[{"ColumnDef":{"colname":"id","typeName":{"names":[{"String":{"sval":"serial"}}],"typemod":-1,"location":103},"is_local":true,"location":100}}],"oncommit":"ONCOMMIT_NOOP"}},"stmt_location":70}]}
+== 125
 -- test header/footer/tuples_only behavior in aligned/unaligned/wrapped cases
 
 
 -- empty table is a special case for this format
 select 1 where false
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":136}},"location":136}}],"whereClause":{"A_Const":{"boolval":{},"location":144}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 123
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"ival":{"ival":1},"location":136}},"location":136}}],"whereClause":{"A_Const":{"boolval":{},"location":144}},"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":129}]}
+== 126
 -- check conditional am display
 
 CREATE SCHEMA tableam_display
 --
-{"version":170007,"stmts":[{"stmt":{"CreateSchemaStmt":{"schemaname":"tableam_display"}}}]}
-== 124
+{"version":180004,"stmts":[{"stmt":{"CreateSchemaStmt":{"schemaname":"tableam_display"}},"stmt_location":33}]}
+== 127
 CREATE ROLE regress_display_role
 --
-{"version":170007,"stmts":[{"stmt":{"CreateRoleStmt":{"stmt_type":"ROLESTMT_ROLE","role":"regress_display_role"}}}]}
-== 125
+{"version":180004,"stmts":[{"stmt":{"CreateRoleStmt":{"stmt_type":"ROLESTMT_ROLE","role":"regress_display_role"}}}]}
+== 128
 ALTER SCHEMA tableam_display OWNER TO regress_display_role
 --
-{"version":170007,"stmts":[{"stmt":{"AlterOwnerStmt":{"objectType":"OBJECT_SCHEMA","object":{"String":{"sval":"tableam_display"}},"newowner":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_display_role","location":38}}}}]}
-== 126
+{"version":180004,"stmts":[{"stmt":{"AlterOwnerStmt":{"objectType":"OBJECT_SCHEMA","object":{"String":{"sval":"tableam_display"}},"newowner":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_display_role","location":38}}}}]}
+== 129
 SET search_path TO tableam_display
 --
-{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"search_path","args":[{"A_Const":{"sval":{"sval":"tableam_display"},"location":19}}]}}}]}
-== 127
+{"version":180004,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"search_path","args":[{"A_Const":{"sval":{"sval":"tableam_display"},"location":19}}],"location":19}}}]}
+== 130
 CREATE ACCESS METHOD heap_psql TYPE TABLE HANDLER heap_tableam_handler
 --
-{"version":170007,"stmts":[{"stmt":{"CreateAmStmt":{"amname":"heap_psql","handler_name":[{"String":{"sval":"heap_tableam_handler"}}],"amtype":"t"}}}]}
-== 128
+{"version":180004,"stmts":[{"stmt":{"CreateAmStmt":{"amname":"heap_psql","handler_name":[{"String":{"sval":"heap_tableam_handler"}}],"amtype":"t"}}}]}
+== 131
 SET ROLE TO regress_display_role
 --
-{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"role","args":[{"A_Const":{"sval":{"sval":"regress_display_role"},"location":12}}]}}}]}
-== 129
+{"version":180004,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_SET_VALUE","name":"role","args":[{"A_Const":{"sval":{"sval":"regress_display_role"},"location":12}}],"location":12}}}]}
+== 132
 -- Use only relations with a physical size of zero.
 CREATE TABLE tbl_heap_psql(f1 int, f2 char(100)) using heap_psql
 --
-{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":65},"tableElts":[{"ColumnDef":{"colname":"f1","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":82},"is_local":true,"location":79}},{"ColumnDef":{"colname":"f2","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bpchar"}}],"typmods":[{"A_Const":{"ival":{"ival":100},"location":95}}],"typemod":-1,"location":90},"is_local":true,"location":87}}],"oncommit":"ONCOMMIT_NOOP","accessMethod":"heap_psql"}}}]}
-== 130
+{"version":180004,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":65},"tableElts":[{"ColumnDef":{"colname":"f1","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":82},"is_local":true,"location":79}},{"ColumnDef":{"colname":"f2","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bpchar"}}],"typmods":[{"A_Const":{"ival":{"ival":100},"location":95}}],"typemod":-1,"location":90},"is_local":true,"location":87}}],"oncommit":"ONCOMMIT_NOOP","accessMethod":"heap_psql"}},"stmt_location":52}]}
+== 133
 CREATE TABLE tbl_heap(f1 int, f2 char(100)) using heap
 --
-{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tbl_heap","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"f1","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":25},"is_local":true,"location":22}},{"ColumnDef":{"colname":"f2","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bpchar"}}],"typmods":[{"A_Const":{"ival":{"ival":100},"location":38}}],"typemod":-1,"location":33},"is_local":true,"location":30}}],"oncommit":"ONCOMMIT_NOOP","accessMethod":"heap"}}}]}
-== 131
+{"version":180004,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tbl_heap","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"f1","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":25},"is_local":true,"location":22}},{"ColumnDef":{"colname":"f2","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"bpchar"}}],"typmods":[{"A_Const":{"ival":{"ival":100},"location":38}}],"typemod":-1,"location":33},"is_local":true,"location":30}}],"oncommit":"ONCOMMIT_NOOP","accessMethod":"heap"}}}]}
+== 134
 CREATE VIEW view_heap_psql AS SELECT f1 from tbl_heap_psql
 --
-{"version":170007,"stmts":[{"stmt":{"ViewStmt":{"view":{"relname":"view_heap_psql","inh":true,"relpersistence":"p","location":12},"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"f1"}}],"location":37}},"location":37}}],"fromClause":[{"RangeVar":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":45}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"withCheckOption":"NO_CHECK_OPTION"}}}]}
-== 132
+{"version":180004,"stmts":[{"stmt":{"ViewStmt":{"view":{"relname":"view_heap_psql","inh":true,"relpersistence":"p","location":12},"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"f1"}}],"location":37}},"location":37}}],"fromClause":[{"RangeVar":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":45}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"withCheckOption":"NO_CHECK_OPTION"}}}]}
+== 135
 CREATE MATERIALIZED VIEW mat_view_heap_psql USING heap_psql AS SELECT f1 from tbl_heap_psql
 --
-{"version":170007,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"f1"}}],"location":70}},"location":70}}],"fromClause":[{"RangeVar":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":78}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"mat_view_heap_psql","inh":true,"relpersistence":"p","location":25},"accessMethod":"heap_psql","onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_MATVIEW"}}}]}
-== 133
+{"version":180004,"stmts":[{"stmt":{"CreateTableAsStmt":{"query":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"f1"}}],"location":70}},"location":70}}],"fromClause":[{"RangeVar":{"relname":"tbl_heap_psql","inh":true,"relpersistence":"p","location":78}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"into":{"rel":{"relname":"mat_view_heap_psql","inh":true,"relpersistence":"p","location":25},"accessMethod":"heap_psql","onCommit":"ONCOMMIT_NOOP"},"objtype":"OBJECT_MATVIEW"}}}]}
+== 136
 -- AM is displayed for tables, indexes and materialized views.
 -- But not for views and sequences.
+-- \d with 'x' enables expanded mode, but only without a pattern
 RESET ROLE
 --
-{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"role"}}}]}
-== 134
+{"version":180004,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"role","location":-1}},"stmt_location":164}]}
+== 137
 RESET search_path
 --
-{"version":170007,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"search_path"}}}]}
-== 135
+{"version":180004,"stmts":[{"stmt":{"VariableSetStmt":{"kind":"VAR_RESET","name":"search_path","location":-1}}}]}
+== 138
 DROP SCHEMA tableam_display CASCADE
 --
-{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"String":{"sval":"tableam_display"}}],"removeType":"OBJECT_SCHEMA","behavior":"DROP_CASCADE"}}}]}
-== 136
+{"version":180004,"stmts":[{"stmt":{"DropStmt":{"objects":[{"String":{"sval":"tableam_display"}}],"removeType":"OBJECT_SCHEMA","behavior":"DROP_CASCADE"}}}]}
+== 139
 DROP ACCESS METHOD heap_psql
 --
-{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"String":{"sval":"heap_psql"}}],"removeType":"OBJECT_ACCESS_METHOD","behavior":"DROP_RESTRICT"}}}]}
-== 137
+{"version":180004,"stmts":[{"stmt":{"DropStmt":{"objects":[{"String":{"sval":"heap_psql"}}],"removeType":"OBJECT_ACCESS_METHOD","behavior":"DROP_RESTRICT"}}}]}
+== 140
 DROP ROLE regress_display_role
 --
-{"version":170007,"stmts":[{"stmt":{"DropRoleStmt":{"roles":[{"RoleSpec":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_display_role","location":10}}]}}}]}
-== 138
+{"version":180004,"stmts":[{"stmt":{"DropRoleStmt":{"roles":[{"RoleSpec":{"roletype":"ROLESPEC_CSTRING","rolename":"regress_display_role","location":10}}]}}}]}
+== 141
 -- test numericlocale (as best we can without control of psql's locale)
 
 
 select n, -n as m, n * 111 as x, '1e90'::float8 as f
 from generate_series(0,3) n
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":81}},"location":81}},{"ResTarget":{"name":"m","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":85}},"location":84}},"location":84}},{"ResTarget":{"name":"x","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":93}},"rexpr":{"A_Const":{"ival":{"ival":111},"location":97}},"location":95}},"location":93}},{"ResTarget":{"name":"f","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"1e90"},"location":107}},"typeName":{"names":[{"String":{"sval":"float8"}}],"typemod":-1,"location":115},"location":113}},"location":107}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{},"location":148}},{"A_Const":{"ival":{"ival":3},"location":150}}],"funcformat":"COERCE_EXPLICIT_CALL","location":132}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 139
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":81}},"location":81}},{"ResTarget":{"name":"m","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"-"}}],"rexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":85}},"location":84}},"location":84}},{"ResTarget":{"name":"x","val":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"*"}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":93}},"rexpr":{"A_Const":{"ival":{"ival":111},"location":97}},"location":95}},"location":93}},{"ResTarget":{"name":"f","val":{"TypeCast":{"arg":{"A_Const":{"sval":{"sval":"1e90"},"location":107}},"typeName":{"names":[{"String":{"sval":"float8"}}],"typemod":-1,"location":115},"location":113}},"location":107}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{},"location":148}},{"A_Const":{"ival":{"ival":3},"location":150}}],"funcformat":"COERCE_EXPLICIT_CALL","location":132}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":74}]}
+== 142
 -- test asciidoc output format
 
 
@@ -709,36 +747,36 @@ prepare q as
   select 'some|text' as "a|title", '        ' as "empty ", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a|title","val":{"A_Const":{"sval":{"sval":"some|text"},"location":56}},"location":56}},{"ResTarget":{"name":"empty ","val":{"A_Const":{"sval":{"sval":"        "},"location":82}},"location":82}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":106}},"location":106}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":138}},{"A_Const":{"ival":{"ival":2},"location":140}}],"funcformat":"COERCE_EXPLICIT_CALL","location":122}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 140
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 141
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 142
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a|title","val":{"A_Const":{"sval":{"sval":"some|text"},"location":56}},"location":56}},{"ResTarget":{"name":"empty ","val":{"A_Const":{"sval":{"sval":"        "},"location":82}},"location":82}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":106}},"location":106}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":138}},{"A_Const":{"ival":{"ival":2},"location":140}}],"funcformat":"COERCE_EXPLICIT_CALL","location":122}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":34}]}
 == 143
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 144
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 145
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 146
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 147
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 148
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 149
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 147
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 150
 -- test csv output format
 
 
@@ -748,37 +786,37 @@ prepare q as
          '   ' as "empty", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a\"title","val":{"A_Const":{"sval":{"sval":"some\"text"},"location":51}},"location":51}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":78}},"location":78}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":116}},"location":116}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":134}},"location":134}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":166}},{"A_Const":{"ival":{"ival":2},"location":168}}],"funcformat":"COERCE_EXPLICIT_CALL","location":150}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 148
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a\"title","val":{"A_Const":{"sval":{"sval":"some\"text"},"location":51}},"location":51}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":78}},"location":78}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":116}},"location":116}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":134}},"location":134}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":166}},{"A_Const":{"ival":{"ival":2},"location":168}}],"funcformat":"COERCE_EXPLICIT_CALL","location":150}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":29}]}
+== 151
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 149
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 152
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 150
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 153
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 151
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 154
 -- special cases
 select 'comma,comma' as comma, 'semi;semi' as semi
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"comma","val":{"A_Const":{"sval":{"sval":"comma,comma"},"location":24}},"location":24}},{"ResTarget":{"name":"semi","val":{"A_Const":{"sval":{"sval":"semi;semi"},"location":48}},"location":48}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 152
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"comma","val":{"A_Const":{"sval":{"sval":"comma,comma"},"location":24}},"location":24}},{"ResTarget":{"name":"semi","val":{"A_Const":{"sval":{"sval":"semi;semi"},"location":48}},"location":48}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":17}]}
+== 155
 select 'comma,comma' as comma, 'semi;semi' as semi
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"comma","val":{"A_Const":{"sval":{"sval":"comma,comma"},"location":7}},"location":7}},{"ResTarget":{"name":"semi","val":{"A_Const":{"sval":{"sval":"semi;semi"},"location":31}},"location":31}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 153
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"comma","val":{"A_Const":{"sval":{"sval":"comma,comma"},"location":7}},"location":7}},{"ResTarget":{"name":"semi","val":{"A_Const":{"sval":{"sval":"semi;semi"},"location":31}},"location":31}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 156
 select '\.' as data
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"data","val":{"A_Const":{"sval":{"sval":"\\."},"location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 154
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"data","val":{"A_Const":{"sval":{"sval":"\\."},"location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 157
 select '\' as d1, '' as d2
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"d1","val":{"A_Const":{"sval":{"sval":"\\"},"location":7}},"location":7}},{"ResTarget":{"name":"d2","val":{"A_Const":{"sval":{"sval":""},"location":18}},"location":18}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 155
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"d1","val":{"A_Const":{"sval":{"sval":"\\"},"location":7}},"location":7}},{"ResTarget":{"name":"d2","val":{"A_Const":{"sval":{"sval":""},"location":18}},"location":18}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 158
 -- illegal csv separators
 
 
@@ -791,36 +829,36 @@ prepare q as
          '   ' as "empty", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a&title","val":{"A_Const":{"sval":{"sval":"some\"text"},"location":80}},"location":80}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":106}},"location":106}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":144}},"location":144}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":162}},"location":162}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":194}},{"A_Const":{"ival":{"ival":2},"location":196}}],"funcformat":"COERCE_EXPLICIT_CALL","location":178}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 156
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 157
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 158
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a&title","val":{"A_Const":{"sval":{"sval":"some\"text"},"location":80}},"location":80}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":106}},"location":106}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":144}},"location":144}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":162}},"location":162}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":194}},{"A_Const":{"ival":{"ival":2},"location":196}}],"funcformat":"COERCE_EXPLICIT_CALL","location":178}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":58}]}
 == 159
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 160
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 161
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 162
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 163
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 164
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 165
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 163
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 166
 -- test latex output format
 
 
@@ -830,44 +868,44 @@ prepare q as
          '   ' as "empty", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a$title","val":{"A_Const":{"sval":{"sval":"some\\more_text"},"location":53}},"location":53}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  #\u003cfoo\u003e%&^~|\n{bar}"},"location":84}},"location":84}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":128}},"location":128}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":146}},"location":146}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":178}},{"A_Const":{"ival":{"ival":2},"location":180}}],"funcformat":"COERCE_EXPLICIT_CALL","location":162}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 164
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 165
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 166
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a$title","val":{"A_Const":{"sval":{"sval":"some\\more_text"},"location":53}},"location":53}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  #\u003cfoo\u003e%&^~|\n{bar}"},"location":84}},"location":84}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":128}},"location":128}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":146}},"location":146}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":178}},{"A_Const":{"ival":{"ival":2},"location":180}}],"funcformat":"COERCE_EXPLICIT_CALL","location":162}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":31}]}
 == 167
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 168
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 169
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 170
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 171
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 172
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 173
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 174
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 175
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 173
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 176
 -- test latex-longtable output format
 
 
@@ -877,52 +915,52 @@ prepare q as
          '   ' as "empty", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a$title","val":{"A_Const":{"sval":{"sval":"some\\more_text"},"location":63}},"location":63}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  #\u003cfoo\u003e%&^~|\n{bar}"},"location":94}},"location":94}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":138}},"location":138}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":156}},"location":156}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":188}},{"A_Const":{"ival":{"ival":2},"location":190}}],"funcformat":"COERCE_EXPLICIT_CALL","location":172}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 174
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 175
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 176
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a$title","val":{"A_Const":{"sval":{"sval":"some\\more_text"},"location":63}},"location":63}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  #\u003cfoo\u003e%&^~|\n{bar}"},"location":94}},"location":94}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":138}},"location":138}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":156}},"location":156}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":188}},{"A_Const":{"ival":{"ival":2},"location":190}}],"funcformat":"COERCE_EXPLICIT_CALL","location":172}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":41}]}
 == 177
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 178
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 179
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 180
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 181
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 182
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 183
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 184
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 185
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 186
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 187
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 185
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 188
 -- test troff-ms output format
 
 
@@ -932,36 +970,36 @@ prepare q as
          '   ' as "empty", n as int
   from generate_series(1,2) as n
 --
-{"version":170007,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a\\title","val":{"A_Const":{"sval":{"sval":"some\\text"},"location":56}},"location":56}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":82}},"location":82}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":120}},"location":120}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":138}},"location":138}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":170}},{"A_Const":{"ival":{"ival":2},"location":172}}],"funcformat":"COERCE_EXPLICIT_CALL","location":154}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}}}]}
-== 186
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 187
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
-== 188
-execute q
---
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"PrepareStmt":{"name":"q","query":{"SelectStmt":{"targetList":[{"ResTarget":{"name":"a\\title","val":{"A_Const":{"sval":{"sval":"some\\text"},"location":56}},"location":56}},{"ResTarget":{"name":"junk","val":{"A_Const":{"sval":{"sval":"  \u003cfoo\u003e\n\u003cbar\u003e"},"location":82}},"location":82}},{"ResTarget":{"name":"empty","val":{"A_Const":{"sval":{"sval":"   "},"location":120}},"location":120}},{"ResTarget":{"name":"int","val":{"ColumnRef":{"fields":[{"String":{"sval":"n"}}],"location":138}},"location":138}}],"fromClause":[{"RangeFunction":{"functions":[{"List":{"items":[{"FuncCall":{"funcname":[{"String":{"sval":"generate_series"}}],"args":[{"A_Const":{"ival":{"ival":1},"location":170}},{"A_Const":{"ival":{"ival":2},"location":172}}],"funcformat":"COERCE_EXPLICIT_CALL","location":154}},{}]}}],"alias":{"aliasname":"n"}}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}},"stmt_location":34}]}
 == 189
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 190
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 191
 execute q
 --
-{"version":170007,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
 == 192
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 193
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 194
+execute q
+--
+{"version":180004,"stmts":[{"stmt":{"ExecuteStmt":{"name":"q"}}}]}
+== 195
 deallocate q
 --
-{"version":170007,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
-== 193
+{"version":180004,"stmts":[{"stmt":{"DeallocateStmt":{"name":"q","location":11}}}]}
+== 196
 -- check ambiguous format requests
 
 
@@ -969,8 +1007,8 @@ deallocate q
 
 drop table psql_serial_tab
 --
-{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"psql_serial_tab"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
-== 194
+{"version":180004,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"psql_serial_tab"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}},"stmt_location":76}]}
+== 197
 -- \echo and allied features
 
 
@@ -981,12 +1019,12 @@ drop table psql_serial_tab
 
   select 'okay'
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"okay"},"location":72}},"location":72}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 195
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"okay"},"location":72}},"location":72}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"stmt_location":65}]}
+== 198
 select 'still okay'
 --
-{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"still okay"},"location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
-== 196
+{"version":180004,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"A_Const":{"sval":{"sval":"still okay"},"location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 199
 not okay
 --
 ERROR: syntax error at or near "not"

@@ -1,4 +1,4 @@
-// Ported from postgres_deparse.c (libpg_query 17-6.2.2).
+// Ported from postgres_deparse.c (libpg_query 18.0.0).
 // Clause helpers: any_name, expression lists, target lists, from lists.
 package deparse
 
@@ -697,6 +697,19 @@ func deparseAggregateWithArgtypes(st *state, object_with_args *ast.ObjectWithArg
 		}
 	}
 	st.appendChar(')')
+}
+
+// "opt_column_and_period_list" and "optionalPeriodName" in gram.y
+func deparseColumnListWithPeriod(st *state, columns []*ast.Node) {
+	for i, column := range columns {
+		if i == len(columns)-1 {
+			st.appendString("PERIOD ")
+		}
+		st.appendString(quoteIdentifier(strVal(column)))
+		if i < len(columns)-1 {
+			st.appendString(", ")
+		}
+	}
 }
 
 func deparseColumnList(st *state, columns []*ast.Node) {

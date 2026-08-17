@@ -184,7 +184,6 @@ func (p *parser) parseOpclassItem() *ast.Node {
 				p.syntaxErrorAt()
 			}
 		}
-		p.have(ast.Token_RECHECK)
 	case p.have(ast.Token_FUNCTION):
 		n.Itemtype = opclassItemFunction
 		n.Number = p.iconst()

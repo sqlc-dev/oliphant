@@ -451,23 +451,115 @@ explain (costs off)
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 WHERE unique1 = unique1 AND unique2 = unique2
 == 076
+-- Test that broken ECs are processed correctly during self join removal.
+-- Disable merge joins so that we don't get an error about missing commutator.
+-- Test both orientations of the join clause, because only one of them breaks
+-- the EC.
+set enable_mergejoin to off
+--
+SET enable_mergejoin TO OFF
+== 077
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on m.ff + n.ff = p.f1
+--
+EXPLAIN (COSTS OFF) SELECT * FROM ec0 m JOIN ec0 n ON m.ff = n.ff JOIN ec1 p ON (m.ff + n.ff) = p.f1
+== 078
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on p.f1::int8 = (m.ff + n.ff)::int8alias1
+--
+EXPLAIN (COSTS OFF) SELECT * FROM ec0 m JOIN ec0 n ON m.ff = n.ff JOIN ec1 p ON p.f1::int8 = (m.ff + n.ff)::int8alias1
+== 079
+reset enable_mergejoin
+--
+RESET enable_mergejoin
+== 080
 -- this could be converted, but isn't at present
 explain (costs off)
   select * from tenk1 where unique1 = unique1 or unique2 = unique2
 --
 EXPLAIN (COSTS OFF) SELECT * FROM tenk1 WHERE unique1 = unique1 OR unique2 = unique2
-== 077
+== 081
 -- check that we recognize equivalence with dummy domains in the way
 create temp table undername (f1 name, f2 int)
 --
 CREATE TEMPORARY TABLE undername (f1 name, f2 int)
-== 078
+== 082
 create temp view overview as
   select f1::information_schema.sql_identifier as sqli, f2 from undername
 --
 CREATE TEMPORARY VIEW overview AS SELECT f1::information_schema.sql_identifier AS sqli, f2 FROM undername
-== 079
+== 083
 explain (costs off)  -- this should not require a sort
   select * from overview where sqli = 'foo' order by sqli
 --
 EXPLAIN (COSTS OFF) SELECT * FROM overview WHERE sqli = 'foo' ORDER BY sqli
+== 084
+|--
+-- test handling of merge/hash clauses that do not have valid commutators
+|--
+
+-- There are not (and should not be) any such operators built into Postgres
+-- that are mergejoinable or hashable but have no commutators; so we leverage
+-- the alias type 'int8alias1' created in this file to conduct the tests.
+-- That's why this test is included here rather than in join.sql.
+
+begin
+--
+BEGIN
+== 085
+create table tbl_nocom(a int8, b int8alias1)
+--
+CREATE TABLE tbl_nocom (a int8, b int8alias1)
+== 086
+-- check that non-commutable merge clauses do not lead to error
+set enable_hashjoin to off
+--
+SET enable_hashjoin TO OFF
+== 087
+set enable_mergejoin to on
+--
+SET enable_mergejoin TO ON
+== 088
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+EXPLAIN (COSTS OFF) SELECT * FROM tbl_nocom t1 FULL JOIN tbl_nocom t2 ON t2.a = t1.b
+== 089
+-- check that non-commutable hash clauses do not lead to error
+alter operator = (int8, int8alias1) set (hashes)
+--
+ALTER OPERATOR =(int8, int8alias1) SET (hashes = NONE)
+== 090
+alter operator family integer_ops using hash add
+  operator 1 = (int8, int8alias1)
+--
+ALTER OPERATOR FAMILY integer_ops USING hash ADD OPERATOR 1 =(int8, int8alias1)
+== 091
+create function hashint8alias1(int8alias1) returns int
+  strict immutable language internal as 'hashint8'
+--
+CREATE FUNCTION hashint8alias1(int8alias1) RETURNS int RETURNS NULL ON NULL INPUT IMMUTABLE LANGUAGE internal AS $$hashint8$$
+== 092
+alter operator family integer_ops using hash add
+  function 1 hashint8alias1(int8alias1)
+--
+ALTER OPERATOR FAMILY integer_ops USING hash ADD FUNCTION 1 hashint8alias1(int8alias1)
+== 093
+set enable_hashjoin to on
+--
+SET enable_hashjoin TO ON
+== 094
+set enable_mergejoin to off
+--
+SET enable_mergejoin TO OFF
+== 095
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+EXPLAIN (COSTS OFF) SELECT * FROM tbl_nocom t1 FULL JOIN tbl_nocom t2 ON t2.a = t1.b
+== 096
+abort
+--
+ROLLBACK

@@ -1,7 +1,6 @@
 package plpgsql
 
 import (
-	"github.com/sqlc-dev/oliphant/ast"
 	"github.com/sqlc-dev/oliphant/internal/deparse"
 )
 
@@ -190,9 +189,8 @@ func (c *compiler) buildVariable(refname string, lineno int, dtype *plType, add2
 	case ttypeRec:
 		return c.buildRecord(refname, lineno, dtype, dtype.typoid, add2namespace)
 	case ttypePseudo:
-		// format_type_be is mocked to "-" in the vendored build.
 		panic(&compileError{
-			Message:  `variable "` + refname + `" has pseudo-type -`,
+			Message:  `variable "` + refname + `" has pseudo-type ` + formatTypeBe(dtype.typoid),
 			Filename: plCompFilename,
 			Funcname: "plpgsql_build_variable",
 		})
@@ -235,71 +233,20 @@ func (c *compiler) buildRecfield(rec *plRec, fldname string) *plRecfield {
 	return recfield
 }
 
-// buildDatatype is the vendored plpgsql_build_datatype mock: no catalog
-// access; the type name comes from the parsed TypeName (or the handful of
-// hardwired OIDs).
-func buildDatatype(typeOid uint32, typmod int32, collation uint32, origtypname *ast.TypeName) *plType {
-	typ := &plType{
-		ttype:     ttypeScalar,
-		atttypmod: typmod,
-		collation: collation,
-	}
-	var ident, ns string
-	if origtypname != nil {
-		typ.typoid = uint32(origtypname.TypeOid)
-		switch len(origtypname.Names) {
-		case 1:
-			ident = origtypname.Names[0].GetString_().GetSval()
-		case 2:
-			ns = origtypname.Names[0].GetString_().GetSval()
-			ident = origtypname.Names[1].GetString_().GetSval()
-			if ns != "pg_catalog" {
-				typ.ttype = ttypeRec
-			}
-		}
-	} else {
-		typ.typoid = typeOid
-		ns = "pg_catalog"
-		switch typeOid {
-		case oidBool:
-			ident = "boolean"
-		case oidInt4:
-			ident = "integer"
-		case oidText:
-			ident = "text"
-		case oidRefcursor:
-			ident = "refcursor"
-		}
-	}
-	if ident != "" {
-		typ.typname = quoteQualifiedIdentifier(ns, ident)
-	}
-	return typ
-}
-
-// buildDatatypeArrayof is the vendored plpgsql_build_datatype_arrayof mock.
-func buildDatatypeArrayof(dtype *plType) *plType {
+// buildDatatypeArrayof is plpgsql_build_datatype_arrayof (real at 18).
+func (c *compiler) buildDatatypeArrayof(dtype *plType) *plType {
+	// If it's already an array type, use it as-is: Postgres doesn't do
+	// nested arrays.
 	if dtype.typisarray {
 		return dtype
 	}
-	arr := &plType{
-		ttype:      ttypeRec,
-		atttypmod:  dtype.atttypmod,
-		collation:  dtype.collation,
-		typisarray: true,
+	arrayTypeid := getArrayType(dtype.typoid)
+	if arrayTypeid == 0 {
+		panic(compErr("plpgsql_build_datatype_arrayof",
+			"could not find array type for data type %s", formatTypeBe(dtype.typoid)))
 	}
-	switch dtype.typoid {
-	case oidBool:
-		arr.typname = "boolean[]"
-	case oidInt4:
-		arr.typname = "integer[]"
-	case oidText:
-		arr.typname = "text[]"
-	default:
-		arr.typname = "UNKNOWN"
-	}
-	arr.typoid = dtype.typoid
-	return arr
+	// Note we inherit typmod and collation, if any, from the element type.
+	return c.plpgsqlBuildDatatype(arrayTypeid, dtype.atttypmod, dtype.collation, nil)
 }
 
 // quoteQualifiedIdentifier is ruleutils.c's quote_qualified_identifier.
@@ -391,12 +338,22 @@ func (c *compiler) parseTripword(word1, word2, word3 string, wdatum *plWdatum, c
 	return false
 }
 
-// %TYPE / %ROWTYPE lookups are mocked to NULL in the vendored build.
-func (c *compiler) parseWordType(string) *plType    { return nil }
-func (c *compiler) parseWordRowType(string) *plType { return nil }
-func (c *compiler) parseCwordType([]string) *plType { return nil }
-func (c *compiler) parseCwordRowType([]string) *plType {
-	return nil
+// %TYPE / %ROWTYPE lookups are mocked in the vendored build to stubs that
+// keep the reference text as the typname ("<ident>%TYPE" and friends).
+func (c *compiler) parseWordType(ident string) *plType {
+	return &plType{typname: ident + "%TYPE", ttype: ttypeScalar}
+}
+
+func (c *compiler) parseWordRowType(ident string) *plType {
+	return &plType{typname: ident + "%rowtype", ttype: ttypeScalar}
+}
+
+func (c *compiler) parseCwordType(idents []string) *plType {
+	return &plType{typname: nameListToString(idents) + "%TYPE", ttype: ttypeScalar}
+}
+
+func (c *compiler) parseCwordRowType(idents []string) *plType {
+	return &plType{typname: nameListToString(idents) + "%rowtype", ttype: ttypeScalar}
 }
 
 // --- exception conditions ----------------------------------------------------

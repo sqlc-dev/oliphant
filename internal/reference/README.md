@@ -4,12 +4,12 @@ These files are **documentation only**: nothing in the build reads them except
 the table generators (`kwlist.h`, `pl_*_kwlist.h`, `plerrcodes.h`). They are
 the source of truth every `parse*` method's attribution comment points at.
 
-Provenance — PostgreSQL **17.7** source tarball with libpg_query
-**`17-6.2.2`**'s patches applied (the ones that touch these files):
+Provenance — PostgreSQL **18.4** source tarball with libpg_query
+**`18.0.0`**'s patches applied (the ones that touch these files):
 
 | File | Upstream path | Patches applied |
 |---|---|---|
-| `gram.y` | `src/backend/parser/gram.y` | 01 (additional `$n` param-ref positions) |
+| `gram.y` | `src/backend/parser/gram.y` | 01 (additional `$n` param-ref positions), 04 (SQL_COMMENT/C_COMMENT token declarations) |
 | `scan.l` | `src/backend/parser/scan.l` | 03 (`yyllocend` token-end tracking), 04 (comments as tokens), 09 (`param_junk` removed) |
 | `parser.c` | `src/backend/parser/parser.c` | 03, 04 (`base_yylex` lookahead filter — the NOT_LA/NULLS_LA/WITH_LA/WITHOUT_LA/FORMAT_LA merges live here) |
 | `kwlist.h` | `src/include/parser/kwlist.h` | none (copied from libpg_query's extracted `src/postgres/include/parser/kwlist.h`) |
@@ -18,6 +18,8 @@ Provenance — PostgreSQL **17.7** source tarball with libpg_query
 | `pl_reserved_kwlist.h` | `src/pl/plpgsql/src/pl_reserved_kwlist.h` | none (copied from libpg_query's `src/postgres/include/`) |
 | `pl_unreserved_kwlist.h` | `src/pl/plpgsql/src/pl_unreserved_kwlist.h` | none (same) |
 | `plerrcodes.h` | generated from `src/backend/utils/errcodes.txt` | none (copied from libpg_query's `src/postgres/include/`) |
+| `pg_query_pg_type.c` | libpg_query `src/include/pg_query_pg_type.c` | none (the mini pg_type catalog the mocked syscache serves; generator input for `internal/plpgsql/tables.go`) |
+| `pg_type_d.h` | `src/include/catalog/pg_type_d.h` | none (copied from libpg_query's extracted includes; resolves the OID macros in `pg_query_pg_type.c`) |
 
 oliphant ports **patched** PostgreSQL, never vanilla: `$1` parameter references
 are legal in more grammar positions, the lexer tracks token end offsets and
@@ -34,6 +36,6 @@ fails (so compile errors carry a "near line N" context instead of a cursor).
 The vendored `src/postgres/src_pl_plpgsql_src_pl_gram.c` at the pin is the
 authority where it differs from `pl_gram.y`.
 
-To re-derive: download `postgresql-17.7.tar.gz`, extract these paths, and
+To re-derive: download `postgresql-18.4.tar.gz`, extract these paths, and
 apply `patches/01,03,04,09` from the libpg_query tag (hunks touching other
 files skipped).

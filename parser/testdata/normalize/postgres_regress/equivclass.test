@@ -603,28 +603,144 @@ explain (costs off)
 explain (costs off)
   select * from tenk1 where unique1 = unique1 and unique2 = unique2
 == 076
--- this could be converted, but isn't at present
-explain (costs off)
-  select * from tenk1 where unique1 = unique1 or unique2 = unique2
+-- Test that broken ECs are processed correctly during self join removal.
+-- Disable merge joins so that we don't get an error about missing commutator.
+-- Test both orientations of the join clause, because only one of them breaks
+-- the EC.
+set enable_mergejoin to off
 --
--- this could be converted, but isn't at present
-explain (costs off)
-  select * from tenk1 where unique1 = unique1 or unique2 = unique2
+-- Test that broken ECs are processed correctly during self join removal.
+-- Disable merge joins so that we don't get an error about missing commutator.
+-- Test both orientations of the join clause, because only one of them breaks
+-- the EC.
+set enable_mergejoin to $1
 == 077
--- check that we recognize equivalence with dummy domains in the way
-create temp table undername (f1 name, f2 int)
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on m.ff + n.ff = p.f1
 --
--- check that we recognize equivalence with dummy domains in the way
-create temp table undername (f1 name, f2 int)
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on m.ff + n.ff = p.f1
 == 078
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on p.f1::int8 = (m.ff + n.ff)::int8alias1
+--
+explain (costs off)
+  select * from ec0 m join ec0 n on m.ff = n.ff
+  join ec1 p on p.f1::int8 = (m.ff + n.ff)::int8alias1
+== 079
+reset enable_mergejoin
+--
+reset enable_mergejoin
+== 080
+-- this could be converted, but isn't at present
+explain (costs off)
+  select * from tenk1 where unique1 = unique1 or unique2 = unique2
+--
+-- this could be converted, but isn't at present
+explain (costs off)
+  select * from tenk1 where unique1 = unique1 or unique2 = unique2
+== 081
+-- check that we recognize equivalence with dummy domains in the way
+create temp table undername (f1 name, f2 int)
+--
+-- check that we recognize equivalence with dummy domains in the way
+create temp table undername (f1 name, f2 int)
+== 082
 create temp view overview as
   select f1::information_schema.sql_identifier as sqli, f2 from undername
 --
 create temp view overview as
   select f1::information_schema.sql_identifier as sqli, f2 from undername
-== 079
+== 083
 explain (costs off)  -- this should not require a sort
   select * from overview where sqli = 'foo' order by sqli
 --
 explain (costs off)  -- this should not require a sort
   select * from overview where sqli = $1 order by sqli
+== 084
+|--
+-- test handling of merge/hash clauses that do not have valid commutators
+|--
+
+-- There are not (and should not be) any such operators built into Postgres
+-- that are mergejoinable or hashable but have no commutators; so we leverage
+-- the alias type 'int8alias1' created in this file to conduct the tests.
+-- That's why this test is included here rather than in join.sql.
+
+begin
+--
+|--
+-- test handling of merge/hash clauses that do not have valid commutators
+|--
+
+-- There are not (and should not be) any such operators built into Postgres
+-- that are mergejoinable or hashable but have no commutators; so we leverage
+-- the alias type 'int8alias1' created in this file to conduct the tests.
+-- That's why this test is included here rather than in join.sql.
+
+begin
+== 085
+create table tbl_nocom(a int8, b int8alias1)
+--
+create table tbl_nocom(a int8, b int8alias1)
+== 086
+-- check that non-commutable merge clauses do not lead to error
+set enable_hashjoin to off
+--
+-- check that non-commutable merge clauses do not lead to error
+set enable_hashjoin to $1
+== 087
+set enable_mergejoin to on
+--
+set enable_mergejoin to $1
+== 088
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+== 089
+-- check that non-commutable hash clauses do not lead to error
+alter operator = (int8, int8alias1) set (hashes)
+--
+-- check that non-commutable hash clauses do not lead to error
+alter operator = (int8, int8alias1) set (hashes)
+== 090
+alter operator family integer_ops using hash add
+  operator 1 = (int8, int8alias1)
+--
+alter operator family integer_ops using hash add
+  operator 1 = (int8, int8alias1)
+== 091
+create function hashint8alias1(int8alias1) returns int
+  strict immutable language internal as 'hashint8'
+--
+create function hashint8alias1(int8alias1) returns int
+  strict immutable language internal as $1
+== 092
+alter operator family integer_ops using hash add
+  function 1 hashint8alias1(int8alias1)
+--
+alter operator family integer_ops using hash add
+  function 1 hashint8alias1(int8alias1)
+== 093
+set enable_hashjoin to on
+--
+set enable_hashjoin to $1
+== 094
+set enable_mergejoin to off
+--
+set enable_mergejoin to $1
+== 095
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+--
+explain (costs off)
+select * from tbl_nocom t1 full join tbl_nocom t2 on t2.a = t1.b
+== 096
+abort
+--
+abort

@@ -29,12 +29,12 @@ select count(*) >= $1 as ok from pg_available_extensions
 == 003
 -- The entire output of pg_backend_memory_contexts is not stable,
 -- we test only the existence and basic condition of TopMemoryContext.
-select name, ident, parent, level, total_bytes >= free_bytes
-  from pg_backend_memory_contexts where level = 0
+select type, name, ident, level, total_bytes >= free_bytes
+  from pg_backend_memory_contexts where level = 1
 --
 -- The entire output of pg_backend_memory_contexts is not stable,
 -- we test only the existence and basic condition of TopMemoryContext.
-select name, ident, parent, level, total_bytes >= free_bytes
+select type, name, ident, level, total_bytes >= free_bytes
   from pg_backend_memory_contexts where level = $1
 == 004
 -- We can exercise some MemoryContext type stats functions.  Most of the
@@ -65,32 +65,52 @@ fetch 1 from cur
 --
 fetch 1 from cur
 == 007
-select name, parent, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
+select type, name, total_bytes > 0, total_nblocks, free_bytes > 0, free_chunks
 from pg_backend_memory_contexts where name = 'Caller tuples'
 --
-select name, parent, total_bytes > $1, total_nblocks, free_bytes > $2, free_chunks
+select type, name, total_bytes > $1, total_nblocks, free_bytes > $2, free_chunks
 from pg_backend_memory_contexts where name = $3
 == 008
 rollback
 --
 rollback
 == 009
+-- Further sanity checks on pg_backend_memory_contexts.  We expect
+-- CacheMemoryContext to have multiple children.  Ensure that's the case.
+with contexts as (
+  select * from pg_backend_memory_contexts
+)
+select count(*) > 1
+from contexts c1, contexts c2
+where c2.name = 'CacheMemoryContext'
+and c1.path[c2.level] = c2.path[c2.level]
+--
+-- Further sanity checks on pg_backend_memory_contexts.  We expect
+-- CacheMemoryContext to have multiple children.  Ensure that's the case.
+with contexts as (
+  select * from pg_backend_memory_contexts
+)
+select count(*) > $1
+from contexts c1, contexts c2
+where c2.name = $2
+and c1.path[c2.level] = c2.path[c2.level]
+== 010
 -- At introduction, pg_config had 23 entries; it may grow
 select count(*) > 20 as ok from pg_config
 --
 -- At introduction, pg_config had 23 entries; it may grow
 select count(*) > $1 as ok from pg_config
-== 010
+== 011
 -- We expect no cursors in this test; see also portals.sql
 select count(*) = 0 as ok from pg_cursors
 --
 -- We expect no cursors in this test; see also portals.sql
 select count(*) = $1 as ok from pg_cursors
-== 011
+== 012
 select count(*) >= 0 as ok from pg_file_settings
 --
 select count(*) >= $1 as ok from pg_file_settings
-== 012
+== 013
 -- There will surely be at least one rule, with no errors.
 select count(*) > 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
   from pg_hba_file_rules
@@ -98,7 +118,7 @@ select count(*) > 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_e
 -- There will surely be at least one rule, with no errors.
 select count(*) > $1 as ok, count(*) FILTER (WHERE error IS NOT NULL) = $2 AS no_err
   from pg_hba_file_rules
-== 013
+== 014
 -- There may be no rules, and there should be no errors.
 select count(*) >= 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_err
   from pg_ident_file_mappings
@@ -106,43 +126,43 @@ select count(*) >= 0 as ok, count(*) FILTER (WHERE error IS NOT NULL) = 0 AS no_
 -- There may be no rules, and there should be no errors.
 select count(*) >= $1 as ok, count(*) FILTER (WHERE error IS NOT NULL) = $2 AS no_err
   from pg_ident_file_mappings
-== 014
+== 015
 -- There will surely be at least one active lock
 select count(*) > 0 as ok from pg_locks
 --
 -- There will surely be at least one active lock
 select count(*) > $1 as ok from pg_locks
-== 015
+== 016
 -- We expect no prepared statements in this test; see also prepare.sql
 select count(*) = 0 as ok from pg_prepared_statements
 --
 -- We expect no prepared statements in this test; see also prepare.sql
 select count(*) = $1 as ok from pg_prepared_statements
-== 016
+== 017
 -- See also prepared_xacts.sql
 select count(*) >= 0 as ok from pg_prepared_xacts
 --
 -- See also prepared_xacts.sql
 select count(*) >= $1 as ok from pg_prepared_xacts
-== 017
+== 018
 -- There will surely be at least one SLRU cache
 select count(*) > 0 as ok from pg_stat_slru
 --
 -- There will surely be at least one SLRU cache
 select count(*) > $1 as ok from pg_stat_slru
-== 018
+== 019
 -- There must be only one record
 select count(*) = 1 as ok from pg_stat_wal
 --
 -- There must be only one record
 select count(*) = $1 as ok from pg_stat_wal
-== 019
+== 020
 -- We expect no walreceiver running in this test
 select count(*) = 0 as ok from pg_stat_wal_receiver
 --
 -- We expect no walreceiver running in this test
 select count(*) = $1 as ok from pg_stat_wal_receiver
-== 020
+== 021
 -- This is to record the prevailing planner enable_foo settings during
 -- a regression test run.
 select name, setting from pg_settings where name like 'enable%'
@@ -150,7 +170,7 @@ select name, setting from pg_settings where name like 'enable%'
 -- This is to record the prevailing planner enable_foo settings during
 -- a regression test run.
 select name, setting from pg_settings where name like $1
-== 021
+== 022
 -- There are always wait event descriptions for various types.  InjectionPoint
 -- may be present or absent, depending on history since last postmaster start.
 select type, count(*) > 0 as ok FROM pg_wait_events
@@ -160,7 +180,7 @@ select type, count(*) > 0 as ok FROM pg_wait_events
 -- may be present or absent, depending on history since last postmaster start.
 select type, count(*) > $1 as ok FROM pg_wait_events
   where type <> $2 group by type order by type COLLATE "C"
-== 022
+== 023
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail
 -- without the outputs changing anytime IANA updates the underlying data,
@@ -176,25 +196,33 @@ select count(distinct utc_offset) >= 24 as ok from pg_timezone_names
 -- (At the time of writing, the actual counts are around 38 because of
 -- zones using fractional GMT offsets, so this is a pretty loose test.)
 select count(distinct utc_offset) >= $1 as ok from pg_timezone_names
-== 023
+== 024
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs
-== 024
+== 025
 -- Let's check the non-default timezone abbreviation sets, too
 set timezone_abbreviations = 'Australia'
 --
 -- Let's check the non-default timezone abbreviation sets, too
 set timezone_abbreviations = $1
-== 025
+== 026
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs
-== 026
+== 027
 set timezone_abbreviations = 'India'
 --
 set timezone_abbreviations = $1
-== 027
+== 028
 select count(distinct utc_offset) >= 24 as ok from pg_timezone_abbrevs
 --
 select count(distinct utc_offset) >= $1 as ok from pg_timezone_abbrevs
+== 029
+-- One specific case we can check without much fear of breakage
+-- is the historical local-mean-time value used for America/Los_Angeles.
+select * from pg_timezone_abbrevs where abbrev = 'LMT'
+--
+-- One specific case we can check without much fear of breakage
+-- is the historical local-mean-time value used for America/Los_Angeles.
+select * from pg_timezone_abbrevs where abbrev = $1

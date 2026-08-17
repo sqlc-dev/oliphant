@@ -311,3 +311,11 @@ func nFetchStmt(s *ast.FetchStmt) *ast.Node {
 func nClosePortalStmt(s *ast.ClosePortalStmt) *ast.Node {
 	return &ast.Node{Node: &ast.Node_ClosePortalStmt{ClosePortalStmt: s}}
 }
+
+func nReturningOption(r *ast.ReturningOption) *ast.Node {
+	return &ast.Node{Node: &ast.Node_ReturningOption{ReturningOption: r}}
+}
+
+func nATAlterConstraint(c *ast.ATAlterConstraint) *ast.Node {
+	return &ast.Node{Node: &ast.Node_AtalterConstraint{AtalterConstraint: c}}
+}

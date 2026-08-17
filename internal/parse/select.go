@@ -5,12 +5,16 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 )
 
-// selectLimit mirrors gram.y's SelectLimit struct.
+// selectLimit mirrors gram.y's SelectLimit struct, including the PG 18
+// error-cursor locations (offsetLoc/countLoc/optionLoc, -1 when absent).
 type selectLimit struct {
 	limitOffset *ast.Node
 	limitCount  *ast.Node
 	limitOption ast.LimitOption
 	optionTok   lexer.Token
+	offsetLoc   int32
+	countLoc    int32
+	optionLoc   int32
 }
 
 // parseSelectStmt is gram.y's SelectStmt:
@@ -206,7 +210,8 @@ func (p *parser) startsTargetEl() bool {
 	case 0, ast.Token(';'), ast.Token(')'), ast.Token_FROM, ast.Token_INTO,
 		ast.Token_WHERE, ast.Token_GROUP_P, ast.Token_HAVING, ast.Token_WINDOW,
 		ast.Token_ORDER, ast.Token_LIMIT, ast.Token_OFFSET, ast.Token_FETCH,
-		ast.Token_FOR, ast.Token_UNION, ast.Token_INTERSECT, ast.Token_EXCEPT:
+		ast.Token_FOR, ast.Token_UNION, ast.Token_INTERSECT, ast.Token_EXCEPT,
+		ast.Token_RETURNING:
 		return false
 	}
 	return true
@@ -1165,7 +1170,12 @@ func (p *parser) parseForLockingClause() []*ast.Node {
 
 // parseSelectLimit is gram.y's select_limit.
 func (p *parser) parseSelectLimit() *selectLimit {
-	sl := &selectLimit{limitOption: ast.LimitOption_LIMIT_OPTION_UNDEFINED}
+	sl := &selectLimit{
+		limitOption: ast.LimitOption_LIMIT_OPTION_UNDEFINED,
+		offsetLoc:   -1,
+		countLoc:    -1,
+		optionLoc:   -1,
+	}
 	seenLimit, seenOffset := false, false
 	for {
 		switch {
@@ -1173,6 +1183,7 @@ func (p *parser) parseSelectLimit() *selectLimit {
 			tok := p.next()
 			seenLimit = true
 			sl.optionTok = tok
+			sl.countLoc = tok.Start
 			if p.kind() == ast.Token_ALL {
 				// LIMIT ALL is represented as a NULL constant
 				all := p.next()
@@ -1185,8 +1196,9 @@ func (p *parser) parseSelectLimit() *selectLimit {
 				p.ereport("base_yyparse", "LIMIT #,# syntax is not supported", tok.Start)
 			}
 		case !seenOffset && p.kind() == ast.Token_OFFSET:
-			p.next()
+			otok := p.next()
 			seenOffset = true
+			sl.offsetLoc = otok.Start
 			// select_offset_value: a_expr | select_fetch_first_value row_or_rows
 			sl.limitOffset = p.parseAExpr(0)
 			if p.kind() == ast.Token_ROW || p.kind() == ast.Token_ROWS {
@@ -1199,6 +1211,7 @@ func (p *parser) parseSelectLimit() *selectLimit {
 			tok := p.next()
 			seenLimit = true
 			sl.optionTok = tok
+			sl.countLoc = tok.Start
 			// first_or_next
 			if !p.have(ast.Token_FIRST_P) {
 				p.expect(ast.Token_NEXT)
@@ -1215,9 +1228,10 @@ func (p *parser) parseSelectLimit() *selectLimit {
 			if p.have(ast.Token_ONLY) {
 				sl.limitOption = ast.LimitOption_LIMIT_OPTION_COUNT
 			} else {
-				p.expect(ast.Token_WITH)
+				wtok := p.expect(ast.Token_WITH)
 				p.expect(ast.Token_TIES)
 				sl.limitOption = ast.LimitOption_LIMIT_OPTION_WITH_TIES
+				sl.optionLoc = wtok.Start
 			}
 		default:
 			if sl.limitOption == ast.LimitOption_LIMIT_OPTION_UNDEFINED {
@@ -1272,14 +1286,14 @@ func (p *parser) insertSelectOptions(stmt *ast.SelectStmt, sortClause []*ast.Nod
 	if limit != nil && limit.limitOffset != nil {
 		if stmt.LimitOffset != nil {
 			p.ereport("insertSelectOptions", "multiple OFFSET clauses not allowed",
-				exprLocation(limit.limitOffset))
+				limit.offsetLoc)
 		}
 		stmt.LimitOffset = limit.limitOffset
 	}
 	if limit != nil && limit.limitCount != nil {
 		if stmt.LimitCount != nil {
 			p.ereport("insertSelectOptions", "multiple LIMIT clauses not allowed",
-				exprLocation(limit.limitCount))
+				limit.countLoc)
 		}
 		stmt.LimitCount = limit.limitCount
 	}
@@ -1288,14 +1302,14 @@ func (p *parser) insertSelectOptions(stmt *ast.SelectStmt, sortClause []*ast.Nod
 			p.ereport("insertSelectOptions", "multiple limit options not allowed", -1)
 		}
 		if stmt.SortClause == nil && limit.limitOption == ast.LimitOption_LIMIT_OPTION_WITH_TIES {
-			p.ereport("insertSelectOptions", "WITH TIES cannot be specified without ORDER BY clause", -1)
+			p.ereport("insertSelectOptions", "WITH TIES cannot be specified without ORDER BY clause", limit.optionLoc)
 		}
 		if limit.limitOption == ast.LimitOption_LIMIT_OPTION_WITH_TIES && stmt.LockingClause != nil {
 			for _, lcn := range stmt.LockingClause {
 				lc := lcn.GetLockingClause()
 				if lc != nil && lc.WaitPolicy == ast.LockWaitPolicy_LockWaitSkip {
 					p.ereport("insertSelectOptions",
-						"SKIP LOCKED and WITH TIES options cannot be used together", -1)
+						"SKIP LOCKED and WITH TIES options cannot be used together", limit.optionLoc)
 				}
 			}
 		}

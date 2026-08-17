@@ -1,6 +1,6 @@
 // Package fingerprint computes libpg_query's version-3 query fingerprints
 // (pg_query_fingerprint.c + the generated pg_query_fingerprint_defs.c /
-// pg_query_fingerprint_conds.c at the pinned 17-6.2.2).
+// pg_query_fingerprint_conds.c at the pinned 18.0.0).
 //
 // Like the JSON emitter (internal/emit), the per-node walk is driven by
 // protobuf reflection rather than generated per-node code: the upstream defs
@@ -60,7 +60,15 @@ const maxDepth = 100
 // Tree fingerprints a full parse result (pg_query_fingerprint's
 // _fingerprintNode over the raw statement list).
 func Tree(tree *ast.ParseResult) uint64 {
+	return TreeWithEmpties(tree, nil)
+}
+
+// TreeWithEmpties is Tree with the parser's present-but-empty string set:
+// the C fingerprint emits a field name for a non-NULL empty string
+// (COMMENT ... IS ”), which proto3 cannot represent in the tree alone.
+func TreeWithEmpties(tree *ast.ParseResult, empties map[any]bool) uint64 {
 	ctx := newContext()
+	ctx.empties = empties
 	// The C tree is a List of RawStmt; _fingerprintNode(tree, NULL, NULL, 0)
 	// dispatches to _fingerprintList (no sorted field name), which visits
 	// each element at depth 1.
@@ -97,6 +105,8 @@ type context struct {
 	// sort-fields would be re-hashed once per enclosing sort level, going
 	// exponential on deep trees (the 1.1 MB stress query).
 	listsortCache map[listKey][]sortItem
+	// empties is the parser's present-but-empty string set (TreeWithEmpties).
+	empties map[any]bool
 }
 
 func newContext() *context {
@@ -106,7 +116,7 @@ func newContext() *context {
 // sub creates a scratch context sharing the listsort cache
 // (_fingerprintInitContext with a parent).
 func (ctx *context) sub() *context {
-	return &context{listsortCache: ctx.listsortCache}
+	return &context{listsortCache: ctx.listsortCache, empties: ctx.empties}
 }
 
 func (ctx *context) digest() uint64 {
@@ -265,7 +275,12 @@ var skipNodes = map[string]bool{
 // every node type.
 var skipFields = map[[2]string]bool{
 	{"", "location"}:                       true,
+	{"", "list_start"}:                     true,
+	{"", "list_end"}:                       true,
 	{"", "xpr"}:                            true,
+	{"A_Expr", "rexpr_list_start"}:         true,
+	{"A_Expr", "rexpr_list_end"}:           true,
+	{"VariableSetStmt", "jumble_args"}:     true,
 	{"PrepareStmt", "name"}:                true,
 	{"ExecuteStmt", "name"}:                true,
 	{"DeallocateStmt", "name"}:             true,
@@ -305,8 +320,12 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 	if skipNodes[msgName] {
 		return // Intentionally ignoring all fields for fingerprinting
 	}
+	if msgName == "RangeVar" {
+		// FINGERPRINT_RANGE_VAR_BODY: complete hand-written fingerprint.
+		ctx.rangeVarFields(m, parentType, fieldName)
+		return
+	}
 
-	fds := d.Fields()
 	order := sortedFields(d)
 
 	for _, fd := range order {
@@ -324,26 +343,6 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 			if s := v.String(); s != "" && !(parentType == "SelectStmt" && fieldName == "targetList") {
 				ctx.str("name")
 				ctx.str(s)
-			}
-			continue
-		case msgName == "RangeVar" && name == "relname":
-			// Runs of two or more digits are stripped (sharded table names
-			// hash together), and temp table names are ignored entirely.
-			relname := v.String()
-			relpersistence := m.Get(fds.ByJSONName("relpersistence")).String()
-			if relname != "" && relpersistence != "t" {
-				r := make([]byte, 0, len(relname))
-				for i := 0; i < len(relname); i++ {
-					c := relname[i]
-					if c >= '0' && c <= '9' &&
-						((i+1 < len(relname) && relname[i+1] >= '0' && relname[i+1] <= '9') ||
-							(i > 0 && relname[i-1] >= '0' && relname[i-1] <= '9')) {
-						continue
-					}
-					r = append(r, c)
-				}
-				ctx.str("relname")
-				ctx.str(string(r))
 			}
 			continue
 		case msgName == "A_Expr" && name == "kind":
@@ -440,7 +439,8 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 				ctx.str("true")
 			}
 		case fd.Kind() == protoreflect.StringKind:
-			if s := v.String(); s != "" || alwaysEmitString[[2]string{msgName, name}] {
+			if s := v.String(); s != "" || alwaysEmitString[[2]string{msgName, name}] ||
+				ctx.empties[m.Interface()] {
 				ctx.str(name)
 				ctx.str(s)
 			}
@@ -465,4 +465,84 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 
 func enumName(fd protoreflect.FieldDescriptor, n protoreflect.EnumNumber) string {
 	return string(fd.Enum().Values().ByNumber(n).Name())
+}
+
+// rangeVarFields is 18.0.0's hand-written _fingerprintRangeVar body
+// (FINGERPRINT_RANGE_VAR_BODY): it mirrors PostgreSQL's post-analysis query
+// jumble for relation references. In SELECT/DML contexts the user alias
+// contributes (and suppresses the relation name), and the schema name is
+// dropped; in utility contexts the relation and schema names always
+// contribute. Temp-table relname elision and digit-run stripping carry over
+// from 17.
+func (ctx *context) rangeVarFields(m protoreflect.Message, parentType, fieldName string) {
+	fds := m.Descriptor().Fields()
+	str := func(name string) string { return m.Get(fds.ByJSONName(name)).String() }
+
+	isDMLContext := false
+	switch parentType {
+	case "SelectStmt":
+		isDMLContext = fieldName == "fromClause"
+	case "InsertStmt":
+		isDMLContext = fieldName == "relation"
+	case "UpdateStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "fromClause"
+	case "DeleteStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "usingClause"
+	case "MergeStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "sourceRelation"
+	case "JoinExpr", "RangeTableSample", "LockingClause":
+		isDMLContext = true
+	}
+
+	var aliasname string
+	if m.Has(fds.ByJSONName("alias")) {
+		alias := m.Get(fds.ByJSONName("alias")).Message()
+		aliasname = alias.Get(alias.Descriptor().Fields().ByJSONName("aliasname")).String()
+	}
+	if aliasname != "" {
+		ctx.str("aliasname")
+		ctx.str(aliasname)
+	}
+
+	if catalogname := str("catalogname"); catalogname != "" {
+		ctx.str("catalogname")
+		ctx.str(catalogname)
+	}
+
+	if m.Get(fds.ByJSONName("inh")).Bool() {
+		ctx.str("inh")
+		ctx.str("true")
+	}
+
+	// Intentionally ignoring location for fingerprinting
+
+	// In DML/SELECT context, the relation name only contributes when there
+	// is no user alias; runs of two or more digits are stripped (sharded
+	// table names hash together), and temp table names are ignored entirely.
+	relname := str("relname")
+	relpersistence := str("relpersistence")
+	if relname != "" && relpersistence != "t" && !(isDMLContext && m.Has(fds.ByJSONName("alias"))) {
+		r := make([]byte, 0, len(relname))
+		for i := 0; i < len(relname); i++ {
+			c := relname[i]
+			if c >= '0' && c <= '9' &&
+				((i+1 < len(relname) && relname[i+1] >= '0' && relname[i+1] <= '9') ||
+					(i > 0 && relname[i-1] >= '0' && relname[i-1] <= '9')) {
+				continue
+			}
+			r = append(r, c)
+		}
+		ctx.str("relname")
+		ctx.str(string(r))
+	}
+
+	if relpersistence != "" {
+		ctx.str("relpersistence")
+		ctx.str(relpersistence)
+	}
+
+	if schemaname := str("schemaname"); schemaname != "" && !isDMLContext {
+		ctx.str("schemaname")
+		ctx.str(schemaname)
+	}
 }

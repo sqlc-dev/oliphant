@@ -429,40 +429,198 @@ create table inttest (a myint)
 --
 create table inttest (a myint)
 == 064
-insert into inttest values(1::myint),(null)
+insert into inttest values (null), (0::myint), (1::myint)
 --
-insert into inttest values($1::myint),($2)
+insert into inttest values ($1), ($2::myint), ($3::myint)
 == 065
--- try an array with enough elements to cause hashing
-select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+-- Test EEOP_HASHED_SCALARARRAYOP against EEOP_SCALARARRAYOP.  Ensure the
+-- result of non-hashed vs hashed is the same.
+select
+  a,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed
+from inttest
 --
--- try an array with enough elements to cause hashing
-select * from inttest where a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint,$9::myint, $10)
+-- Test EEOP_HASHED_SCALARARRAYOP against EEOP_SCALARARRAYOP.  Ensure the
+-- result of non-hashed vs hashed is the same.
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
 == 066
-select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+select
+  a,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+ from inttest
 --
-select * from inttest where a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint,$9::myint, $10)
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+ from inttest
 == 067
-select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+select
+  a,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed
+from inttest
 --
-select * from inttest where a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint,$9::myint, $10)
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
 == 068
--- ensure the result matched with the non-hashed version.  We simply remove
--- some array elements so that we don't reach the hashing threshold.
-select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+select
+  a,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+from inttest
 --
--- ensure the result matched with the non-hashed version.  We simply remove
--- some array elements so that we don't reach the hashing threshold.
-select * from inttest where a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint, $6)
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
 == 069
-select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+-- Now make the equal function return false when given two NULLs
+create or replace function myinteq(myint, myint) returns bool as $$
+begin
+  if $1 is null and $2 is null then
+    return false;
+  else
+    return $1::int = $2::int;
+  end if;
+end;
+$$ language plpgsql immutable
 --
-select * from inttest where a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint, $6)
+-- Now make the equal function return false when given two NULLs
+create or replace function myinteq(myint, myint) returns bool as $1 language plpgsql immutable
 == 070
-select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint, null)
+-- And try the same again to ensure EEOP_HASHED_SCALARARRAYOP does the same
+-- thing as EEOP_SCALARARRAYOP.
+select
+  a,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed
+from inttest
 --
-select * from inttest where a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint, $6)
+-- And try the same again to ensure EEOP_HASHED_SCALARARRAYOP does the same
+-- thing as EEOP_SCALARARRAYOP.
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
 == 071
+select
+  a,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+ from inttest
+--
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+ from inttest
+== 072
+select
+  a,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed
+from inttest
+--
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
+== 073
+select
+  a,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+from inttest
+--
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
+== 074
+-- Try again with an equality function that treats NULLs as equal to 0.
+create or replace function myinteq(myint, myint) returns bool as $$
+begin
+  if $1 is null and $2 is null then
+    return false;
+  else
+    return coalesce($1::int,0) = coalesce($2::int, 0);
+  end if;
+end;
+$$ language plpgsql immutable
+--
+-- Try again with an equality function that treats NULLs as equal to 0.
+create or replace function myinteq(myint, myint) returns bool as $1 language plpgsql immutable
+== 075
+select
+  a,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed,
+  a in (0::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed_zero,
+  a in (0::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed_zero
+from inttest
+--
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed,
+  a in ($18::myint,$19::myint,$20::myint,$21::myint,$22::myint,$23::myint,$24::myint,$25::myint) as not_hashed_zero,
+  a in ($26::myint,$27::myint,$28::myint,$29::myint,$30::myint,$31::myint,$32::myint,$33::myint,$34::myint) as hashed_zero
+from inttest
+== 076
+select
+  a,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+ from inttest
+--
+select
+  a,
+  a in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+ from inttest
+== 077
+select
+  a,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as not_hashed,
+  a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint) as hashed,
+  a not in (0::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed_zero,
+  a not in (0::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed_zero
+from inttest
+--
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed,
+  a not in ($18::myint,$19::myint,$20::myint,$21::myint,$22::myint,$23::myint,$24::myint,$25::myint) as not_hashed_zero,
+  a not in ($26::myint,$27::myint,$28::myint,$29::myint,$30::myint,$31::myint,$32::myint,$33::myint,$34::myint) as hashed_zero
+from inttest
+== 078
+select
+  a,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint) as not_hashed,
+  a not in (null::myint,1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint) as hashed
+from inttest
+--
+select
+  a,
+  a not in ($1::myint,$2::myint,$3::myint,$4::myint,$5::myint,$6::myint,$7::myint,$8::myint) as not_hashed,
+  a not in ($9::myint,$10::myint,$11::myint,$12::myint,$13::myint,$14::myint,$15::myint,$16::myint,$17::myint) as hashed
+from inttest
+== 079
 rollback
 --
 rollback

@@ -73,9 +73,10 @@ func (p *parser) parseFuncType() *ast.TypeName {
 	return p.parseTypename()
 }
 
-// parseFuncArg is gram.y's func_arg.
+// parseFuncArg is gram.y's func_arg. Every alternative sets location = @1,
+// the parameter's first token.
 func (p *parser) parseFuncArg() *ast.FunctionParameter {
-	n := &ast.FunctionParameter{Mode: ast.FunctionParameterMode_FUNC_PARAM_DEFAULT}
+	n := &ast.FunctionParameter{Mode: ast.FunctionParameterMode_FUNC_PARAM_DEFAULT, Location: p.loc()}
 	mode, haveMode := p.parseArgClass()
 	if haveMode {
 		n.Mode = mode
@@ -506,7 +507,9 @@ func (p *parser) parseCommentStmt() *ast.Node {
 	p.expect(ast.Token_IS)
 	// comment_text: Sconst | NULL_P
 	if !p.have(ast.Token_NULL_P) {
-		n.Comment = p.sconst()
+		if n.Comment = p.sconst(); n.Comment == "" {
+			p.markEmptyString(n)
+		}
 	}
 	return &ast.Node{Node: &ast.Node_CommentStmt{CommentStmt: n}}
 }
@@ -522,7 +525,9 @@ func (p *parser) parseSecLabelStmt() *ast.Node {
 	n.Objtype, n.Object = p.parseCommentOrLabelObject()
 	p.expect(ast.Token_IS)
 	if !p.have(ast.Token_NULL_P) {
-		n.Label = p.sconst()
+		if n.Label = p.sconst(); n.Label == "" {
+			p.markEmptyString(n)
+		}
 	}
 	return &ast.Node{Node: &ast.Node_SecLabelStmt{SecLabelStmt: n}}
 }

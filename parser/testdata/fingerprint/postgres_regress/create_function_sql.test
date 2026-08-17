@@ -543,7 +543,7 @@ SELECT routine_name, ordinal_position, parameter_name, parameter_default
     WHERE routine_schema = 'temp_func_test' AND routine_name ~ '^functest_is_'
     ORDER BY 1, 2
 --
-3eda978853d1389d
+ed97d0fe2e07b411
 == 100
 DROP FUNCTION functest_IS_1(int, int, text), functest_IS_2(int), functest_IS_3(int)
 --
@@ -596,25 +596,25 @@ SELECT r0.routine_name, r1.routine_name
         r1.routine_schema = 'temp_func_test'
   ORDER BY 1, 2
 --
-22687657da6d394a
+13d6dc2083e52e59
 == 109
 SELECT routine_name, sequence_name FROM information_schema.routine_sequence_usage
   WHERE routine_schema = 'temp_func_test'
   ORDER BY 1, 2
 --
-6b5e95eb227d244c
+909c20b5ede3664b
 == 110
 SELECT routine_name, table_name, column_name FROM information_schema.routine_column_usage
   WHERE routine_schema = 'temp_func_test'
   ORDER BY 1, 2
 --
-490b2c7fae1f8b80
+02e47cce1015d5e5
 == 111
 SELECT routine_name, table_name FROM information_schema.routine_table_usage
   WHERE routine_schema = 'temp_func_test'
   ORDER BY 1, 2
 --
-e4408e57808dbe86
+d66604f05d2e2d56
 == 112
 DROP FUNCTION functest_IS_4a CASCADE
 --
@@ -668,16 +668,28 @@ DROP FUNCTION functest1(a int)
 --
 75e3726c2db05d85
 == 123
+-- early shutdown of set-returning functions
+
+CREATE FUNCTION functest_srf0() RETURNS SETOF int
+LANGUAGE SQL
+AS $$ SELECT i FROM generate_series(1, 100) i $$
+--
+74b41b34758af558
+== 124
+SELECT functest_srf0() LIMIT 5
+--
+12468d6cd2845e3c
+== 125
 -- inlining of set-returning functions
 
 CREATE TABLE functest3 (a int)
 --
 face7ed03c5fd908
-== 124
+== 126
 INSERT INTO functest3 VALUES (1), (2), (3)
 --
 cc4dd367e62bb9f1
-== 125
+== 127
 CREATE FUNCTION functest_sri1() RETURNS SETOF int
 LANGUAGE SQL
 STABLE
@@ -686,15 +698,15 @@ AS '
 '
 --
 ac9ef12f050e681a
-== 126
+== 128
 SELECT * FROM functest_sri1()
 --
 231c6f45bd672582
-== 127
+== 129
 EXPLAIN (verbose, costs off) SELECT * FROM functest_sri1()
 --
 8af05a87da4d1397
-== 128
+== 130
 CREATE FUNCTION functest_sri2() RETURNS SETOF int
 LANGUAGE SQL
 STABLE
@@ -705,83 +717,124 @@ ERROR: syntax error at end of input
 CURSORPOS: 111
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 129
+== 131
 END
 --
 7bbcde9cfab6c79c
-== 130
+== 132
 SELECT * FROM functest_sri2()
 --
 f87cd4d3ff54fc83
-== 131
+== 133
 EXPLAIN (verbose, costs off) SELECT * FROM functest_sri2()
 --
 1d30c441fd4b9058
-== 132
+== 134
 DROP TABLE functest3 CASCADE
 --
 8d88d0f2ad904993
-== 133
+== 135
 -- Check behavior of VOID-returning SQL functions
 
 CREATE FUNCTION voidtest1(a int) RETURNS VOID LANGUAGE SQL AS
 $$ SELECT a + 1 $$
 --
 ad6c8b5d260ed052
-== 134
+== 136
 SELECT voidtest1(42)
 --
 d5349fa9f45859c3
-== 135
+== 137
 CREATE FUNCTION voidtest2(a int, b int) RETURNS VOID LANGUAGE SQL AS
 $$ SELECT voidtest1(a + b) $$
 --
 48729573be6afd2d
-== 136
+== 138
 SELECT voidtest2(11,22)
 --
 89ac34ebcd4b031b
-== 137
+== 139
 -- currently, we can inline voidtest2 but not voidtest1
 EXPLAIN (verbose, costs off) SELECT voidtest2(11,22)
 --
 1673fdeb8bfa5f0f
-== 138
+== 140
 CREATE TEMP TABLE sometable(f1 int)
 --
 cecd718310a73ba0
-== 139
+== 141
 CREATE FUNCTION voidtest3(a int) RETURNS VOID LANGUAGE SQL AS
 $$ INSERT INTO sometable VALUES(a + 1) $$
 --
 4789e264dc2cad7d
-== 140
+== 142
 SELECT voidtest3(17)
 --
 8eb65d524514d26a
-== 141
+== 143
 CREATE FUNCTION voidtest4(a int) RETURNS VOID LANGUAGE SQL AS
 $$ INSERT INTO sometable VALUES(a - 1) RETURNING f1 $$
 --
 aeec746ecf748f42
-== 142
+== 144
 SELECT voidtest4(39)
 --
 0066250339b95382
-== 143
+== 145
 TABLE sometable
 --
 5ae7004e8cc3bad1
-== 144
+== 146
 CREATE FUNCTION voidtest5(a int) RETURNS SETOF VOID LANGUAGE SQL AS
 $$ SELECT generate_series(1, a) $$ STABLE
 --
 0356c5bf3e9c3c57
-== 145
+== 147
 SELECT * FROM voidtest5(3)
 --
 0e83f505f87a3b12
-== 146
+== 148
+-- DDL within a SQL function can now affect later statements in the function;
+-- though that doesn't work if check_function_bodies is on.
+
+SET check_function_bodies TO off
+--
+f8d4a000b73082a4
+== 149
+CREATE FUNCTION create_and_insert() RETURNS VOID LANGUAGE sql AS $$
+  create table ddl_test (f1 int);
+  insert into ddl_test values (1.2);
+$$
+--
+4dab073090cd1414
+== 150
+SELECT create_and_insert()
+--
+ea7f9d61571ef40c
+== 151
+TABLE ddl_test
+--
+f588a8ec23219be2
+== 152
+CREATE FUNCTION alter_and_insert() RETURNS VOID LANGUAGE sql AS $$
+  alter table ddl_test alter column f1 type numeric;
+  insert into ddl_test values (1.2);
+$$
+--
+759f827e72a781e6
+== 153
+SELECT alter_and_insert()
+--
+045265728a5b4f88
+== 154
+TABLE ddl_test
+--
+f588a8ec23219be2
+== 155
+RESET check_function_bodies
+--
+507d70c54f92e61b
+== 156
 -- Regression tests for bugs:
 
 -- Check that arguments that are R/W expanded datums aren't corrupted by
@@ -793,48 +846,102 @@ LANGUAGE SQL IMMUTABLE AS
 $$ SELECT array_append($1, $2) || array_append($1, $2) $$
 --
 34576e9d6784fe28
-== 147
+== 157
 SELECT double_append(array_append(ARRAY[q1], q2), q3)
   FROM (VALUES(1,2,3), (4,5,6)) v(q1,q2,q3)
 --
 636bc1e70dd4527b
-== 148
+== 158
+-- Check that we can re-use a SQLFunctionCache after a run-time error.
+
+-- This function will fail with zero-divide at run time (not plan time).
+CREATE FUNCTION part_hashint4_error(value int4, seed int8) RETURNS int8
+LANGUAGE SQL STRICT IMMUTABLE PARALLEL SAFE AS
+$$ SELECT value + seed + random()::int/0 $$
+--
+ec27780826b4e7f4
+== 159
+-- Put it into an operator class so that FmgrInfo will be cached in relcache.
+CREATE OPERATOR CLASS part_test_int4_ops_bad FOR TYPE int4 USING hash AS
+  FUNCTION 2 part_hashint4_error(int4, int8)
+--
+24154f28bc4971ca
+== 160
+CREATE TABLE pt(i int) PARTITION BY hash (i part_test_int4_ops_bad)
+--
+0b6630378c1f1aac
+== 161
+CREATE TABLE p1 PARTITION OF pt FOR VALUES WITH (modulus 4, remainder 0)
+--
+bf2d8a8ab8194ddc
+== 162
+INSERT INTO pt VALUES (1)
+--
+cfb2c0c2a7decd2c
+== 163
+INSERT INTO pt VALUES (1)
+--
+cfb2c0c2a7decd2c
+== 164
 -- Things that shouldn't work:
 
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'SELECT ''not an integer'';'
 --
 d45923d0640d1626
-== 149
+== 165
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'not even SQL'
 --
 d45923d0640d1626
-== 150
+== 166
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'SELECT 1, 2, 3;'
 --
 d45923d0640d1626
-== 151
+== 167
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'SELECT $2;'
 --
 d45923d0640d1626
-== 152
+== 168
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'a', 'b'
 --
 d45923d0640d1626
-== 153
+== 169
+CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
+    AS ''
+--
+d45923d0640d1626
+== 170
+-- make sure empty-body case is handled at execution time, too
+SET check_function_bodies = off
+--
+f8d4a000b73082a4
+== 171
+CREATE FUNCTION test1 (anyelement) RETURNS anyarray LANGUAGE SQL
+    AS ''
+--
+900ed3d304b8873d
+== 172
+SELECT test1(0)
+--
+d9b213652642f830
+== 173
+RESET check_function_bodies
+--
+507d70c54f92e61b
+== 174
 -- Cleanup
 DROP SCHEMA temp_func_test CASCADE
 --
 2fbb2d91091540ac
-== 154
+== 175
 DROP USER regress_unpriv_user
 --
 23b2977c3f3320c1
-== 155
+== 176
 RESET search_path
 --
 e97698aade82a29f

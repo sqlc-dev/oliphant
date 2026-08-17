@@ -1,5 +1,5 @@
 // Package rawwalk is raw_expression_tree_walker (src/backend/nodes/
-// nodeFuncs.c, PostgreSQL 17) over the protobuf tree, gated exactly as
+// nodeFuncs.c, PostgreSQL 18) over the protobuf tree, gated exactly as
 // pg_query_raw_tree_walker_supports allows: node types outside the walker's
 // switch return false without descending. It drives the summary walks and
 // the PL/pgSQL driver's statement collection.
@@ -54,7 +54,7 @@ func IsNil(item any) bool {
 }
 
 // walkChildren is raw_expression_tree_walker_impl (src/backend/nodes/
-// nodeFuncs.c, PostgreSQL 17) gated exactly as pg_query_raw_tree_walker_supports
+// nodeFuncs.c, PostgreSQL 18) gated exactly as pg_query_raw_tree_walker_supports
 // allows: node types outside the walker's switch return false without
 // descending (the summary C files check the gate before calling the walker;
 // folding it into the default arm is equivalent). Child order is the C
@@ -178,18 +178,21 @@ func WalkChildren(item any, cb func(any) bool) bool {
 		return w(v.Rel, v.ViewQuery)
 	case *ast.InsertStmt:
 		return w(v.Relation, wl(v.Cols), v.SelectStmt, v.OnConflictClause,
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.DeleteStmt:
 		return w(v.Relation, wl(v.UsingClause), v.WhereClause,
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.UpdateStmt:
 		return w(v.Relation, wl(v.TargetList), v.WhereClause, wl(v.FromClause),
-			wl(v.ReturningList), v.WithClause)
+			v.ReturningClause, v.WithClause)
 	case *ast.MergeStmt:
 		return w(v.Relation, v.SourceRelation, v.JoinCondition,
-			wl(v.MergeWhenClauses), wl(v.ReturningList), v.WithClause)
+			wl(v.MergeWhenClauses), v.ReturningClause, v.WithClause)
 	case *ast.MergeWhenClause:
 		return w(v.Condition, wl(v.TargetList), wl(v.Values))
+	// ReturningClause is walked by PG 18's raw_expression_tree_walker, but
+	// pg_query_raw_tree_walker_supports was not extended to it at 18.0.0 —
+	// the summary walks visit the node and never descend (default arm).
 	case *ast.SelectStmt:
 		return w(wl(v.DistinctClause), v.IntoClause, wl(v.TargetList),
 			wl(v.FromClause), v.WhereClause, wl(v.GroupClause), v.HavingClause,

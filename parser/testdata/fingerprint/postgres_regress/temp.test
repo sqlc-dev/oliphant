@@ -253,7 +253,7 @@ dc1cbec4606819b7
 CREATE TEMP TABLE temptest2(col int REFERENCES temptest1)
   ON COMMIT DELETE ROWS
 --
-d90b0778be01d12d
+5273bb524a6274f2
 == 058
 INSERT INTO temptest1 VALUES (1)
 --
@@ -285,7 +285,7 @@ cfacd6a170489f4f
 == 065
 CREATE TEMP TABLE temptest4(col int REFERENCES temptest3)
 --
-c7c1db98b69eb100
+3770b69c950b1644
 == 066
 COMMIT
 --
@@ -299,7 +299,7 @@ aea55dc6ba9f6afc
 == 068
 insert into public.whereami values ('public')
 --
-0d4acd0295153ecc
+98baabed4c575b8e
 == 069
 create temp table whereami (f1 text)
 --
@@ -370,7 +370,7 @@ set search_path = pg_temp, public
 == 084
 create domain pg_temp.nonempty as text check (value <> '')
 --
-fa17a16a132bb84d
+7e23dc213d5ccfd0
 == 085
 -- function-syntax invocation of types matches rules for functions
 select nonempty('')
@@ -733,3 +733,225 @@ da9672d66fe57d0c
 PREPARE TRANSACTION 'twophase_search'
 --
 d993959a33d627d4
+== 163
+-- Tests to verify we recover correctly from exhausting buffer pins and
+-- related matters.
+
+-- use lower possible buffer limit to make the test cheaper
+SET temp_buffers = 100
+--
+c28b5d96ba0231ba
+== 164
+CREATE TEMPORARY TABLE test_temp(a int not null unique, b TEXT not null, cnt int not null)
+--
+5b94db4e5f47297f
+== 165
+INSERT INTO test_temp SELECT generate_series(1, 10000) as id, repeat('a', 200), 0
+--
+cc4be8a011ac8f5a
+== 166
+-- should be at least 2x as large than temp_buffers
+SELECT pg_relation_size('test_temp') / current_setting('block_size')::int8 > 200
+--
+94e7a628803b389d
+== 167
+-- Don't want cursor names and plpgsql function lines in the error messages
+
+/* helper function to create cursors for each page in [p_start, p_end] */
+CREATE FUNCTION test_temp_pin(p_start int, p_end int)
+RETURNS void
+LANGUAGE plpgsql
+AS $f$
+  DECLARE
+      cursorname text;
+      query text;
+  BEGIN
+    FOR i IN p_start..p_end LOOP
+       cursorname = 'c_'||i;
+       query = format($q$DECLARE %I CURSOR FOR SELECT ctid FROM test_temp WHERE ctid >= '( %s, 1)'::tid $q$, cursorname, i);
+       EXECUTE query;
+       EXECUTE 'FETCH NEXT FROM '||cursorname;
+       -- for test development
+       -- RAISE NOTICE '%: %', cursorname, query;
+    END LOOP;
+  END;
+$f$
+--
+b06d6387ea1dee78
+== 168
+-- Test overflow of temp table buffers is handled correctly
+BEGIN
+--
+b16b431979fc3e05
+== 169
+-- should work, below max
+SELECT test_temp_pin(0, 9)
+--
+5e0ef13dea72297c
+== 170
+-- should fail, too many buffers pinned
+SELECT test_temp_pin(10, 105)
+--
+5e0ef13dea72297c
+== 171
+ROLLBACK
+--
+a46081a556fda027
+== 172
+BEGIN
+--
+b16b431979fc3e05
+== 173
+-- have some working cursors to test after errors
+SELECT test_temp_pin(0, 9)
+--
+5e0ef13dea72297c
+== 174
+FETCH NEXT FROM c_3
+--
+81daee5623e71d72
+== 175
+-- exhaust buffer pins in subtrans, check things work after
+SAVEPOINT rescue_me
+--
+8ebd566ea1bf947b
+== 176
+SELECT test_temp_pin(10, 105)
+--
+5e0ef13dea72297c
+== 177
+ROLLBACK TO SAVEPOINT rescue_me
+--
+ede7bfabb934a1db
+== 178
+-- pre-subtrans cursors continue to work
+FETCH NEXT FROM c_3
+--
+81daee5623e71d72
+== 179
+-- new cursors with pins can be created after subtrans rollback
+SELECT test_temp_pin(10, 94)
+--
+5e0ef13dea72297c
+== 180
+-- Check that read streams deal with lower number of pins available
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+85a275c49ad79d5a
+== 181
+ROLLBACK
+--
+a46081a556fda027
+== 182
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+b16b431979fc3e05
+== 183
+SELECT test_temp_pin(0, 1)
+--
+5e0ef13dea72297c
+== 184
+DROP TABLE test_temp
+--
+3628c68777285744
+== 185
+COMMIT
+--
+7bbcde9cfab6c79c
+== 186
+-- Check that temp tables with existing cursors can't be dropped.
+BEGIN
+--
+b16b431979fc3e05
+== 187
+SELECT test_temp_pin(0, 1)
+--
+5e0ef13dea72297c
+== 188
+TRUNCATE test_temp
+--
+ebce96bfe8f351c4
+== 189
+COMMIT
+--
+7bbcde9cfab6c79c
+== 190
+-- Check that temp tables that are dropped in transaction that's rolled back
+-- preserve buffer contents
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+85a275c49ad79d5a
+== 191
+INSERT INTO test_temp(a, b, cnt) VALUES (-1, '', 0)
+--
+459eed6f6faa78c3
+== 192
+BEGIN
+--
+b16b431979fc3e05
+== 193
+INSERT INTO test_temp(a, b, cnt) VALUES (-2, '', 0)
+--
+459eed6f6faa78c3
+== 194
+DROP TABLE test_temp
+--
+3628c68777285744
+== 195
+ROLLBACK
+--
+a46081a556fda027
+== 196
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+85a275c49ad79d5a
+== 197
+-- Check that temp table drop is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+407022c242db473d
+== 198
+BEGIN
+--
+b16b431979fc3e05
+== 199
+DROP TABLE test_temp
+--
+3628c68777285744
+== 200
+ROLLBACK
+--
+a46081a556fda027
+== 201
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+85a275c49ad79d5a
+== 202
+-- Check that temp table truncation is transactional and preserves dirty
+-- buffer contents
+UPDATE test_temp SET cnt = cnt + 1 WHERE a = -1
+--
+407022c242db473d
+== 203
+BEGIN
+--
+b16b431979fc3e05
+== 204
+TRUNCATE test_temp
+--
+ebce96bfe8f351c4
+== 205
+ROLLBACK
+--
+a46081a556fda027
+== 206
+SELECT count(*), max(a) max_a, min(a) min_a, max(cnt) max_cnt FROM test_temp
+--
+85a275c49ad79d5a
+== 207
+-- cleanup
+DROP FUNCTION test_temp_pin(int, int)
+--
+ad71b8a30f530c54

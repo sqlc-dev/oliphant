@@ -13,6 +13,9 @@
 -- row in the linked-to table.  However, if we want to enforce that a link
 -- field can't be 0, we have to check it here.
 
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
 -- **************** pg_type ****************
 
 -- Look for illegal values in pg_type fields.
@@ -39,6 +42,9 @@ WHERE t1.typnamespace = 0 OR
 -- that is OID or REGPROC fields that are not zero and do not match some
 -- row in the linked-to table.  However, if we want to enforce that a link
 -- field can't be 0, we have to check it here.
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
 
 -- **************** pg_type ****************
 
@@ -790,8 +796,7 @@ WHERE pc.relkind IN ($1, $2, $3) and
 SELECT a1.attrelid, a1.attname
 FROM pg_attribute as a1
 WHERE a1.attrelid = 0 OR a1.atttypid = 0 OR a1.attnum = 0 OR
-    a1.attcacheoff != -1 OR a1.attinhcount < 0 OR
-    (a1.attinhcount = 0 AND NOT a1.attislocal)
+    a1.attinhcount < 0 OR (a1.attinhcount = 0 AND NOT a1.attislocal)
 --
 -- **************** pg_attribute ****************
 
@@ -800,8 +805,7 @@ WHERE a1.attrelid = 0 OR a1.atttypid = 0 OR a1.attnum = 0 OR
 SELECT a1.attrelid, a1.attname
 FROM pg_attribute as a1
 WHERE a1.attrelid = $1 OR a1.atttypid = $2 OR a1.attnum = $3 OR
-    a1.attcacheoff != $4 OR a1.attinhcount < $5 OR
-    (a1.attinhcount = $6 AND NOT a1.attislocal)
+    a1.attinhcount < $4 OR (a1.attinhcount = $5 AND NOT a1.attislocal)
 == 051
 -- Cross-check attnum against parent relation
 
@@ -855,6 +859,33 @@ WHERE a1.atttypid = t1.oid AND
      a1.attbyval != t1.typbyval OR
      (a1.attstorage != t1.typstorage AND a1.attstorage != $1))
 == 054
+-- Look for IsCatalogTextUniqueIndexOid() omissions.
+
+CREATE FUNCTION is_catalog_text_unique_index_oid(oid) RETURNS bool
+    AS :'regresslib', 'is_catalog_text_unique_index_oid'
+    LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 129
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 055
+SELECT indexrelid::regclass
+FROM pg_index
+WHERE (is_catalog_text_unique_index_oid(indexrelid) <>
+       (indisunique AND
+        indexrelid < 16384 AND
+        EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = indexrelid AND atttypid = 'text'::regtype)))
+--
+SELECT indexrelid::regclass
+FROM pg_index
+WHERE (is_catalog_text_unique_index_oid(indexrelid) <>
+       (indisunique AND
+        indexrelid < $1 AND
+        EXISTS (SELECT $2 FROM pg_attribute
+                WHERE attrelid = indexrelid AND atttypid = $3::regtype)))
+== 056
 -- **************** pg_range ****************
 
 -- Look for illegal values in pg_range fields.
@@ -870,7 +901,7 @@ WHERE r.rngtypid = 0 OR r.rngsubtype = 0 OR r.rngsubopc = 0
 SELECT r.rngtypid, r.rngsubtype
 FROM pg_range as r
 WHERE r.rngtypid = $1 OR r.rngsubtype = $2 OR r.rngsubopc = $3
-== 055
+== 057
 -- rngcollation should be specified iff subtype is collatable
 
 SELECT r.rngtypid, r.rngsubtype, r.rngcollation, t.typcollation
@@ -882,7 +913,7 @@ WHERE (rngcollation = 0) != (typcollation = 0)
 SELECT r.rngtypid, r.rngsubtype, r.rngcollation, t.typcollation
 FROM pg_range r JOIN pg_type t ON t.oid = r.rngsubtype
 WHERE (rngcollation = $1) != (typcollation = $2)
-== 056
+== 058
 -- opclass had better be a btree opclass accepting the subtype.
 -- We must allow anyarray matches, cf IsBinaryCoercible()
 
@@ -906,7 +937,7 @@ WHERE o.opcmethod != $1 OR
       EXISTS(select $3 from pg_catalog.pg_type where
              oid = r.rngsubtype and typelem != $4 and
              typsubscript = $5::regproc)))
-== 057
+== 059
 -- canonical function, if any, had better match the range type
 
 SELECT r.rngtypid, r.rngsubtype, p.proname
@@ -918,7 +949,7 @@ WHERE pronargs != 1 OR proargtypes[0] != rngtypid OR prorettype != rngtypid
 SELECT r.rngtypid, r.rngsubtype, p.proname
 FROM pg_range r JOIN pg_proc p ON p.oid = r.rngcanonical
 WHERE pronargs != $1 OR proargtypes[$2] != rngtypid OR prorettype != rngtypid
-== 058
+== 060
 -- subdiff function, if any, had better match the subtype
 
 SELECT r.rngtypid, r.rngsubtype, p.proname
@@ -934,7 +965,7 @@ FROM pg_range r JOIN pg_proc p ON p.oid = r.rngsubdiff
 WHERE pronargs != $1
     OR proargtypes[$2] != rngsubtype OR proargtypes[$3] != rngsubtype
     OR prorettype != $4::regtype
-== 059
+== 061
 -- every range should have a valid multirange
 
 SELECT r.rngtypid, r.rngsubtype, r.rngmultitypid
@@ -946,7 +977,7 @@ WHERE r.rngmultitypid IS NULL OR r.rngmultitypid = 0
 SELECT r.rngtypid, r.rngsubtype, r.rngmultitypid
 FROM pg_range r
 WHERE r.rngmultitypid IS NULL OR r.rngmultitypid = $1
-== 060
+== 062
 -- Create a table that holds all the known in-core data types and leave it
 -- around so as pg_upgrade is able to test their binary compatibility.
 CREATE TABLE tab_core_types AS SELECT
@@ -1080,7 +1111,7 @@ CREATE TABLE tab_core_types AS SELECT
   '{(2020-01-02 03:04:05, 2021-02-03 06:07:08)}'::tsmultirange,
   '(2020-01-02 03:04:05, 2021-02-03 06:07:08)'::tstzrange,
   '{(2020-01-02 03:04:05, 2021-02-03 06:07:08)}'::tstzmultirange
-== 061
+== 063
 -- Sanity check on the previous table, checking that all core types are
 -- included in this table.
 SELECT oid, typname, typtype, typelem, typarray

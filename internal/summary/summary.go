@@ -23,6 +23,13 @@ func (e *Error) Error() string { return e.Message }
 // statement-type walk, and — when truncateLimit is not -1 — the truncation
 // pass.
 func Summarize(tree *ast.ParseResult, truncateLimit int) (result *ast.SummaryResult, err error) {
+	return SummarizeWithEmpties(tree, truncateLimit, nil)
+}
+
+// SummarizeWithEmpties is Summarize with the parser's present-but-empty
+// string set, which the truncation deparse needs (the C summary deparses
+// the original tree, where COMMENT ... IS ” is non-NULL).
+func SummarizeWithEmpties(tree *ast.ParseResult, truncateLimit int, empties map[any]bool) (result *ast.SummaryResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if se, ok := r.(*Error); ok {
@@ -68,7 +75,7 @@ func Summarize(tree *ast.ParseResult, truncateLimit int) (result *ast.SummaryRes
 	}
 
 	if truncateLimit != -1 {
-		res.TruncatedQuery = truncate(tree.Stmts, truncateLimit)
+		res.TruncatedQuery = truncate(tree.Stmts, truncateLimit, empties)
 	}
 	return res, nil
 }

@@ -153,7 +153,7 @@ func (p *parser) parseAlterTableCmd() *ast.Node {
 	case ast.Token_ADD_P:
 		p.next()
 		switch p.kind() {
-		case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_UNIQUE,
+		case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_NOT, ast.Token_UNIQUE,
 			ast.Token_PRIMARY, ast.Token_EXCLUDE, ast.Token_FOREIGN:
 			n := newAlterTableCmd(ast.AlterTableType_AT_AddConstraint)
 			n.Def = p.parseTableConstraint()
@@ -174,15 +174,32 @@ func (p *parser) parseAlterTableCmd() *ast.Node {
 		p.next()
 		if p.kind() == ast.Token_CONSTRAINT {
 			// ALTER CONSTRAINT name ConstraintAttributeSpec
+			// | ALTER CONSTRAINT name INHERIT (PG 18: ATAlterConstraint)
 			p.next()
 			n := newAlterTableCmd(ast.AlterTableType_AT_AlterConstraint)
-			c := &ast.Constraint{
-				Contype: ast.ConstrType_CONSTR_FOREIGN,
-				Conname: p.name(),
+			c := &ast.ATAlterConstraint{Conname: p.name()}
+			if p.have(ast.Token_INHERIT) {
+				c.AlterInheritability = true
+				c.Noinherit = false
+			} else {
+				cas, casLoc := p.parseConstraintAttributeSpec()
+				if cas&(casNotEnforced|casEnforced) != 0 {
+					c.AlterEnforceability = true
+				}
+				if cas&(casDeferrable|casNotDeferrable|casInitiallyDeferred|casInitiallyImmediate) != 0 {
+					c.AlterDeferrability = true
+				}
+				if cas&casNoInherit != 0 {
+					c.AlterInheritability = true
+				}
+				// handle unsupported case with specific error message
+				if cas&casNotValid != 0 {
+					p.ereport("base_yyparse", "constraints cannot be altered to be NOT VALID", casLoc)
+				}
+				p.processCASbits(cas, casLoc, "FOREIGN KEY",
+					&c.Deferrable, &c.Initdeferred, &c.IsEnforced, nil, &c.Noinherit)
 			}
-			cas, casLoc := p.parseConstraintAttributeSpec()
-			p.processCASbits(cas, casLoc, "FOREIGN KEY", &c.Deferrable, &c.Initdeferred, nil, nil)
-			n.Def = nConstraint(c)
+			n.Def = nATAlterConstraint(c)
 			return nAlterTableCmd(n)
 		}
 		p.have(ast.Token_COLUMN)

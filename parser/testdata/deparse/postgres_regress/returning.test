@@ -371,3 +371,423 @@ INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.*
 INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.f3
 --
 INSERT INTO foo AS bar DEFAULT VALUES RETURNING bar.f3
+== 078
+-- ok
+
+|--
+-- Test RETURNING OLD/NEW.
+|--
+-- Start with new data, to ensure predictable TIDs.
+|--
+TRUNCATE foo
+--
+TRUNCATE foo
+== 079
+INSERT INTO foo VALUES (1, 'xxx', 10, 20), (2, 'more', 42, 141), (3, 'zoo2', 57, 99)
+--
+INSERT INTO foo VALUES (1, 'xxx', 10, 20), (2, 'more', 42, 141), (3, 'zoo2', 57, 99)
+== 080
+-- Error cases
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (nonsuch AS something) *
+--
+ERROR: syntax error at or near "nonsuch"
+CURSORPOS: 63
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 081
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (new AS foo) *
+--
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (NEW AS foo) *
+== 082
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (old AS o, new AS n, old AS o) *
+--
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (OLD AS o, NEW AS n, OLD AS o) *
+== 083
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (old AS o, new AS n, new AS n) *
+--
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (OLD AS o, NEW AS n, NEW AS n) *
+== 084
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (old AS x, new AS x) *
+--
+INSERT INTO foo DEFAULT VALUES RETURNING WITH (OLD AS x, NEW AS x) *
+== 085
+-- INSERT has NEW, but not OLD
+EXPLAIN (verbose, costs off)
+INSERT INTO foo VALUES (4)
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO foo VALUES (4) RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 086
+INSERT INTO foo VALUES (4)
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+INSERT INTO foo VALUES (4) RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 087
+-- INSERT ... ON CONFLICT ... UPDATE has OLD and NEW
+CREATE UNIQUE INDEX foo_f1_idx ON foo (f1)
+--
+CREATE UNIQUE INDEX foo_f1_idx ON foo USING btree (f1)
+== 088
+EXPLAIN (verbose, costs off)
+INSERT INTO foo VALUES (4, 'conflict'), (5, 'ok')
+  ON CONFLICT (f1) DO UPDATE SET f2 = excluded.f2||'ed', f3 = -1
+  RETURNING WITH (OLD AS o, NEW AS n)
+            o.tableoid::regclass, o.ctid, o.*,
+            n.tableoid::regclass, n.ctid, n.*, *
+--
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO foo VALUES (4, 'conflict'), (5, 'ok') ON CONFLICT (f1) DO UPDATE SET f2 = excluded.f2 || 'ed', f3 = -1 RETURNING WITH (OLD AS o, NEW AS n) o.tableoid::regclass, o.ctid, o.*, n.tableoid::regclass, n.ctid, n.*, *
+== 089
+INSERT INTO foo VALUES (4, 'conflict'), (5, 'ok')
+  ON CONFLICT (f1) DO UPDATE SET f2 = excluded.f2||'ed', f3 = -1
+  RETURNING WITH (OLD AS o, NEW AS n)
+            o.tableoid::regclass, o.ctid, o.*,
+            n.tableoid::regclass, n.ctid, n.*, *
+--
+INSERT INTO foo VALUES (4, 'conflict'), (5, 'ok') ON CONFLICT (f1) DO UPDATE SET f2 = excluded.f2 || 'ed', f3 = -1 RETURNING WITH (OLD AS o, NEW AS n) o.tableoid::regclass, o.ctid, o.*, n.tableoid::regclass, n.ctid, n.*, *
+== 090
+-- UPDATE has OLD and NEW
+EXPLAIN (verbose, costs off)
+UPDATE foo SET f4 = 100 WHERE f1 = 5
+  RETURNING old.tableoid::regclass, old.ctid, old.*, old,
+            new.tableoid::regclass, new.ctid, new.*, new,
+            old.f4::text||'->'||new.f4::text AS change
+--
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE foo SET f4 = 100 WHERE f1 = 5 RETURNING old.tableoid::regclass, old.ctid, old.*, old, new.tableoid::regclass, new.ctid, new.*, new, (old.f4::text || '->') || new.f4::text AS change
+== 091
+UPDATE foo SET f4 = 100 WHERE f1 = 5
+  RETURNING old.tableoid::regclass, old.ctid, old.*, old,
+            new.tableoid::regclass, new.ctid, new.*, new,
+            old.f4::text||'->'||new.f4::text AS change
+--
+UPDATE foo SET f4 = 100 WHERE f1 = 5 RETURNING old.tableoid::regclass, old.ctid, old.*, old, new.tableoid::regclass, new.ctid, new.*, new, (old.f4::text || '->') || new.f4::text AS change
+== 092
+-- DELETE has OLD, but not NEW
+EXPLAIN (verbose, costs off)
+DELETE FROM foo WHERE f1 = 5
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+EXPLAIN (VERBOSE, COSTS OFF) DELETE FROM foo WHERE f1 = 5 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 093
+DELETE FROM foo WHERE f1 = 5
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+DELETE FROM foo WHERE f1 = 5 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 094
+-- RETURNING OLD and NEW from subquery
+EXPLAIN (verbose, costs off)
+INSERT INTO foo VALUES (5, 'subquery test')
+  RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO foo VALUES (5, 'subquery test') RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 095
+INSERT INTO foo VALUES (5, 'subquery test')
+  RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+INSERT INTO foo VALUES (5, 'subquery test') RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 096
+EXPLAIN (verbose, costs off)
+UPDATE foo SET f4 = 100 WHERE f1 = 5
+  RETURNING (SELECT old.f4 = new.f4),
+            (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE foo SET f4 = 100 WHERE f1 = 5 RETURNING (SELECT old.f4 = new.f4), (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 097
+UPDATE foo SET f4 = 100 WHERE f1 = 5
+  RETURNING (SELECT old.f4 = new.f4),
+            (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+UPDATE foo SET f4 = 100 WHERE f1 = 5 RETURNING (SELECT old.f4 = new.f4), (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 098
+EXPLAIN (verbose, costs off)
+DELETE FROM foo WHERE f1 = 5
+  RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+EXPLAIN (VERBOSE, COSTS OFF) DELETE FROM foo WHERE f1 = 5 RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 099
+DELETE FROM foo WHERE f1 = 5
+  RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) old_max,
+            (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) new_max
+--
+DELETE FROM foo WHERE f1 = 5 RETURNING (SELECT max(old.f4 + x) FROM generate_series(1, 10) x) AS old_max, (SELECT max(new.f4 + x) FROM generate_series(1, 10) x) AS new_max
+== 100
+-- DELETE turned into UPDATE by a rule has OLD and NEW
+CREATE RULE foo_del_rule AS ON DELETE TO foo DO INSTEAD
+  UPDATE foo SET f2 = f2||' (deleted)', f3 = -1, f4 = -1 WHERE f1 = OLD.f1
+  RETURNING *
+--
+CREATE RULE foo_del_rule AS ON DELETE TO foo DO INSTEAD UPDATE foo SET f2 = f2 || ' (deleted)', f3 = -1, f4 = -1 WHERE f1 = old.f1 RETURNING *
+== 101
+EXPLAIN (verbose, costs off)
+DELETE FROM foo WHERE f1 = 4 RETURNING old.*,new.*, *
+--
+EXPLAIN (VERBOSE, COSTS OFF) DELETE FROM foo WHERE f1 = 4 RETURNING old.*, new.*, *
+== 102
+DELETE FROM foo WHERE f1 = 4 RETURNING old.*,new.*, *
+--
+DELETE FROM foo WHERE f1 = 4 RETURNING old.*, new.*, *
+== 103
+-- UPDATE on view with rule
+EXPLAIN (verbose, costs off)
+UPDATE joinview SET f3 = f3 + 1 WHERE f3 = 57
+  RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+--
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE joinview SET f3 = f3 + 1 WHERE f3 = 57 RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+== 104
+UPDATE joinview SET f3 = f3 + 1 WHERE f3 = 57
+  RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+--
+UPDATE joinview SET f3 = f3 + 1 WHERE f3 = 57 RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+== 105
+-- UPDATE on view with INSTEAD OF trigger
+CREATE FUNCTION joinview_upd_trig_fn() RETURNS trigger
+LANGUAGE plpgsql AS
+$$
+BEGIN
+  RAISE NOTICE 'UPDATE: % -> %', old, new;
+  UPDATE foo SET f1 = new.f1, f3 = new.f3, f4 = new.f4 * 10
+    FROM joinme WHERE f2 = f2j AND f2 = old.f2
+    RETURNING new.f1, new.f4 INTO new.f1, new.f4;  -- should fail
+  RETURN NEW;
+END;
+$$
+--
+CREATE FUNCTION joinview_upd_trig_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'UPDATE: % -> %', old, new;
+  UPDATE foo SET f1 = new.f1, f3 = new.f3, f4 = new.f4 * 10
+    FROM joinme WHERE f2 = f2j AND f2 = old.f2
+    RETURNING new.f1, new.f4 INTO new.f1, new.f4;  -- should fail
+  RETURN NEW;
+END;
+$$
+== 106
+CREATE TRIGGER joinview_upd_trig INSTEAD OF UPDATE ON joinview
+  FOR EACH ROW EXECUTE FUNCTION joinview_upd_trig_fn()
+--
+CREATE TRIGGER joinview_upd_trig INSTEAD OF UPDATE ON joinview FOR EACH ROW EXECUTE FUNCTION joinview_upd_trig_fn()
+== 107
+DROP RULE joinview_u ON joinview
+--
+DROP RULE joinview_u ON joinview
+== 108
+UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58
+  RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+--
+UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58 RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+== 109
+-- should fail
+
+CREATE OR REPLACE FUNCTION joinview_upd_trig_fn() RETURNS trigger
+LANGUAGE plpgsql AS
+$$
+BEGIN
+  RAISE NOTICE 'UPDATE: % -> %', old, new;
+  UPDATE foo SET f1 = new.f1, f3 = new.f3, f4 = new.f4 * 10
+    FROM joinme WHERE f2 = f2j AND f2 = old.f2
+    RETURNING WITH (new AS n) new.f1, n.f4 INTO new.f1, new.f4;  -- now ok
+  RETURN NEW;
+END;
+$$
+--
+CREATE OR REPLACE FUNCTION joinview_upd_trig_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'UPDATE: % -> %', old, new;
+  UPDATE foo SET f1 = new.f1, f3 = new.f3, f4 = new.f4 * 10
+    FROM joinme WHERE f2 = f2j AND f2 = old.f2
+    RETURNING WITH (new AS n) new.f1, n.f4 INTO new.f1, new.f4;  -- now ok
+  RETURN NEW;
+END;
+$$
+== 110
+EXPLAIN (verbose, costs off)
+UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58
+  RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+--
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58 RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+== 111
+UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58
+  RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+--
+UPDATE joinview SET f3 = f3 + 1, f4 = 7 WHERE f3 = 58 RETURNING old.*, new.*, *, new.f3 - old.f3 AS delta_f3
+== 112
+-- should succeed
+
+-- Test wholerow & dropped column handling
+ALTER TABLE foo DROP COLUMN f3 CASCADE
+--
+ALTER TABLE foo DROP f3 CASCADE
+== 113
+UPDATE foo SET f4 = f4 + 1 RETURNING old.f3
+--
+UPDATE foo SET f4 = f4 + 1 RETURNING old.f3
+== 114
+-- should fail
+UPDATE foo SET f4 = f4 + 1 RETURNING old, new
+--
+UPDATE foo SET f4 = f4 + 1 RETURNING old, new
+== 115
+-- INSERT/DELETE on zero column table
+CREATE TABLE zerocol()
+--
+CREATE TABLE zerocol ()
+== 116
+INSERT INTO zerocol SELECT RETURNING old.*, new.*, *
+--
+INSERT INTO zerocol SELECT RETURNING old.*, new.*, *
+== 117
+INSERT INTO zerocol SELECT
+  RETURNING old.tableoid::regclass, old.ctid,
+            new.tableoid::regclass, new.ctid, ctid, *
+--
+INSERT INTO zerocol SELECT RETURNING old.tableoid::regclass, old.ctid, new.tableoid::regclass, new.ctid, ctid, *
+== 118
+DELETE FROM zerocol
+  RETURNING old.tableoid::regclass, old.ctid,
+            new.tableoid::regclass, new.ctid, ctid, *
+--
+DELETE FROM zerocol RETURNING old.tableoid::regclass, old.ctid, new.tableoid::regclass, new.ctid, ctid, *
+== 119
+DROP TABLE zerocol
+--
+DROP TABLE zerocol
+== 120
+-- Test schema-qualified table name in RETURNING list
+CREATE TABLE public.tt(a int, b int)
+--
+CREATE TABLE public.tt (a int, b int)
+== 121
+INSERT INTO public.tt VALUES (1, 10)
+--
+INSERT INTO public.tt VALUES (1, 10)
+== 122
+UPDATE public.tt SET b = b * 2 RETURNING a, b, old.b, new.b, tt.b, public.tt.b
+--
+UPDATE public.tt SET b = b * 2 RETURNING a, b, old.b, new.b, tt.b, public.tt.b
+== 123
+DROP TABLE public.tt
+--
+DROP TABLE public.tt
+== 124
+-- Test cross-partition updates and attribute mapping
+CREATE TABLE foo_parted (a int, b float8, c text) PARTITION BY LIST (a)
+--
+CREATE TABLE foo_parted (a int, b float8, c text) PARTITION BY LIST (a)
+== 125
+CREATE TABLE foo_part_s1 PARTITION OF foo_parted FOR VALUES IN (1)
+--
+CREATE TABLE foo_part_s1 PARTITION OF foo_parted FOR VALUES IN (1)
+== 126
+CREATE TABLE foo_part_s2 PARTITION OF foo_parted FOR VALUES IN (2)
+--
+CREATE TABLE foo_part_s2 PARTITION OF foo_parted FOR VALUES IN (2)
+== 127
+CREATE TABLE foo_part_d1 (c text, a int, b float8)
+--
+CREATE TABLE foo_part_d1 (c text, a int, b float8)
+== 128
+ALTER TABLE foo_parted ATTACH PARTITION foo_part_d1 FOR VALUES IN (3)
+--
+ALTER TABLE foo_parted ATTACH PARTITION foo_part_d1 FOR VALUES IN (3)
+== 129
+CREATE TABLE foo_part_d2 (b float8, c text, a int)
+--
+CREATE TABLE foo_part_d2 (b float8, c text, a int)
+== 130
+ALTER TABLE foo_parted ATTACH PARTITION foo_part_d2 FOR VALUES IN (4)
+--
+ALTER TABLE foo_parted ATTACH PARTITION foo_part_d2 FOR VALUES IN (4)
+== 131
+INSERT INTO foo_parted
+  VALUES (1, 17.1, 'P1'), (2, 17.2, 'P2'), (3, 17.3, 'P3'), (4, 17.4, 'P4')
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+INSERT INTO foo_parted VALUES (1, 17.1, 'P1'), (2, 17.2, 'P2'), (3, 17.3, 'P3'), (4, 17.4, 'P4') RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 132
+UPDATE foo_parted SET a = 2, b = b + 1, c = c || '->P2' WHERE a = 1
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+UPDATE foo_parted SET a = 2, b = b + 1, c = c || '->P2' WHERE a = 1 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 133
+UPDATE foo_parted SET a = 1, b = b + 1, c = c || '->P1' WHERE a = 3
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+UPDATE foo_parted SET a = 1, b = b + 1, c = c || '->P1' WHERE a = 3 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 134
+UPDATE foo_parted SET a = 3, b = b + 1, c = c || '->P3' WHERE a = 1
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+UPDATE foo_parted SET a = 3, b = b + 1, c = c || '->P3' WHERE a = 1 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 135
+UPDATE foo_parted SET a = 4, b = b + 1, c = c || '->P4' WHERE a = 3
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+UPDATE foo_parted SET a = 4, b = b + 1, c = c || '->P4' WHERE a = 3 RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 136
+-- cross-partition update that uses ReturningExpr nodes, without returning
+-- old/new table values
+CREATE VIEW foo_parted_v AS SELECT *, 'xxx' AS dummy FROM foo_parted
+--
+CREATE VIEW foo_parted_v AS SELECT *, 'xxx' AS dummy FROM foo_parted
+== 137
+UPDATE foo_parted_v SET a = 1, c = c || '->P1' WHERE a = 2 AND c = 'P2'
+  RETURNING 'P2:'||old.dummy, 'P1:'||new.dummy
+--
+UPDATE foo_parted_v SET a = 1, c = c || '->P1' WHERE a = 2 AND c = 'P2' RETURNING 'P2:' || old.dummy, 'P1:' || new.dummy
+== 138
+DELETE FROM foo_parted
+  RETURNING old.tableoid::regclass, old.ctid, old.*,
+            new.tableoid::regclass, new.ctid, new.*, *
+--
+DELETE FROM foo_parted RETURNING old.tableoid::regclass, old.ctid, old.*, new.tableoid::regclass, new.ctid, new.*, *
+== 139
+DROP TABLE foo_parted CASCADE
+--
+DROP TABLE foo_parted CASCADE
+== 140
+-- Test deparsing
+CREATE FUNCTION foo_update()
+  RETURNS void
+  LANGUAGE sql
+BEGIN ATOMIC
+  WITH u1 AS (
+    UPDATE foo SET f1 = f1 + 1 RETURNING old.*, new.*
+  ), u2 AS (
+    UPDATE foo SET f1 = f1 + 1 RETURNING WITH (OLD AS "old foo") "old foo".*, new.*
+  ), u3 AS (
+    UPDATE foo SET f1 = f1 + 1 RETURNING WITH (NEW AS "new foo") old.*, "new foo".*
+  )
+  UPDATE foo SET f1 = f1 + 1
+    RETURNING WITH (OLD AS o, NEW AS n)
+              o.*, n.*, o, n, o.f1 = n.f1, o = n,
+              (SELECT o.f2 = n.f2),
+              (SELECT count(*) FROM foo WHERE foo.f1 = o.f4),
+              (SELECT count(*) FROM foo WHERE foo.f4 = n.f4),
+              (SELECT count(*) FROM foo WHERE foo = o),
+              (SELECT count(*) FROM foo WHERE foo = n)
+--
+ERROR: syntax error at end of input
+CURSORPOS: 747
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 141
+END
+--
+COMMIT
+== 142
+DROP FUNCTION foo_update
+--
+DROP FUNCTION foo_update

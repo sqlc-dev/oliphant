@@ -26,9 +26,9 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
 
-// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 17.7, libpg_query
-// 17-6.2.2), reported in ScanResult.Version and ParseResult.Version.
-const pgVersionNum = 170007
+// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 18.4, libpg_query
+// 18.0.0), reported in ScanResult.Version and ParseResult.Version.
+const pgVersionNum = 180004
 
 // scanErr converts a lexer error into the public Error, mirroring
 // pg_query_scan.c's PG_CATCH block (Lineno is a C source line number
@@ -219,11 +219,11 @@ func SplitWithParser(input string, trimSpace bool) (result []string, err error) 
 // FingerprintToUInt64 is pg_query_fingerprint: parse, then hash the raw tree
 // (version-3 fingerprint).
 func FingerprintToUInt64(input string) (result uint64, err error) {
-	tree, perr := parse.Parse(input)
+	tree, empties, perr := parse.ParseTracked(input)
 	if perr != nil {
 		return 0, scanErr(perr)
 	}
-	return fingerprint.Tree(tree), nil
+	return fingerprint.TreeWithEmpties(tree, empties), nil
 }
 
 // FingerprintToHexStr renders the fingerprint the way the C implementation
@@ -267,11 +267,11 @@ func IsUtilityStmt(input string) (result []bool, err error) {
 // CTEs/functions/filter columns/statement types, and — unless truncateLimit
 // is -1 — produce the smart-truncated query text.
 func SummaryToProtobuf(input string, truncateLimit int) ([]byte, error) {
-	tree, perr := parse.Parse(input)
+	tree, empties, perr := parse.ParseTracked(input)
 	if perr != nil {
 		return nil, scanErr(perr)
 	}
-	res, serr := summary.Summarize(tree, truncateLimit)
+	res, serr := summary.SummarizeWithEmpties(tree, truncateLimit, empties)
 	if serr != nil {
 		var se *summary.Error
 		if errors.As(serr, &se) {

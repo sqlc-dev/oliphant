@@ -34,13 +34,14 @@ type possibleTruncation struct {
 type truncationState struct {
 	truncations []*possibleTruncation
 	depth       int32
+	empties     map[any]bool
 }
 
 // truncate is pg_query_summary_truncate.
-func truncate(stmts []*ast.RawStmt, truncateLimit int) string {
-	state := &truncationState{}
+func truncate(stmts []*ast.RawStmt, truncateLimit int, empties map[any]bool) string {
+	state := &truncationState{empties: empties}
 
-	output := deparseRawStmtList(stmts)
+	output := deparseRawStmtList(stmts, empties)
 	if len(output) <= truncateLimit {
 		return output
 	}
@@ -220,7 +221,7 @@ func applyTruncations(stmts []*ast.RawStmt, state *truncationState, truncationLi
 			panic(&Error{Message: "apply_truncations() got unknown truncation type"})
 		}
 
-		output = deparseRawStmtList(stmts)
+		output = deparseRawStmtList(stmts, state.empties)
 		deparsed = true
 
 		output = globalReplace(output, `SELECT "…" AS "…"`, `SELECT "…"`)
@@ -233,7 +234,7 @@ func applyTruncations(stmts []*ast.RawStmt, state *truncationState, truncationLi
 	}
 
 	if !deparsed {
-		output = deparseRawStmtList(stmts)
+		output = deparseRawStmtList(stmts, state.empties)
 	}
 	return truncateMbstr(output, truncationLimit)
 }
@@ -320,14 +321,14 @@ func colsLen(nodes []*ast.Node) int32 {
 // deparseStmtLen is deparse_stmt_len: wrap in a RawStmt and measure.
 func deparseStmtLen(node *ast.Node) int {
 	raw := &ast.RawStmt{Stmt: node, StmtLocation: -1, StmtLen: 0}
-	return len(deparseRawStmtList([]*ast.RawStmt{raw}))
+	return len(deparseRawStmtList([]*ast.RawStmt{raw}, nil))
 }
 
 // deparseRawStmtList is deparse_raw_stmt_list: statements joined with "; ".
 // A deparse failure ereports in C and unwinds to pg_query_summary's catch
 // block; the panic here unwinds to Summarize's recover the same way.
-func deparseRawStmtList(stmts []*ast.RawStmt) string {
-	out, err := deparse.Deparse(&ast.ParseResult{Stmts: stmts})
+func deparseRawStmtList(stmts []*ast.RawStmt, empties map[any]bool) string {
+	out, err := deparse.DeparseWithEmpties(&ast.ParseResult{Stmts: stmts}, empties)
 	if err != nil {
 		panic(&Error{Message: err.Error()})
 	}

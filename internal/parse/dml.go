@@ -41,7 +41,7 @@ func (p *parser) parseInsertStmt(with *ast.WithClause) *ast.Node {
 	n := p.parseInsertRest()
 	n.Relation = rel
 	n.OnConflictClause = p.parseOptOnConflict()
-	n.ReturningList = p.parseReturningClause()
+	n.ReturningClause = p.parseReturningClause()
 	n.WithClause = with
 	return nInsertStmt(n)
 }
@@ -339,11 +339,49 @@ func (p *parser) parseSignedIconst() int32 {
 }
 
 // parseReturningClause is gram.y's returning_clause.
-func (p *parser) parseReturningClause() []*ast.Node {
+func (p *parser) parseReturningClause() *ast.ReturningClause {
 	if !p.have(ast.Token_RETURNING) {
 		return nil
 	}
-	return p.parseTargetList()
+	n := &ast.ReturningClause{}
+	n.Options = p.parseReturningWithClause()
+	n.Exprs = p.parseTargetList()
+	return n
+}
+
+// parseReturningWithClause is gram.y's returning_with_clause:
+// WITH '(' returning_options ')' | EMPTY.
+func (p *parser) parseReturningWithClause() []*ast.Node {
+	if !p.have(ast.Token_WITH) {
+		return nil
+	}
+	p.expect(ast.Token('('))
+	var opts []*ast.Node
+	for {
+		opts = append(opts, p.parseReturningOption())
+		if !p.have(ast.Token(',')) {
+			break
+		}
+	}
+	p.expect(ast.Token(')'))
+	return opts
+}
+
+// parseReturningOption is gram.y's returning_option (and
+// returning_option_kind).
+func (p *parser) parseReturningOption() *ast.Node {
+	n := &ast.ReturningOption{Location: p.loc()}
+	switch {
+	case p.have(ast.Token_OLD):
+		n.Option = ast.ReturningOptionKind_RETURNING_OPTION_OLD
+	case p.have(ast.Token_NEW):
+		n.Option = ast.ReturningOptionKind_RETURNING_OPTION_NEW
+	default:
+		p.syntaxErrorAt()
+	}
+	p.expect(ast.Token_AS)
+	n.Value = p.colId()
+	return nReturningOption(n)
 }
 
 // parseDeleteStmt is gram.y's DeleteStmt.
@@ -357,7 +395,7 @@ func (p *parser) parseDeleteStmt(with *ast.WithClause) *ast.Node {
 		n.UsingClause = p.parseFromList()
 	}
 	n.WhereClause = p.parseWhereOrCurrentClause()
-	n.ReturningList = p.parseReturningClause()
+	n.ReturningClause = p.parseReturningClause()
 	return nDeleteStmt(n)
 }
 
@@ -372,7 +410,7 @@ func (p *parser) parseUpdateStmt(with *ast.WithClause) *ast.Node {
 		n.FromClause = p.parseFromList()
 	}
 	n.WhereClause = p.parseWhereOrCurrentClause()
-	n.ReturningList = p.parseReturningClause()
+	n.ReturningClause = p.parseReturningClause()
 	return nUpdateStmt(n)
 }
 
@@ -468,7 +506,7 @@ func (p *parser) parseMergeStmt(with *ast.WithClause) *ast.Node {
 	for p.kind() == ast.Token_WHEN {
 		m.MergeWhenClauses = append(m.MergeWhenClauses, p.parseMergeWhenClause())
 	}
-	m.ReturningList = p.parseReturningClause()
+	m.ReturningClause = p.parseReturningClause()
 	return nMergeStmt(m)
 }
 

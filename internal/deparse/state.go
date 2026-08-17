@@ -1,5 +1,5 @@
 // Package deparse ports libpg_query's postgres_deparse.c at the pinned
-// 17-6.2.2, targeting the protobuf structs directly.
+// 18.0.0, targeting the protobuf structs directly.
 //
 // This file is the deparser state machinery: nesting levels, part groups and
 // parts (postgres_deparse.c's DeparseState). The machinery exists for the
@@ -37,6 +37,7 @@ const (
 	contextAExpr
 	contextCreateType
 	contextAlterType
+	contextAlterDomain
 	contextSetStatement
 	contextFuncExpr
 	contextSelectSetop
@@ -86,6 +87,9 @@ type nestingLevel struct {
 type state struct {
 	current     *nestingLevel
 	resultParts []*part
+	// empties is the parser's present-but-empty string set (see
+	// DeparseWithEmpties); nil for API-supplied trees.
+	empties map[any]bool
 }
 
 // deparseError carries an elog/ereport message out of the recursion; the
@@ -303,16 +307,30 @@ func trimTrailingSpace(b []byte) []byte {
 
 // deparseRawStmt is deparseRawStmtOpts with default options.
 func deparseRawStmt(out []byte, raw *ast.RawStmt) []byte {
+	return deparseRawStmtEmpties(out, raw, nil)
+}
+
+func deparseRawStmtEmpties(out []byte, raw *ast.RawStmt, empties map[any]bool) []byte {
 	if raw.Stmt == nil || raw.Stmt.Node == nil {
 		panic(deparseError{message: "deparse error in deparseRawStmt: RawStmt with empty Stmt"})
 	}
-	st := &state{}
+	st := &state{empties: empties}
 	deparseStmt(st, raw.Stmt)
 	return st.emit(out)
 }
 
 // Deparse is pg_query_deparse_protobuf: statements joined with "; ".
 func Deparse(tree *ast.ParseResult) (result string, err error) {
+	return DeparseWithEmpties(tree, nil)
+}
+
+// DeparseWithEmpties is Deparse with the parser's present-but-empty string
+// set: the C deparser distinguishes COMMENT/SECURITY LABEL ... IS ” (a
+// non-NULL empty string) from IS NULL, which proto3 collapses. Only callers
+// that re-parsed the input themselves (the summary truncation) can supply
+// the set; trees received over the API deparse as the protobuf round-trip
+// does upstream (both forms print IS NULL).
+func DeparseWithEmpties(tree *ast.ParseResult, empties map[any]bool) (result string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if de, ok := r.(deparseError); ok {
@@ -324,7 +342,7 @@ func Deparse(tree *ast.ParseResult) (result string, err error) {
 	}()
 	var out []byte
 	for i, raw := range tree.Stmts {
-		out = deparseRawStmt(out, raw)
+		out = deparseRawStmtEmpties(out, raw, empties)
 		if i < len(tree.Stmts)-1 {
 			out = append(out, "; "...)
 		}

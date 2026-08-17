@@ -250,7 +250,7 @@ func (p *parser) parseTableElement() *ast.Node {
 	switch p.kind() {
 	case ast.Token_LIKE:
 		return p.parseTableLikeClause()
-	case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_UNIQUE,
+	case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_NOT, ast.Token_UNIQUE,
 		ast.Token_PRIMARY, ast.Token_EXCLUDE, ast.Token_FOREIGN:
 		return p.parseTableConstraint()
 	}
@@ -270,7 +270,7 @@ func (p *parser) parseTypedTableElementList() []*ast.Node {
 // TableConstraint.
 func (p *parser) parseTypedTableElement() *ast.Node {
 	switch p.kind() {
-	case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_UNIQUE,
+	case ast.Token_CONSTRAINT, ast.Token_CHECK, ast.Token_NOT, ast.Token_UNIQUE,
 		ast.Token_PRIMARY, ast.Token_EXCLUDE, ast.Token_FOREIGN:
 		return p.parseTableConstraint()
 	}
@@ -354,7 +354,15 @@ func (p *parser) parseColQualList() ([]*ast.Node, *ast.CollateClause) {
 			switch {
 			case p.have(ast.Token_NULL_P):
 				constraints = append(constraints, nConstraint(&ast.Constraint{
-					Contype:  ast.ConstrType_CONSTR_NOTNULL,
+					Contype:        ast.ConstrType_CONSTR_NOTNULL,
+					Location:       tok.Start,
+					IsNoInherit:    p.parseOptNoInherit(),
+					IsEnforced:     true,
+					InitiallyValid: true,
+				}))
+			case p.have(ast.Token_ENFORCED):
+				constraints = append(constraints, nConstraint(&ast.Constraint{
+					Contype:  ast.ConstrType_CONSTR_ATTR_NOT_ENFORCED,
 					Location: tok.Start,
 				}))
 			case p.have(ast.Token_DEFERRABLE):
@@ -369,6 +377,12 @@ func (p *parser) parseColQualList() ([]*ast.Node, *ast.CollateClause) {
 			p.next()
 			constraints = append(constraints, nConstraint(&ast.Constraint{
 				Contype:  ast.ConstrType_CONSTR_ATTR_DEFERRABLE,
+				Location: tok.Start,
+			}))
+		case ast.Token_ENFORCED:
+			p.next()
+			constraints = append(constraints, nConstraint(&ast.Constraint{
+				Contype:  ast.ConstrType_CONSTR_ATTR_ENFORCED,
 				Location: tok.Start,
 			}))
 		case ast.Token_INITIALLY:
@@ -408,6 +422,9 @@ func (p *parser) parseColConstraintElem() *ast.Constraint {
 		p.next()
 		p.expect(ast.Token_NULL_P)
 		n.Contype = ast.ConstrType_CONSTR_NOTNULL
+		n.IsNoInherit = p.parseOptNoInherit()
+		n.IsEnforced = true
+		n.InitiallyValid = true
 	case ast.Token_NULL_P:
 		p.next()
 		n.Contype = ast.ConstrType_CONSTR_NULL
@@ -426,15 +443,12 @@ func (p *parser) parseColConstraintElem() *ast.Constraint {
 	case ast.Token_CHECK:
 		p.next()
 		n.Contype = ast.ConstrType_CONSTR_CHECK
+		n.IsEnforced = true
 		n.InitiallyValid = true
 		p.expect(ast.Token('('))
 		n.RawExpr = p.parseAExpr(0)
 		p.expect(ast.Token(')'))
-		if p.kind() == ast.Token_NO && p.kindN(1) == ast.Token_INHERIT {
-			p.next()
-			p.next()
-			n.IsNoInherit = true
-		}
+		n.IsNoInherit = p.parseOptNoInherit()
 	case ast.Token_DEFAULT:
 		p.next()
 		n.Contype = ast.ConstrType_CONSTR_DEFAULT
@@ -455,7 +469,7 @@ func (p *parser) parseColConstraintElem() *ast.Constraint {
 			p.expect(ast.Token('('))
 			n.RawExpr = p.parseAExpr(0)
 			p.expect(ast.Token(')'))
-			p.expect(ast.Token_STORED)
+			n.GeneratedKind = p.parseOptVirtualOrStored()
 			if n.GeneratedWhen != attributeIdentityAlways {
 				p.ereport("base_yyparse", "for a generated column, GENERATED ALWAYS must be specified", wtok.Start)
 			}
@@ -463,6 +477,7 @@ func (p *parser) parseColConstraintElem() *ast.Constraint {
 	case ast.Token_REFERENCES:
 		p.next()
 		n.Contype = ast.ConstrType_CONSTR_FOREIGN
+		n.IsEnforced = true
 		n.InitiallyValid = true
 		n.Pktable = p.parseQualifiedName()
 		if p.have(ast.Token('(')) {
@@ -486,6 +501,12 @@ const (
 	attributeIdentityByDefault = "d"
 )
 
+// Generated column kinds (pg_attribute.h).
+const (
+	attributeGeneratedStored  = "s"
+	attributeGeneratedVirtual = "v"
+)
+
 // parseGeneratedWhen is gram.y's generated_when.
 func (p *parser) parseGeneratedWhen() string {
 	switch {
@@ -497,6 +518,28 @@ func (p *parser) parseGeneratedWhen() string {
 	}
 	p.syntaxErrorAt()
 	return ""
+}
+
+// parseOptNoInherit is gram.y's opt_no_inherit.
+func (p *parser) parseOptNoInherit() bool {
+	if p.kind() == ast.Token_NO && p.kindN(1) == ast.Token_INHERIT {
+		p.next()
+		p.next()
+		return true
+	}
+	return false
+}
+
+// parseOptVirtualOrStored is gram.y's opt_virtual_or_stored; the default is
+// VIRTUAL (PG 18).
+func (p *parser) parseOptVirtualOrStored() string {
+	switch {
+	case p.have(ast.Token_STORED):
+		return attributeGeneratedStored
+	case p.have(ast.Token_VIRTUAL):
+		return attributeGeneratedVirtual
+	}
+	return attributeGeneratedVirtual
 }
 
 // parseOptUniqueNullTreatment is gram.y's opt_unique_null_treatment;
@@ -725,6 +768,8 @@ const (
 	casInitiallyDeferred  = 1 << 3
 	casNotValid           = 1 << 4
 	casNoInherit          = 1 << 5
+	casNotEnforced        = 1 << 6
+	casEnforced           = 1 << 7
 )
 
 // parseConstraintAttributeSpec is gram.y's ConstraintAttributeSpec; returns
@@ -750,12 +795,19 @@ func (p *parser) parseConstraintAttributeSpec() (int, int32) {
 				p.next()
 				p.next()
 				bit = casNotValid
+			case ast.Token_ENFORCED:
+				p.next()
+				p.next()
+				bit = casNotEnforced
 			default:
 				return spec, loc
 			}
 		case ast.Token_DEFERRABLE:
 			p.next()
 			bit = casDeferrable
+		case ast.Token_ENFORCED:
+			p.next()
+			bit = casEnforced
 		case ast.Token_INITIALLY:
 			switch p.kindN(1) {
 			case ast.Token_IMMEDIATE:
@@ -780,13 +832,19 @@ func (p *parser) parseConstraintAttributeSpec() (int, int32) {
 		default:
 			return spec, loc
 		}
+		if loc == -1 {
+			// PG 18's YYLLOC_DEFAULT scans for the first valid location, so
+			// a non-empty spec's location is its first element's.
+			loc = tok.Start
+		}
 		newspec := spec | bit
 		// gram.y: ConstraintAttributeSpec conflict checks, reported at @2.
 		if newspec&(casNotDeferrable|casInitiallyDeferred) == casNotDeferrable|casInitiallyDeferred {
 			p.ereport("base_yyparse", "constraint declared INITIALLY DEFERRED must be DEFERRABLE", tok.Start)
 		}
 		if newspec&(casNotDeferrable|casDeferrable) == casNotDeferrable|casDeferrable ||
-			newspec&(casInitiallyImmediate|casInitiallyDeferred) == casInitiallyImmediate|casInitiallyDeferred {
+			newspec&(casInitiallyImmediate|casInitiallyDeferred) == casInitiallyImmediate|casInitiallyDeferred ||
+			newspec&(casNotEnforced|casEnforced) == casNotEnforced|casEnforced {
 			p.ereport("base_yyparse", "conflicting constraint properties", tok.Start)
 		}
 		spec = newspec
@@ -794,9 +852,13 @@ func (p *parser) parseConstraintAttributeSpec() (int, int32) {
 }
 
 // processCASbits is gram.y's processCASbits: apply the attribute bits to
-// the flags the constraint type supports, erroring on the rest.
+// the flags the constraint type supports, erroring on the rest. isEnforced
+// defaults to true when the constraint supports enforceability.
 func (p *parser) processCASbits(casBits int, loc int32, constrType string,
-	deferrable, initdeferred, notValid, noInherit *bool) {
+	deferrable, initdeferred, isEnforced, notValid, noInherit *bool) {
+	if isEnforced != nil {
+		*isEnforced = true
+	}
 	if casBits&(casDeferrable|casInitiallyDeferred) != 0 {
 		if deferrable != nil {
 			*deferrable = true
@@ -829,6 +891,26 @@ func (p *parser) processCASbits(casBits int, loc int32, constrType string,
 				fmt.Sprintf("%s constraints cannot be marked NO INHERIT", constrType), loc)
 		}
 	}
+	if casBits&casNotEnforced != 0 {
+		if isEnforced != nil {
+			*isEnforced = false
+		} else {
+			p.ereport("processCASbits",
+				fmt.Sprintf("%s constraints cannot be marked NOT ENFORCED", constrType), loc)
+		}
+		// NB: a NOT ENFORCED constraint is also recorded as not validated.
+		if notValid != nil {
+			*notValid = true
+		}
+	}
+	if casBits&casEnforced != 0 {
+		if isEnforced != nil {
+			*isEnforced = true
+		} else {
+			p.ereport("processCASbits",
+				fmt.Sprintf("%s constraints cannot be marked ENFORCED", constrType), loc)
+		}
+	}
 }
 
 // parseConstraintElem is gram.y's ConstraintElem. The leading CONSTRAINT
@@ -844,7 +926,16 @@ func (p *parser) parseConstraintElem() *ast.Constraint {
 		n.RawExpr = p.parseAExpr(0)
 		p.expect(ast.Token(')'))
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "CHECK", nil, nil, &n.SkipValidation, &n.IsNoInherit)
+		p.processCASbits(cas, casLoc, "CHECK", nil, nil, &n.IsEnforced, &n.SkipValidation, &n.IsNoInherit)
+		n.InitiallyValid = !n.SkipValidation
+	case ast.Token_NOT:
+		// NOT NULL_P ColId ConstraintAttributeSpec (PG 18)
+		p.next()
+		p.expect(ast.Token_NULL_P)
+		n.Contype = ast.ConstrType_CONSTR_NOTNULL
+		n.Keys = []*ast.Node{nStr(p.colId())}
+		cas, casLoc := p.parseConstraintAttributeSpec()
+		p.processCASbits(cas, casLoc, "NOT NULL", nil, nil, nil, &n.SkipValidation, &n.IsNoInherit)
 		n.InitiallyValid = !n.SkipValidation
 	case ast.Token_UNIQUE:
 		p.next()
@@ -856,18 +947,19 @@ func (p *parser) parseConstraintElem() *ast.Constraint {
 			p.next()
 			n.Indexname = p.name()
 			cas, casLoc := p.parseConstraintAttributeSpec()
-			p.processCASbits(cas, casLoc, "UNIQUE", &n.Deferrable, &n.Initdeferred, nil, nil)
+			p.processCASbits(cas, casLoc, "UNIQUE", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 			break
 		}
 		n.NullsNotDistinct = !p.parseOptUniqueNullTreatment()
 		p.expect(ast.Token('('))
 		n.Keys = p.columnList()
+		n.WithoutOverlaps = p.parseOptWithoutOverlaps()
 		p.expect(ast.Token(')'))
 		n.Including = p.parseOptCInclude()
 		n.Options = p.parseOptDefinition()
 		n.Indexspace = p.parseOptConsTableSpace()
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "UNIQUE", &n.Deferrable, &n.Initdeferred, nil, nil)
+		p.processCASbits(cas, casLoc, "UNIQUE", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 	case ast.Token_PRIMARY:
 		p.next()
 		p.expect(ast.Token_KEY)
@@ -878,17 +970,18 @@ func (p *parser) parseConstraintElem() *ast.Constraint {
 			p.next()
 			n.Indexname = p.name()
 			cas, casLoc := p.parseConstraintAttributeSpec()
-			p.processCASbits(cas, casLoc, "PRIMARY KEY", &n.Deferrable, &n.Initdeferred, nil, nil)
+			p.processCASbits(cas, casLoc, "PRIMARY KEY", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 			break
 		}
 		p.expect(ast.Token('('))
 		n.Keys = p.columnList()
+		n.WithoutOverlaps = p.parseOptWithoutOverlaps()
 		p.expect(ast.Token(')'))
 		n.Including = p.parseOptCInclude()
 		n.Options = p.parseOptDefinition()
 		n.Indexspace = p.parseOptConsTableSpace()
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "PRIMARY KEY", &n.Deferrable, &n.Initdeferred, nil, nil)
+		p.processCASbits(cas, casLoc, "PRIMARY KEY", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 	case ast.Token_EXCLUDE:
 		p.next()
 		n.Contype = ast.ConstrType_CONSTR_EXCLUSION
@@ -910,18 +1003,19 @@ func (p *parser) parseConstraintElem() *ast.Constraint {
 			p.expect(ast.Token(')'))
 		}
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "EXCLUDE", &n.Deferrable, &n.Initdeferred, nil, nil)
+		p.processCASbits(cas, casLoc, "EXCLUDE", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 	case ast.Token_FOREIGN:
 		p.next()
 		p.expect(ast.Token_KEY)
 		n.Contype = ast.ConstrType_CONSTR_FOREIGN
 		p.expect(ast.Token('('))
-		n.FkAttrs = p.columnList()
+		n.FkAttrs, n.FkWithPeriod = p.parseColumnListWithPeriod()
 		p.expect(ast.Token(')'))
 		p.expect(ast.Token_REFERENCES)
 		n.Pktable = p.parseQualifiedName()
+		// opt_column_and_period_list
 		if p.have(ast.Token('(')) {
-			n.PkAttrs = p.columnList()
+			n.PkAttrs, n.PkWithPeriod = p.parseColumnListWithPeriod()
 			p.expect(ast.Token(')'))
 		}
 		n.FkMatchtype = p.parseKeyMatch()
@@ -930,12 +1024,38 @@ func (p *parser) parseConstraintElem() *ast.Constraint {
 		n.FkDelAction = del
 		n.FkDelSetCols = delCols
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "FOREIGN KEY", &n.Deferrable, &n.Initdeferred, &n.SkipValidation, nil)
+		p.processCASbits(cas, casLoc, "FOREIGN KEY", &n.Deferrable, &n.Initdeferred, &n.IsEnforced, &n.SkipValidation, nil)
 		n.InitiallyValid = !n.SkipValidation
 	default:
 		p.syntaxErrorAt()
 	}
 	return n
+}
+
+// parseOptWithoutOverlaps is gram.y's opt_without_overlaps.
+func (p *parser) parseOptWithoutOverlaps() bool {
+	if p.kind() == ast.Token_WITHOUT && p.kindN(1) == ast.Token_OVERLAPS {
+		p.next()
+		p.next()
+		return true
+	}
+	return false
+}
+
+// parseColumnListWithPeriod is columnList optionalPeriodName: a comma-headed
+// PERIOD reads as the period column exactly when a columnElem follows it —
+// otherwise PERIOD is an unreserved keyword acting as a column name, the
+// same one-token-later disambiguation the LALR tables perform.
+func (p *parser) parseColumnListWithPeriod() ([]*ast.Node, bool) {
+	list := []*ast.Node{nStr(p.colId())}
+	for p.have(ast.Token(',')) {
+		if p.kind() == ast.Token_PERIOD && isColIdToken(p.peekN(1)) {
+			p.next()
+			return append(list, nStr(p.colId())), true
+		}
+		list = append(list, nStr(p.colId()))
+	}
+	return list, false
 }
 
 // parseOptCInclude is gram.y's opt_c_include.
@@ -994,9 +1114,9 @@ func (p *parser) parseOptPartitionSpec() *ast.PartitionSpec {
 	case strEqualsFold(strategy, "hash"):
 		n.Strategy = ast.PartitionStrategy_PARTITION_STRATEGY_HASH
 	default:
+		// PG 18: parsePartitionStrategy takes the strategy's location.
 		p.fail(p.filter.ParserError("parsePartitionStrategy",
-			fmt.Sprintf("unrecognized partitioning strategy %q", strategy), -1))
-		_ = stok
+			fmt.Sprintf("unrecognized partitioning strategy %q", strategy), int(stok.Start)))
 	}
 	p.expect(ast.Token('('))
 	n.PartParams = []*ast.Node{p.parsePartElem()}

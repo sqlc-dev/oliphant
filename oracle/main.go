@@ -1,5 +1,5 @@
 // Command oracle wraps the pinned pg_query_go v6.2.2 (cgo — the real
-// libpg_query 17-6.2.2) behind a JSONL stdin/stdout protocol. It is the
+// libpg_query 18.0.0) behind a JSONL stdin/stdout protocol. It is the
 // oracle every golden in parser/testdata derives from; nothing in the main
 // module ever links it.
 //

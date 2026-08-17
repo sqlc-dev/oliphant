@@ -34,7 +34,7 @@ declare
   line text;
 begin
   for line in
-    execute 'explain (analyze, costs off, summary off, timing off) ' || query
+    execute 'explain (analyze, costs off, summary off, timing off, buffers off) ' || query
   loop
     out_line := regexp_replace(line, '\d+kB', 'NNkB', 'g');
     return next;
@@ -53,7 +53,7 @@ declare
   element jsonb;
   matching_nodes jsonb := '[]'::jsonb;
 begin
-  execute 'explain (analyze, costs off, summary off, timing off, format ''json'') ' || query into strict elements;
+  execute 'explain (analyze, costs off, summary off, timing off, buffers off, format ''json'') ' || query into strict elements;
   while jsonb_array_length(elements) > 0 loop
     element := elements->0;
     elements := elements - 0;
@@ -548,7 +548,7 @@ join tenk1 t2 on t1.unique1 = t2.unique2
 join tenk1 t3 on t2.unique1 = t3.unique1
 order by count(*)
 --
-ee8778a524157b88
+6c889e172e5d1e41
 == 105
 -- Parallel sort but with expression (correlated subquery) that
 -- is prohibited in parallel plans.
@@ -557,7 +557,7 @@ explain (costs off) select distinct
   (select t.unique1 from tenk1 where tenk1.unique1 = t.unique1)
 from tenk1 t, generate_series(1, 1000)
 --
-8b420e025426a872
+14e2e74d504fc58b
 == 106
 explain (costs off) select
   unique1,
@@ -565,7 +565,7 @@ explain (costs off) select
 from tenk1 t, generate_series(1, 1000)
 order by 1, 2
 --
-8ba001e16e7261d5
+b39dcf1680ef620a
 == 107
 -- Parallel sort but with expression not available until the upper rel.
 explain (costs off) select distinct sub.unique1, stringu1 || random()::text
@@ -624,3 +624,11 @@ cc9d6a0a2edc3b88
 explain (costs off) select a, b, a <-> point(5, 5) dist from point_table order by dist, b desc limit 1
 --
 07d8a80efe6c44b1
+== 120
+-- Ensure we get an incremental sort on the outer side of the mergejoin
+explain (costs off)
+select * from
+  (select * from tenk1 order by four) t1 join tenk1 t2 on t1.four = t2.four and t1.two = t2.two
+order by t1.four, t1.two limit 1
+--
+9aff91a7cab720bb

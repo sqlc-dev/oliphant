@@ -10,7 +10,7 @@ error type, same fingerprints. Consumers change one import path:
 +import pg_query "github.com/sqlc-dev/oliphant"
 ```
 
-Pinned to **libpg_query `17-6.2.2`** (PostgreSQL 17.7, patched) — the exact
+Pinned to **libpg_query `18.0.0`** (PostgreSQL 18.4, patched) — the exact
 build pg_query_go v6.2.2 ships. Every golden in `parser/testdata` derives
 from that oracle, byte for byte, and is never edited by hand.
 

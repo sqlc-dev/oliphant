@@ -689,127 +689,147 @@ CREATE TABLE atest2 (col1 varchar(10), col2 boolean)
 --
 ca04d7c4d912b932
 == 162
+SELECT pg_get_acl('pg_class'::regclass, 'atest2'::regclass::oid, 0)
+--
+51dccccd82838401
+== 163
 GRANT SELECT ON atest2 TO regress_priv_user2
 --
 cdc345373a932510
-== 163
+== 164
 GRANT UPDATE ON atest2 TO regress_priv_user3
 --
 adb6100a07418d11
-== 164
+== 165
 GRANT INSERT ON atest2 TO regress_priv_user4 GRANTED BY CURRENT_USER
 --
 84a9fe3b689c9138
-== 165
+== 166
 GRANT TRUNCATE ON atest2 TO regress_priv_user5 GRANTED BY CURRENT_ROLE
 --
 53734890817e782d
-== 166
+== 167
+SELECT unnest(pg_get_acl('pg_class'::regclass, 'atest2'::regclass::oid, 0))
+--
+eb5b96008d5fc19b
+== 168
+-- Invalid inputs
+SELECT pg_get_acl('pg_class'::regclass, 0, 0)
+--
+dfcdbc6a097c2fff
+== 169
+-- null
+SELECT pg_get_acl(0, 0, 0)
+--
+dfcdbc6a097c2fff
+== 170
+-- null
+
 GRANT TRUNCATE ON atest2 TO regress_priv_user4 GRANTED BY regress_priv_user5
 --
 df823f418cd5fe07
-== 167
+== 171
 -- error
 
 
 SET SESSION AUTHORIZATION regress_priv_user2
 --
 532a0ea53df105d9
-== 168
+== 172
 SELECT session_user, current_user
 --
 4c3990d1d7cd6057
-== 169
+== 173
 -- try various combinations of queries on atest1 and atest2
 
 SELECT * FROM atest1
 --
 2501e3081cbe0291
-== 170
+== 174
 -- ok
 SELECT * FROM atest2
 --
 e85304ee7c12ea79
-== 171
+== 175
 -- ok
 INSERT INTO atest1 VALUES (2, 'two')
 --
 d9812e76bc8a00a8
-== 172
+== 176
 -- ok
 INSERT INTO atest2 VALUES ('foo', true)
 --
 ce0f5c2a5ac8bce8
-== 173
+== 177
 -- fail
 INSERT INTO atest1 SELECT 1, b FROM atest1
 --
 f562465510fa1041
-== 174
+== 178
 -- ok
 UPDATE atest1 SET a = 1 WHERE a = 2
 --
 5b8e61a97c18e3e2
-== 175
+== 179
 -- ok
 UPDATE atest2 SET col2 = NOT col2
 --
 20f58912b24a0067
-== 176
+== 180
 -- fail
 SELECT * FROM atest1 FOR UPDATE
 --
 36e17b85e64b2741
-== 177
+== 181
 -- ok
 SELECT * FROM atest2 FOR UPDATE
 --
 765b8b914e30e360
-== 178
+== 182
 -- fail
 DELETE FROM atest2
 --
 5ab02e9005043490
-== 179
+== 183
 -- fail
 TRUNCATE atest2
 --
 6123c6fcc9930b27
-== 180
+== 184
 -- fail
 BEGIN
 --
 b16b431979fc3e05
-== 181
+== 185
 LOCK atest2 IN ACCESS EXCLUSIVE MODE
 --
 99ba02c2c6782267
-== 182
+== 186
 -- fail
 COMMIT
 --
 7bbcde9cfab6c79c
-== 183
+== 187
 COPY atest2 FROM stdin
 --
 827272ba4a3f491c
-== 184
+== 188
 -- fail
 GRANT ALL ON atest1 TO PUBLIC
 --
 856120b8397b3c2c
-== 185
+== 189
 -- fail
 
 -- checks in subquery, both ok
 SELECT * FROM atest1 WHERE ( b IN ( SELECT col1 FROM atest2 ) )
 --
 740516e7666495b7
-== 186
+== 190
 SELECT * FROM atest1
 --
 2501e3081cbe0291
-== 187
+== 191
 -- ok
 
 
@@ -819,337 +839,337 @@ SELECT * FROM atest1
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 188
+== 192
 CREATE TABLE atest12 as
   SELECT x AS a, 10001 - x AS b FROM generate_series(1,10000) x
 --
 2cf643155c2f912b
-== 189
+== 193
 CREATE INDEX ON atest12 (a)
 --
 c6313974291310fa
-== 190
+== 194
 CREATE INDEX ON atest12 (abs(a))
 --
 bc9ff3c82dfcc9bd
-== 191
+== 195
 -- results below depend on having quite accurate stats for atest12, so...
 ALTER TABLE atest12 SET (autovacuum_enabled = off)
 --
 cb3b589150499be2
-== 192
+== 196
 SET default_statistics_target = 10000
 --
 b72df779709ed3e3
-== 193
+== 197
 VACUUM ANALYZE atest12
 --
 9023aff4d2cca9f8
-== 194
+== 198
 RESET default_statistics_target
 --
 b6fbd27f0834133b
-== 195
+== 199
 CREATE OPERATOR <<< (procedure = leak, leftarg = integer, rightarg = integer,
                      restrict = scalarltsel)
 --
 9ee57dc8b17db055
-== 196
+== 200
 -- views with leaky operator
 CREATE VIEW atest12v AS
   SELECT * FROM atest12 WHERE b <<< 5
 --
 72b42bed871c242e
-== 197
+== 201
 CREATE VIEW atest12sbv WITH (security_barrier=true) AS
   SELECT * FROM atest12 WHERE b <<< 5
 --
 428cf47282b54956
-== 198
+== 202
 -- This plan should use nestloop, knowing that few rows will be selected.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b
 --
-4fab764603e62579
-== 199
+a1def660d7aa1bf1
+== 203
 -- And this one.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12 x, atest12 y
   WHERE x.a = y.b and abs(y.a) <<< 5
 --
-53038a9628d7cdf5
-== 200
+735b43816b685363
+== 204
 -- This should also be a nestloop, but the security barrier forces the inner
 -- scan to be materialized
 EXPLAIN (COSTS OFF) SELECT * FROM atest12sbv x, atest12sbv y WHERE x.a = y.b
 --
-69c175c26580fe44
-== 201
+a1def660d7aa1bf1
+== 205
 -- Check if regress_priv_user2 can break security.
 SET SESSION AUTHORIZATION regress_priv_user2
 --
 532a0ea53df105d9
-== 202
+== 206
 CREATE FUNCTION leak2(integer,integer) RETURNS boolean
   AS $$begin raise notice 'leak % %', $1, $2; return $1 > $2; end$$
   LANGUAGE plpgsql immutable
 --
 0581debd15c70230
-== 203
+== 207
 CREATE OPERATOR >>> (procedure = leak2, leftarg = integer, rightarg = integer,
                      restrict = scalargtsel)
 --
 4fe2c1b6276fa6d5
-== 204
+== 208
 -- These should not show any "leak" notices before failing.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12 WHERE a >>> 0
 --
 a5c25adb6a14f769
-== 205
+== 209
 EXPLAIN (COSTS OFF) SELECT * FROM atest12v WHERE a >>> 0
 --
 94abc044a55cea3d
-== 206
+== 210
 EXPLAIN (COSTS OFF) SELECT * FROM atest12sbv WHERE a >>> 0
 --
 e493add75eac4f62
-== 207
+== 211
 -- Now regress_priv_user1 grants access to regress_priv_user2 via the views.
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 208
+== 212
 GRANT SELECT ON atest12v TO PUBLIC
 --
 9e33ef79187b1b98
-== 209
+== 213
 GRANT SELECT ON atest12sbv TO PUBLIC
 --
 f5d2c1de19e4573e
-== 210
+== 214
 SET SESSION AUTHORIZATION regress_priv_user2
 --
 532a0ea53df105d9
-== 211
+== 215
 -- These plans should continue to use a nestloop, since they execute with the
 -- privileges of the view owner.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b
 --
-4fab764603e62579
-== 212
+a1def660d7aa1bf1
+== 216
 EXPLAIN (COSTS OFF) SELECT * FROM atest12sbv x, atest12sbv y WHERE x.a = y.b
 --
-69c175c26580fe44
-== 213
+a1def660d7aa1bf1
+== 217
 -- A non-security barrier view does not guard against information leakage.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y
   WHERE x.a = y.b and abs(y.a) <<< 5
 --
-f1ba4436dba6ac1e
-== 214
+735b43816b685363
+== 218
 -- But a security barrier view isolates the leaky operator.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12sbv x, atest12sbv y
   WHERE x.a = y.b and abs(y.a) <<< 5
 --
-9dd2b80fb2c6e2e2
-== 215
+735b43816b685363
+== 219
 -- Now regress_priv_user1 grants sufficient access to regress_priv_user2.
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 216
+== 220
 GRANT SELECT (a, b) ON atest12 TO PUBLIC
 --
 2edf3f9b938f962b
-== 217
+== 221
 SET SESSION AUTHORIZATION regress_priv_user2
 --
 532a0ea53df105d9
-== 218
+== 222
 -- regress_priv_user2 should continue to get a good row estimate.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b
 --
-4fab764603e62579
-== 219
+a1def660d7aa1bf1
+== 223
 -- But not for this, due to lack of table-wide permissions needed
 -- to make use of the expression index's statistics.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12 x, atest12 y
   WHERE x.a = y.b and abs(y.a) <<< 5
 --
-53038a9628d7cdf5
-== 220
+735b43816b685363
+== 224
 -- clean up (regress_priv_user1's objects are all dropped later)
 DROP FUNCTION leak2(integer, integer) CASCADE
 --
 7904a53930784a5f
-== 221
+== 225
 -- groups
 
 SET SESSION AUTHORIZATION regress_priv_user3
 --
 532a0ea53df105d9
-== 222
+== 226
 CREATE TABLE atest3 (one int, two int, three int)
 --
 f4421cee6cdaee1c
-== 223
+== 227
 GRANT DELETE ON atest3 TO GROUP regress_priv_group2
 --
 8177657343571807
-== 224
+== 228
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 225
+== 229
 SELECT * FROM atest3
 --
 c4ff201379d65892
-== 226
+== 230
 -- fail
 DELETE FROM atest3
 --
 40e45c90930d9f14
-== 227
+== 231
 -- ok
 
 BEGIN
 --
 b16b431979fc3e05
-== 228
+== 232
 RESET SESSION AUTHORIZATION
 --
 8a5cf7139a632958
-== 229
+== 233
 ALTER ROLE regress_priv_user1 NOINHERIT
 --
 1c9c1140d85ec615
-== 230
+== 234
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 231
+== 235
 SAVEPOINT s1
 --
 8ebd566ea1bf947b
-== 232
+== 236
 DELETE FROM atest3
 --
 40e45c90930d9f14
-== 233
+== 237
 -- ok because grant-level option is unchanged
 ROLLBACK TO s1
 --
 ede7bfabb934a1db
-== 234
+== 238
 RESET SESSION AUTHORIZATION
 --
 8a5cf7139a632958
-== 235
+== 239
 GRANT regress_priv_group2 TO regress_priv_user1 WITH INHERIT FALSE
 --
 4f35d419b5a9c7e5
-== 236
+== 240
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 237
+== 241
 DELETE FROM atest3
 --
 40e45c90930d9f14
-== 238
+== 242
 -- fail
 ROLLBACK TO s1
 --
 ede7bfabb934a1db
-== 239
+== 243
 RESET SESSION AUTHORIZATION
 --
 8a5cf7139a632958
-== 240
+== 244
 REVOKE INHERIT OPTION FOR regress_priv_group2 FROM regress_priv_user1
 --
 dda1ff0c08b2461e
-== 241
+== 245
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 242
+== 246
 DELETE FROM atest3
 --
 40e45c90930d9f14
-== 243
+== 247
 -- also fail
 ROLLBACK
 --
 a46081a556fda027
-== 244
+== 248
 -- views
 
 SET SESSION AUTHORIZATION regress_priv_user3
 --
 532a0ea53df105d9
-== 245
+== 249
 CREATE VIEW atestv1 AS SELECT * FROM atest1
 --
 2f4b864c9a4f830c
-== 246
+== 250
 -- ok
 /* The next *should* fail, but it's not implemented that way yet. */
 CREATE VIEW atestv2 AS SELECT * FROM atest2
 --
 ff5b501a66a1fcad
-== 247
+== 251
 CREATE VIEW atestv3 AS SELECT * FROM atest3
 --
 2523099ee66d0e40
-== 248
+== 252
 -- ok
 /* Empty view is a corner case that failed in 9.2. */
 CREATE VIEW atestv0 AS SELECT 0 as x WHERE false
 --
 904ea20b4ec66f9d
-== 249
+== 253
 -- ok
 
 SELECT * FROM atestv1
 --
 17431f899b9643c2
-== 250
+== 254
 -- ok
 SELECT * FROM atestv2
 --
 517300fdb621b6ce
-== 251
+== 255
 -- fail
 GRANT SELECT ON atestv1, atestv3 TO regress_priv_user4
 --
 e19e70532920e0c4
-== 252
+== 256
 GRANT SELECT ON atestv2 TO regress_priv_user2
 --
 521d432a1e1417eb
-== 253
+== 257
 SET SESSION AUTHORIZATION regress_priv_user4
 --
 532a0ea53df105d9
-== 254
+== 258
 SELECT * FROM atestv1
 --
 17431f899b9643c2
-== 255
+== 259
 -- ok
 SELECT * FROM atestv2
 --
 517300fdb621b6ce
-== 256
+== 260
 -- fail
 SELECT * FROM atestv3
 --
 a6cb9a56527d48cc
-== 257
+== 261
 -- ok
 SELECT * FROM atestv0
 --
 720ad177155bdd00
-== 258
+== 262
 -- fail
 
 -- Appendrels excluded by constraints failed to check permissions in 8.4-9.2.
@@ -1159,64 +1179,64 @@ select * from
    (select b.q2 as x from int8_tbl b offset 0)) ss
 where false
 --
-357bdcfa8544b949
-== 259
+e0963c68f455cbd9
+== 263
 set constraint_exclusion = on
 --
 6ebc3ac71b95e94f
-== 260
+== 264
 select * from
   ((select a.q1 as x, random() from int8_tbl a where q1 > 0)
    union all
    (select b.q2 as x, random() from int8_tbl b where q2 > 0)) ss
 where x < 0
 --
-d8f52328961cc0a5
-== 261
+10a2a6c91d764f09
+== 265
 reset constraint_exclusion
 --
 c821c87e72fa84a8
-== 262
+== 266
 CREATE VIEW atestv4 AS SELECT * FROM atestv3
 --
 8fc72846a0f5a70c
-== 263
+== 267
 -- nested view
 SELECT * FROM atestv4
 --
 f4fdec9cd5dd1724
-== 264
+== 268
 -- ok
 GRANT SELECT ON atestv4 TO regress_priv_user2
 --
 66e83b89d7db0f8a
-== 265
+== 269
 SET SESSION AUTHORIZATION regress_priv_user2
 --
 532a0ea53df105d9
-== 266
+== 270
 -- Two complex cases:
 
 SELECT * FROM atestv3
 --
 a6cb9a56527d48cc
-== 267
+== 271
 -- fail
 SELECT * FROM atestv4
 --
 f4fdec9cd5dd1724
-== 268
+== 272
 -- ok (even though regress_priv_user2 cannot access underlying atestv3)
 
 SELECT * FROM atest2
 --
 e85304ee7c12ea79
-== 269
+== 273
 -- ok
 SELECT * FROM atestv2
 --
 517300fdb621b6ce
-== 270
+== 274
 -- fail (even though regress_priv_user2 can access underlying atest2)
 
 -- Test column level permissions
@@ -1224,273 +1244,289 @@ SELECT * FROM atestv2
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 271
+== 275
 CREATE TABLE atest5 (one int, two int unique, three int, four int unique)
 --
 c8d2e61b0d14603e
-== 272
+== 276
 CREATE TABLE atest6 (one int, two int, blue int)
 --
 911379d4cab13fe9
-== 273
+== 277
 GRANT SELECT (one), INSERT (two), UPDATE (three) ON atest5 TO regress_priv_user4
 --
 53086c20663a8025
-== 274
+== 278
 GRANT ALL (one) ON atest5 TO regress_priv_user3
 --
 4269e552fa7692cf
-== 275
+== 279
+SELECT unnest(pg_get_acl('pg_class'::regclass, 'atest5'::regclass::oid, 1))
+--
+eb5b96008d5fc19b
+== 280
+SELECT unnest(pg_get_acl('pg_class'::regclass, 'atest5'::regclass::oid, 2))
+--
+eb5b96008d5fc19b
+== 281
+SELECT unnest(pg_get_acl('pg_class'::regclass, 'atest5'::regclass::oid, 3))
+--
+eb5b96008d5fc19b
+== 282
+SELECT unnest(pg_get_acl('pg_class'::regclass, 'atest5'::regclass::oid, 4))
+--
+eb5b96008d5fc19b
+== 283
 INSERT INTO atest5 VALUES (1,2,3)
 --
 3436c15e7fe0a3b5
-== 276
+== 284
 SET SESSION AUTHORIZATION regress_priv_user4
 --
 532a0ea53df105d9
-== 277
+== 285
 SELECT * FROM atest5
 --
 f131c8de16769cd0
-== 278
+== 286
 -- fail
 SELECT one FROM atest5
 --
 5602862e4329908b
-== 279
+== 287
 -- ok
 COPY atest5 (one) TO stdout
 --
 ff379258f730f6dc
-== 280
+== 288
 -- ok
 SELECT two FROM atest5
 --
 02cba685d1593c23
-== 281
+== 289
 -- fail
 COPY atest5 (two) TO stdout
 --
 00d2728c50369518
-== 282
+== 290
 -- fail
 SELECT atest5 FROM atest5
 --
 10c1272579e64172
-== 283
+== 291
 -- fail
 COPY atest5 (one,two) TO stdout
 --
 dbc4cb313478df19
-== 284
+== 292
 -- fail
 SELECT 1 FROM atest5
 --
 c986c285ada0fb14
-== 285
+== 293
 -- ok
 SELECT 1 FROM atest5 a JOIN atest5 b USING (one)
 --
-a63402802b9c5e18
-== 286
+65a49e55d1e29972
+== 294
 -- ok
 SELECT 1 FROM atest5 a JOIN atest5 b USING (two)
 --
-23ea083505f4ff60
-== 287
+90dfa9e08efaf3b4
+== 295
 -- fail
 SELECT 1 FROM atest5 a NATURAL JOIN atest5 b
 --
-02f802786a77a322
-== 288
+1e3fdc62ab67037e
+== 296
 -- fail
 SELECT * FROM (atest5 a JOIN atest5 b USING (one)) j
 --
-c8b03d0f5f993d50
-== 289
+035a9229221157df
+== 297
 -- fail
 SELECT j.* FROM (atest5 a JOIN atest5 b USING (one)) j
 --
-0dab98f6632f6741
-== 290
+f14473e06a9a3f6b
+== 298
 -- fail
 SELECT (j.*) IS NULL FROM (atest5 a JOIN atest5 b USING (one)) j
 --
-77b57ca2b112d8ca
-== 291
+89d281c242a48221
+== 299
 -- fail
 SELECT one FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-1afb4e8470c60246
-== 292
+f638616e45bfbd89
+== 300
 -- ok
 SELECT j.one FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-ae6820d0b900fdbb
-== 293
+57375cb3bf08f62b
+== 301
 -- ok
 SELECT two FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-7ca45678cac85809
-== 294
+43ef190e7ab55995
+== 302
 -- fail
 SELECT j.two FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-c8d6c1ecba204e7a
-== 295
+511a0298e35c7e07
+== 303
 -- fail
 SELECT y FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-499f5c251f2b0ee3
-== 296
+f9318903d9ff7f89
+== 304
 -- fail
 SELECT j.y FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one)) j
 --
-1148705c89ad110a
-== 297
+3e364302f464d02a
+== 305
 -- fail
 SELECT * FROM (atest5 a JOIN atest5 b USING (one))
 --
-c8b03d0f5f993d50
-== 298
+035a9229221157df
+== 306
 -- fail
 SELECT a.* FROM (atest5 a JOIN atest5 b USING (one))
 --
-ace34201d8ffd1af
-== 299
+3ca57aab3e7e250b
+== 307
 -- fail
 SELECT (a.*) IS NULL FROM (atest5 a JOIN atest5 b USING (one))
 --
-923e8e8a8995c891
-== 300
+860e6dd2c58c6ff0
+== 308
 -- fail
 SELECT two FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one))
 --
-7ca45678cac85809
-== 301
+43ef190e7ab55995
+== 309
 -- fail
 SELECT a.two FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one))
 --
-4e0971c68e23653e
-== 302
+3c632205f7b7cc94
+== 310
 -- fail
 SELECT y FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one))
 --
-499f5c251f2b0ee3
-== 303
+f9318903d9ff7f89
+== 311
 -- fail
 SELECT b.y FROM (atest5 a JOIN atest5 b(one,x,y,z) USING (one))
 --
-d809bac7400c03ee
-== 304
+f36eec2ea924dfda
+== 312
 -- fail
 SELECT y FROM (atest5 a LEFT JOIN atest5 b(one,x,y,z) USING (one))
 --
-fbe4f1024c58d0b8
-== 305
+335d87f9aca9460c
+== 313
 -- fail
 SELECT b.y FROM (atest5 a LEFT JOIN atest5 b(one,x,y,z) USING (one))
 --
-1e1905f6535bbebc
-== 306
+c5f97e5bf5a498d9
+== 314
 -- fail
 SELECT y FROM (atest5 a FULL JOIN atest5 b(one,x,y,z) USING (one))
 --
-347958cb29930cf8
-== 307
+c291f5ce5bd591cd
+== 315
 -- fail
 SELECT b.y FROM (atest5 a FULL JOIN atest5 b(one,x,y,z) USING (one))
 --
-62a8f2cb0e8491d3
-== 308
+4f41aefd4245f0c6
+== 316
 -- fail
 SELECT 1 FROM atest5 WHERE two = 2
 --
 4a4f6df402ab8748
-== 309
+== 317
 -- fail
 SELECT * FROM atest1, atest5
 --
 b2dcfcf48e60dbe3
-== 310
+== 318
 -- fail
 SELECT atest1.* FROM atest1, atest5
 --
 af50dd6c194e0392
-== 311
+== 319
 -- ok
 SELECT atest1.*,atest5.one FROM atest1, atest5
 --
 5429ce2dcbaef375
-== 312
+== 320
 -- ok
 SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.two)
 --
 a40e758b80b2ca9e
-== 313
+== 321
 -- fail
 SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.one)
 --
 1292c8832f8689d6
-== 314
+== 322
 -- ok
 SELECT one, two FROM atest5
 --
 672b8675656e3ce9
-== 315
+== 323
 -- fail
 
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 316
+== 324
 GRANT SELECT (one,two) ON atest6 TO regress_priv_user4
 --
 0bf717c9617dbb77
-== 317
+== 325
 SET SESSION AUTHORIZATION regress_priv_user4
 --
 532a0ea53df105d9
-== 318
+== 326
 SELECT one, two FROM atest5 NATURAL JOIN atest6
 --
 b58afa2f55d4cd1c
-== 319
+== 327
 -- fail still
 
 SET SESSION AUTHORIZATION regress_priv_user1
 --
 532a0ea53df105d9
-== 320
+== 328
 GRANT SELECT (two) ON atest5 TO regress_priv_user4
 --
 4c94e17a1783a2fc
-== 321
+== 329
 SET SESSION AUTHORIZATION regress_priv_user4
 --
 532a0ea53df105d9
-== 322
+== 330
 SELECT one, two FROM atest5 NATURAL JOIN atest6
 --
 b58afa2f55d4cd1c
-== 323
+== 331
 -- ok now
 
 -- test column-level privileges for INSERT and UPDATE
 INSERT INTO atest5 (two) VALUES (3)
 --
 7a8b36451bb1a808
-== 324
+== 332
 -- ok
 COPY atest5 FROM stdin
 --
 799ade6fb6e3c63f
-== 325
+== 333
 -- fail
 COPY atest5 (two) FROM stdin
 --
 0c105a38f4377f0c
-== 326
+== 334
 -- ok
 1
 INSERT INTO atest5 (three) VALUES (4)
@@ -1499,27 +1535,27 @@ ERROR: syntax error at or near "1"
 CURSORPOS: 7
 FILENAME: scan.l
 FUNCNAME: scanner_yyerror
-== 327
+== 335
 -- fail
 INSERT INTO atest5 VALUES (5,5,5)
 --
 3436c15e7fe0a3b5
-== 328
+== 336
 -- fail
 UPDATE atest5 SET three = 10
 --
 d91c9dc76a8dab93
-== 329
+== 337
 -- ok
 UPDATE atest5 SET one = 8
 --
 83600e887a5e31cb
-== 330
+== 338
 -- fail
 UPDATE atest5 SET three = 5, one = 2
 --
 fb7ee05cb0a1d942
-== 331
+== 339
 -- fail
 -- Check that column level privs are enforced in RETURNING
 -- Ok.

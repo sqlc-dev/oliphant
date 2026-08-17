@@ -432,7 +432,11 @@ func toJSON(fn *plFunction) string {
 		j.c('{')
 		switch v := d.(type) {
 		case *plVar:
-			j.dumpVar(v)
+			// dump_datum has no arm for PLPGSQL_DTYPE_PROMISE: those datums
+			// serialize as bare {}.
+			if !v.isPromise {
+				j.dumpVar(v)
+			}
 		case *plRow:
 			j.dumpRow(v)
 		case *plRec:

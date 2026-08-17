@@ -567,7 +567,7 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 		case p.have(ast.Token_SET):
 			n.Setstmt = p.parseGenericSet()
 		case p.have(ast.Token_RESET):
-			n.Setstmt = &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET}
+			n.Setstmt = &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Location: -1}
 			if p.have(ast.Token_ALL) {
 				n.Setstmt.Kind = ast.VariableSetKind_VAR_RESET_ALL
 			} else {
@@ -795,15 +795,17 @@ func (p *parser) parseDomainConstraintElem() *ast.Constraint {
 		n.RawExpr = p.parseAExpr(0)
 		p.expect(ast.Token(')'))
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "CHECK", nil, nil, &n.SkipValidation, &n.IsNoInherit)
+		p.processCASbits(cas, casLoc, "CHECK", nil, nil, nil, &n.SkipValidation, &n.IsNoInherit)
+		n.IsEnforced = true
 		n.InitiallyValid = !n.SkipValidation
 	case ast.Token_NOT:
 		p.next()
 		p.expect(ast.Token_NULL_P)
 		n.Contype = ast.ConstrType_CONSTR_NOTNULL
 		n.Keys = []*ast.Node{nStr("value")}
+		// no NOT VALID, NO INHERIT support
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "NOT NULL", nil, nil, nil, &n.IsNoInherit)
+		p.processCASbits(cas, casLoc, "NOT NULL", nil, nil, nil, nil, nil)
 		n.InitiallyValid = true
 	default:
 		p.syntaxErrorAt()
@@ -855,14 +857,17 @@ func (p *parser) parseGenericSet() *ast.VariableSetStmt {
 	if p.kind() == ast.Token_DEFAULT {
 		p.next()
 		return &ast.VariableSetStmt{
-			Kind: ast.VariableSetKind_VAR_SET_DEFAULT,
-			Name: name,
+			Kind:     ast.VariableSetKind_VAR_SET_DEFAULT,
+			Name:     name,
+			Location: -1,
 		}
 	}
+	vtok := p.peek()
 	return &ast.VariableSetStmt{
-		Kind: ast.VariableSetKind_VAR_SET_VALUE,
-		Name: name,
-		Args: p.parseVarList(),
+		Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+		Name:     name,
+		Args:     p.parseVarList(),
+		Location: vtok.Start,
 	}
 }
 
