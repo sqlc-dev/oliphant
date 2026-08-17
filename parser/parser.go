@@ -21,6 +21,7 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 	"github.com/sqlc-dev/oliphant/internal/normalize"
 	"github.com/sqlc-dev/oliphant/internal/parse"
+	"github.com/sqlc-dev/oliphant/internal/plpgsql"
 	"github.com/sqlc-dev/oliphant/internal/summary"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
@@ -118,8 +119,21 @@ func DeparseFromProtobuf(input []byte) (result string, err error) {
 	return out, nil
 }
 
+// ParsePlPgSqlToJSON is pg_query_parse_plpgsql: compile every CREATE
+// FUNCTION/PROCEDURE and DO statement with the PL/pgSQL parser and render
+// the JSON array of function dumps.
 func ParsePlPgSqlToJSON(input string) (result string, err error) {
-	return "", errNotImplemented("ParsePlPgSqlToJSON")
+	out, perr := plpgsql.ParseToJSON(input)
+	if perr != nil {
+		return "", &Error{
+			Message:   perr.Message,
+			Filename:  perr.Filename,
+			Funcname:  perr.Funcname,
+			Cursorpos: perr.Cursorpos,
+			Context:   perr.Context,
+		}
+	}
+	return out, nil
 }
 
 // Normalize is pg_query_normalize: constants become $n parameter references.

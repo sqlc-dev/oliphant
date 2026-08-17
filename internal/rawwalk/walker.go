@@ -1,8 +1,9 @@
-// Package summary ports libpg_query's summary API: pg_query_summary.c (the
-// table/alias/CTE/function/filter-column walk), pg_query_summary_statement_type.c
-// (the statement-type walk), and pg_query_summary_truncate.c (deparse-driven
-// smart truncation).
-package summary
+// Package rawwalk is raw_expression_tree_walker (src/backend/nodes/
+// nodeFuncs.c, PostgreSQL 17) over the protobuf tree, gated exactly as
+// pg_query_raw_tree_walker_supports allows: node types outside the walker's
+// switch return false without descending. It drives the summary walks and
+// the PL/pgSQL driver's statement collection.
+package rawwalk
 
 import (
 	"reflect"
@@ -12,17 +13,17 @@ import (
 
 // The C walks operate on Node* where a node may be a T_List; the callback is
 // invoked for list nodes too (which matters for the truncation walk's depth
-// accounting). nodeList and rawStmtList model those list nodes over the
+// accounting). NodeList and RawStmtList model those list nodes over the
 // protobuf tree.
-type nodeList []*ast.Node
+type NodeList []*ast.Node
 
-type rawStmtList []*ast.RawStmt
+type RawStmtList []*ast.RawStmt
 
 // concrete unwraps an *ast.Node into its inner concrete pointer (the oneof
 // member), so callbacks can switch on one representation regardless of
 // whether a child arrived generically (*ast.Node) or as a typed field
 // (*ast.RangeVar, *ast.FuncCall, ...).
-func concrete(item any) any {
+func Concrete(item any) any {
 	n, ok := item.(*ast.Node)
 	if !ok {
 		return item
@@ -40,11 +41,11 @@ func wl(list []*ast.Node) any {
 	if len(list) == 0 {
 		return nil
 	}
-	return nodeList(list)
+	return NodeList(list)
 }
 
 // isNil reports whether a child slot is empty (NULL in the C tree).
-func isNil(item any) bool {
+func IsNil(item any) bool {
 	if item == nil {
 		return true
 	}
@@ -58,10 +59,10 @@ func isNil(item any) bool {
 // descending (the summary C files check the gate before calling the walker;
 // folding it into the default arm is equivalent). Child order is the C
 // walker's, verbatim — it decides the order of every summary list.
-func walkChildren(item any, cb func(any) bool) bool {
+func WalkChildren(item any, cb func(any) bool) bool {
 	w := func(children ...any) bool {
 		for _, c := range children {
-			if isNil(c) {
+			if IsNil(c) {
 				continue
 			}
 			if cb(c) {
@@ -71,15 +72,15 @@ func walkChildren(item any, cb func(any) bool) bool {
 		return false
 	}
 
-	switch v := concrete(item).(type) {
-	case rawStmtList:
+	switch v := Concrete(item).(type) {
+	case RawStmtList:
 		for _, rs := range v {
 			if cb(rs) {
 				return true
 			}
 		}
 		return false
-	case nodeList:
+	case NodeList:
 		for _, n := range v {
 			if n == nil || n.Node == nil {
 				continue

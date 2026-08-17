@@ -1,6 +1,9 @@
 package summary
 
-import "github.com/sqlc-dev/oliphant/ast"
+import (
+	"github.com/sqlc-dev/oliphant/ast"
+	"github.com/sqlc-dev/oliphant/internal/rawwalk"
+)
 
 // addStmtType is add_stmt_type_if_needed: an insertion-ordered set.
 func (s *state) addStmtType(name string) {
@@ -17,8 +20,8 @@ func (s *state) addStmtType(name string) {
 // node the raw walker can reach, with explicit sub-walks for the four
 // utility statements that wrap a query but are not raw-walkable themselves.
 func (s *state) stmtWalk(item any) bool {
-	c := concrete(item)
-	if isNil(c) {
+	c := rawwalk.Concrete(item)
+	if rawwalk.IsNil(c) {
 		return false
 	}
 
@@ -267,5 +270,5 @@ func (s *state) stmtWalk(item any) bool {
 		s.addStmtType("VariableShowStmt")
 	}
 
-	return walkChildren(item, s.stmtWalk)
+	return rawwalk.WalkChildren(item, s.stmtWalk)
 }

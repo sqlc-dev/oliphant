@@ -5,6 +5,7 @@ import (
 
 	"github.com/sqlc-dev/oliphant/ast"
 	"github.com/sqlc-dev/oliphant/internal/deparse"
+	"github.com/sqlc-dev/oliphant/internal/rawwalk"
 )
 
 // Port of pg_query_summary_truncate.c: deparse the statements; if the result
@@ -45,7 +46,7 @@ func truncate(stmts []*ast.RawStmt, truncateLimit int) string {
 	}
 
 	if len(stmts) > 0 {
-		state.generate(rawStmtList(stmts))
+		state.generate(rawwalk.RawStmtList(stmts))
 	}
 	pgQsortTruncations(state.truncations)
 	return applyTruncations(stmts, state, truncateLimit)
@@ -88,8 +89,8 @@ func (ts *truncationState) addWhereClause(node any, whereClause *ast.Node) {
 
 // generate is generate_possible_truncations.
 func (ts *truncationState) generate(item any) bool {
-	c := concrete(item)
-	if isNil(c) {
+	c := rawwalk.Concrete(item)
+	if rawwalk.IsNil(c) {
 		return false
 	}
 
@@ -149,7 +150,7 @@ func (ts *truncationState) generate(item any) bool {
 	// (list nodes count as a level, matching WALK on a List field).
 	oldDepth := ts.depth
 	ts.depth++
-	result := walkChildren(item, ts.generate)
+	result := rawwalk.WalkChildren(item, ts.generate)
 	ts.depth = oldDepth
 	return result
 }

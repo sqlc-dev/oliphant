@@ -5,6 +5,7 @@ import (
 
 	"github.com/sqlc-dev/oliphant/ast"
 	"github.com/sqlc-dev/oliphant/internal/deparse"
+	"github.com/sqlc-dev/oliphant/internal/rawwalk"
 )
 
 // Error carries an ereport raised during the summary walk (there is exactly
@@ -33,7 +34,7 @@ func Summarize(tree *ast.ParseResult, truncateLimit int) (result *ast.SummaryRes
 	}()
 
 	s := &state{}
-	root := rawStmtList(tree.Stmts)
+	root := rawwalk.RawStmtList(tree.Stmts)
 
 	// pg_query_summary_walk: the main walk, then the deferred range-var pass
 	// (CTEs can be referenced before they are defined, so tables are only
@@ -93,8 +94,8 @@ type state struct {
 // addRangeVar is add_range_var (pg_query_summary.c): wrap a FROM-clause item
 // (or statement target relation) and stash it for the deferred pass.
 func (s *state) addRangeVar(item any, context ast.SummaryResult_Context) {
-	c := concrete(item)
-	if isNil(c) {
+	c := rawwalk.Concrete(item)
+	if rawwalk.IsNil(c) {
 		return
 	}
 	switch v := c.(type) {
@@ -143,8 +144,8 @@ func (s *state) addFunction(funcname []*ast.Node, context ast.SummaryResult_Cont
 // walk is pg_query_summary_walk_impl. Returning true aborts the walk up the
 // chain, exactly like a C tree-walker callback.
 func (s *state) walk(item any) bool {
-	c := concrete(item)
-	if isNil(c) {
+	c := rawwalk.Concrete(item)
+	if rawwalk.IsNil(c) {
 		return false
 	}
 
@@ -352,7 +353,7 @@ func (s *state) walk(item any) bool {
 		s.filterColumns = append(s.filterColumns, fc)
 	}
 
-	return walkChildren(item, s.walk)
+	return rawwalk.WalkChildren(item, s.walk)
 }
 
 // rangeVarToName is range_var_to_name: quote_identifier-rendered, dotted.

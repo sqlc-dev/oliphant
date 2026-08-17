@@ -21,10 +21,11 @@ func main() {
 	proto := flag.Bool("proto", false, "regenerate ast/pg_query.pb.go (needs protoc + protoc-gen-go)")
 	aliases := flag.Bool("aliases", false, "regenerate aliases.go")
 	keywords := flag.Bool("keywords", false, "regenerate internal/lexer/keywords.go")
+	plpgsql := flag.Bool("plpgsql", false, "regenerate internal/plpgsql/tables.go")
 	flag.Parse()
 
-	if !*proto && !*aliases && !*keywords {
-		*aliases, *keywords = true, true
+	if !*proto && !*aliases && !*keywords && !*plpgsql {
+		*aliases, *keywords, *plpgsql = true, true, true
 	}
 
 	if *proto {
@@ -46,6 +47,12 @@ func main() {
 			fatal(err)
 		}
 		fmt.Println("wrote internal/lexer/keywords.go")
+	}
+	if *plpgsql {
+		if err := generatePlpgsql("internal/reference", "internal/plpgsql/tables.go"); err != nil {
+			fatal(err)
+		}
+		fmt.Println("wrote internal/plpgsql/tables.go")
 	}
 }
 
