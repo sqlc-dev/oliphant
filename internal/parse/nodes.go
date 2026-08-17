@@ -315,3 +315,7 @@ func nClosePortalStmt(s *ast.ClosePortalStmt) *ast.Node {
 func nReturningOption(r *ast.ReturningOption) *ast.Node {
 	return &ast.Node{Node: &ast.Node_ReturningOption{ReturningOption: r}}
 }
+
+func nATAlterConstraint(c *ast.ATAlterConstraint) *ast.Node {
+	return &ast.Node{Node: &ast.Node_AtalterConstraint{AtalterConstraint: c}}
+}

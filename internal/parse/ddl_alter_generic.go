@@ -795,15 +795,17 @@ func (p *parser) parseDomainConstraintElem() *ast.Constraint {
 		n.RawExpr = p.parseAExpr(0)
 		p.expect(ast.Token(')'))
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "CHECK", nil, nil, &n.SkipValidation, &n.IsNoInherit)
+		p.processCASbits(cas, casLoc, "CHECK", nil, nil, nil, &n.SkipValidation, &n.IsNoInherit)
+		n.IsEnforced = true
 		n.InitiallyValid = !n.SkipValidation
 	case ast.Token_NOT:
 		p.next()
 		p.expect(ast.Token_NULL_P)
 		n.Contype = ast.ConstrType_CONSTR_NOTNULL
 		n.Keys = []*ast.Node{nStr("value")}
+		// no NOT VALID, NO INHERIT support
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "NOT NULL", nil, nil, nil, &n.IsNoInherit)
+		p.processCASbits(cas, casLoc, "NOT NULL", nil, nil, nil, nil, nil)
 		n.InitiallyValid = true
 	default:
 		p.syntaxErrorAt()

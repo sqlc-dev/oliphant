@@ -409,9 +409,11 @@ func deparseAlterTableCmd(st *state, alter_table_cmd *ast.AlterTableCmd, ctx nod
 		}
 		st.appendChar(' ')
 	case ast.AlterTableType_AT_AddIdentity,
-		ast.AlterTableType_AT_AddConstraint,
-		ast.AlterTableType_AT_AlterConstraint:
+		ast.AlterTableType_AT_AddConstraint:
 		deparseConstraint(st, alter_table_cmd.Def.GetConstraint())
+		st.appendChar(' ')
+	case ast.AlterTableType_AT_AlterConstraint:
+		deparseATAlterConstraint(st, alter_table_cmd.Def.GetAtalterConstraint())
 		st.appendChar(' ')
 	case ast.AlterTableType_AT_SetIdentity:
 		deparseAlterIdentityColumnOptionList(st, alter_table_cmd.Def.GetList().Items)
@@ -1186,6 +1188,42 @@ func deparseCopyStmt(st *state, copy_stmt *ast.CopyStmt) {
 	}
 
 	deparseWhereClause(st, copy_stmt.WhereClause)
+
+	st.removeTrailingSpace()
+}
+
+func deparseATAlterConstraint(st *state, constraint *ast.ATAlterConstraint) {
+	if constraint.Conname != "" {
+		st.appendString("CONSTRAINT ")
+		st.appendString(quoteIdentifier(constraint.Conname))
+		st.appendChar(' ')
+	}
+
+	if constraint.AlterEnforceability {
+		if constraint.IsEnforced {
+			st.appendString("ENFORCED ")
+		} else {
+			st.appendString("NOT ENFORCED ")
+		}
+	}
+
+	if constraint.AlterDeferrability {
+		if constraint.Initdeferred {
+			st.appendString("INITIALLY DEFERRED ")
+		} else if constraint.Deferrable {
+			st.appendString("DEFERRABLE ")
+		} else {
+			st.appendString("NOT DEFERRABLE ")
+		}
+	}
+
+	if constraint.AlterInheritability {
+		if constraint.Noinherit {
+			st.appendString("NO INHERIT ")
+		} else {
+			st.appendString("INHERIT ")
+		}
+	}
 
 	st.removeTrailingSpace()
 }

@@ -41,7 +41,7 @@ func (p *parser) parseCreateTrigStmt(replace, isConstraint bool) *ast.Node {
 			n.Constrrel = p.parseQualifiedName()
 		}
 		cas, casLoc := p.parseConstraintAttributeSpec()
-		p.processCASbits(cas, casLoc, "TRIGGER", &n.Deferrable, &n.Initdeferred, nil, nil)
+		p.processCASbits(cas, casLoc, "TRIGGER", &n.Deferrable, &n.Initdeferred, nil, nil, nil)
 		p.expect(ast.Token_FOR)
 		p.have(ast.Token_EACH)
 		p.expect(ast.Token_ROW)

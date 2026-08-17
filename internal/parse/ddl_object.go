@@ -73,9 +73,10 @@ func (p *parser) parseFuncType() *ast.TypeName {
 	return p.parseTypename()
 }
 
-// parseFuncArg is gram.y's func_arg.
+// parseFuncArg is gram.y's func_arg. Every alternative sets location = @1,
+// the parameter's first token.
 func (p *parser) parseFuncArg() *ast.FunctionParameter {
-	n := &ast.FunctionParameter{Mode: ast.FunctionParameterMode_FUNC_PARAM_DEFAULT}
+	n := &ast.FunctionParameter{Mode: ast.FunctionParameterMode_FUNC_PARAM_DEFAULT, Location: p.loc()}
 	mode, haveMode := p.parseArgClass()
 	if haveMode {
 		n.Mode = mode
