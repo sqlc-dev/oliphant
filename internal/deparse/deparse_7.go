@@ -397,7 +397,7 @@ func deparseCommentStmt(st *state, comment_stmt *ast.CommentStmt) {
 
 	st.appendString(" IS ")
 
-	if comment_stmt.Comment != "" {
+	if comment_stmt.Comment != "" || st.empties[comment_stmt] {
 		deparseStringLiteral(st, comment_stmt.Comment)
 	} else {
 		st.appendString("NULL")

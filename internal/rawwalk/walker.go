@@ -105,7 +105,7 @@ func WalkChildren(item any, cb func(any) bool) bool {
 	case *ast.JsonFormat, *ast.SetToDefault, *ast.CurrentOfExpr,
 		*ast.SQLValueFunction, *ast.Integer, *ast.Float, *ast.Boolean,
 		*ast.String, *ast.BitString, *ast.ParamRef, *ast.A_Const, *ast.A_Star,
-		*ast.MergeSupportFunc, *ast.ReturningOption:
+		*ast.MergeSupportFunc:
 		// primitive node types with no subnodes
 		return false
 	case *ast.Alias:
@@ -190,8 +190,9 @@ func WalkChildren(item any, cb func(any) bool) bool {
 			wl(v.MergeWhenClauses), v.ReturningClause, v.WithClause)
 	case *ast.MergeWhenClause:
 		return w(v.Condition, wl(v.TargetList), wl(v.Values))
-	case *ast.ReturningClause:
-		return w(wl(v.Options), wl(v.Exprs))
+	// ReturningClause is walked by PG 18's raw_expression_tree_walker, but
+	// pg_query_raw_tree_walker_supports was not extended to it at 18.0.0 —
+	// the summary walks visit the node and never descend (default arm).
 	case *ast.SelectStmt:
 		return w(wl(v.DistinctClause), v.IntoClause, wl(v.TargetList),
 			wl(v.FromClause), v.WhereClause, wl(v.GroupClause), v.HavingClause,

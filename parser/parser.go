@@ -267,11 +267,11 @@ func IsUtilityStmt(input string) (result []bool, err error) {
 // CTEs/functions/filter columns/statement types, and — unless truncateLimit
 // is -1 — produce the smart-truncated query text.
 func SummaryToProtobuf(input string, truncateLimit int) ([]byte, error) {
-	tree, perr := parse.Parse(input)
+	tree, empties, perr := parse.ParseTracked(input)
 	if perr != nil {
 		return nil, scanErr(perr)
 	}
-	res, serr := summary.Summarize(tree, truncateLimit)
+	res, serr := summary.SummarizeWithEmpties(tree, truncateLimit, empties)
 	if serr != nil {
 		var se *summary.Error
 		if errors.As(serr, &se) {

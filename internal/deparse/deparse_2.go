@@ -328,6 +328,8 @@ func deparsePrivilegeTarget(st *state, targtype ast.GrantTargetType, objtype ast
 			st.appendString("TYPES")
 		case ast.ObjectType_OBJECT_SCHEMA:
 			st.appendString("SCHEMAS")
+		case ast.ObjectType_OBJECT_LARGEOBJECT:
+			st.appendString("LARGE OBJECTS")
 		default:
 			// Other types are not supported here
 		}

@@ -375,7 +375,7 @@ func deparseAlterTableCmd(st *state, alter_table_cmd *ast.AlterTableCmd, ctx nod
 		st.appendChar(' ')
 	case ast.AlterTableType_AT_DetachPartitionFinalize:
 		deparsePartitionCmd(st, alter_table_cmd.Def.GetPartitionCmd())
-		st.appendString("FINALIZE ")
+		st.appendString(" FINALIZE ")
 	case ast.AlterTableType_AT_AddColumn,
 		ast.AlterTableType_AT_AlterColumnType:
 		deparseColumnDef(st, alter_table_cmd.Def.GetColumnDef())
@@ -410,7 +410,7 @@ func deparseAlterTableCmd(st *state, alter_table_cmd *ast.AlterTableCmd, ctx nod
 		st.appendChar(' ')
 	case ast.AlterTableType_AT_AddIdentity,
 		ast.AlterTableType_AT_AddConstraint:
-		deparseConstraint(st, alter_table_cmd.Def.GetConstraint())
+		deparseConstraint(st, alter_table_cmd.Def.GetConstraint(), contextNone)
 		st.appendChar(' ')
 	case ast.AlterTableType_AT_AlterConstraint:
 		deparseATAlterConstraint(st, alter_table_cmd.Def.GetAtalterConstraint())
@@ -544,7 +544,7 @@ func deparseAlterDomainStmt(st *state, alter_domain_stmt *ast.AlterDomainStmt) {
 		st.appendString("SET NOT NULL")
 	case "C":
 		st.appendString("ADD ")
-		deparseConstraint(st, alter_domain_stmt.Def.GetConstraint())
+		deparseConstraint(st, alter_domain_stmt.Def.GetConstraint(), contextAlterDomain)
 	case "X":
 		st.appendString("DROP CONSTRAINT ")
 		if alter_domain_stmt.MissingOk {
@@ -794,20 +794,6 @@ func deparseTransactionStmt(st *state, transaction_stmt *ast.TransactionStmt) {
 	st.removeTrailingSpace()
 }
 
-func isSetTimeZoneInterval(stmt *ast.VariableSetStmt) bool {
-	if !(stmt.Name == "timezone" &&
-		len(stmt.Args) == 1 &&
-		stmt.Args[0].GetTypeCast() != nil) {
-		return false
-	}
-
-	typeName := stmt.Args[0].GetTypeCast().TypeName
-
-	return len(typeName.Names) == 2 &&
-		strVal(typeName.Names[0]) == "pg_catalog" &&
-		strVal(typeName.Names[len(typeName.Names)-1]) == "interval"
-}
-
 func deparseVariableSetStmt(st *state, variable_set_stmt *ast.VariableSetStmt) {
 	switch variable_set_stmt.Kind {
 	case ast.VariableSetKind_VAR_SET_VALUE: /* SET var = value */
@@ -815,9 +801,20 @@ func deparseVariableSetStmt(st *state, variable_set_stmt *ast.VariableSetStmt) {
 		if variable_set_stmt.IsLocal {
 			st.appendString("LOCAL ")
 		}
-		if isSetTimeZoneInterval(variable_set_stmt) {
+		if variable_set_stmt.Name == "timezone" && variable_set_stmt.JumbleArgs {
 			st.appendString("TIME ZONE ")
 			deparseVarList(st, variable_set_stmt.Args)
+		} else if variable_set_stmt.Name == "xmloption" && variable_set_stmt.JumbleArgs {
+			option := aConstVal(variable_set_stmt.Args[0].GetAConst()).GetString_().Sval
+			st.appendString("XML OPTION ")
+			switch option {
+			case "DOCUMENT":
+				st.appendString("DOCUMENT ")
+			case "CONTENT":
+				st.appendString("CONTENT ")
+			default:
+				deparseVarList(st, variable_set_stmt.Args)
+			}
 		} else {
 			deparseVarName(st, variable_set_stmt.Name)
 			st.appendString(" TO ")
@@ -828,8 +825,12 @@ func deparseVariableSetStmt(st *state, variable_set_stmt *ast.VariableSetStmt) {
 		if variable_set_stmt.IsLocal {
 			st.appendString("LOCAL ")
 		}
-		deparseVarName(st, variable_set_stmt.Name)
-		st.appendString(" TO DEFAULT")
+		if variable_set_stmt.Name == "timezone" && variable_set_stmt.JumbleArgs {
+			st.appendString("TIME ZONE DEFAULT")
+		} else {
+			deparseVarName(st, variable_set_stmt.Name)
+			st.appendString(" TO DEFAULT")
+		}
 	case ast.VariableSetKind_VAR_SET_CURRENT: /* SET var FROM CURRENT */
 		st.appendString("SET ")
 		if variable_set_stmt.IsLocal {
@@ -1058,7 +1059,7 @@ func deparseCopyStmt(st *state, copy_stmt *ast.CopyStmt) {
 		for _, option := range copy_stmt.Options {
 			def_elem := option.GetDefElem()
 
-			if def_elem.Defname == "freeze" && optBooleanValue(def_elem.Arg) {
+			if def_elem.Defname == "freeze" && def_elem.Arg != nil && optBooleanValue(def_elem.Arg) {
 			} else if def_elem.Defname == "header" && def_elem.Arg != nil && optBooleanValue(def_elem.Arg) {
 			} else if def_elem.Defname == "format" && strVal(def_elem.Arg) == "csv" {
 			} else if def_elem.Defname == "force_quote" && def_elem.Arg != nil && def_elem.Arg.GetList() != nil {
@@ -1073,7 +1074,7 @@ func deparseCopyStmt(st *state, copy_stmt *ast.CopyStmt) {
 			for _, option := range copy_stmt.Options {
 				def_elem := option.GetDefElem()
 
-				if def_elem.Defname == "freeze" && optBooleanValue(def_elem.Arg) {
+				if def_elem.Defname == "freeze" && def_elem.Arg != nil && optBooleanValue(def_elem.Arg) {
 					st.appendString("FREEZE ")
 				} else if def_elem.Defname == "header" && def_elem.Arg != nil && optBooleanValue(def_elem.Arg) {
 					st.appendString("HEADER ")

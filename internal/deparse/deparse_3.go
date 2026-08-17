@@ -200,6 +200,7 @@ func deparseJoinExpr(st *state, join_expr *ast.JoinExpr) {
 		st.appendString("RIGHT ")
 	case ast.JoinType_JOIN_SEMI,
 		ast.JoinType_JOIN_ANTI,
+		ast.JoinType_JOIN_RIGHT_SEMI,
 		ast.JoinType_JOIN_RIGHT_ANTI,
 		ast.JoinType_JOIN_UNIQUE_OUTER,
 		ast.JoinType_JOIN_UNIQUE_INNER:
@@ -684,6 +685,7 @@ func deparseAIndirection(st *state, a_indirection *ast.A_Indirection) {
 		a_indirection.Arg.GetAExpr() != nil ||
 		a_indirection.Arg.GetTypeCast() != nil ||
 		a_indirection.Arg.GetRowExpr() != nil ||
+		a_indirection.Arg.GetAArrayExpr() != nil ||
 		(a_indirection.Arg.GetColumnRef() != nil && a_indirection.Indirection[0].GetAIndices() == nil) ||
 		a_indirection.Arg.GetJsonFuncExpr() != nil
 
@@ -800,7 +802,7 @@ func deparseColumnDef(st *state, column_def *ast.ColumnDef) {
 	}
 
 	for _, item := range column_def.Constraints {
-		deparseConstraint(st, item.GetConstraint())
+		deparseConstraint(st, item.GetConstraint(), contextNone)
 		st.appendChar(' ')
 	}
 
