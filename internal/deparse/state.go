@@ -401,7 +401,7 @@ func isOp(val string) bool {
 }
 
 // deparseStringLiteral appends a SQL string literal (postgres_fdw's
-// deparseStringLiteral: E'' syntax whenever a backslash is present).
+// deparseStringLiteral: E” syntax whenever a backslash is present).
 func deparseStringLiteral(st *state, val string) {
 	if strings.ContainsRune(val, '\\') {
 		st.appendChar('E')
@@ -420,14 +420,14 @@ func deparseStringLiteral(st *state, val string) {
 // Interval typmod masks (datetime.h): INTERVAL_MASK(x) is 1 << x with the
 // datetime token unit values.
 const (
-	intervalMaskYear   = 1 << 2  // INTERVAL_MASK(YEAR)
-	intervalMaskMonth  = 1 << 1  // INTERVAL_MASK(MONTH)
-	intervalMaskDay    = 1 << 3  // INTERVAL_MASK(DAY)
-	intervalMaskHour   = 1 << 10 // INTERVAL_MASK(HOUR)
-	intervalMaskMinute = 1 << 11 // INTERVAL_MASK(MINUTE)
-	intervalMaskSecond = 1 << 12 // INTERVAL_MASK(SECOND)
-	intervalFullRange  = 0x7FFF  // INTERVAL_FULL_RANGE
-	intervalFullPrecision = 0xFFFF // INTERVAL_FULL_PRECISION
+	intervalMaskYear      = 1 << 2  // INTERVAL_MASK(YEAR)
+	intervalMaskMonth     = 1 << 1  // INTERVAL_MASK(MONTH)
+	intervalMaskDay       = 1 << 3  // INTERVAL_MASK(DAY)
+	intervalMaskHour      = 1 << 10 // INTERVAL_MASK(HOUR)
+	intervalMaskMinute    = 1 << 11 // INTERVAL_MASK(MINUTE)
+	intervalMaskSecond    = 1 << 12 // INTERVAL_MASK(SECOND)
+	intervalFullRange     = 0x7FFF  // INTERVAL_FULL_RANGE
+	intervalFullPrecision = 0xFFFF  // INTERVAL_FULL_PRECISION
 )
 
 // Value-node helpers (value.h accessors).
