@@ -265,7 +265,12 @@ var skipNodes = map[string]bool{
 // every node type.
 var skipFields = map[[2]string]bool{
 	{"", "location"}:                       true,
+	{"", "list_start"}:                     true,
+	{"", "list_end"}:                       true,
 	{"", "xpr"}:                            true,
+	{"A_Expr", "rexpr_list_start"}:         true,
+	{"A_Expr", "rexpr_list_end"}:           true,
+	{"VariableSetStmt", "jumble_args"}:     true,
 	{"PrepareStmt", "name"}:                true,
 	{"ExecuteStmt", "name"}:                true,
 	{"DeallocateStmt", "name"}:             true,
@@ -305,8 +310,12 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 	if skipNodes[msgName] {
 		return // Intentionally ignoring all fields for fingerprinting
 	}
+	if msgName == "RangeVar" {
+		// FINGERPRINT_RANGE_VAR_BODY: complete hand-written fingerprint.
+		ctx.rangeVarFields(m, parentType, fieldName)
+		return
+	}
 
-	fds := d.Fields()
 	order := sortedFields(d)
 
 	for _, fd := range order {
@@ -324,26 +333,6 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 			if s := v.String(); s != "" && !(parentType == "SelectStmt" && fieldName == "targetList") {
 				ctx.str("name")
 				ctx.str(s)
-			}
-			continue
-		case msgName == "RangeVar" && name == "relname":
-			// Runs of two or more digits are stripped (sharded table names
-			// hash together), and temp table names are ignored entirely.
-			relname := v.String()
-			relpersistence := m.Get(fds.ByJSONName("relpersistence")).String()
-			if relname != "" && relpersistence != "t" {
-				r := make([]byte, 0, len(relname))
-				for i := 0; i < len(relname); i++ {
-					c := relname[i]
-					if c >= '0' && c <= '9' &&
-						((i+1 < len(relname) && relname[i+1] >= '0' && relname[i+1] <= '9') ||
-							(i > 0 && relname[i-1] >= '0' && relname[i-1] <= '9')) {
-						continue
-					}
-					r = append(r, c)
-				}
-				ctx.str("relname")
-				ctx.str(string(r))
 			}
 			continue
 		case msgName == "A_Expr" && name == "kind":
@@ -465,4 +454,84 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 
 func enumName(fd protoreflect.FieldDescriptor, n protoreflect.EnumNumber) string {
 	return string(fd.Enum().Values().ByNumber(n).Name())
+}
+
+// rangeVarFields is 18.0.0's hand-written _fingerprintRangeVar body
+// (FINGERPRINT_RANGE_VAR_BODY): it mirrors PostgreSQL's post-analysis query
+// jumble for relation references. In SELECT/DML contexts the user alias
+// contributes (and suppresses the relation name), and the schema name is
+// dropped; in utility contexts the relation and schema names always
+// contribute. Temp-table relname elision and digit-run stripping carry over
+// from 17.
+func (ctx *context) rangeVarFields(m protoreflect.Message, parentType, fieldName string) {
+	fds := m.Descriptor().Fields()
+	str := func(name string) string { return m.Get(fds.ByJSONName(name)).String() }
+
+	isDMLContext := false
+	switch parentType {
+	case "SelectStmt":
+		isDMLContext = fieldName == "fromClause"
+	case "InsertStmt":
+		isDMLContext = fieldName == "relation"
+	case "UpdateStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "fromClause"
+	case "DeleteStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "usingClause"
+	case "MergeStmt":
+		isDMLContext = fieldName == "relation" || fieldName == "sourceRelation"
+	case "JoinExpr", "RangeTableSample", "LockingClause":
+		isDMLContext = true
+	}
+
+	var aliasname string
+	if m.Has(fds.ByJSONName("alias")) {
+		alias := m.Get(fds.ByJSONName("alias")).Message()
+		aliasname = alias.Get(alias.Descriptor().Fields().ByJSONName("aliasname")).String()
+	}
+	if aliasname != "" {
+		ctx.str("aliasname")
+		ctx.str(aliasname)
+	}
+
+	if catalogname := str("catalogname"); catalogname != "" {
+		ctx.str("catalogname")
+		ctx.str(catalogname)
+	}
+
+	if m.Get(fds.ByJSONName("inh")).Bool() {
+		ctx.str("inh")
+		ctx.str("true")
+	}
+
+	// Intentionally ignoring location for fingerprinting
+
+	// In DML/SELECT context, the relation name only contributes when there
+	// is no user alias; runs of two or more digits are stripped (sharded
+	// table names hash together), and temp table names are ignored entirely.
+	relname := str("relname")
+	relpersistence := str("relpersistence")
+	if relname != "" && relpersistence != "t" && !(isDMLContext && m.Has(fds.ByJSONName("alias"))) {
+		r := make([]byte, 0, len(relname))
+		for i := 0; i < len(relname); i++ {
+			c := relname[i]
+			if c >= '0' && c <= '9' &&
+				((i+1 < len(relname) && relname[i+1] >= '0' && relname[i+1] <= '9') ||
+					(i > 0 && relname[i-1] >= '0' && relname[i-1] <= '9')) {
+				continue
+			}
+			r = append(r, c)
+		}
+		ctx.str("relname")
+		ctx.str(string(r))
+	}
+
+	if relpersistence != "" {
+		ctx.str("relpersistence")
+		ctx.str(relpersistence)
+	}
+
+	if schemaname := str("schemaname"); schemaname != "" && !isDMLContext {
+		ctx.str("schemaname")
+		ctx.str(schemaname)
+	}
 }

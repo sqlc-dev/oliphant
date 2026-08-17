@@ -10,8 +10,8 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/lexer"
 )
 
-// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 17.7).
-const pgVersionNum = 170007
+// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 18.4).
+const pgVersionNum = 180004
 
 // parser holds one parse's state: the filtered token stream (base_yylex
 // semantics) buffered as the grammar pulls it, so lookahead never runs
@@ -156,8 +156,10 @@ func (p *parser) parseToplevel() *ast.ParseResult {
 
 	// gram.y: stmtmulti
 	var last *ast.RawStmt
-	stmtStart := int32(0)
 	for {
+		// makeRawStmt($3, @3): the statement's location is its own first
+		// token's (PG 18; previously the position after the prior ';').
+		stmtStart := p.loc()
 		if stmt := p.parseToplevelStmt(); stmt != nil {
 			last = &ast.RawStmt{Stmt: stmt, StmtLocation: stmtStart}
 			res.Stmts = append(res.Stmts, last)
@@ -170,13 +172,12 @@ func (p *parser) parseToplevel() *ast.ParseResult {
 			p.syntaxError(tok)
 		}
 		p.next()
-		// gram.y: stmtmulti — updateRawStmtEnd(llast, @2) and the next
-		// statement starts at @2 + 1.
+		// gram.y: stmtmulti — updateRawStmtEnd(llast, @2); the nil-ing of
+		// last reproduces the stmt_len>0 guard ("select foo ;; select bar").
 		if last != nil {
 			last.StmtLen = tok.Start - last.StmtLocation
 			last = nil
 		}
-		stmtStart = tok.Start + 1
 	}
 	return res
 }

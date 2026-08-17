@@ -42,6 +42,9 @@ func ParseWithMode(input string, mode Mode) (res *ast.ParseResult, err *lexer.Er
 
 	res = &ast.ParseResult{Version: pgVersionNum}
 	var stmt *ast.Node
+	// makeRawStmt($2, @2): the location of the expression's first token
+	// (PG 18; previously 0).
+	stmtStart := p.loc()
 	switch mode {
 	case ModePlpgsqlExpr:
 		// parse_toplevel: MODE_PLPGSQL_EXPR PLpgSQL_Expr
@@ -60,7 +63,7 @@ func ParseWithMode(input string, mode Mode) (res *ast.ParseResult, err *lexer.Er
 		p.syntaxError(tok)
 	}
 
-	res.Stmts = []*ast.RawStmt{{Stmt: stmt, StmtLocation: 0}}
+	res.Stmts = []*ast.RawStmt{{Stmt: stmt, StmtLocation: stmtStart}}
 	return res, nil
 }
 

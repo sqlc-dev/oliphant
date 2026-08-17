@@ -72,16 +72,19 @@ func (p *parser) parseSetRest() *ast.VariableSetStmt {
 				// set_rest_more: TRANSACTION SNAPSHOT Sconst
 				stok := p.peek()
 				return &ast.VariableSetStmt{
-					Kind: ast.VariableSetKind_VAR_SET_MULTI,
-					Name: "TRANSACTION SNAPSHOT",
-					Args: []*ast.Node{makeStringConst(p.sconst(), stok.Start)},
+					Kind:     ast.VariableSetKind_VAR_SET_MULTI,
+					Name:     "TRANSACTION SNAPSHOT",
+					Args:     []*ast.Node{makeStringConst(p.sconst(), stok.Start)},
+					Location: stok.Start,
 				}
 			}
 			// set_rest: TRANSACTION transaction_mode_list
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_MULTI,
-				Name: "TRANSACTION",
-				Args: p.parseTransactionModeList(),
+				Kind:       ast.VariableSetKind_VAR_SET_MULTI,
+				Name:       "TRANSACTION",
+				Args:       p.parseTransactionModeList(),
+				JumbleArgs: true,
+				Location:   -1,
 			}
 		}
 	case ast.Token_SESSION:
@@ -93,9 +96,11 @@ func (p *parser) parseSetRest() *ast.VariableSetStmt {
 			p.expect(ast.Token_AS)
 			p.expect(ast.Token_TRANSACTION)
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_MULTI,
-				Name: "SESSION CHARACTERISTICS",
-				Args: p.parseTransactionModeList(),
+				Kind:       ast.VariableSetKind_VAR_SET_MULTI,
+				Name:       "SESSION CHARACTERISTICS",
+				Args:       p.parseTransactionModeList(),
+				JumbleArgs: true,
+				Location:   -1,
 			}
 		}
 	}
@@ -114,8 +119,10 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 			p.next()
 			p.next()
 			n := &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_VALUE,
-				Name: "timezone",
+				Kind:       ast.VariableSetKind_VAR_SET_VALUE,
+				Name:       "timezone",
+				JumbleArgs: true,
+				Location:   -1,
 			}
 			if zv := p.parseZoneValue(); zv != nil {
 				n.Args = []*ast.Node{zv}
@@ -136,9 +143,10 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 			p.next()
 			stok := p.peek()
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_VALUE,
-				Name: "search_path",
-				Args: []*ast.Node{makeStringConst(p.sconst(), stok.Start)},
+				Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+				Name:     "search_path",
+				Args:     []*ast.Node{makeStringConst(p.sconst(), stok.Start)},
+				Location: stok.Start,
 			}
 		case ast.Token_PARAM:
 			p.next()
@@ -161,11 +169,16 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 			switch etok.Kind {
 			case ast.Token_SCONST:
 				n.Args = []*ast.Node{makeStringConst(p.sconst(), etok.Start)}
+				n.Location = etok.Start
 			case ast.Token_DEFAULT:
 				p.next()
 				n.Kind = ast.VariableSetKind_VAR_SET_DEFAULT
+				n.Location = etok.Start
 			default:
+				// empty opt_encoding: @2 is -1 (YYLLOC_DEFAULT of an empty
+				// production).
 				n.Kind = ast.VariableSetKind_VAR_SET_DEFAULT
+				n.Location = -1
 			}
 			return n
 		}
@@ -182,9 +195,10 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 				}
 			}
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_VALUE,
-				Name: "role",
-				Args: []*ast.Node{makeStringConst(p.nonReservedWordOrSconst(), vtok.Start)},
+				Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+				Name:     "role",
+				Args:     []*ast.Node{makeStringConst(p.nonReservedWordOrSconst(), vtok.Start)},
+				Location: vtok.Start,
 			}
 		}
 	case ast.Token_SESSION:
@@ -196,8 +210,9 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 			case ast.Token_DEFAULT:
 				p.next()
 				return &ast.VariableSetStmt{
-					Kind: ast.VariableSetKind_VAR_SET_DEFAULT,
-					Name: "session_authorization",
+					Kind:     ast.VariableSetKind_VAR_SET_DEFAULT,
+					Name:     "session_authorization",
+					Location: -1,
 				}
 			case ast.Token_PARAM:
 				p.next()
@@ -208,9 +223,10 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 				}
 			}
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_VALUE,
-				Name: "session_authorization",
-				Args: []*ast.Node{makeStringConst(p.nonReservedWordOrSconst(), vtok.Start)},
+				Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+				Name:     "session_authorization",
+				Args:     []*ast.Node{makeStringConst(p.nonReservedWordOrSconst(), vtok.Start)},
+				Location: vtok.Start,
 			}
 		}
 	case ast.Token_XML_P:
@@ -224,9 +240,11 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 				s = "DOCUMENT"
 			}
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_VALUE,
-				Name: "xmloption",
-				Args: []*ast.Node{makeStringConst(s, vtok.Start)},
+				Kind:       ast.VariableSetKind_VAR_SET_VALUE,
+				Name:       "xmloption",
+				Args:       []*ast.Node{makeStringConst(s, vtok.Start)},
+				JumbleArgs: true,
+				Location:   -1,
 			}
 		}
 	}
@@ -238,21 +256,25 @@ func (p *parser) parseSetRestMore() *ast.VariableSetStmt {
 		if p.kind() == ast.Token_DEFAULT {
 			p.next()
 			return &ast.VariableSetStmt{
-				Kind: ast.VariableSetKind_VAR_SET_DEFAULT,
-				Name: name,
+				Kind:     ast.VariableSetKind_VAR_SET_DEFAULT,
+				Name:     name,
+				Location: -1,
 			}
 		}
+		vtok := p.peek()
 		return &ast.VariableSetStmt{
-			Kind: ast.VariableSetKind_VAR_SET_VALUE,
-			Name: name,
-			Args: p.parseVarList(),
+			Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+			Name:     name,
+			Args:     p.parseVarList(),
+			Location: vtok.Start,
 		}
 	case p.kind() == ast.Token_FROM:
 		p.next()
 		p.expect(ast.Token_CURRENT_P)
 		return &ast.VariableSetStmt{
-			Kind: ast.VariableSetKind_VAR_SET_CURRENT,
-			Name: name,
+			Kind:     ast.VariableSetKind_VAR_SET_CURRENT,
+			Name:     name,
+			Location: -1,
 		}
 	}
 	p.syntaxErrorAt()
@@ -470,27 +492,27 @@ func (p *parser) parseResetRest() *ast.VariableSetStmt {
 		if p.kindN(1) == ast.Token_ZONE {
 			p.next()
 			p.next()
-			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "timezone"}
+			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "timezone", Location: -1}
 		}
 	case ast.Token_TRANSACTION:
 		if p.kindN(1) == ast.Token_ISOLATION {
 			p.next()
 			p.next()
 			p.expect(ast.Token_LEVEL)
-			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "transaction_isolation"}
+			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "transaction_isolation", Location: -1}
 		}
 	case ast.Token_SESSION:
 		if p.kindN(1) == ast.Token_AUTHORIZATION {
 			p.next()
 			p.next()
-			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "session_authorization"}
+			return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: "session_authorization", Location: -1}
 		}
 	case ast.Token_ALL:
 		p.next()
-		return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET_ALL}
+		return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET_ALL, Location: -1}
 	}
 	// generic_reset: var_name
-	return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: p.parseVarName()}
+	return &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Name: p.parseVarName(), Location: -1}
 }
 
 // parseSetResetClause is gram.y's SetResetClause (SET or RESET without

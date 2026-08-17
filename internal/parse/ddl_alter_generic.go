@@ -567,7 +567,7 @@ func (p *parser) parseAlterDispatch() *ast.Node {
 		case p.have(ast.Token_SET):
 			n.Setstmt = p.parseGenericSet()
 		case p.have(ast.Token_RESET):
-			n.Setstmt = &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET}
+			n.Setstmt = &ast.VariableSetStmt{Kind: ast.VariableSetKind_VAR_RESET, Location: -1}
 			if p.have(ast.Token_ALL) {
 				n.Setstmt.Kind = ast.VariableSetKind_VAR_RESET_ALL
 			} else {
@@ -855,14 +855,17 @@ func (p *parser) parseGenericSet() *ast.VariableSetStmt {
 	if p.kind() == ast.Token_DEFAULT {
 		p.next()
 		return &ast.VariableSetStmt{
-			Kind: ast.VariableSetKind_VAR_SET_DEFAULT,
-			Name: name,
+			Kind:     ast.VariableSetKind_VAR_SET_DEFAULT,
+			Name:     name,
+			Location: -1,
 		}
 	}
+	vtok := p.peek()
 	return &ast.VariableSetStmt{
-		Kind: ast.VariableSetKind_VAR_SET_VALUE,
-		Name: name,
-		Args: p.parseVarList(),
+		Kind:     ast.VariableSetKind_VAR_SET_VALUE,
+		Name:     name,
+		Args:     p.parseVarList(),
+		Location: vtok.Start,
 	}
 }
 

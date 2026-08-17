@@ -26,8 +26,8 @@ import (
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
 
-// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 17.7, libpg_query
-// 17-6.2.2), reported in ScanResult.Version and ParseResult.Version.
+// pgVersionNum is the pinned PG_VERSION_NUM (PostgreSQL 18.4, libpg_query
+// 18.0.0), reported in ScanResult.Version and ParseResult.Version.
 const pgVersionNum = 180004
 
 // scanErr converts a lexer error into the public Error, mirroring
