@@ -1,0 +1,728 @@
+== 001
+-- Examples from https://www.postgresql.org/docs/9.6/static/plpgsql-control-structures.html
+
+CREATE OR REPLACE FUNCTION get_all_foo() RETURNS SETOF foo AS
+$BODY$
+DECLARE
+    r foo%rowtype;
+BEGIN
+    FOR r IN
+        SELECT * FROM foo WHERE fooid > 0
+    LOOP
+        -- can do some processing here
+        RETURN NEXT r; -- return current row of SELECT
+    END LOOP;
+    RETURN;
+END
+$BODY$
+LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"r","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"foo%rowtype"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":5,"fields":[{"name":"r","varno":1}]}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_fors":{"lineno":5,"var":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":5,"fields":[{"name":"r","varno":1}]}},"body":[{"PLpgSQL_stmt_return_next":{"lineno":9}}],"query":{"PLpgSQL_expr":{"query":"SELECT * FROM foo WHERE fooid \u003e 0","parseMode":0}}}},{"PLpgSQL_stmt_return":{"lineno":11}}]}}}}
+]
+== 002
+CREATE FUNCTION get_available_flightid(date) RETURNS SETOF integer AS
+$BODY$
+BEGIN
+    RETURN QUERY SELECT flightid
+                   FROM flight
+                  WHERE flightdate >= $1
+                    AND flightdate < ($1 + 1);
+
+    -- Since execution is not finished, we can check whether rows were returned
+    -- and raise exception if not.
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'No flight at %.', $1;
+    END IF;
+
+    RETURN;
+ END
+$BODY$
+LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_return_query":{"lineno":3,"query":{"PLpgSQL_expr":{"query":"SELECT flightid\n                   FROM flight\n                  WHERE flightdate \u003e= $1\n                    AND flightdate \u003c ($1 + 1)","parseMode":0}}}},{"PLpgSQL_stmt_if":{"lineno":10,"cond":{"PLpgSQL_expr":{"query":"NOT FOUND","parseMode":2}},"then_body":[{"PLpgSQL_stmt_raise":{"lineno":11,"elog_level":21,"message":"No flight at %.","params":[{"PLpgSQL_expr":{"query":"$1","parseMode":2}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":14}}]}}}}
+]
+== 003
+-- Examples from https://www.postgresql.org/docs/9.6/static/plpgsql-porting.html
+
+CREATE OR REPLACE FUNCTION cs_fmt_browser_version(v_name varchar,
+                                                  v_version varchar)
+RETURNS varchar AS $$
+BEGIN
+  IF v_version IS NULL THEN
+    RETURN v_name;
+  END IF;
+  RETURN v_name || '/' || v_version;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"v_name","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"v_version","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_if":{"lineno":3,"cond":{"PLpgSQL_expr":{"query":"v_version IS NULL","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":4,"expr":{"PLpgSQL_expr":{"query":"v_name","parseMode":2}}}}]}},{"PLpgSQL_stmt_return":{"lineno":6,"expr":{"PLpgSQL_expr":{"query":"v_name || '/' || v_version","parseMode":2}}}}]}}}}
+]
+== 004
+-- CREATE OR REPLACE FUNCTION cs_update_referrer_type_proc() RETURNS void AS $func$
+-- DECLARE
+--     referrer_keys CURSOR IS
+--         SELECT * FROM cs_referrer_keys
+--         ORDER BY try_order;
+--     func_body text;
+--     func_cmd text;
+-- BEGIN
+--   func_body := 'BEGIN';
+--   -- Notice how we scan through the results of a query in a FOR loop
+--   -- using the FOR <record> construct.
+--   FOR referrer_key IN SELECT * FROM cs_referrer_keys ORDER BY try_order LOOP
+--       func_body := func_body ||
+--         ' IF v_' || referrer_key.kind
+--         || ' LIKE ' || quote_literal(referrer_key.key_string)
+--         || ' THEN RETURN ' || quote_literal(referrer_key.referrer_type)
+--         || '; END IF;' ;
+--   END LOOP;
+--   func_body := func_body || ' RETURN NULL; END;';
+--   func_cmd :=
+--     'CREATE OR REPLACE FUNCTION cs_find_referrer_type(v_host varchar,
+--                                                       v_domain varchar,
+--                                                       v_url varchar)
+--       RETURNS varchar AS '
+--     || quote_literal(func_body)
+--     || ' LANGUAGE plpgsql;' ;
+--   EXECUTE func_cmd;
+-- END;$func$;
+
+CREATE OR REPLACE FUNCTION cs_parse_url(
+    v_url IN VARCHAR,
+    v_host OUT VARCHAR,  -- This will be passed back
+    v_path OUT VARCHAR,  -- This one too
+    v_query OUT VARCHAR) -- And this one
+AS $$
+DECLARE
+    a_pos1 INTEGER;
+    a_pos2 INTEGER;
+BEGIN
+    v_host := NULL;
+    v_path := NULL;
+    v_query := NULL;
+    a_pos1 := instr(v_url, '//');
+
+    IF a_pos1 = 0 THEN
+        RETURN;
+    END IF;
+    a_pos2 := instr(v_url, '/', a_pos1 + 2);
+    IF a_pos2 = 0 THEN
+        v_host := substr(v_url, a_pos1 + 2);
+        v_path := '/';
+        RETURN;
+    END IF;
+
+    v_host := substr(v_url, a_pos1 + 2, a_pos2 - a_pos1 - 2);
+    a_pos1 := instr(v_url, '?', a_pos2 + 1);
+
+    IF a_pos1 = 0 THEN
+        v_path := substr(v_url, a_pos2);
+        RETURN;
+    END IF;
+
+    v_path := substr(v_url, a_pos2, a_pos1 - a_pos2);
+    v_query := substr(v_url, a_pos1 + 1);
+END;
+$$ LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"v_url","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"v_host","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"v_path","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"v_query","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"a_pos1","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"a_pos2","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_assign":{"lineno":6,"varno":1,"expr":{"PLpgSQL_expr":{"query":"v_host := NULL","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":2,"expr":{"PLpgSQL_expr":{"query":"v_path := NULL","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":8,"varno":3,"expr":{"PLpgSQL_expr":{"query":"v_query := NULL","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":9,"varno":5,"expr":{"PLpgSQL_expr":{"query":"a_pos1 := instr(v_url, '//')","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":11,"cond":{"PLpgSQL_expr":{"query":"a_pos1 = 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":12}}]}},{"PLpgSQL_stmt_assign":{"lineno":14,"varno":6,"expr":{"PLpgSQL_expr":{"query":"a_pos2 := instr(v_url, '/', a_pos1 + 2)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":15,"cond":{"PLpgSQL_expr":{"query":"a_pos2 = 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":16,"varno":1,"expr":{"PLpgSQL_expr":{"query":"v_host := substr(v_url, a_pos1 + 2)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":17,"varno":2,"expr":{"PLpgSQL_expr":{"query":"v_path := '/'","parseMode":3}}}},{"PLpgSQL_stmt_return":{"lineno":18}}]}},{"PLpgSQL_stmt_assign":{"lineno":21,"varno":1,"expr":{"PLpgSQL_expr":{"query":"v_host := substr(v_url, a_pos1 + 2, a_pos2 - a_pos1 - 2)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":22,"varno":5,"expr":{"PLpgSQL_expr":{"query":"a_pos1 := instr(v_url, '?', a_pos2 + 1)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":24,"cond":{"PLpgSQL_expr":{"query":"a_pos1 = 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":25,"varno":2,"expr":{"PLpgSQL_expr":{"query":"v_path := substr(v_url, a_pos2)","parseMode":3}}}},{"PLpgSQL_stmt_return":{"lineno":26}}]}},{"PLpgSQL_stmt_assign":{"lineno":29,"varno":2,"expr":{"PLpgSQL_expr":{"query":"v_path := substr(v_url, a_pos2, a_pos1 - a_pos2)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":30,"varno":3,"expr":{"PLpgSQL_expr":{"query":"v_query := substr(v_url, a_pos1 + 1)","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 005
+CREATE OR REPLACE FUNCTION cs_create_job(v_job_id integer) RETURNS void AS $$
+DECLARE
+    a_running_job_count integer;
+BEGIN
+    LOCK TABLE cs_jobs IN EXCLUSIVE MODE;
+
+    SELECT count(*) INTO a_running_job_count FROM cs_jobs WHERE end_stamp IS NULL;
+
+    IF a_running_job_count > 0 THEN
+        RAISE EXCEPTION 'Unable to create a new job: a job is currently running';
+    END IF;
+
+    DELETE FROM cs_active_job;
+    INSERT INTO cs_active_job(job_id) VALUES (v_job_id);
+
+    BEGIN
+        INSERT INTO cs_jobs (job_id, start_stamp) VALUES (v_job_id, now());
+    EXCEPTION
+        WHEN unique_violation THEN
+            -- don't worry if it already exists
+    END;
+END;
+$$ LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"v_job_id","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"a_running_job_count","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"a_running_job_count","varno":2}]}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":18,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":18,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_execsql":{"lineno":5,"sqlstmt":{"PLpgSQL_expr":{"query":"LOCK TABLE cs_jobs IN EXCLUSIVE MODE","parseMode":0}}}},{"PLpgSQL_stmt_execsql":{"lineno":7,"sqlstmt":{"PLpgSQL_expr":{"query":"SELECT count(*)                          FROM cs_jobs WHERE end_stamp IS NULL","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"a_running_job_count","varno":2}]}}}},{"PLpgSQL_stmt_if":{"lineno":9,"cond":{"PLpgSQL_expr":{"query":"a_running_job_count \u003e 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_raise":{"lineno":10,"elog_level":21,"message":"Unable to create a new job: a job is currently running"}}]}},{"PLpgSQL_stmt_execsql":{"lineno":13,"sqlstmt":{"PLpgSQL_expr":{"query":"DELETE FROM cs_active_job","parseMode":0}}}},{"PLpgSQL_stmt_execsql":{"lineno":14,"sqlstmt":{"PLpgSQL_expr":{"query":"INSERT INTO cs_active_job(job_id) VALUES (v_job_id)","parseMode":0}}}},{"PLpgSQL_stmt_block":{"lineno":16,"body":[{"PLpgSQL_stmt_execsql":{"lineno":17,"sqlstmt":{"PLpgSQL_expr":{"query":"INSERT INTO cs_jobs (job_id, start_stamp) VALUES (v_job_id, now())","parseMode":0}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"unique_violation"}}]}}]}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 006
+CREATE FUNCTION instr(varchar, varchar) RETURNS integer AS $$
+DECLARE
+    pos integer;
+BEGIN
+    pos:= instr($1, $2, 1);
+    RETURN pos;
+END;
+$$ LANGUAGE plpgsql STRICT IMMUTABLE
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"$2","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"pos","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_assign":{"lineno":5,"varno":3,"expr":{"PLpgSQL_expr":{"query":"pos:= instr($1, $2, 1)","parseMode":3}}}},{"PLpgSQL_stmt_return":{"lineno":6,"expr":{"PLpgSQL_expr":{"query":"pos","parseMode":2}}}}]}}}}
+]
+== 007
+CREATE FUNCTION instr(string varchar, string_to_search varchar, beg_index integer)
+RETURNS integer AS $$
+DECLARE
+    pos integer NOT NULL DEFAULT 0;
+    temp_str varchar;
+    beg integer;
+    length integer;
+    ss_length integer;
+BEGIN
+    IF beg_index > 0 THEN
+        temp_str := substring(string FROM beg_index);
+        pos := position(string_to_search IN temp_str);
+
+        IF pos = 0 THEN
+            RETURN 0;
+        ELSE
+            RETURN pos + beg_index - 1;
+        END IF;
+    ELSIF beg_index < 0 THEN
+        ss_length := char_length(string_to_search);
+        length := char_length(string);
+        beg := length + beg_index - ss_length + 2;
+
+        WHILE beg > 0 LOOP
+            temp_str := substring(string FROM beg FOR ss_length);
+            pos := position(string_to_search IN temp_str);
+
+            IF pos > 0 THEN
+                RETURN beg;
+            END IF;
+
+            beg := beg - 1;
+        END LOOP;
+
+        RETURN 0;
+    ELSE
+        RETURN 0;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STRICT IMMUTABLE
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"string","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"string_to_search","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"beg_index","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"pos","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"integer "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}},{"PLpgSQL_var":{"refname":"temp_str","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"varchar"}}}},{"PLpgSQL_var":{"refname":"beg","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"length","lineno":6,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"ss_length","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":8,"body":[{"PLpgSQL_stmt_if":{"lineno":9,"cond":{"PLpgSQL_expr":{"query":"beg_index \u003e 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":10,"varno":5,"expr":{"PLpgSQL_expr":{"query":"temp_str := substring(string FROM beg_index)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":11,"varno":4,"expr":{"PLpgSQL_expr":{"query":"pos := position(string_to_search IN temp_str)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":13,"cond":{"PLpgSQL_expr":{"query":"pos = 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":14,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}],"else_body":[{"PLpgSQL_stmt_return":{"lineno":16,"expr":{"PLpgSQL_expr":{"query":"pos + beg_index - 1","parseMode":2}}}}]}}],"elsif_list":[{"PLpgSQL_if_elsif":{"lineno":18,"cond":{"PLpgSQL_expr":{"query":"beg_index \u003c 0","parseMode":2}},"stmts":[{"PLpgSQL_stmt_assign":{"lineno":19,"varno":8,"expr":{"PLpgSQL_expr":{"query":"ss_length := char_length(string_to_search)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":20,"varno":7,"expr":{"PLpgSQL_expr":{"query":"length := char_length(string)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":21,"varno":6,"expr":{"PLpgSQL_expr":{"query":"beg := length + beg_index - ss_length + 2","parseMode":3}}}},{"PLpgSQL_stmt_while":{"lineno":23,"cond":{"PLpgSQL_expr":{"query":"beg \u003e 0","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":24,"varno":5,"expr":{"PLpgSQL_expr":{"query":"temp_str := substring(string FROM beg FOR ss_length)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":25,"varno":4,"expr":{"PLpgSQL_expr":{"query":"pos := position(string_to_search IN temp_str)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":27,"cond":{"PLpgSQL_expr":{"query":"pos \u003e 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":28,"expr":{"PLpgSQL_expr":{"query":"beg","parseMode":2}}}}]}},{"PLpgSQL_stmt_assign":{"lineno":31,"varno":6,"expr":{"PLpgSQL_expr":{"query":"beg := beg - 1","parseMode":3}}}}]}},{"PLpgSQL_stmt_return":{"lineno":34,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}}],"else_body":[{"PLpgSQL_stmt_return":{"lineno":36,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 008
+CREATE FUNCTION instr(string varchar, string_to_search varchar,
+                      beg_index integer, occur_index integer)
+RETURNS integer AS $$
+DECLARE
+    pos integer NOT NULL DEFAULT 0;
+    occur_number integer NOT NULL DEFAULT 0;
+    temp_str varchar;
+    beg integer;
+    i integer;
+    length integer;
+    ss_length integer;
+BEGIN
+    IF beg_index > 0 THEN
+        beg := beg_index;
+        temp_str := substring(string FROM beg_index);
+
+        FOR i IN 1..occur_index LOOP
+            pos := position(string_to_search IN temp_str);
+
+            IF i = 1 THEN
+                beg := beg + pos - 1;
+            ELSE
+                beg := beg + pos;
+            END IF;
+
+            temp_str := substring(string FROM beg + 1);
+        END LOOP;
+
+        IF pos = 0 THEN
+            RETURN 0;
+        ELSE
+            RETURN beg;
+        END IF;
+    ELSIF beg_index < 0 THEN
+        ss_length := char_length(string_to_search);
+        length := char_length(string);
+        beg := length + beg_index - ss_length + 2;
+
+        WHILE beg > 0 LOOP
+            temp_str := substring(string FROM beg FOR ss_length);
+            pos := position(string_to_search IN temp_str);
+
+            IF pos > 0 THEN
+                occur_number := occur_number + 1;
+
+                IF occur_number = occur_index THEN
+                    RETURN beg;
+                END IF;
+            END IF;
+
+            beg := beg - 1;
+        END LOOP;
+
+        RETURN 0;
+    ELSE
+        RETURN 0;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STRICT IMMUTABLE
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"string","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"string_to_search","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"beg_index","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"occur_index","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"pos","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"integer "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}},{"PLpgSQL_var":{"refname":"occur_number","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"integer "}},"notnull":true,"default_val":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}},{"PLpgSQL_var":{"refname":"temp_str","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"varchar"}}}},{"PLpgSQL_var":{"refname":"beg","lineno":6,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"i","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"length","lineno":8,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"ss_length","lineno":9,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_var":{"refname":"i","lineno":15,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":10,"body":[{"PLpgSQL_stmt_if":{"lineno":11,"cond":{"PLpgSQL_expr":{"query":"beg_index \u003e 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":12,"varno":8,"expr":{"PLpgSQL_expr":{"query":"beg := beg_index","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":13,"varno":7,"expr":{"PLpgSQL_expr":{"query":"temp_str := substring(string FROM beg_index)","parseMode":3}}}},{"PLpgSQL_stmt_fori":{"lineno":15,"var":{"PLpgSQL_var":{"refname":"i","lineno":15,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},"lower":{"PLpgSQL_expr":{"query":"1","parseMode":2}},"upper":{"PLpgSQL_expr":{"query":"occur_index","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":16,"varno":5,"expr":{"PLpgSQL_expr":{"query":"pos := position(string_to_search IN temp_str)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":18,"cond":{"PLpgSQL_expr":{"query":"i = 1","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":19,"varno":8,"expr":{"PLpgSQL_expr":{"query":"beg := beg + pos - 1","parseMode":3}}}}],"else_body":[{"PLpgSQL_stmt_assign":{"lineno":21,"varno":8,"expr":{"PLpgSQL_expr":{"query":"beg := beg + pos","parseMode":3}}}}]}},{"PLpgSQL_stmt_assign":{"lineno":24,"varno":7,"expr":{"PLpgSQL_expr":{"query":"temp_str := substring(string FROM beg + 1)","parseMode":3}}}}]}},{"PLpgSQL_stmt_if":{"lineno":27,"cond":{"PLpgSQL_expr":{"query":"pos = 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":28,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}],"else_body":[{"PLpgSQL_stmt_return":{"lineno":30,"expr":{"PLpgSQL_expr":{"query":"beg","parseMode":2}}}}]}}],"elsif_list":[{"PLpgSQL_if_elsif":{"lineno":32,"cond":{"PLpgSQL_expr":{"query":"beg_index \u003c 0","parseMode":2}},"stmts":[{"PLpgSQL_stmt_assign":{"lineno":33,"varno":11,"expr":{"PLpgSQL_expr":{"query":"ss_length := char_length(string_to_search)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":34,"varno":10,"expr":{"PLpgSQL_expr":{"query":"length := char_length(string)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":35,"varno":8,"expr":{"PLpgSQL_expr":{"query":"beg := length + beg_index - ss_length + 2","parseMode":3}}}},{"PLpgSQL_stmt_while":{"lineno":37,"cond":{"PLpgSQL_expr":{"query":"beg \u003e 0","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":38,"varno":7,"expr":{"PLpgSQL_expr":{"query":"temp_str := substring(string FROM beg FOR ss_length)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":39,"varno":5,"expr":{"PLpgSQL_expr":{"query":"pos := position(string_to_search IN temp_str)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":41,"cond":{"PLpgSQL_expr":{"query":"pos \u003e 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":42,"varno":6,"expr":{"PLpgSQL_expr":{"query":"occur_number := occur_number + 1","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":44,"cond":{"PLpgSQL_expr":{"query":"occur_number = occur_index","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":45,"expr":{"PLpgSQL_expr":{"query":"beg","parseMode":2}}}}]}}]}},{"PLpgSQL_stmt_assign":{"lineno":49,"varno":8,"expr":{"PLpgSQL_expr":{"query":"beg := beg - 1","parseMode":3}}}}]}},{"PLpgSQL_stmt_return":{"lineno":52,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}}],"else_body":[{"PLpgSQL_stmt_return":{"lineno":54,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 009
+-- Additional test data below kindly provided by Olivier Auverlot and used with permission
+
+CREATE FUNCTION displayDate(endDate date, canceled boolean) RETURNS text
+    LANGUAGE plpgsql
+    AS $$BEGIN
+	IF canceled = true THEN
+		return null;
+	ELSE
+		return endDate;
+	END IF;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"enddate","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"canceled","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.bool"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":1,"body":[{"PLpgSQL_stmt_if":{"lineno":2,"cond":{"PLpgSQL_expr":{"query":"canceled = true","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":3,"expr":{"PLpgSQL_expr":{"query":"null","parseMode":2}}}}],"else_body":[{"PLpgSQL_stmt_return":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"endDate","parseMode":2}}}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 010
+CREATE FUNCTION calcule_theYear_these(date_inscription date, date_observation date) RETURNS smallint
+    LANGUAGE plpgsql
+    AS $$BEGIN
+	return (calcule_duree(date_inscription,date_observation) + 1);
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"date_inscription","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"date_observation","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":1,"body":[{"PLpgSQL_stmt_return":{"lineno":2,"expr":{"PLpgSQL_expr":{"query":"(calcule_duree(date_inscription,date_observation) + 1)","parseMode":2}}}}]}}}}
+]
+== 011
+CREATE FUNCTION calcule_duree(origine date, atDate date) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$DECLARE
+	theDay INTEGER;
+	theMonth INTEGER;
+	theYear INTEGER;
+	theDay_now INTEGER;
+	theMonth_now INTEGER;
+	theYear_now INTEGER;
+BEGIN
+	theDay := EXTRACT(DAY FROM origine);
+	theMonth := EXTRACT(MONTH FROM origine);
+	theYear := EXTRACT(YEAR FROM origine);
+
+	theDay_now := EXTRACT(DAY FROM atDate);
+	theMonth_now := EXTRACT(MONTH FROM atDate);
+	theYear_now := EXTRACT(YEAR FROM atDate);
+
+	theYear := theYear_now - theYear;
+	if theMonth_now <= theMonth THEN
+		IF theMonth = theMonth_now THEN
+			IF theDay > theDay_now THEN
+				theYear := theYear - 1;
+			END IF;
+		ELSE
+			theYear := theYear - 1;
+		END IF;
+	END IF;
+
+	return theYear;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"origine","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"atdate","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"theday","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"themonth","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"theyear","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"theday_now","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"themonth_now","lineno":6,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}},{"PLpgSQL_var":{"refname":"theyear_now","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"INTEGER"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":8,"body":[{"PLpgSQL_stmt_assign":{"lineno":9,"varno":3,"expr":{"PLpgSQL_expr":{"query":"theDay := EXTRACT(DAY FROM origine)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":10,"varno":4,"expr":{"PLpgSQL_expr":{"query":"theMonth := EXTRACT(MONTH FROM origine)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":11,"varno":5,"expr":{"PLpgSQL_expr":{"query":"theYear := EXTRACT(YEAR FROM origine)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":13,"varno":6,"expr":{"PLpgSQL_expr":{"query":"theDay_now := EXTRACT(DAY FROM atDate)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":14,"varno":7,"expr":{"PLpgSQL_expr":{"query":"theMonth_now := EXTRACT(MONTH FROM atDate)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":15,"varno":8,"expr":{"PLpgSQL_expr":{"query":"theYear_now := EXTRACT(YEAR FROM atDate)","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":17,"varno":5,"expr":{"PLpgSQL_expr":{"query":"theYear := theYear_now - theYear","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":18,"cond":{"PLpgSQL_expr":{"query":"theMonth_now \u003c= theMonth","parseMode":2}},"then_body":[{"PLpgSQL_stmt_if":{"lineno":19,"cond":{"PLpgSQL_expr":{"query":"theMonth = theMonth_now","parseMode":2}},"then_body":[{"PLpgSQL_stmt_if":{"lineno":20,"cond":{"PLpgSQL_expr":{"query":"theDay \u003e theDay_now","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":21,"varno":5,"expr":{"PLpgSQL_expr":{"query":"theYear := theYear - 1","parseMode":3}}}}]}}],"else_body":[{"PLpgSQL_stmt_assign":{"lineno":24,"varno":5,"expr":{"PLpgSQL_expr":{"query":"theYear := theYear - 1","parseMode":3}}}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":28,"expr":{"PLpgSQL_expr":{"query":"theYear","parseMode":2}}}}]}}}}
+]
+== 012
+CREATE FUNCTION endDatedUID(uidmember character varying) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$DECLARE
+	memberID int4;
+
+BEGIN
+	SELECT key INTO memberID
+	FROM
+		member
+	WHERE
+		uidmember = uid;
+
+	RETURN memberID;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"uidmember","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"memberid","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int4"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":5,"fields":[{"name":"memberid","varno":2}]}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_execsql":{"lineno":5,"sqlstmt":{"PLpgSQL_expr":{"query":"SELECT key                FROM\n\t\tmember\n\tWHERE\n\t\tuidmember = uid","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":5,"fields":[{"name":"memberid","varno":2}]}}}},{"PLpgSQL_stmt_return":{"lineno":11,"expr":{"PLpgSQL_expr":{"query":"memberID","parseMode":2}}}}]}}}}
+]
+== 013
+CREATE FUNCTION currentEmployer(memberID integer, jobID integer, jobEnd date) RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$DECLARE
+	lastJob RECORD;
+	lastEmployer record;
+	updateJob BOOL;
+BEGIN
+	updateJob := false;
+
+	SELECT * INTO lastJob FROM lire_lastJob(memberID) AS (jobID INT,startsupport DATE,jobEnd DATE);
+	IF lastJob.jobID = jobID THEN
+		SELECT
+			r_perlab.key AS positionHeld,
+			r_perlab.endDate AS positionEnd
+		INTO lastEmployer
+		FROM
+			r_perlab,
+			(SELECT
+				r_perlab.key_member AS col_memberID,
+				max(r_perlab.start) AS startrattachement
+			FROM r_perlab
+			GROUP BY col_memberID) positions
+		WHERE ((positions.col_memberID = memberID) AND (r_perlab.key_member = positions.col_memberID) AND (r_perlab.start = startrattachement));
+
+		IF lastEmployer.positionHeld IS NOT NULL THEN
+			updateJob := true;
+			UPDATE r_perlab SET endDate = jobEnd WHERE key = lastEmployer.positionHeld;
+		END IF;
+	END IF;
+
+	RETURN updateJob;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"memberid","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"jobid","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"jobend","datatype":{"PLpgSQL_type":{"typname":"date"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"lastjob","dno":4,"lineno":2}},{"PLpgSQL_rec":{"refname":"lastemployer","dno":5,"lineno":3}},{"PLpgSQL_var":{"refname":"updatejob","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"BOOL"}}}},{"PLpgSQL_recfield":{"fieldname":"jobid","recparentno":4}},{"PLpgSQL_recfield":{"fieldname":"positionheld","recparentno":5}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_assign":{"lineno":6,"varno":6,"expr":{"PLpgSQL_expr":{"query":"updateJob := false","parseMode":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":8,"sqlstmt":{"PLpgSQL_expr":{"query":"SELECT *              FROM lire_lastJob(memberID) AS (jobID INT,startsupport DATE,jobEnd DATE)","parseMode":0}},"into":true,"target":{"PLpgSQL_rec":{"refname":"lastjob","dno":4,"lineno":2}}}},{"PLpgSQL_stmt_if":{"lineno":9,"cond":{"PLpgSQL_expr":{"query":"lastJob.jobID = jobID","parseMode":2}},"then_body":[{"PLpgSQL_stmt_execsql":{"lineno":10,"sqlstmt":{"PLpgSQL_expr":{"query":"SELECT\n\t\t\tr_perlab.key AS positionHeld,\n\t\t\tr_perlab.endDate AS positionEnd\n\t\t                    FROM\n\t\t\tr_perlab,\n\t\t\t(SELECT\n\t\t\t\tr_perlab.key_member AS col_memberID,\n\t\t\t\tmax(r_perlab.start) AS startrattachement\n\t\t\tFROM r_perlab\n\t\t\tGROUP BY col_memberID) positions\n\t\tWHERE ((positions.col_memberID = memberID) AND (r_perlab.key_member = positions.col_memberID) AND (r_perlab.start = startrattachement))","parseMode":0}},"into":true,"target":{"PLpgSQL_rec":{"refname":"lastemployer","dno":5,"lineno":3}}}},{"PLpgSQL_stmt_if":{"lineno":23,"cond":{"PLpgSQL_expr":{"query":"lastEmployer.positionHeld IS NOT NULL","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":24,"varno":6,"expr":{"PLpgSQL_expr":{"query":"updateJob := true","parseMode":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":25,"sqlstmt":{"PLpgSQL_expr":{"query":"UPDATE r_perlab SET endDate = jobEnd WHERE key = lastEmployer.positionHeld","parseMode":0}}}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":29,"expr":{"PLpgSQL_expr":{"query":"updateJob","parseMode":2}}}}]}}}}
+]
+== 014
+-- CREATE FUNCTION getArrivalDate(memberID integer, teamID integer, atDate date) RETURNS date
+--     LANGUAGE plpgsql
+--     AS $$
+-- DECLARE
+--         affectations affectation[];
+--         aff affectation;
+|--
+--         DELAI_MAX CONSTANT INTEGER := 30;
+|--
+--         idx INTEGER;
+-- 		nbr_aff INTEGER;
+--         start DATE;
+--         endDate DATE;
+--         sortie BOOLEAN;
+|--
+--         arrivalDate DATE;
+|--
+--         crs_affectation CURSOR (memberID INTEGER) FOR
+--                 SELECT
+--                         affectation.key,
+--                         affectation.key_team,
+--                         affectation.key_support,
+--                         affectation.start,
+--                         affectation.endDate,
+--                         affectation.repartition,
+--                         affectation.key_typeaffectation
+--                 FROM support,affectation
+--                 WHERE
+--                         support.key_member = memberID
+--                 AND     affectation.key_support = support.key
+--                 AND     affectation.start <= atDate
+--                 AND     affectation.key_team = teamID
+--                 ORDER BY affectation.start DESC;
+-- BEGIN
+--         OPEN crs_affectation(memberID);
+--         LOOP
+--                 IF NOT FOUND THEN
+--                         EXIT;
+--                 END IF;
+--                 FETCH crs_affectation into aff.key,aff.key_team,aff.key_support,aff.start,aff.endDate,aff.repartition,aff.key_typeaffectation;
+--                 affectations := ARRAY_APPEND(affectations,aff);
+--         END LOOP;
+--         CLOSE crs_affectation;
+|--
+--         nbr_aff := ARRAY_LENGTH(affectations, 1);
+-- 		idx := 1;
+--         sortie := FALSE;
+|--
+--         WHILE (idx <= nbr_aff AND sortie = FALSE) LOOP
+--                 IF(arrivalDate IS NULL) THEN
+--                         arrivalDate := affectations[idx].start;
+--                         endDate := affectations[idx].endDate;
+--                 ELSE
+--                         IF(arrivalDate - affectations[idx].endDate) < DELAI_MAX THEN
+--                                 arrivalDate := affectations[idx].start;
+--                                 endDate := affectations[idx].endDate;
+--                         ELSE
+--                                 sortie := TRUE;
+--                         END IF;
+--                 END IF;
+--                 idx := idx + 1;
+--         END LOOP;
+|--
+--         RETURN arrivalDate;
+-- END;$$;
+
+CREATE FUNCTION cleanString(str character varying) RETURNS character varying
+    LANGUAGE plpgsql
+    AS $$
+
+DECLARE
+	spechar VARCHAR[ ] := ARRAY['à','â','é','è','ê','ë','ï','î','ô','û','ù','À','Â','É','È','Ê','Ë','Ï','Î','ô','û','ù','ç' ];
+	lettres VARCHAR[ ] := ARRAY['a','a','e','e','e','e','i','i','o','u','u','a','a','e','e','e','e','i','i','o','u','u','c' ];
+	resultat VARCHAR;
+	nbrspechar INTEGER := 23;
+
+BEGIN
+	IF (str IS NOT NULL) THEN
+		resultat := str;
+		FOR i IN 1..nbrspechar LOOP
+			resultat := regexp_replace(resultat,spechar[i],lettres[i],'g');
+		END LOOP;
+	END IF;
+	RETURN resultat;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"str","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"spechar","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"VARCHAR[ ] "}},"default_val":{"PLpgSQL_expr":{"query":"ARRAY['à','â','é','è','ê','ë','ï','î','ô','û','ù','À','Â','É','È','Ê','Ë','Ï','Î','ô','û','ù','ç' ]","parseMode":2}}}},{"PLpgSQL_var":{"refname":"lettres","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"VARCHAR[ ] "}},"default_val":{"PLpgSQL_expr":{"query":"ARRAY['a','a','e','e','e','e','i','i','o','u','u','a','a','e','e','e','e','i','i','o','u','u','c' ]","parseMode":2}}}},{"PLpgSQL_var":{"refname":"resultat","lineno":6,"datatype":{"PLpgSQL_type":{"typname":"VARCHAR"}}}},{"PLpgSQL_var":{"refname":"nbrspechar","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"INTEGER "}},"default_val":{"PLpgSQL_expr":{"query":"23","parseMode":2}}}},{"PLpgSQL_var":{"refname":"i","lineno":12,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":9,"body":[{"PLpgSQL_stmt_if":{"lineno":10,"cond":{"PLpgSQL_expr":{"query":"(str IS NOT NULL)","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":11,"varno":4,"expr":{"PLpgSQL_expr":{"query":"resultat := str","parseMode":3}}}},{"PLpgSQL_stmt_fori":{"lineno":12,"var":{"PLpgSQL_var":{"refname":"i","lineno":12,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},"lower":{"PLpgSQL_expr":{"query":"1","parseMode":2}},"upper":{"PLpgSQL_expr":{"query":"nbrspechar","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":13,"varno":4,"expr":{"PLpgSQL_expr":{"query":"resultat := regexp_replace(resultat,spechar[i],lettres[i],'g')","parseMode":3}}}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":16,"expr":{"PLpgSQL_expr":{"query":"resultat","parseMode":2}}}}]}}}}
+]
+== 015
+CREATE FUNCTION t_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+
+BEGIN
+        NEW.name = upper(cleanString(NEW.name));
+        return NEW;
+END;$$
+--
+[
+{"PLpgSQL_function":{"new_varno":1,"old_varno":2,"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"new","dno":1}},{"PLpgSQL_rec":{"refname":"old","dno":2}},{"PLpgSQL_recfield":{"fieldname":"name","recparentno":1}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_assign":{"lineno":4,"varno":3,"expr":{"PLpgSQL_expr":{"query":"NEW.name = upper(cleanString(NEW.name))","parseMode":4}}}},{"PLpgSQL_stmt_return":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"NEW","parseMode":2}}}}]}}}}
+]
+== 016
+CREATE FUNCTION t_create() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+	INSERT INTO list(key,date) VALUES(NEW.key,NEW.end);
+	RETURN NEW;
+END;$$
+--
+[
+{"PLpgSQL_function":{"new_varno":1,"old_varno":2,"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"new","dno":1}},{"PLpgSQL_rec":{"refname":"old","dno":2}},{"PLpgSQL_recfield":{"fieldname":"key","recparentno":1}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_execsql":{"lineno":3,"sqlstmt":{"PLpgSQL_expr":{"query":"INSERT INTO list(key,date) VALUES(NEW.key,NEW.end)","parseMode":0}}}},{"PLpgSQL_stmt_return":{"lineno":4,"expr":{"PLpgSQL_expr":{"query":"NEW","parseMode":2}}}}]}}}}
+]
+== 017
+CREATE OR REPLACE FUNCTION test.test_parse (
+    p_time_start timestamptz,
+    p_time_end timestamptz,
+    p_time_interval interval default NULL
+) RETURNS TABLE (
+    ts timestamptz,
+    arbitrary_return bigint
+) AS $$
+BEGIN
+    -- some comment
+    -- some other comment
+
+    IF p_time_interval IS NULL
+        THEN p_time_interval := interval_from_start_end(p_time_start, p_time_end);
+    END IF;
+    RETURN QUERY
+    SELECT
+        bucket_function(p_time_interval, timestamp) AS ts,
+        arbitrary_return
+    FROM test.some_table
+    WHERE
+        start >= p_time_start
+        AND "end" < p_time_end
+    GROUP BY 1;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER PARALLEL UNSAFE
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"p_time_start","datatype":{"PLpgSQL_type":{"typname":"timestamptz"}}}},{"PLpgSQL_var":{"refname":"p_time_end","datatype":{"PLpgSQL_type":{"typname":"timestamptz"}}}},{"PLpgSQL_var":{"refname":"p_time_interval","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"interval\""}}}},{"PLpgSQL_var":{"refname":"ts","datatype":{"PLpgSQL_type":{"typname":"timestamptz"}}}},{"PLpgSQL_var":{"refname":"arbitrary_return","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int8"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_if":{"lineno":6,"cond":{"PLpgSQL_expr":{"query":"p_time_interval IS NULL","parseMode":2}},"then_body":[{"PLpgSQL_stmt_assign":{"lineno":7,"varno":2,"expr":{"PLpgSQL_expr":{"query":"p_time_interval := interval_from_start_end(p_time_start, p_time_end)","parseMode":3}}}}]}},{"PLpgSQL_stmt_return_query":{"lineno":9,"query":{"PLpgSQL_expr":{"query":"SELECT\n        bucket_function(p_time_interval, timestamp) AS ts,\n        arbitrary_return\n    FROM test.some_table\n    WHERE\n        start \u003e= p_time_start\n        AND \"end\" \u003c p_time_end\n    GROUP BY 1","parseMode":0}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 018
+CREATE FUNCTION public.somefunc(OUT _result uuid[])
+    RETURNS uuid[]
+    LANGUAGE 'plpgsql'
+
+AS $BODY$
+DECLARE
+	active_on_to_date uuid[];
+BEGIN
+_result := ARRAY( SELECT some_id FROM some_table);
+END;
+$BODY$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"_result","datatype":{"PLpgSQL_type":{"typname":"uuid"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"active_on_to_date","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"uuid[]"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_assign":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"_result := ARRAY( SELECT some_id FROM some_table)","parseMode":3}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 019
+CREATE OR REPLACE FUNCTION cs_fmt_browser_version(v_name varchar, v_version varchar)
+RETURNS varchar AS $$
+DECLARE
+_a int;
+_v_name_alias ALIAS FOR $1;
+BEGIN
+IF v_version IS NULL THEN
+RETURN v_name;
+END IF;
+
+RETURN v_name || '/' || v_version;
+END; $$ LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"v_name","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"v_version","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"_a","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"int"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_if":{"lineno":6,"cond":{"PLpgSQL_expr":{"query":"v_version IS NULL","parseMode":2}},"then_body":[{"PLpgSQL_stmt_return":{"lineno":7,"expr":{"PLpgSQL_expr":{"query":"v_name","parseMode":2}}}}]}},{"PLpgSQL_stmt_return":{"lineno":10,"expr":{"PLpgSQL_expr":{"query":"v_name || '/' || v_version","parseMode":2}}}}]}}}}
+]
+== 020
+CREATE FUNCTION test(str character varying) RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v3 RECORD;
+  v4 integer;
+BEGIN
+  select 1 as c1, 2 as c2 into v3;
+  v3.c1 := 4;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"str","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"varchar\""}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"v3","dno":2,"lineno":3}},{"PLpgSQL_var":{"refname":"v4","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"integer"}}}},{"PLpgSQL_recfield":{"fieldname":"c1","recparentno":2}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_execsql":{"lineno":6,"sqlstmt":{"PLpgSQL_expr":{"query":"select 1 as c1, 2 as c2","parseMode":0}},"into":true,"target":{"PLpgSQL_rec":{"refname":"v3","dno":2,"lineno":3}}}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":4,"expr":{"PLpgSQL_expr":{"query":"v3.c1 := 4","parseMode":4}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 021
+CREATE FUNCTION test_assert() RETURNS integer
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  ASSERT true;
+  ASSERT now() < '2000-01-01';
+  ASSERT false, 'msg';
+  ASSERT false, version();
+
+  RETURN 1;
+END;$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_assert":{"lineno":3,"cond":{"PLpgSQL_expr":{"query":"true","parseMode":2}}}},{"PLpgSQL_stmt_assert":{"lineno":4,"cond":{"PLpgSQL_expr":{"query":"now() \u003c '2000-01-01'","parseMode":2}}}},{"PLpgSQL_stmt_assert":{"lineno":5,"cond":{"PLpgSQL_expr":{"query":"false","parseMode":2}},"message":{"PLpgSQL_expr":{"query":"'msg'","parseMode":2}}}},{"PLpgSQL_stmt_assert":{"lineno":6,"cond":{"PLpgSQL_expr":{"query":"false","parseMode":2}},"message":{"PLpgSQL_expr":{"query":"version()","parseMode":2}}}},{"PLpgSQL_stmt_return":{"lineno":8,"expr":{"PLpgSQL_expr":{"query":"1","parseMode":2}}}}]}}}}
+]
+== 022
+-- Example from https://www.postgresql.org/docs/current/sql-do.html
+DO $$DECLARE r record;
+BEGIN
+    FOR r IN SELECT table_schema, table_name FROM information_schema.tables
+             WHERE table_type = 'VIEW' AND table_schema = 'public'
+    LOOP
+        EXECUTE 'GRANT ALL ON ' || quote_ident(r.table_schema) || '.' || quote_ident(r.table_name) || ' TO webuser';
+    END LOOP;
+END$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"r","dno":1,"lineno":1}},{"PLpgSQL_recfield":{"fieldname":"table_schema","recparentno":1}},{"PLpgSQL_recfield":{"fieldname":"table_name","recparentno":1}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_fors":{"lineno":3,"var":{"PLpgSQL_rec":{"refname":"r","dno":1,"lineno":1}},"body":[{"PLpgSQL_stmt_dynexecute":{"lineno":6,"query":{"PLpgSQL_expr":{"query":"'GRANT ALL ON ' || quote_ident(r.table_schema) || '.' || quote_ident(r.table_name) || ' TO webuser'","parseMode":2}}}}],"query":{"PLpgSQL_expr":{"query":"SELECT table_schema, table_name FROM information_schema.tables\n             WHERE table_type = 'VIEW' AND table_schema = 'public'","parseMode":0}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 023
+CREATE FUNCTION test_cursor() RETURNS void AS $$
+  DECLARE
+    i INT;
+    c CURSOR FOR SELECT generate_series(1,10);
+  BEGIN
+    FOR i IN c LOOP
+      RAISE NOTICE 'i is %',i;
+    END LOOP;
+  END
+$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"i","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"INT"}}}},{"PLpgSQL_var":{"refname":"c","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.refcursor"}},"cursor_explicit_expr":{"PLpgSQL_expr":{"query":"SELECT generate_series(1,10)","parseMode":0}},"cursor_explicit_argrow":-1,"cursor_options":256}},{"PLpgSQL_rec":{"refname":"i","dno":3,"lineno":6}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_forc":{"lineno":6,"var":{"PLpgSQL_rec":{"refname":"i","dno":3,"lineno":6}},"body":[{"PLpgSQL_stmt_raise":{"lineno":7,"elog_level":18,"message":"i is %","params":[{"PLpgSQL_expr":{"query":"i","parseMode":2}}]}}],"curvar":2}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 024
+CREATE FUNCTION public.dz_sumfunc(
+    IN  p_in  INTEGER
+    ,OUT p_out public.dz_sumthing
+)
+AS $BODY$
+DECLARE
+BEGIN
+    p_out.sumattribute := p_in;
+END;
+$BODY$
+LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"p_in","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_rec":{"refname":"p_out","dno":1}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_recfield":{"fieldname":"sumattribute","recparentno":1}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_assign":{"lineno":4,"varno":3,"expr":{"PLpgSQL_expr":{"query":"p_out.sumattribute := p_in","parseMode":4}}}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 025
+-- Examples from https://www.postgresql.org/docs/16/plpgsql-declarations.html#PLPGSQL-DECLARATION-PARAMETERS
+CREATE FUNCTION sales_tax(real) RETURNS real AS $$
+DECLARE
+    subtotal ALIAS FOR $1;
+BEGIN
+    RETURN subtotal * 0.06;
+END;
+$$ LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.float4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_return":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"subtotal * 0.06","parseMode":2}}}}]}}}}
+]
+== 026
+-- RETURN NEXT; with no expression https://www.postgresql.org/docs/16/plpgsql-control-structures.html#PLPGSQL-STATEMENTS-RETURNING-RETURN-NEXT
+CREATE OR REPLACE FUNCTION public.test_pl(s integer, e integer)
+  RETURNS TABLE(id INTEGER) AS $$
+BEGIN
+  id := s;
+LOOP
+  EXIT WHEN id>e;
+  RETURN NEXT;
+  id := id + 1;
+END LOOP;
+END
+$$
+  LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"s","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"e","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"id","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_assign":{"lineno":3,"varno":2,"expr":{"PLpgSQL_expr":{"query":"id := s","parseMode":3}}}},{"PLpgSQL_stmt_loop":{"lineno":4,"body":[{"PLpgSQL_stmt_exit":{"lineno":5,"is_exit":true,"cond":{"PLpgSQL_expr":{"query":"id\u003ee","parseMode":2}}}},{"PLpgSQL_stmt_return_next":{"lineno":6}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":2,"expr":{"PLpgSQL_expr":{"query":"id := id + 1","parseMode":3}}}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 027
+CREATE OR REPLACE FUNCTION trgfn()
+ RETURNS trigger AS $$
+DECLARE
+ prior ALIAS FOR old;
+ updated ALIAS FOR new;
+BEGIN
+ RETURN;
+END;
+$$
+  LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"new_varno":1,"old_varno":2,"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_rec":{"refname":"new","dno":1}},{"PLpgSQL_rec":{"refname":"old","dno":2}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_return":{"lineno":6}}]}}}}
+]
+== 028
+-- Example from https://www.postgresql.org/docs/16/plpgsql-cursors.html
+CREATE FUNCTION reffunc2() RETURNS refcursor AS '
+DECLARE
+    ref refcursor;
+BEGIN
+    OPEN ref FOR SELECT col FROM test;
+    RETURN ref;
+END;
+' LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"ref","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"refcursor"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_open":{"lineno":5,"curvar":1,"cursor_options":256,"query":{"PLpgSQL_expr":{"query":"SELECT col FROM test","parseMode":0}}}},{"PLpgSQL_stmt_return":{"lineno":6,"expr":{"PLpgSQL_expr":{"query":"ref","parseMode":2}}}}]}}}}
+]
+== 029
+-- Example from https://www.postgresql.org/docs/16/plpgsql-declarations.html#PLPGSQL-DECLARATION-COLLATION
+CREATE FUNCTION less_than(a text, b text) RETURNS boolean AS $$
+DECLARE
+    local_a text COLLATE "en_US" := a;
+    local_b text := b;
+BEGIN
+    RETURN local_a < local_b;
+END;
+$$ LANGUAGE plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"a","datatype":{"PLpgSQL_type":{"typname":"text"}}}},{"PLpgSQL_var":{"refname":"b","datatype":{"PLpgSQL_type":{"typname":"text"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"local_a","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"text "}},"default_val":{"PLpgSQL_expr":{"query":"a","parseMode":2}}}},{"PLpgSQL_var":{"refname":"local_b","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"text "}},"default_val":{"PLpgSQL_expr":{"query":"b","parseMode":2}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_return":{"lineno":6,"expr":{"PLpgSQL_expr":{"query":"local_a \u003c local_b","parseMode":2}}}}]}}}}
+]

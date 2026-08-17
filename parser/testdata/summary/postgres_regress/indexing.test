@@ -1,0 +1,3228 @@
+== 001
+-- Creating an index on a partitioned table makes the partitions
+-- automatically get the index
+create table idxpart (a int, b int, c text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 002
+-- relhassubclass of a partitioned index is false before creating any partition.
+-- It will be set after the first partition is created.
+create index idxpart_idx on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 003
+select relhassubclass from pg_class where relname = 'idxpart_idx'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 004
+-- Check that partitioned indexes are present in pg_indexes.
+select indexdef from pg_indexes where indexname like 'idxpart_idx%'
+--
+TABLE: name="pg_indexes" schema="" table="pg_indexes" ctx=Select
+FILTER: schema="" table="" column="indexname"
+STMT: SelectStmt
+== 005
+drop index idxpart_idx
+--
+STMT: DropStmt
+== 006
+create table idxpart1 partition of idxpart for values from (0) to (10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 007
+create table idxpart2 partition of idxpart for values from (10) to (100)
+	partition by range (b)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 008
+create table idxpart21 partition of idxpart2 for values from (0) to (100)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: CreateStmt
+== 009
+-- Even with partitions, relhassubclass should not be set if a partitioned
+-- index is created only on the parent.
+create index idxpart_idx on only idxpart(a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 010
+select relhassubclass from pg_class where relname = 'idxpart_idx'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 011
+drop index idxpart_idx
+--
+STMT: DropStmt
+== 012
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 013
+select relname, relkind, relhassubclass, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 014
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 015
+-- Some unsupported features
+create table idxpart (a int, b int, c text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 016
+create table idxpart1 partition of idxpart for values from (0) to (10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 017
+create index concurrently on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 018
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 019
+-- Verify bugfix with query on indexed partitioned table with no partitions
+-- https://postgr.es/m/20180124162006.pmapfiznhgngwtjf@alvherre.pgsql
+CREATE TABLE idxpart (col1 INT) PARTITION BY RANGE (col1)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 020
+CREATE INDEX ON idxpart (col1)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 021
+CREATE TABLE idxpart_two (col2 INT)
+--
+TABLE: name="idxpart_two" schema="" table="idxpart_two" ctx=DDL
+STMT: CreateStmt
+== 022
+SELECT col2 FROM idxpart_two fk LEFT OUTER JOIN idxpart pk ON (col1 = col2)
+--
+TABLE: name="idxpart_two" schema="" table="idxpart_two" ctx=Select
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+ALIAS: "fk"="idxpart_two"
+ALIAS: "pk"="idxpart"
+STMT: SelectStmt
+== 023
+DROP table idxpart, idxpart_two
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart_two" schema="" table="idxpart_two" ctx=DDL
+STMT: DropStmt
+== 024
+-- Verify bugfix with index rewrite on ALTER TABLE / SET DATA TYPE
+-- https://postgr.es/m/CAKcux6mxNCGsgATwf5CGMF8g4WSupCXicCVMeKUTuWbyxHOMsQ@mail.gmail.com
+CREATE TABLE idxpart (a INT, b TEXT, c INT) PARTITION BY RANGE(a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 025
+CREATE TABLE idxpart1 PARTITION OF idxpart FOR VALUES FROM (MINVALUE) TO (MAXVALUE)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 026
+CREATE INDEX partidx_abc_idx ON idxpart (a, b, c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 027
+INSERT INTO idxpart (a, b, c) SELECT i, i, i FROM generate_series(1, 50) i
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 028
+ALTER TABLE idxpart ALTER COLUMN c TYPE numeric
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 029
+DROP TABLE idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 030
+-- If a table without index is attached as partition to a table with
+-- an index, the index is automatically created
+create table idxpart (a int, b int, c text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 031
+create index idxparti on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 032
+create index idxparti2 on idxpart (b, c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 033
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 034
+alter table idxpart attach partition idxpart1 for values from (0) to (10)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 035
+-- Forbid ALTER TABLE when attaching or detaching an index to a partition.
+create index idxpart_c on only idxpart (c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 036
+create index idxpart1_c on idxpart1 (c)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 037
+alter table idxpart_c attach partition idxpart1_c for values from (10) to (20)
+--
+TABLE: name="idxpart_c" schema="" table="idxpart_c" ctx=DDL
+STMT: AlterTableStmt
+== 038
+alter index idxpart_c attach partition idxpart1_c
+--
+STMT: AlterTableStmt
+== 039
+select relname, relpartbound from pg_class
+  where relname in ('idxpart_c', 'idxpart1_c')
+  order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 040
+alter table idxpart_c detach partition idxpart1_c
+--
+TABLE: name="idxpart_c" schema="" table="idxpart_c" ctx=DDL
+STMT: AlterTableStmt
+== 041
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 042
+-- If a partition already has an index, don't create a duplicative one
+create table idxpart (a int, b int) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 043
+create table idxpart1 partition of idxpart for values from (0, 0) to (10, 10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 044
+create index on idxpart1 (a, b)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 045
+create index on idxpart (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 046
+select relname, relkind, relhassubclass, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 047
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 048
+-- DROP behavior for partitioned indexes
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 049
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 050
+create table idxpart1 partition of idxpart for values from (0) to (10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 051
+drop index idxpart1_a_idx
+--
+STMT: DropStmt
+== 052
+-- no way
+drop index concurrently idxpart_a_idx
+--
+STMT: DropStmt
+== 053
+-- unsupported
+drop index idxpart_a_idx
+--
+STMT: DropStmt
+== 054
+-- both indexes go away
+select relname, relkind from pg_class
+  where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 055
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 056
+drop table idxpart1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: DropStmt
+== 057
+-- the index on partition goes away too
+select relname, relkind from pg_class
+  where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 058
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 059
+-- DROP behavior with temporary partitioned indexes
+create temp table idxpart_temp (a int) partition by range (a)
+--
+TABLE: name="idxpart_temp" schema="" table="idxpart_temp" ctx=DDL
+STMT: CreateStmt
+== 060
+create index on idxpart_temp(a)
+--
+TABLE: name="idxpart_temp" schema="" table="idxpart_temp" ctx=DDL
+STMT: IndexStmt
+== 061
+create temp table idxpart1_temp partition of idxpart_temp
+  for values from (0) to (10)
+--
+TABLE: name="idxpart1_temp" schema="" table="idxpart1_temp" ctx=DDL
+STMT: CreateStmt
+== 062
+drop index idxpart1_temp_a_idx
+--
+STMT: DropStmt
+== 063
+-- error
+-- non-concurrent drop is enforced here, so it is a valid case.
+drop index concurrently idxpart_temp_a_idx
+--
+STMT: DropStmt
+== 064
+select relname, relkind from pg_class
+  where relname like 'idxpart_temp%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 065
+drop table idxpart_temp
+--
+TABLE: name="idxpart_temp" schema="" table="idxpart_temp" ctx=DDL
+STMT: DropStmt
+== 066
+-- ALTER INDEX .. ATTACH, error cases
+create table idxpart (a int, b int) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 067
+create table idxpart1 partition of idxpart for values from (0, 0) to (10, 10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 068
+create index idxpart_a_b_idx on only idxpart (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 069
+create index idxpart1_a_b_idx on idxpart1 (a, b)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 070
+create index idxpart1_tst1 on idxpart1 (b, a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 071
+create index idxpart1_tst2 on idxpart1 using hash (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 072
+create index idxpart1_tst3 on idxpart1 (a, b) where a > 10
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 073
+alter index idxpart attach partition idxpart1
+--
+STMT: AlterTableStmt
+== 074
+alter index idxpart_a_b_idx attach partition idxpart1
+--
+STMT: AlterTableStmt
+== 075
+alter index idxpart_a_b_idx attach partition idxpart_a_b_idx
+--
+STMT: AlterTableStmt
+== 076
+alter index idxpart_a_b_idx attach partition idxpart1_b_idx
+--
+STMT: AlterTableStmt
+== 077
+alter index idxpart_a_b_idx attach partition idxpart1_tst1
+--
+STMT: AlterTableStmt
+== 078
+alter index idxpart_a_b_idx attach partition idxpart1_tst2
+--
+STMT: AlterTableStmt
+== 079
+alter index idxpart_a_b_idx attach partition idxpart1_tst3
+--
+STMT: AlterTableStmt
+== 080
+-- OK
+alter index idxpart_a_b_idx attach partition idxpart1_a_b_idx
+--
+STMT: AlterTableStmt
+== 081
+alter index idxpart_a_b_idx attach partition idxpart1_a_b_idx
+--
+STMT: AlterTableStmt
+== 082
+-- quiet
+
+-- reject dupe
+create index idxpart1_2_a_b on idxpart1 (a, b)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 083
+alter index idxpart_a_b_idx attach partition idxpart1_2_a_b
+--
+STMT: AlterTableStmt
+== 084
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 085
+-- make sure everything's gone
+select indexrelid::regclass, indrelid::regclass
+  from pg_index where indexrelid::regclass::text like 'idxpart%'
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 086
+-- Don't auto-attach incompatible indexes
+create table idxpart (a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 087
+create table idxpart1 (a int, b int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 088
+create index on idxpart1 using hash (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 089
+create index on idxpart1 (a) where b > 1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 090
+create index on idxpart1 ((a + 0))
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 091
+create index on idxpart1 (a, a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 092
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 093
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 094
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 095
+-- If CREATE INDEX ONLY, don't create indexes on partitions; and existing
+-- indexes on partitions don't change parent.  ALTER INDEX ATTACH can change
+-- the parent after the fact.
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 096
+create table idxpart1 partition of idxpart for values from (0) to (100)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 097
+create table idxpart2 partition of idxpart for values from (100) to (1000)
+  partition by range (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 098
+create table idxpart21 partition of idxpart2 for values from (100) to (200)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: CreateStmt
+== 099
+create table idxpart22 partition of idxpart2 for values from (200) to (300)
+--
+TABLE: name="idxpart22" schema="" table="idxpart22" ctx=DDL
+STMT: CreateStmt
+== 100
+create index on idxpart22 (a)
+--
+TABLE: name="idxpart22" schema="" table="idxpart22" ctx=DDL
+STMT: IndexStmt
+== 101
+create index on only idxpart2 (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 102
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 103
+-- Here we expect that idxpart1 and idxpart2 have a new index, but idxpart21
+-- does not; also, idxpart22 is not attached.
+select indexrelid::regclass, indrelid::regclass, inhparent::regclass
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+where indexrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 104
+alter index idxpart2_a_idx attach partition idxpart22_a_idx
+--
+STMT: AlterTableStmt
+== 105
+select indexrelid::regclass, indrelid::regclass, inhparent::regclass
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+where indexrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 106
+-- attaching idxpart22 is not enough to set idxpart22_a_idx valid ...
+alter index idxpart2_a_idx attach partition idxpart22_a_idx
+--
+STMT: AlterTableStmt
+== 107
+-- ... but this one is.
+create index on idxpart21 (a)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: IndexStmt
+== 108
+alter index idxpart2_a_idx attach partition idxpart21_a_idx
+--
+STMT: AlterTableStmt
+== 109
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 110
+-- When a table is attached a partition and it already has an index, a
+-- duplicate index should not get created, but rather the index becomes
+-- attached to the parent's index.
+create table idxpart (a int, b int, c text, d bool) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 111
+create index idxparti on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 112
+create index idxparti2 on idxpart (b, c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 113
+create table idxpart1 (like idxpart including indexes)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 114
+select relname, relkind, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 115
+alter table idxpart attach partition idxpart1 for values from (0) to (10)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 116
+select relname, relkind, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 117
+-- While here, also check matching when creating an index after the fact.
+create index on idxpart1 ((a+b)) where d = true
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 118
+select relname, relkind, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 119
+create index idxparti3 on idxpart ((a+b)) where d = true
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 120
+select relname, relkind, inhparent::regclass
+    from pg_class left join pg_index ix on (indexrelid = oid)
+	left join pg_inherits on (ix.indexrelid = inhrelid)
+	where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "ix"="pg_index"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 121
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 122
+-- Verify that attaching an invalid index does not mark the parent index valid.
+-- On the other hand, attaching a valid index marks not only its direct
+-- ancestor valid, but also any indirect ancestor that was only missing the one
+-- that was just made valid
+create table idxpart (a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 123
+create table idxpart1 partition of idxpart for values from (1) to (1000) partition by range (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 124
+create table idxpart11 partition of idxpart1 for values from (1) to (100)
+--
+TABLE: name="idxpart11" schema="" table="idxpart11" ctx=DDL
+STMT: CreateStmt
+== 125
+create index on only idxpart1 (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 126
+create index on only idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 127
+-- this results in two invalid indexes:
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 128
+-- idxpart1_a_idx is not valid, so idxpart_a_idx should not become valid:
+alter index idxpart_a_idx attach partition idxpart1_a_idx
+--
+STMT: AlterTableStmt
+== 129
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 130
+-- after creating and attaching this, both idxpart1_a_idx and idxpart_a_idx
+-- should become valid
+create index on idxpart11 (a)
+--
+TABLE: name="idxpart11" schema="" table="idxpart11" ctx=DDL
+STMT: IndexStmt
+== 131
+alter index idxpart1_a_idx attach partition idxpart11_a_idx
+--
+STMT: AlterTableStmt
+== 132
+select relname, indisvalid from pg_class join pg_index on indexrelid = oid
+   where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 133
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 134
+-- verify dependency handling during ALTER TABLE DETACH PARTITION
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 135
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 136
+create index on idxpart1 (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 137
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 138
+create table idxpart2 (like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 139
+alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 140
+alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 141
+create table idxpart3 partition of idxpart for values from (2000) to (3000)
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 142
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 143
+-- a) after detaching partitions, the indexes can be dropped independently
+alter table idxpart detach partition idxpart1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 144
+alter table idxpart detach partition idxpart2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 145
+alter table idxpart detach partition idxpart3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 146
+drop index idxpart1_a_idx
+--
+STMT: DropStmt
+== 147
+drop index idxpart2_a_idx
+--
+STMT: DropStmt
+== 148
+drop index idxpart3_a_idx
+--
+STMT: DropStmt
+== 149
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 150
+drop table idxpart, idxpart1, idxpart2, idxpart3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: DropStmt
+== 151
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 152
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 153
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 154
+create index on idxpart1 (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 155
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 156
+create table idxpart2 (like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 157
+alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 158
+alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 159
+create table idxpart3 partition of idxpart for values from (2000) to (3000)
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 160
+-- b) after detaching, dropping the index on parent does not remove the others
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 161
+alter table idxpart detach partition idxpart1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 162
+alter table idxpart detach partition idxpart2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 163
+alter table idxpart detach partition idxpart3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 164
+drop index idxpart_a_idx
+--
+STMT: DropStmt
+== 165
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 166
+drop table idxpart, idxpart1, idxpart2, idxpart3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: DropStmt
+== 167
+select relname, relkind from pg_class where relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 168
+create table idxpart (a int, b int, c int) partition by range(a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 169
+create index on idxpart(c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 170
+create table idxpart1 partition of idxpart for values from (0) to (250)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 171
+create table idxpart2 partition of idxpart for values from (250) to (500)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 172
+alter table idxpart detach partition idxpart2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 173
+alter table idxpart2 drop column c
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: AlterTableStmt
+== 174
+drop table idxpart, idxpart2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: DropStmt
+== 175
+-- Verify that expression indexes inherit correctly
+create table idxpart (a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 176
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 177
+create index on idxpart1 ((a + b))
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 178
+create index on idxpart ((a + b))
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 179
+create table idxpart2 (like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 180
+alter table idxpart attach partition idxpart1 for values from (0000) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 181
+alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 182
+create table idxpart3 partition of idxpart for values from (2000) to (3000)
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 183
+select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
+  from pg_class join pg_inherits on inhrelid = oid,
+  lateral pg_get_indexdef(pg_class.oid)
+  where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="relkind"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 184
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 185
+-- Verify behavior for collation (mis)matches
+create table idxpart (a text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 186
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 187
+create table idxpart2 (like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 188
+create index on idxpart2 (a collate "POSIX")
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 189
+create index on idxpart2 (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 190
+create index on idxpart2 (a collate "C")
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 191
+alter table idxpart attach partition idxpart1 for values from ('aaa') to ('bbb')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 192
+alter table idxpart attach partition idxpart2 for values from ('bbb') to ('ccc')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 193
+create table idxpart3 partition of idxpart for values from ('ccc') to ('ddd')
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 194
+create index on idxpart (a collate "C")
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 195
+create table idxpart4 partition of idxpart for values from ('ddd') to ('eee')
+--
+TABLE: name="idxpart4" schema="" table="idxpart4" ctx=DDL
+STMT: CreateStmt
+== 196
+select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
+  from pg_class left join pg_inherits on inhrelid = oid,
+  lateral pg_get_indexdef(pg_class.oid)
+  where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="relkind"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 197
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 198
+-- Verify behavior for opclass (mis)matches
+create table idxpart (a text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 199
+create table idxpart1 (like idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 200
+create table idxpart2 (like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 201
+create index on idxpart2 (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 202
+alter table idxpart attach partition idxpart1 for values from ('aaa') to ('bbb')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 203
+alter table idxpart attach partition idxpart2 for values from ('bbb') to ('ccc')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 204
+create table idxpart3 partition of idxpart for values from ('ccc') to ('ddd')
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 205
+create index on idxpart (a text_pattern_ops)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 206
+create table idxpart4 partition of idxpart for values from ('ddd') to ('eee')
+--
+TABLE: name="idxpart4" schema="" table="idxpart4" ctx=DDL
+STMT: CreateStmt
+== 207
+-- must *not* have attached the index we created on idxpart2
+select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
+  from pg_class left join pg_inherits on inhrelid = oid,
+  lateral pg_get_indexdef(pg_class.oid)
+  where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="relkind"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 208
+drop index idxpart_a_idx
+--
+STMT: DropStmt
+== 209
+create index on only idxpart (a text_pattern_ops)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 210
+-- must reject
+alter index idxpart_a_idx attach partition idxpart2_a_idx
+--
+STMT: AlterTableStmt
+== 211
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 212
+-- Verify that attaching indexes maps attribute numbers correctly
+create table idxpart (col1 int, a int, col2 int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 213
+create table idxpart1 (b int, col1 int, col2 int, col3 int, a int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 214
+alter table idxpart drop column col1, drop column col2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 215
+alter table idxpart1 drop column col1, drop column col2, drop column col3
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 216
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 217
+create index idxpart_1_idx on only idxpart (b, a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 218
+create index idxpart1_1_idx on idxpart1 (b, a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 219
+create index idxpart1_1b_idx on idxpart1 (b)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 220
+-- test expressions and partial-index predicate, too
+create index idxpart_2_idx on only idxpart ((b + a)) where a > 1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 221
+create index idxpart1_2_idx on idxpart1 ((b + a)) where a > 1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 222
+create index idxpart1_2b_idx on idxpart1 ((a + b)) where a > 1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 223
+create index idxpart1_2c_idx on idxpart1 ((b + a)) where b > 1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 224
+alter index idxpart_1_idx attach partition idxpart1_1b_idx
+--
+STMT: AlterTableStmt
+== 225
+-- fail
+alter index idxpart_1_idx attach partition idxpart1_1_idx
+--
+STMT: AlterTableStmt
+== 226
+alter index idxpart_2_idx attach partition idxpart1_2b_idx
+--
+STMT: AlterTableStmt
+== 227
+-- fail
+alter index idxpart_2_idx attach partition idxpart1_2c_idx
+--
+STMT: AlterTableStmt
+== 228
+-- fail
+alter index idxpart_2_idx attach partition idxpart1_2_idx
+--
+STMT: AlterTableStmt
+== 229
+-- ok
+select relname as child, inhparent::regclass as parent, pg_get_indexdef as childdef
+  from pg_class left join pg_inherits on inhrelid = oid,
+  lateral pg_get_indexdef(pg_class.oid)
+  where relkind in ('i', 'I') and relname like 'idxpart%' order by relname
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="relkind"
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 230
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 231
+-- Make sure the partition columns are mapped correctly
+create table idxpart (a int, b int, c text) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 232
+create index idxparti on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 233
+create index idxparti2 on idxpart (c, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 234
+create table idxpart1 (c text, a int, b int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 235
+alter table idxpart attach partition idxpart1 for values from (0) to (10)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 236
+create table idxpart2 (c text, a int, b int)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 237
+create index on idxpart2 (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 238
+create index on idxpart2 (c, b)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 239
+alter table idxpart attach partition idxpart2 for values from (10) to (20)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 240
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 241
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 242
+-- Verify that columns are mapped correctly in expression indexes
+create table idxpart (col1 int, col2 int, a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 243
+create table idxpart1 (col2 int, b int, col1 int, a int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 244
+create table idxpart2 (col1 int, col2 int, b int, a int)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 245
+alter table idxpart drop column col1, drop column col2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 246
+alter table idxpart1 drop column col1, drop column col2
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 247
+alter table idxpart2 drop column col1, drop column col2
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: AlterTableStmt
+== 248
+create index on idxpart2 (abs(b))
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+FUNCTION: name="abs" function="abs" schema="" ctx=Call
+STMT: IndexStmt
+== 249
+alter table idxpart attach partition idxpart2 for values from (0) to (1)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 250
+create index on idxpart (abs(b))
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+FUNCTION: name="abs" function="abs" schema="" ctx=Call
+STMT: IndexStmt
+== 251
+create index on idxpart ((b + 1))
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 252
+alter table idxpart attach partition idxpart1 for values from (1) to (2)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 253
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 254
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 255
+-- Verify that columns are mapped correctly for WHERE in a partial index
+create table idxpart (col1 int, a int, col3 int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 256
+alter table idxpart drop column col1, drop column col3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 257
+create table idxpart1 (col1 int, col2 int, col3 int, col4 int, b int, a int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 258
+alter table idxpart1 drop column col1, drop column col2, drop column col3, drop column col4
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 259
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 260
+create table idxpart2 (col1 int, col2 int, b int, a int)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 261
+create index on idxpart2 (a) where b > 1000
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 262
+alter table idxpart2 drop column col1, drop column col2
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: AlterTableStmt
+== 263
+alter table idxpart attach partition idxpart2 for values from (1000) to (2000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 264
+create index on idxpart (a) where b > 1000
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 265
+select c.relname, pg_get_indexdef(indexrelid)
+  from pg_class c join pg_index i on c.oid = i.indexrelid
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+ALIAS: "c"="pg_class"
+ALIAS: "i"="pg_index"
+FUNCTION: name="pg_get_indexdef" function="pg_get_indexdef" schema="" ctx=Call
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 266
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 267
+-- Column number mapping: dropped columns in the partition
+create table idxpart1 (drop_1 int, drop_2 int, col_keep int, drop_3 int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 268
+alter table idxpart1 drop column drop_1
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 269
+alter table idxpart1 drop column drop_2
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 270
+alter table idxpart1 drop column drop_3
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 271
+create index on idxpart1 (col_keep)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 272
+create table idxpart (col_keep int) partition by range (col_keep)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 273
+create index on idxpart (col_keep)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 274
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 275
+select attrelid::regclass, attname, attnum from pg_attribute
+  where attrelid::regclass::text like 'idxpart%' and attnum > 0
+  order by attrelid::regclass, attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attnum"
+STMT: SelectStmt
+== 276
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 277
+-- Column number mapping: dropped columns in the parent table
+create table idxpart(drop_1 int, drop_2 int, col_keep int, drop_3 int) partition by range (col_keep)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 278
+alter table idxpart drop column drop_1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 279
+alter table idxpart drop column drop_2
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 280
+alter table idxpart drop column drop_3
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 281
+create table idxpart1 (col_keep int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 282
+create index on idxpart1 (col_keep)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 283
+create index on idxpart (col_keep)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 284
+alter table idxpart attach partition idxpart1 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 285
+select attrelid::regclass, attname, attnum from pg_attribute
+  where attrelid::regclass::text like 'idxpart%' and attnum > 0
+  order by attrelid::regclass, attnum
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attnum"
+STMT: SelectStmt
+== 286
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 287
+|--
+-- Constraint-related indexes
+|--
+
+-- Verify that it works to add primary key / unique to partitioned tables
+create table idxpart (a int primary key, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 288
+-- multiple primary key on child should fail
+create table failpart partition of idxpart (b primary key) for values from (0) to (100)
+--
+TABLE: name="failpart" schema="" table="failpart" ctx=DDL
+STMT: CreateStmt
+== 289
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 290
+-- primary key on child is okay if there's no PK in the parent, though
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 291
+create table idxpart1pk partition of idxpart (a primary key) for values from (0) to (100)
+--
+TABLE: name="idxpart1pk" schema="" table="idxpart1pk" ctx=DDL
+STMT: CreateStmt
+== 292
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 293
+-- Failing to use the full partition key is not allowed
+create table idxpart (a int unique, b int) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 294
+create table idxpart (a int, b int unique) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 295
+create table idxpart (a int primary key, b int) partition by range (b, a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 296
+create table idxpart (a int, b int primary key) partition by range (b, a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 297
+-- OK if you use them in some other order
+create table idxpart (a int, b int, c text, primary key  (a, b, c)) partition by range (b, c, a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 298
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 299
+-- OK to add an exclusion constraint if partitioning by its equal column
+create table idxpart (a int4range, exclude USING GIST (a with = )) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 300
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 301
+-- OK more than one equal column
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 302
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 303
+-- OK with more than one equal column: constraint is a proper superset of partition key
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with =)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 304
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 305
+-- Not OK more than one equal column: partition keys are a proper superset of constraint
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with = )) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 306
+-- Not OK with just -|-
+create table idxpart (a int4range, exclude USING GIST (a with -|- )) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 307
+-- OK with equals and &&, and equals is the partition key
+create table idxpart (a int4range, b int4range, exclude USING GIST (a with =, b with &&)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 308
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 309
+-- Not OK with equals and &&, and equals is not the partition key
+create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (b with =, c with &&)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 310
+-- OK more than one equal column and a && column
+create table idxpart (a int4range, b int4range, c int4range, exclude USING GIST (a with =, b with =, c with &&)) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 311
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 312
+-- no expressions in partition key for PK/UNIQUE
+create table idxpart (a int primary key, b int) partition by range ((b + a))
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 313
+create table idxpart (a int unique, b int) partition by range ((b + a))
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 314
+-- use ALTER TABLE to add a primary key
+create table idxpart (a int, b int, c text) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 315
+alter table idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 316
+-- not an incomplete one though
+alter table idxpart add primary key (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 317
+-- this works
+create table idxpart1 partition of idxpart for values from (0, 0) to (1000, 1000)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 318
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 319
+-- use ALTER TABLE to add a unique constraint
+create table idxpart (a int, b int) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 320
+alter table idxpart add unique (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 321
+-- not an incomplete one though
+alter table idxpart add unique (b, a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 322
+-- this works
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 323
+-- Exclusion constraints can be added if partitioning by their equal column
+create table idxpart (a int4range, b int4range) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 324
+alter table idxpart add exclude USING GIST (a with =)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 325
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 326
+-- OK more than one equal column
+create table idxpart (a int4range, b int4range) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 327
+alter table idxpart add exclude USING GIST (a with =, b with =)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 328
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 329
+-- OK with more than one equal column: constraint is a proper superset of partition key
+create table idxpart (a int4range, b int4range) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 330
+alter table idxpart add exclude USING GIST (a with =, b with =)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 331
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 332
+-- Not OK more than one equal column: partition keys are a proper superset of constraint
+create table idxpart (a int4range, b int4range) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 333
+alter table idxpart add exclude USING GIST (a with =)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 334
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 335
+-- Not OK with just -|-
+create table idxpart (a int4range, b int4range) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 336
+alter table idxpart add exclude USING GIST (a with -|-)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 337
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 338
+-- OK with equals and &&, and equals is the partition key
+create table idxpart (a int4range, b int4range) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 339
+alter table idxpart add exclude USING GIST (a with =, b with &&)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 340
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 341
+-- Not OK with equals and &&, and equals is not the partition key
+create table idxpart (a int4range, b int4range, c int4range) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 342
+alter table idxpart add exclude USING GIST (b with =, c with &&)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 343
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 344
+-- OK more than one equal column and a && column
+create table idxpart (a int4range, b int4range, c int4range) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 345
+alter table idxpart add exclude USING GIST (a with =, b with =, c with &&)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 346
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 347
+-- When (sub)partitions are created, they also contain the constraint
+create table idxpart (a int, b int, primary key (a, b)) partition by range (a, b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 348
+create table idxpart1 partition of idxpart for values from (1, 1) to (10, 10)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 349
+create table idxpart2 partition of idxpart for values from (10, 10) to (20, 20)
+  partition by range (b)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 350
+create table idxpart21 partition of idxpart2 for values from (10) to (15)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: CreateStmt
+== 351
+create table idxpart22 partition of idxpart2 for values from (15) to (20)
+--
+TABLE: name="idxpart22" schema="" table="idxpart22" ctx=DDL
+STMT: CreateStmt
+== 352
+create table idxpart3 (b int not null, a int not null)
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 353
+alter table idxpart attach partition idxpart3 for values from (20, 20) to (30, 30)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 354
+select conname, contype, conrelid::regclass, conindid::regclass, conkey
+  from pg_constraint where conrelid::regclass::text like 'idxpart%'
+  order by conrelid::regclass::text, conname
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 355
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 356
+-- Verify that multi-layer partitioning honors the requirement that all
+-- columns in the partition key must appear in primary/unique key
+create table idxpart (a int, b int, primary key (a)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 357
+create table idxpart2 partition of idxpart
+for values from (0) to (1000) partition by range (b)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 358
+-- fail
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 359
+-- Ditto for the ATTACH PARTITION case
+create table idxpart (a int unique, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 360
+create table idxpart1 (a int not null, b int, unique (a, b))
+  partition by range (a, b)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 361
+alter table idxpart attach partition idxpart1 for values from (1) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 362
+DROP TABLE idxpart, idxpart1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: DropStmt
+== 363
+-- Multi-layer partitioning works correctly in this case:
+create table idxpart (a int, b int, primary key (a, b)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 364
+create table idxpart2 partition of idxpart for values from (0) to (1000) partition by range (b)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 365
+create table idxpart21 partition of idxpart2 for values from (0) to (1000)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: CreateStmt
+== 366
+select conname, contype, conrelid::regclass, conindid::regclass, conkey
+  from pg_constraint where conrelid::regclass::text like 'idxpart%'
+  order by conname
+--
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+FILTER: schema="" table="" column="conrelid"
+STMT: SelectStmt
+== 367
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 368
+-- If a partitioned table has a unique/PK constraint, then it's not possible
+-- to drop the corresponding constraint in the children; nor it's possible
+-- to drop the indexes individually.  Dropping the constraint in the parent
+-- gets rid of the lot.
+create table idxpart (i int) partition by hash (i)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 369
+create table idxpart0 partition of idxpart (i) for values with (modulus 2, remainder 0)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: CreateStmt
+== 370
+create table idxpart1 partition of idxpart (i) for values with (modulus 2, remainder 1)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 371
+alter table idxpart0 add primary key(i)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 372
+alter table idxpart add primary key(i)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 373
+select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
+  conname, conislocal, coninhcount, connoinherit, convalidated
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  left join pg_constraint con on (idx.indexrelid = con.conindid)
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "con"="pg_constraint"
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 374
+drop index idxpart0_pkey
+--
+STMT: DropStmt
+== 375
+-- fail
+drop index idxpart1_pkey
+--
+STMT: DropStmt
+== 376
+-- fail
+alter table idxpart0 drop constraint idxpart0_pkey
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 377
+-- fail
+alter table idxpart1 drop constraint idxpart1_pkey
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 378
+-- fail
+alter table idxpart drop constraint idxpart_pkey
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 379
+-- ok
+select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
+  conname, conislocal, coninhcount, connoinherit, convalidated
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  left join pg_constraint con on (idx.indexrelid = con.conindid)
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "con"="pg_constraint"
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 380
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 381
+-- If the partition to be attached already has a primary key, fail if
+-- it doesn't match the parent's PK.
+CREATE TABLE idxpart (c1 INT PRIMARY KEY, c2 INT, c3 VARCHAR(10)) PARTITION BY RANGE(c1)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 382
+CREATE TABLE idxpart1 (LIKE idxpart)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 383
+ALTER TABLE idxpart1 ADD PRIMARY KEY (c1, c2)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 384
+ALTER TABLE idxpart ATTACH PARTITION idxpart1 FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 385
+DROP TABLE idxpart, idxpart1
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: DropStmt
+== 386
+-- Ditto if there is some distance between the PKs (subpartitioning)
+create table idxpart (a int, b int, primary key (a)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 387
+create table idxpart1 (a int not null, b int) partition by range (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 388
+create table idxpart11 (a int not null, b int primary key)
+--
+TABLE: name="idxpart11" schema="" table="idxpart11" ctx=DDL
+STMT: CreateStmt
+== 389
+alter table idxpart1 attach partition idxpart11 for values from (0) to (1000)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: AlterTableStmt
+== 390
+alter table idxpart attach partition idxpart1 for values from (0) to (10000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 391
+drop table idxpart, idxpart1, idxpart11
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+TABLE: name="idxpart11" schema="" table="idxpart11" ctx=DDL
+STMT: DropStmt
+== 392
+-- If a partitioned table has a constraint whose index is not valid,
+-- attaching a missing partition makes it valid.
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 393
+create table idxpart0 (like idxpart)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: CreateStmt
+== 394
+alter table idxpart0 add primary key (a)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 395
+alter table idxpart attach partition idxpart0 for values from (0) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 396
+alter table only idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 397
+select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
+  conname, conislocal, coninhcount, connoinherit, convalidated
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  left join pg_constraint con on (idx.indexrelid = con.conindid)
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "con"="pg_constraint"
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 398
+alter index idxpart_pkey attach partition idxpart0_pkey
+--
+STMT: AlterTableStmt
+== 399
+select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
+  conname, conislocal, coninhcount, connoinherit, convalidated
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  left join pg_constraint con on (idx.indexrelid = con.conindid)
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "con"="pg_constraint"
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 400
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 401
+-- Related to the above scenario: ADD PRIMARY KEY on the parent mustn't
+-- automatically propagate NOT NULL to child columns.
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 402
+create table idxpart0 (like idxpart)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: CreateStmt
+== 403
+alter table idxpart0 add unique (a)
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 404
+alter table idxpart attach partition idxpart0 default
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 405
+alter table only idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 406
+-- fail, no not-null constraint
+alter table idxpart0 alter column a set not null
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 407
+alter table only idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 408
+-- now it works
+alter index idxpart_pkey attach partition idxpart0_a_key
+--
+STMT: AlterTableStmt
+== 409
+alter table idxpart0 alter column a drop not null
+--
+TABLE: name="idxpart0" schema="" table="idxpart0" ctx=DDL
+STMT: AlterTableStmt
+== 410
+-- fail, pkey needs it
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 411
+-- if a partition has a unique index without a constraint, does not attach
+-- automatically; creates a new index instead.
+create table idxpart (a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 412
+create table idxpart1 (a int not null, b int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 413
+create unique index on idxpart1 (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 414
+alter table idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 415
+alter table idxpart attach partition idxpart1 for values from (1) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 416
+select indrelid::regclass, indexrelid::regclass, inhparent::regclass, indisvalid,
+  conname, conislocal, coninhcount, connoinherit, convalidated
+  from pg_index idx left join pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  left join pg_constraint con on (idx.indexrelid = con.conindid)
+  where indrelid::regclass::text like 'idxpart%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+TABLE: name="pg_constraint" schema="" table="pg_constraint" ctx=Select
+ALIAS: "con"="pg_constraint"
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indrelid"
+STMT: SelectStmt
+== 417
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 418
+-- Can't attach an index without a corresponding constraint
+create table idxpart (a int, b int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 419
+create table idxpart1 (a int not null, b int)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 420
+create unique index on idxpart1 (a)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: IndexStmt
+== 421
+alter table idxpart attach partition idxpart1 for values from (1) to (1000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 422
+alter table only idxpart add primary key (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 423
+alter index idxpart_pkey attach partition idxpart1_a_idx
+--
+STMT: AlterTableStmt
+== 424
+-- fail
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 425
+-- Test that unique constraints are working
+create table idxpart (a int, b text, primary key (a, b)) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 426
+create table idxpart1 partition of idxpart for values from (0) to (100000)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 427
+create table idxpart2 (c int, like idxpart)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 428
+insert into idxpart2 (c, a, b) values (42, 572814, 'inserted first')
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 429
+alter table idxpart2 drop column c
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: AlterTableStmt
+== 430
+create unique index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 431
+alter table idxpart attach partition idxpart2 for values from (100000) to (1000000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 432
+insert into idxpart values (0, 'zero'), (42, 'life'), (2^16, 'sixteen')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 433
+insert into idxpart select 2^g, format('two to power of %s', g) from generate_series(15, 17) g
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+FUNCTION: name="format" function="format" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 434
+insert into idxpart values (16, 'sixteen')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 435
+insert into idxpart (b, a) values ('one', 142857), ('two', 285714)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 436
+insert into idxpart select a * 2, b || b from idxpart where a between 2^16 and 2^19
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+== 437
+insert into idxpart values (572814, 'five')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 438
+insert into idxpart values (857142, 'six')
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 439
+select tableoid::regclass, * from idxpart order by a
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+STMT: SelectStmt
+== 440
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 441
+-- Test some other non-btree index types
+create table idxpart (a int, b text, c int[]) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 442
+create table idxpart1 partition of idxpart for values from (0) to (100000)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 443
+set enable_seqscan to off
+--
+STMT: VariableSetStmt
+== 444
+create index idxpart_brin on idxpart using brin(b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 445
+explain (costs off) select * from idxpart where b = 'abcd'
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 446
+drop index idxpart_brin
+--
+STMT: DropStmt
+== 447
+create index idxpart_spgist on idxpart using spgist(b)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 448
+explain (costs off) select * from idxpart where b = 'abcd'
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 449
+drop index idxpart_spgist
+--
+STMT: DropStmt
+== 450
+create index idxpart_gin on idxpart using gin(c)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 451
+explain (costs off) select * from idxpart where c @> array[42]
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=Select
+FILTER: schema="" table="" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 452
+drop index idxpart_gin
+--
+STMT: DropStmt
+== 453
+reset enable_seqscan
+--
+STMT: VariableSetStmt
+== 454
+drop table idxpart
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: DropStmt
+== 455
+-- intentionally leave some objects around
+create table idxpart (a int) partition by range (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: CreateStmt
+== 456
+create table idxpart1 partition of idxpart for values from (0) to (100)
+--
+TABLE: name="idxpart1" schema="" table="idxpart1" ctx=DDL
+STMT: CreateStmt
+== 457
+create table idxpart2 partition of idxpart for values from (100) to (1000)
+  partition by range (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: CreateStmt
+== 458
+create table idxpart21 partition of idxpart2 for values from (100) to (200)
+--
+TABLE: name="idxpart21" schema="" table="idxpart21" ctx=DDL
+STMT: CreateStmt
+== 459
+create table idxpart22 partition of idxpart2 for values from (200) to (300)
+--
+TABLE: name="idxpart22" schema="" table="idxpart22" ctx=DDL
+STMT: CreateStmt
+== 460
+create index on idxpart22 (a)
+--
+TABLE: name="idxpart22" schema="" table="idxpart22" ctx=DDL
+STMT: IndexStmt
+== 461
+create index on only idxpart2 (a)
+--
+TABLE: name="idxpart2" schema="" table="idxpart2" ctx=DDL
+STMT: IndexStmt
+== 462
+alter index idxpart2_a_idx attach partition idxpart22_a_idx
+--
+STMT: AlterTableStmt
+== 463
+create index on idxpart (a)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: IndexStmt
+== 464
+create table idxpart_another (a int, b int, primary key (a, b)) partition by range (a)
+--
+TABLE: name="idxpart_another" schema="" table="idxpart_another" ctx=DDL
+STMT: CreateStmt
+== 465
+create table idxpart_another_1 partition of idxpart_another for values from (0) to (100)
+--
+TABLE: name="idxpart_another_1" schema="" table="idxpart_another_1" ctx=DDL
+STMT: CreateStmt
+== 466
+create table idxpart3 (c int, b int, a int) partition by range (a)
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: CreateStmt
+== 467
+alter table idxpart3 drop column b, drop column c
+--
+TABLE: name="idxpart3" schema="" table="idxpart3" ctx=DDL
+STMT: AlterTableStmt
+== 468
+create table idxpart31 partition of idxpart3 for values from (1000) to (1200)
+--
+TABLE: name="idxpart31" schema="" table="idxpart31" ctx=DDL
+STMT: CreateStmt
+== 469
+create table idxpart32 partition of idxpart3 for values from (1200) to (1400)
+--
+TABLE: name="idxpart32" schema="" table="idxpart32" ctx=DDL
+STMT: CreateStmt
+== 470
+alter table idxpart attach partition idxpart3 for values from (1000) to (2000)
+--
+TABLE: name="idxpart" schema="" table="idxpart" ctx=DDL
+STMT: AlterTableStmt
+== 471
+-- More objects intentionally left behind, to verify some pg_dump/pg_upgrade
+-- behavior; see https://postgr.es/m/20190321204928.GA17535@alvherre.pgsql
+create schema regress_indexing
+--
+STMT: CreateSchemaStmt
+== 472
+set search_path to regress_indexing
+--
+STMT: VariableSetStmt
+== 473
+create table pk (a int primary key) partition by range (a)
+--
+TABLE: name="pk" schema="" table="pk" ctx=DDL
+STMT: CreateStmt
+== 474
+create table pk1 partition of pk for values from (0) to (1000)
+--
+TABLE: name="pk1" schema="" table="pk1" ctx=DDL
+STMT: CreateStmt
+== 475
+create table pk2 (b int, a int)
+--
+TABLE: name="pk2" schema="" table="pk2" ctx=DDL
+STMT: CreateStmt
+== 476
+alter table pk2 drop column b
+--
+TABLE: name="pk2" schema="" table="pk2" ctx=DDL
+STMT: AlterTableStmt
+== 477
+alter table pk2 alter a set not null
+--
+TABLE: name="pk2" schema="" table="pk2" ctx=DDL
+STMT: AlterTableStmt
+== 478
+alter table pk attach partition pk2 for values from (1000) to (2000)
+--
+TABLE: name="pk" schema="" table="pk" ctx=DDL
+STMT: AlterTableStmt
+== 479
+create table pk3 partition of pk for values from (2000) to (3000)
+--
+TABLE: name="pk3" schema="" table="pk3" ctx=DDL
+STMT: CreateStmt
+== 480
+create table pk4 (like pk)
+--
+TABLE: name="pk4" schema="" table="pk4" ctx=DDL
+STMT: CreateStmt
+== 481
+alter table pk attach partition pk4 for values from (3000) to (4000)
+--
+TABLE: name="pk" schema="" table="pk" ctx=DDL
+STMT: AlterTableStmt
+== 482
+create table pk5 (like pk) partition by range (a)
+--
+TABLE: name="pk5" schema="" table="pk5" ctx=DDL
+STMT: CreateStmt
+== 483
+create table pk51 partition of pk5 for values from (4000) to (4500)
+--
+TABLE: name="pk51" schema="" table="pk51" ctx=DDL
+STMT: CreateStmt
+== 484
+create table pk52 partition of pk5 for values from (4500) to (5000)
+--
+TABLE: name="pk52" schema="" table="pk52" ctx=DDL
+STMT: CreateStmt
+== 485
+alter table pk attach partition pk5 for values from (4000) to (5000)
+--
+TABLE: name="pk" schema="" table="pk" ctx=DDL
+STMT: AlterTableStmt
+== 486
+reset search_path
+--
+STMT: VariableSetStmt
+== 487
+-- Test that covering partitioned indexes work in various cases
+create table covidxpart (a int, b int) partition by list (a)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DDL
+STMT: CreateStmt
+== 488
+create unique index on covidxpart (a) include (b)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DDL
+STMT: IndexStmt
+== 489
+create table covidxpart1 partition of covidxpart for values in (1)
+--
+TABLE: name="covidxpart1" schema="" table="covidxpart1" ctx=DDL
+STMT: CreateStmt
+== 490
+create table covidxpart2 partition of covidxpart for values in (2)
+--
+TABLE: name="covidxpart2" schema="" table="covidxpart2" ctx=DDL
+STMT: CreateStmt
+== 491
+insert into covidxpart values (1, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 492
+insert into covidxpart values (1, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 493
+create table covidxpart3 (b int, c int, a int)
+--
+TABLE: name="covidxpart3" schema="" table="covidxpart3" ctx=DDL
+STMT: CreateStmt
+== 494
+alter table covidxpart3 drop c
+--
+TABLE: name="covidxpart3" schema="" table="covidxpart3" ctx=DDL
+STMT: AlterTableStmt
+== 495
+alter table covidxpart attach partition covidxpart3 for values in (3)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DDL
+STMT: AlterTableStmt
+== 496
+insert into covidxpart values (3, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 497
+insert into covidxpart values (3, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 498
+create table covidxpart4 (b int, a int)
+--
+TABLE: name="covidxpart4" schema="" table="covidxpart4" ctx=DDL
+STMT: CreateStmt
+== 499
+create unique index on covidxpart4 (a) include (b)
+--
+TABLE: name="covidxpart4" schema="" table="covidxpart4" ctx=DDL
+STMT: IndexStmt
+== 500
+create unique index on covidxpart4 (a)
+--
+TABLE: name="covidxpart4" schema="" table="covidxpart4" ctx=DDL
+STMT: IndexStmt
+== 501
+alter table covidxpart attach partition covidxpart4 for values in (4)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DDL
+STMT: AlterTableStmt
+== 502
+insert into covidxpart values (4, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 503
+insert into covidxpart values (4, 1)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 504
+create unique index on covidxpart (b) include (a)
+--
+TABLE: name="covidxpart" schema="" table="covidxpart" ctx=DDL
+STMT: IndexStmt
+== 505
+-- should fail
+
+-- check that detaching a partition also detaches the primary key constraint
+create table parted_pk_detach_test (a int primary key) partition by list (a)
+--
+TABLE: name="parted_pk_detach_test" schema="" table="parted_pk_detach_test" ctx=DDL
+STMT: CreateStmt
+== 506
+create table parted_pk_detach_test1 partition of parted_pk_detach_test for values in (1)
+--
+TABLE: name="parted_pk_detach_test1" schema="" table="parted_pk_detach_test1" ctx=DDL
+STMT: CreateStmt
+== 507
+alter table parted_pk_detach_test1 drop constraint parted_pk_detach_test1_pkey
+--
+TABLE: name="parted_pk_detach_test1" schema="" table="parted_pk_detach_test1" ctx=DDL
+STMT: AlterTableStmt
+== 508
+-- should fail
+alter table parted_pk_detach_test detach partition parted_pk_detach_test1
+--
+TABLE: name="parted_pk_detach_test" schema="" table="parted_pk_detach_test" ctx=DDL
+STMT: AlterTableStmt
+== 509
+alter table parted_pk_detach_test1 drop constraint parted_pk_detach_test1_pkey
+--
+TABLE: name="parted_pk_detach_test1" schema="" table="parted_pk_detach_test1" ctx=DDL
+STMT: AlterTableStmt
+== 510
+drop table parted_pk_detach_test, parted_pk_detach_test1
+--
+TABLE: name="parted_pk_detach_test" schema="" table="parted_pk_detach_test" ctx=DDL
+TABLE: name="parted_pk_detach_test1" schema="" table="parted_pk_detach_test1" ctx=DDL
+STMT: DropStmt
+== 511
+create table parted_uniq_detach_test (a int unique) partition by list (a)
+--
+TABLE: name="parted_uniq_detach_test" schema="" table="parted_uniq_detach_test" ctx=DDL
+STMT: CreateStmt
+== 512
+create table parted_uniq_detach_test1 partition of parted_uniq_detach_test for values in (1)
+--
+TABLE: name="parted_uniq_detach_test1" schema="" table="parted_uniq_detach_test1" ctx=DDL
+STMT: CreateStmt
+== 513
+alter table parted_uniq_detach_test1 drop constraint parted_uniq_detach_test1_a_key
+--
+TABLE: name="parted_uniq_detach_test1" schema="" table="parted_uniq_detach_test1" ctx=DDL
+STMT: AlterTableStmt
+== 514
+-- should fail
+alter table parted_uniq_detach_test detach partition parted_uniq_detach_test1
+--
+TABLE: name="parted_uniq_detach_test" schema="" table="parted_uniq_detach_test" ctx=DDL
+STMT: AlterTableStmt
+== 515
+alter table parted_uniq_detach_test1 drop constraint parted_uniq_detach_test1_a_key
+--
+TABLE: name="parted_uniq_detach_test1" schema="" table="parted_uniq_detach_test1" ctx=DDL
+STMT: AlterTableStmt
+== 516
+drop table parted_uniq_detach_test, parted_uniq_detach_test1
+--
+TABLE: name="parted_uniq_detach_test" schema="" table="parted_uniq_detach_test" ctx=DDL
+TABLE: name="parted_uniq_detach_test1" schema="" table="parted_uniq_detach_test1" ctx=DDL
+STMT: DropStmt
+== 517
+-- check that dropping a column takes with it any partitioned indexes
+-- depending on it.
+create table parted_index_col_drop(a int, b int, c int)
+  partition by list (a)
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: CreateStmt
+== 518
+create table parted_index_col_drop1 partition of parted_index_col_drop
+  for values in (1) partition by list (a)
+--
+TABLE: name="parted_index_col_drop1" schema="" table="parted_index_col_drop1" ctx=DDL
+STMT: CreateStmt
+== 519
+-- leave this partition without children.
+create table parted_index_col_drop2 partition of parted_index_col_drop
+  for values in (2) partition by list (a)
+--
+TABLE: name="parted_index_col_drop2" schema="" table="parted_index_col_drop2" ctx=DDL
+STMT: CreateStmt
+== 520
+create table parted_index_col_drop11 partition of parted_index_col_drop1
+  for values in (1)
+--
+TABLE: name="parted_index_col_drop11" schema="" table="parted_index_col_drop11" ctx=DDL
+STMT: CreateStmt
+== 521
+create index on parted_index_col_drop (b)
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: IndexStmt
+== 522
+create index on parted_index_col_drop (c)
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: IndexStmt
+== 523
+create index on parted_index_col_drop (b, c)
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: IndexStmt
+== 524
+alter table parted_index_col_drop drop column c
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: AlterTableStmt
+== 525
+drop table parted_index_col_drop
+--
+TABLE: name="parted_index_col_drop" schema="" table="parted_index_col_drop" ctx=DDL
+STMT: DropStmt
+== 526
+-- Check that invalid indexes are not selected when attaching a partition.
+create table parted_inval_tab (a int) partition by range (a)
+--
+TABLE: name="parted_inval_tab" schema="" table="parted_inval_tab" ctx=DDL
+STMT: CreateStmt
+== 527
+create index parted_inval_idx on parted_inval_tab (a)
+--
+TABLE: name="parted_inval_tab" schema="" table="parted_inval_tab" ctx=DDL
+STMT: IndexStmt
+== 528
+create table parted_inval_tab_1 (a int) partition by range (a)
+--
+TABLE: name="parted_inval_tab_1" schema="" table="parted_inval_tab_1" ctx=DDL
+STMT: CreateStmt
+== 529
+create table parted_inval_tab_1_1 partition of parted_inval_tab_1
+  for values from (0) to (10)
+--
+TABLE: name="parted_inval_tab_1_1" schema="" table="parted_inval_tab_1_1" ctx=DDL
+STMT: CreateStmt
+== 530
+create table parted_inval_tab_1_2 partition of parted_inval_tab_1
+  for values from (10) to (20)
+--
+TABLE: name="parted_inval_tab_1_2" schema="" table="parted_inval_tab_1_2" ctx=DDL
+STMT: CreateStmt
+== 531
+-- this creates an invalid index.
+create index parted_inval_ixd_1 on only parted_inval_tab_1 (a)
+--
+TABLE: name="parted_inval_tab_1" schema="" table="parted_inval_tab_1" ctx=DDL
+STMT: IndexStmt
+== 532
+-- this creates new indexes for all the partitions of parted_inval_tab_1,
+-- discarding the invalid index created previously as what is chosen.
+alter table parted_inval_tab attach partition parted_inval_tab_1
+  for values from (1) to (100)
+--
+TABLE: name="parted_inval_tab" schema="" table="parted_inval_tab" ctx=DDL
+STMT: AlterTableStmt
+== 533
+select indexrelid::regclass, indisvalid,
+       indrelid::regclass, inhparent::regclass
+  from pg_index idx left join
+       pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  where indexrelid::regclass::text like 'parted_inval%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 534
+drop table parted_inval_tab
+--
+TABLE: name="parted_inval_tab" schema="" table="parted_inval_tab" ctx=DDL
+STMT: DropStmt
+== 535
+-- Check setup of indisvalid across a complex partition tree on index
+-- creation.  If one index in a partition index is invalid, so should its
+-- partitioned index.
+create table parted_isvalid_tab (a int, b int) partition by range (a)
+--
+TABLE: name="parted_isvalid_tab" schema="" table="parted_isvalid_tab" ctx=DDL
+STMT: CreateStmt
+== 536
+create table parted_isvalid_tab_1 partition of parted_isvalid_tab
+  for values from (1) to (10) partition by range (a)
+--
+TABLE: name="parted_isvalid_tab_1" schema="" table="parted_isvalid_tab_1" ctx=DDL
+STMT: CreateStmt
+== 537
+create table parted_isvalid_tab_2 partition of parted_isvalid_tab
+  for values from (10) to (20) partition by range (a)
+--
+TABLE: name="parted_isvalid_tab_2" schema="" table="parted_isvalid_tab_2" ctx=DDL
+STMT: CreateStmt
+== 538
+create table parted_isvalid_tab_11 partition of parted_isvalid_tab_1
+  for values from (1) to (5)
+--
+TABLE: name="parted_isvalid_tab_11" schema="" table="parted_isvalid_tab_11" ctx=DDL
+STMT: CreateStmt
+== 539
+create table parted_isvalid_tab_12 partition of parted_isvalid_tab_1
+  for values from (5) to (10)
+--
+TABLE: name="parted_isvalid_tab_12" schema="" table="parted_isvalid_tab_12" ctx=DDL
+STMT: CreateStmt
+== 540
+-- create an invalid index on one of the partitions.
+insert into parted_isvalid_tab_11 values (1, 0)
+--
+TABLE: name="parted_isvalid_tab_11" schema="" table="parted_isvalid_tab_11" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 541
+create index concurrently parted_isvalid_idx_11 on parted_isvalid_tab_11 ((a/b))
+--
+TABLE: name="parted_isvalid_tab_11" schema="" table="parted_isvalid_tab_11" ctx=DDL
+STMT: IndexStmt
+== 542
+-- The previous invalid index is selected, invalidating all the indexes up to
+-- the top-most parent.
+create index parted_isvalid_idx on parted_isvalid_tab ((a/b))
+--
+TABLE: name="parted_isvalid_tab" schema="" table="parted_isvalid_tab" ctx=DDL
+STMT: IndexStmt
+== 543
+select indexrelid::regclass, indisvalid,
+       indrelid::regclass, inhparent::regclass
+  from pg_index idx left join
+       pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  where indexrelid::regclass::text like 'parted_isvalid%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 544
+drop table parted_isvalid_tab
+--
+TABLE: name="parted_isvalid_tab" schema="" table="parted_isvalid_tab" ctx=DDL
+STMT: DropStmt
+== 545
+-- Check state of replica indexes when attaching a partition.
+begin
+--
+STMT: TransactionStmt
+== 546
+create table parted_replica_tab (id int not null) partition by range (id)
+--
+TABLE: name="parted_replica_tab" schema="" table="parted_replica_tab" ctx=DDL
+STMT: CreateStmt
+== 547
+create table parted_replica_tab_1 partition of parted_replica_tab
+  for values from (1) to (10) partition by range (id)
+--
+TABLE: name="parted_replica_tab_1" schema="" table="parted_replica_tab_1" ctx=DDL
+STMT: CreateStmt
+== 548
+create table parted_replica_tab_11 partition of parted_replica_tab_1
+  for values from (1) to (5)
+--
+TABLE: name="parted_replica_tab_11" schema="" table="parted_replica_tab_11" ctx=DDL
+STMT: CreateStmt
+== 549
+create unique index parted_replica_idx
+  on only parted_replica_tab using btree (id)
+--
+TABLE: name="parted_replica_tab" schema="" table="parted_replica_tab" ctx=DDL
+STMT: IndexStmt
+== 550
+create unique index parted_replica_idx_1
+  on only parted_replica_tab_1 using btree (id)
+--
+TABLE: name="parted_replica_tab_1" schema="" table="parted_replica_tab_1" ctx=DDL
+STMT: IndexStmt
+== 551
+-- This triggers an update of pg_index.indisreplident for parted_replica_idx.
+alter table only parted_replica_tab_1 replica identity
+  using index parted_replica_idx_1
+--
+TABLE: name="parted_replica_tab_1" schema="" table="parted_replica_tab_1" ctx=DDL
+STMT: AlterTableStmt
+== 552
+create unique index parted_replica_idx_11 on parted_replica_tab_11 USING btree (id)
+--
+TABLE: name="parted_replica_tab_11" schema="" table="parted_replica_tab_11" ctx=DDL
+STMT: IndexStmt
+== 553
+select indexrelid::regclass, indisvalid, indisreplident,
+       indrelid::regclass, inhparent::regclass
+  from pg_index idx left join
+       pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  where indexrelid::regclass::text like 'parted_replica%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 554
+-- parted_replica_idx is not valid yet here, because parted_replica_idx_1
+-- is not valid.
+alter index parted_replica_idx ATTACH PARTITION parted_replica_idx_1
+--
+STMT: AlterTableStmt
+== 555
+select indexrelid::regclass, indisvalid, indisreplident,
+       indrelid::regclass, inhparent::regclass
+  from pg_index idx left join
+       pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  where indexrelid::regclass::text like 'parted_replica%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 556
+-- parted_replica_idx becomes valid here.
+alter index parted_replica_idx_1 ATTACH PARTITION parted_replica_idx_11
+--
+STMT: AlterTableStmt
+== 557
+alter table only parted_replica_tab_1 replica identity
+  using index parted_replica_idx_1
+--
+TABLE: name="parted_replica_tab_1" schema="" table="parted_replica_tab_1" ctx=DDL
+STMT: AlterTableStmt
+== 558
+commit
+--
+STMT: TransactionStmt
+== 559
+select indexrelid::regclass, indisvalid, indisreplident,
+       indrelid::regclass, inhparent::regclass
+  from pg_index idx left join
+       pg_inherits inh on (idx.indexrelid = inh.inhrelid)
+  where indexrelid::regclass::text like 'parted_replica%'
+  order by indexrelid::regclass::text collate "C"
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+TABLE: name="pg_inherits" schema="" table="pg_inherits" ctx=Select
+ALIAS: "idx"="pg_index"
+ALIAS: "inh"="pg_inherits"
+FILTER: schema="" table="" column="indexrelid"
+STMT: SelectStmt
+== 560
+drop table parted_replica_tab
+--
+TABLE: name="parted_replica_tab" schema="" table="parted_replica_tab" ctx=DDL
+STMT: DropStmt

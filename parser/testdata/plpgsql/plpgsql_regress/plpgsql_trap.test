@@ -1,0 +1,305 @@
+== 001
+|--
+-- Test error trapping
+|--
+
+create function trap_zero_divide(int) returns int as $$
+declare x int;
+	sx smallint;
+begin
+	begin	-- start a subtransaction
+		raise notice 'should see this';
+		x := 100 / $1;
+		raise notice 'should see this only if % <> 0', $1;
+		sx := $1;
+		raise notice 'should see this only if % fits in smallint', $1;
+		if $1 < 0 then
+			raise exception '% is less than zero', $1;
+		end if;
+	exception
+		when division_by_zero then
+			raise notice 'caught division_by_zero';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE then
+			raise notice 'caught numeric_value_out_of_range';
+			x := -2;
+	end;
+	return x;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_var":{"refname":"sx","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"smallint"}}}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":14,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":14,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_raise":{"lineno":6,"elog_level":18,"message":"should see this"}},{"PLpgSQL_stmt_assign":{"lineno":7,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := 100 / $1","parseMode":3}}}},{"PLpgSQL_stmt_raise":{"lineno":8,"elog_level":18,"message":"should see this only if % \u003c\u003e 0","params":[{"PLpgSQL_expr":{"query":"$1","parseMode":2}}]}},{"PLpgSQL_stmt_assign":{"lineno":9,"varno":3,"expr":{"PLpgSQL_expr":{"query":"sx := $1","parseMode":3}}}},{"PLpgSQL_stmt_raise":{"lineno":10,"elog_level":18,"message":"should see this only if % fits in smallint","params":[{"PLpgSQL_expr":{"query":"$1","parseMode":2}}]}},{"PLpgSQL_stmt_if":{"lineno":11,"cond":{"PLpgSQL_expr":{"query":"$1 \u003c 0","parseMode":2}},"then_body":[{"PLpgSQL_stmt_raise":{"lineno":12,"elog_level":21,"message":"% is less than zero","params":[{"PLpgSQL_expr":{"query":"$1","parseMode":2}}]}}]}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"division_by_zero"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":16,"elog_level":18,"message":"caught division_by_zero"}},{"PLpgSQL_stmt_assign":{"lineno":17,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := -1","parseMode":3}}}}]}},{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"numeric_value_out_of_range"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":19,"elog_level":18,"message":"caught numeric_value_out_of_range"}},{"PLpgSQL_stmt_assign":{"lineno":20,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := -2","parseMode":3}}}}]}}]}}}},{"PLpgSQL_stmt_return":{"lineno":22,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 002
+select trap_zero_divide(50)
+--
+[]
+== 003
+select trap_zero_divide(0)
+--
+[]
+== 004
+select trap_zero_divide(100000)
+--
+[]
+== 005
+select trap_zero_divide(-100)
+--
+[]
+== 006
+create table match_source as
+  select x as id, x*10 as data, x/10 as ten from generate_series(1,100) x
+--
+[]
+== 007
+create function trap_matching_test(int) returns int as $$
+declare x int;
+	sx smallint;
+	y int;
+begin
+	begin	-- start a subtransaction
+		x := 100 / $1;
+		sx := $1;
+		select into y data from match_source where id =
+			(select id from match_source b where ten = $1);
+	exception
+		when data_exception then  -- category match
+			raise notice 'caught data_exception';
+			x := -1;
+		when NUMERIC_VALUE_OUT_OF_RANGE OR CARDINALITY_VIOLATION then
+			raise notice 'caught numeric_value_out_of_range or cardinality_violation';
+			x := -2;
+	end;
+	return x;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_var":{"refname":"sx","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"smallint"}}}},{"PLpgSQL_var":{"refname":"y","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":9,"fields":[{"name":"y","varno":4}]}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":11,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":11,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_block":{"lineno":6,"body":[{"PLpgSQL_stmt_assign":{"lineno":7,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := 100 / $1","parseMode":3}}}},{"PLpgSQL_stmt_assign":{"lineno":8,"varno":3,"expr":{"PLpgSQL_expr":{"query":"sx := $1","parseMode":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":9,"sqlstmt":{"PLpgSQL_expr":{"query":"select        data from match_source where id =\n\t\t\t(select id from match_source b where ten = $1)","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":9,"fields":[{"name":"y","varno":4}]}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"data_exception"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":13,"elog_level":18,"message":"caught data_exception"}},{"PLpgSQL_stmt_assign":{"lineno":14,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := -1","parseMode":3}}}}]}},{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"numeric_value_out_of_range"}},{"PLpgSQL_condition":{"condname":"cardinality_violation"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":16,"elog_level":18,"message":"caught numeric_value_out_of_range or cardinality_violation"}},{"PLpgSQL_stmt_assign":{"lineno":17,"varno":2,"expr":{"PLpgSQL_expr":{"query":"x := -2","parseMode":3}}}}]}}]}}}},{"PLpgSQL_stmt_return":{"lineno":19,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 008
+select trap_matching_test(50)
+--
+[]
+== 009
+select trap_matching_test(0)
+--
+[]
+== 010
+select trap_matching_test(100000)
+--
+[]
+== 011
+select trap_matching_test(1)
+--
+[]
+== 012
+create temp table foo (f1 int)
+--
+[]
+== 013
+create function subxact_rollback_semantics() returns int as $$
+declare x int;
+begin
+  x := 1;
+  insert into foo values(x);
+  begin
+    x := x + 1;
+    insert into foo values(x);
+    raise exception 'inner';
+  exception
+    when others then
+      x := x * 10;
+  end;
+  insert into foo values(x);
+  return x;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":10,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":10,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_assign":{"lineno":4,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := 1","parseMode":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":5,"sqlstmt":{"PLpgSQL_expr":{"query":"insert into foo values(x)","parseMode":0}}}},{"PLpgSQL_stmt_block":{"lineno":6,"body":[{"PLpgSQL_stmt_assign":{"lineno":7,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := x + 1","parseMode":3}}}},{"PLpgSQL_stmt_execsql":{"lineno":8,"sqlstmt":{"PLpgSQL_expr":{"query":"insert into foo values(x)","parseMode":0}}}},{"PLpgSQL_stmt_raise":{"lineno":9,"elog_level":21,"message":"inner"}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"others"}}],"action":[{"PLpgSQL_stmt_assign":{"lineno":12,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := x * 10","parseMode":3}}}}]}}]}}}},{"PLpgSQL_stmt_execsql":{"lineno":14,"sqlstmt":{"PLpgSQL_expr":{"query":"insert into foo values(x)","parseMode":0}}}},{"PLpgSQL_stmt_return":{"lineno":15,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 014
+select subxact_rollback_semantics()
+--
+[]
+== 015
+select * from foo
+--
+[]
+== 016
+drop table foo
+--
+[]
+== 017
+create function trap_timeout() returns void as $$
+begin
+  declare x int;
+  begin
+    -- we assume this will take longer than 1 second:
+    select count(*) into x from generate_series(1, 1_000_000_000_000);
+  exception
+    when others then
+      raise notice 'caught others?';
+    when query_canceled then
+      raise notice 'nyeah nyeah, can''t stop me';
+  end;
+  -- Abort transaction to abandon the statement_timeout setting.  Otherwise,
+  -- the next top-level statement would be vulnerable to the timeout.
+  raise exception 'end of function';
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":6,"fields":[{"name":"x","varno":1}]}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":7,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_execsql":{"lineno":6,"sqlstmt":{"PLpgSQL_expr":{"query":"select count(*)        from generate_series(1, 1_000_000_000_000)","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":6,"fields":[{"name":"x","varno":1}]}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"others"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":9,"elog_level":18,"message":"caught others?"}}]}},{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"query_canceled"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":11,"elog_level":18,"message":"nyeah nyeah, can't stop me"}}]}}]}}}},{"PLpgSQL_stmt_raise":{"lineno":15,"elog_level":21,"message":"end of function"}},{"PLpgSQL_stmt_return":{}}]}}}}
+]
+== 018
+begin
+--
+[]
+== 019
+set statement_timeout to 1000
+--
+[]
+== 020
+select trap_timeout()
+--
+[]
+== 021
+rollback
+--
+[]
+== 022
+-- Test for pass-by-ref values being stored in proper context
+create function test_variable_storage() returns text as $$
+declare x text;
+begin
+  x := '1234';
+  begin
+    x := x || '5678';
+    -- force error inside subtransaction SPI context
+    perform trap_zero_divide(-100);
+  exception
+    when others then
+      x := x || '9012';
+  end;
+  return x;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"text"}}}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":9,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":9,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_assign":{"lineno":4,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := '1234'","parseMode":3}}}},{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_assign":{"lineno":6,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := x || '5678'","parseMode":3}}}},{"PLpgSQL_stmt_perform":{"lineno":8,"expr":{"PLpgSQL_expr":{"query":"SELECT trap_zero_divide(-100)","parseMode":0}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"others"}}],"action":[{"PLpgSQL_stmt_assign":{"lineno":11,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := x || '9012'","parseMode":3}}}}]}}]}}}},{"PLpgSQL_stmt_return":{"lineno":13,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 023
+select test_variable_storage()
+--
+[]
+== 024
+|--
+-- test foreign key error trapping
+|--
+
+create temp table root(f1 int primary key)
+--
+[]
+== 025
+create temp table leaf(f1 int references root deferrable)
+--
+[]
+== 026
+insert into root values(1)
+--
+[]
+== 027
+insert into leaf values(1)
+--
+[]
+== 028
+insert into leaf values(2)
+--
+[]
+== 029
+-- fails
+
+create function trap_foreign_key(int) returns int as $$
+begin
+	begin	-- start a subtransaction
+		insert into leaf values($1);
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_execsql":{"lineno":4,"sqlstmt":{"PLpgSQL_expr":{"query":"insert into leaf values($1)","parseMode":0}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"foreign_key_violation"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":7,"elog_level":18,"message":"caught foreign_key_violation"}},{"PLpgSQL_stmt_return":{"lineno":8,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}}]}}}},{"PLpgSQL_stmt_return":{"lineno":10,"expr":{"PLpgSQL_expr":{"query":"1","parseMode":2}}}}]}}}}
+]
+== 030
+create function trap_foreign_key_2() returns int as $$
+begin
+	begin	-- start a subtransaction
+		set constraints all immediate;
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"sqlstate","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}},{"PLpgSQL_var":{"refname":"sqlerrm","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.text"}},"isconst":true}}],"action":{"PLpgSQL_stmt_block":{"lineno":2,"body":[{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_execsql":{"lineno":4,"sqlstmt":{"PLpgSQL_expr":{"query":"set constraints all immediate","parseMode":0}}}}],"exceptions":{"PLpgSQL_exception_block":{"exc_list":[{"PLpgSQL_exception":{"conditions":[{"PLpgSQL_condition":{"condname":"foreign_key_violation"}}],"action":[{"PLpgSQL_stmt_raise":{"lineno":7,"elog_level":18,"message":"caught foreign_key_violation"}},{"PLpgSQL_stmt_return":{"lineno":8,"expr":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}}]}}]}}}},{"PLpgSQL_stmt_return":{"lineno":10,"expr":{"PLpgSQL_expr":{"query":"1","parseMode":2}}}}]}}}}
+]
+== 031
+select trap_foreign_key(1)
+--
+[]
+== 032
+select trap_foreign_key(2)
+--
+[]
+== 033
+-- detects FK violation
+
+begin
+--
+[]
+== 034
+set constraints all deferred
+--
+[]
+== 035
+select trap_foreign_key(2)
+--
+[]
+== 036
+-- should not detect FK violation
+  savepoint x
+--
+[]
+== 037
+set constraints all immediate
+--
+[]
+== 038
+-- fails
+  rollback to x
+--
+[]
+== 039
+select trap_foreign_key_2()
+--
+[]
+== 040
+-- detects FK violation
+commit
+--
+[]
+== 041
+-- still fails
+
+drop function trap_foreign_key(int)
+--
+[]
+== 042
+drop function trap_foreign_key_2()
+--
+[]

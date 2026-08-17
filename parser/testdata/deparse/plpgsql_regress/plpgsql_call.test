@@ -1,0 +1,1079 @@
+== 001
+|--
+-- Tests for procedures / CALL syntax
+|--
+
+CREATE PROCEDURE test_proc1()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NULL;
+END;
+$$
+--
+CREATE PROCEDURE test_proc1() LANGUAGE plpgsql AS $$
+BEGIN
+    NULL;
+END;
+$$
+== 002
+CALL test_proc1()
+--
+CALL test_proc1()
+== 003
+-- error: can't return non-NULL
+CREATE PROCEDURE test_proc2()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN 5;
+END;
+$$
+--
+CREATE PROCEDURE test_proc2() LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN 5;
+END;
+$$
+== 004
+CREATE TABLE test1 (a int)
+--
+CREATE TABLE test1 (a int)
+== 005
+CREATE PROCEDURE test_proc3(x int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO test1 VALUES (x);
+END;
+$$
+--
+CREATE PROCEDURE test_proc3(x int) LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO test1 VALUES (x);
+END;
+$$
+== 006
+CALL test_proc3(55)
+--
+CALL test_proc3(55)
+== 007
+SELECT * FROM test1
+--
+SELECT * FROM test1
+== 008
+-- Check that plan revalidation doesn't prevent setting transaction properties
+-- (bug #18059).  This test must include the first temp-object creation in
+-- this script, or it won't exercise the bug scenario.  Hence we put it early.
+CREATE PROCEDURE test_proc3a()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+   COMMIT;
+   SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+   RAISE NOTICE 'done';
+END;
+$$
+--
+CREATE PROCEDURE test_proc3a() LANGUAGE plpgsql AS $$
+BEGIN
+   COMMIT;
+   SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+   RAISE NOTICE 'done';
+END;
+$$
+== 009
+CALL test_proc3a()
+--
+CALL test_proc3a()
+== 010
+CREATE TEMP TABLE tt1(f1 int)
+--
+CREATE TEMPORARY TABLE tt1 (f1 int)
+== 011
+CALL test_proc3a()
+--
+CALL test_proc3a()
+== 012
+-- nested CALL
+TRUNCATE TABLE test1
+--
+TRUNCATE test1
+== 013
+CREATE PROCEDURE test_proc4(y int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    CALL test_proc3(y);
+    CALL test_proc3($1);
+END;
+$$
+--
+CREATE PROCEDURE test_proc4(y int) LANGUAGE plpgsql AS $$
+BEGIN
+    CALL test_proc3(y);
+    CALL test_proc3($1);
+END;
+$$
+== 014
+CALL test_proc4(66)
+--
+CALL test_proc4(66)
+== 015
+SELECT * FROM test1
+--
+SELECT * FROM test1
+== 016
+CALL test_proc4(66)
+--
+CALL test_proc4(66)
+== 017
+SELECT * FROM test1
+--
+SELECT * FROM test1
+== 018
+-- output arguments
+
+CREATE PROCEDURE test_proc5(INOUT a text)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    a := a || '+' || a;
+END;
+$$
+--
+CREATE PROCEDURE test_proc5(INOUT a text) LANGUAGE plpgsql AS $$
+BEGIN
+    a := a || '+' || a;
+END;
+$$
+== 019
+CALL test_proc5('abc')
+--
+CALL test_proc5('abc')
+== 020
+CREATE PROCEDURE test_proc6(a int, INOUT b int, INOUT c int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    b := b * a;
+    c := c * a;
+END;
+$$
+--
+CREATE PROCEDURE test_proc6(a int, INOUT b int, INOUT c int) LANGUAGE plpgsql AS $$
+BEGIN
+    b := b * a;
+    c := c * a;
+END;
+$$
+== 021
+CALL test_proc6(2, 3, 4)
+--
+CALL test_proc6(2, 3, 4)
+== 022
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);
+    RAISE INFO 'x = %, y = %', x, y;
+    CALL test_proc6(2, c => y, b => x);
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+--
+DO LANGUAGE plpgsql $$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);
+    RAISE INFO 'x = %, y = %', x, y;
+    CALL test_proc6(2, c => y, b => x);
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+== 023
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x + 1, y);  -- error
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+--
+DO LANGUAGE plpgsql $$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x + 1, y);  -- error
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+== 024
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x constant int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);  -- error because x is constant
+END;
+$$
+--
+DO LANGUAGE plpgsql $$
+DECLARE
+    x constant int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);  -- error because x is constant
+END;
+$$
+== 025
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    FOR i IN 1..5 LOOP
+        CALL test_proc6(i, x, y);
+        RAISE INFO 'x = %, y = %', x, y;
+    END LOOP;
+END;
+$$
+--
+DO LANGUAGE plpgsql $$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    FOR i IN 1..5 LOOP
+        CALL test_proc6(i, x, y);
+        RAISE INFO 'x = %, y = %', x, y;
+    END LOOP;
+END;
+$$
+== 026
+-- recursive with output arguments
+
+CREATE PROCEDURE test_proc7(x int, INOUT a int, INOUT b numeric)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+IF x > 1 THEN
+    a := x / 10;
+    b := x / 2;
+    CALL test_proc7(b::int, a, b);
+END IF;
+END;
+$$
+--
+CREATE PROCEDURE test_proc7(x int, INOUT a int, INOUT b numeric) LANGUAGE plpgsql AS $$
+BEGIN
+IF x > 1 THEN
+    a := x / 10;
+    b := x / 2;
+    CALL test_proc7(b::int, a, b);
+END IF;
+END;
+$$
+== 027
+CALL test_proc7(100, -1, -1)
+--
+CALL test_proc7(100, -1, -1)
+== 028
+-- inner COMMIT with output arguments
+
+CREATE PROCEDURE test_proc7c(x int, INOUT a int, INOUT b numeric)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  a := x / 10;
+  b := x / 2;
+  COMMIT;
+END;
+$$
+--
+CREATE PROCEDURE test_proc7c(x int, INOUT a int, INOUT b numeric) LANGUAGE plpgsql AS $$
+BEGIN
+  a := x / 10;
+  b := x / 2;
+  COMMIT;
+END;
+$$
+== 029
+CREATE PROCEDURE test_proc7cc(_x int)
+LANGUAGE plpgsql
+AS $$
+DECLARE _a int; _b numeric;
+BEGIN
+  CALL test_proc7c(_x, _a, _b);
+  RAISE NOTICE '_x: %,_a: %, _b: %', _x, _a, _b;
+END
+$$
+--
+CREATE PROCEDURE test_proc7cc(_x int) LANGUAGE plpgsql AS $$
+DECLARE _a int; _b numeric;
+BEGIN
+  CALL test_proc7c(_x, _a, _b);
+  RAISE NOTICE '_x: %,_a: %, _b: %', _x, _a, _b;
+END
+$$
+== 030
+CALL test_proc7cc(10)
+--
+CALL test_proc7cc(10)
+== 031
+-- named parameters and defaults
+
+CREATE PROCEDURE test_proc8a(INOUT a int, INOUT b int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := a * 10;
+  b := b + 10;
+END;
+$$
+--
+CREATE PROCEDURE test_proc8a(INOUT a int, INOUT b int) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := a * 10;
+  b := b + 10;
+END;
+$$
+== 032
+CALL test_proc8a(10, 20)
+--
+CALL test_proc8a(10, 20)
+== 033
+CALL test_proc8a(b => 20, a => 10)
+--
+CALL test_proc8a(b := 20, a := 10)
+== 034
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc8a(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+  CALL test_proc8a(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc8a(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+  CALL test_proc8a(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+== 035
+CREATE PROCEDURE test_proc8b(INOUT a int, INOUT b int, INOUT c int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+--
+CREATE PROCEDURE test_proc8b(INOUT a int, INOUT b int, INOUT c int) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+== 036
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8b(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  CALL test_proc8b(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8b(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  CALL test_proc8b(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 037
+CREATE PROCEDURE test_proc8c(INOUT a int, INOUT b int, INOUT c int DEFAULT 11)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+--
+CREATE PROCEDURE test_proc8c(INOUT a int, INOUT b int, INOUT c int = 11) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+== 038
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(c => _c, b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(c => _c, b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 039
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 040
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, b => _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, b => _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 041
+-- OUT parameters
+
+CREATE PROCEDURE test_proc9(IN a int, OUT b int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  b := a * 2;
+END;
+$$
+--
+CREATE PROCEDURE test_proc9(IN a int, OUT b int) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  b := a * 2;
+END;
+$$
+== 042
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc9(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc9(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+== 043
+CREATE PROCEDURE test_proc10(IN a int, OUT b int, IN c int DEFAULT 11)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  b := a - c;
+END;
+$$
+--
+CREATE PROCEDURE test_proc10(IN a int, OUT b int, IN c int = 11) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  b := a - c;
+END;
+$$
+== 044
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(a => _a, b => _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(a => _a, b => _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 045
+-- OUT + VARIADIC
+
+CREATE PROCEDURE test_proc11(a OUT int, VARIADIC b int[])
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := b[1] + b[2];
+END;
+$$
+--
+CREATE PROCEDURE test_proc11(OUT a int, VARIADIC b int[]) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := b[1] + b[2];
+END;
+$$
+== 046
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc11(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc11(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 047
+-- polymorphic OUT arguments
+
+CREATE PROCEDURE test_proc12(a anyelement, OUT b anyelement, OUT c anyarray)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %', a;
+  b := a;
+  c := array[a];
+END;
+$$
+--
+CREATE PROCEDURE test_proc12(a anyelement, OUT b anyelement, OUT c anyarray) LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE NOTICE 'a: %', a;
+  b := a;
+  c := array[a];
+END;
+$$
+== 048
+DO $$
+DECLARE _a int; _b int; _c int[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c int[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 049
+DO $$
+DECLARE _a int; _b int; _c text[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);  -- error
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+DO $$
+DECLARE _a int; _b int; _c text[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);  -- error
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+== 050
+-- transition variable assignment
+
+TRUNCATE test1
+--
+TRUNCATE test1
+== 051
+CREATE FUNCTION triggerfunc1() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    z int := 0;
+BEGIN
+    CALL test_proc6(2, NEW.a, NEW.a);
+    RETURN NEW;
+END;
+$$
+--
+CREATE FUNCTION triggerfunc1() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    z int := 0;
+BEGIN
+    CALL test_proc6(2, NEW.a, NEW.a);
+    RETURN NEW;
+END;
+$$
+== 052
+CREATE TRIGGER t1 BEFORE INSERT ON test1 EXECUTE PROCEDURE triggerfunc1()
+--
+CREATE TRIGGER t1 BEFORE INSERT ON test1 EXECUTE FUNCTION triggerfunc1()
+== 053
+INSERT INTO test1 VALUES (1), (2), (3)
+--
+INSERT INTO test1 VALUES (1), (2), (3)
+== 054
+UPDATE test1 SET a = 22 WHERE a = 2
+--
+UPDATE test1 SET a = 22 WHERE a = 2
+== 055
+SELECT * FROM test1 ORDER BY a
+--
+SELECT * FROM test1 ORDER BY a
+== 056
+DROP PROCEDURE test_proc1
+--
+DROP PROCEDURE test_proc1
+== 057
+DROP PROCEDURE test_proc3
+--
+DROP PROCEDURE test_proc3
+== 058
+DROP PROCEDURE test_proc4
+--
+DROP PROCEDURE test_proc4
+== 059
+DROP TABLE test1
+--
+DROP TABLE test1
+== 060
+-- more checks for named-parameter handling
+
+CREATE PROCEDURE p1(v_cnt int, v_Text inout text = NULL)
+AS $$
+BEGIN
+  v_Text := 'v_cnt = ' || v_cnt;
+END
+$$ LANGUAGE plpgsql
+--
+CREATE PROCEDURE p1(v_cnt int, INOUT v_text text = NULL) AS $$
+BEGIN
+  v_Text := 'v_cnt = ' || v_cnt;
+END
+$$ LANGUAGE plpgsql
+== 061
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt);  -- error, must supply something for v_Text
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt);  -- error, must supply something for v_Text
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+== 062
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+== 063
+DO $$
+DECLARE
+  v_Text text;
+BEGIN
+  CALL p1(10, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+DO $$
+DECLARE
+  v_Text text;
+BEGIN
+  CALL p1(10, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+== 064
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer;
+BEGIN
+  CALL p1(v_Text := v_Text, v_cnt := v_cnt);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer;
+BEGIN
+  CALL p1(v_Text := v_Text, v_cnt := v_cnt);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+== 065
+-- check that we detect change of dependencies in CALL
+-- atomic and non-atomic call sites used to do this differently, so check both
+
+CREATE PROCEDURE inner_p (f1 int)
+AS $$
+BEGIN
+  RAISE NOTICE 'inner_p(%)', f1;
+END
+$$ LANGUAGE plpgsql
+--
+CREATE PROCEDURE inner_p(f1 int) AS $$
+BEGIN
+  RAISE NOTICE 'inner_p(%)', f1;
+END
+$$ LANGUAGE plpgsql
+== 066
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 1 $$ LANGUAGE sql
+--
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 1 $$ LANGUAGE sql
+== 067
+CREATE PROCEDURE outer_p (f1 int)
+AS $$
+BEGIN
+  RAISE NOTICE 'outer_p(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+--
+CREATE PROCEDURE outer_p(f1 int) AS $$
+BEGIN
+  RAISE NOTICE 'outer_p(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+== 068
+CREATE FUNCTION outer_f (f1 int) RETURNS void
+AS $$
+BEGIN
+  RAISE NOTICE 'outer_f(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+--
+CREATE FUNCTION outer_f(f1 int) RETURNS void AS $$
+BEGIN
+  RAISE NOTICE 'outer_f(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+== 069
+CALL outer_p(42)
+--
+CALL outer_p(42)
+== 070
+SELECT outer_f(42)
+--
+SELECT outer_f(42)
+== 071
+DROP FUNCTION f(int)
+--
+DROP FUNCTION f(int)
+== 072
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 2 $$ LANGUAGE sql
+--
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 2 $$ LANGUAGE sql
+== 073
+CALL outer_p(42)
+--
+CALL outer_p(42)
+== 074
+SELECT outer_f(42)
+--
+SELECT outer_f(42)
+== 075
+-- Check that stable functions in CALL see the correct snapshot
+
+CREATE TABLE t_test (x int)
+--
+CREATE TABLE t_test (x int)
+== 076
+INSERT INTO t_test VALUES (0)
+--
+INSERT INTO t_test VALUES (0)
+== 077
+CREATE FUNCTION f_get_x () RETURNS int
+AS $$
+DECLARE l_result int;
+BEGIN
+  SELECT x INTO l_result FROM t_test;
+  RETURN l_result;
+END
+$$ LANGUAGE plpgsql STABLE
+--
+CREATE FUNCTION f_get_x() RETURNS int AS $$
+DECLARE l_result int;
+BEGIN
+  SELECT x INTO l_result FROM t_test;
+  RETURN l_result;
+END
+$$ LANGUAGE plpgsql STABLE
+== 078
+CREATE PROCEDURE f_print_x (x int)
+AS $$
+BEGIN
+  RAISE NOTICE 'f_print_x(%)', x;
+END
+$$ LANGUAGE plpgsql
+--
+CREATE PROCEDURE f_print_x(x int) AS $$
+BEGIN
+  RAISE NOTICE 'f_print_x(%)', x;
+END
+$$ LANGUAGE plpgsql
+== 079
+-- test in non-atomic context
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  ROLLBACK;
+END
+$$
+--
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  ROLLBACK;
+END
+$$
+== 080
+-- test in non-atomic context, except exception block is locally atomic
+DO $$
+BEGIN
+ BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+ EXCEPTION WHEN division_by_zero THEN
+   RAISE NOTICE '%', SQLERRM;
+ END;
+  ROLLBACK;
+END
+$$
+--
+DO $$
+BEGIN
+ BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+ EXCEPTION WHEN division_by_zero THEN
+   RAISE NOTICE '%', SQLERRM;
+ END;
+  ROLLBACK;
+END
+$$
+== 081
+-- test in atomic context
+BEGIN
+--
+BEGIN
+== 082
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+END
+$$
+--
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+END
+$$
+== 083
+ROLLBACK
+--
+ROLLBACK

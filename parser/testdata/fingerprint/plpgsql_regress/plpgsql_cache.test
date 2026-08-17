@@ -1,0 +1,82 @@
+== 001
+|--
+-- Cache-behavior-dependent test cases
+|--
+-- These tests logically belong in plpgsql_record.sql, and perhaps someday
+-- can be merged back into it.  For now, however, their results are different
+-- depending on debug_discard_caches, so we must have two expected-output
+-- files to cover both cases.  To minimize the maintenance effort resulting
+-- from that, this file should contain only tests that do have different
+-- results under debug_discard_caches.
+|--
+
+-- check behavior with changes of a named rowtype
+create table c_mutable(f1 int, f2 text)
+--
+ba5c14746e7b2b98
+== 002
+create function c_sillyaddone(int) returns int language plpgsql as
+$$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+f8f8fbcaba44ec6c
+== 003
+select c_sillyaddone(42)
+--
+55e0b998386fc67e
+== 004
+alter table c_mutable drop column f1
+--
+c75396a33282b8f4
+== 005
+alter table c_mutable add column f1 float8
+--
+467a28ec0cd9f5ac
+== 006
+-- currently, this fails due to cached plan for "r.f1 + 1" expression
+-- (but if debug_discard_caches is on, it will succeed)
+select c_sillyaddone(42)
+--
+55e0b998386fc67e
+== 007
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+6e200ea45baf3637
+== 008
+select c_sillyaddone(42)
+--
+55e0b998386fc67e
+== 009
+-- check behavior with changes in a record rowtype
+create function show_result_type(text) returns text language plpgsql as
+$$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+--
+dc44c7b2134dd920
+== 010
+select show_result_type('select 1 as a')
+--
+12fbce0557f5f36b
+== 011
+-- currently this fails due to cached plan for pg_typeof expression
+-- (but if debug_discard_caches is on, it will succeed)
+select show_result_type('select 2.0 as a')
+--
+12fbce0557f5f36b
+== 012
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+6e200ea45baf3637
+== 013
+select show_result_type('select 2.0 as a')
+--
+12fbce0557f5f36b

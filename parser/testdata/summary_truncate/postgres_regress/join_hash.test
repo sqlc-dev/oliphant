@@ -1,0 +1,2370 @@
+== 001
+-- truncate_limit: 100
+|--
+-- exercises for the hash join code
+|--
+
+begin
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 002
+-- truncate_limit: 100
+set local min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL min_parallel_table_scan_size TO 0"
+== 003
+-- truncate_limit: 100
+set local parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL parallel_setup_cost TO 0"
+== 004
+-- truncate_limit: 100
+set local enable_hashjoin = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_hashjoin TO ON"
+== 005
+-- truncate_limit: 100
+-- Extract bucket and batch counts from an explain analyze plan.  In
+-- general we can't make assertions about how many batches (or
+-- buckets) will be required because it can vary, but we can in some
+-- special cases and we can check for growth.
+create or replace function find_hash(node json)
+returns json language plpgsql
+as
+$$
+declare
+  x json;
+  child json;
+begin
+  if node->>'Node Type' = 'Hash' then
+    return node;
+  else
+    for child in select json_array_elements(node->'Plans')
+    loop
+      x := find_hash(child);
+      if x is not null then
+        return x;
+      end if;
+    end loop;
+    return null;
+  end if;
+end;
+$$
+--
+FUNCTION: name="find_hash" function="find_hash" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE OR REPLACE FUNCTION find_hash(node pg_catalog.json) RETURNS pg_catalog.json LANGUAGE plpgs..."
+== 006
+-- truncate_limit: 100
+create or replace function hash_join_batches(query text)
+returns table (original int, final int) language plpgsql
+as
+$$
+declare
+  whole_plan json;
+  hash_node json;
+begin
+  for whole_plan in
+    execute 'explain (analyze, format ''json'') ' || query
+  loop
+    hash_node := find_hash(json_extract_path(whole_plan, '0', 'Plan'));
+    original := hash_node->>'Original Hash Batches';
+    final := hash_node->>'Hash Batches';
+    return next;
+  end loop;
+end;
+$$
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE OR REPLACE FUNCTION hash_join_batches(query text) RETURNS TABLE (original int, final int) ..."
+== 007
+-- truncate_limit: 100
+-- Make a simple relation with well distributed keys and correctly
+-- estimated size.
+create table simple as
+  select generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE simple AS SELECT generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
+== 008
+-- truncate_limit: 100
+alter table simple set (parallel_workers = 2)
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE simple SET (parallel_workers=2)"
+== 009
+-- truncate_limit: 100
+analyze simple
+--
+TABLE: name="simple" schema="" table="simple" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "ANALYZE simple"
+== 010
+-- truncate_limit: 100
+-- Make a relation whose size we will under-estimate.  We want stats
+-- to say 1000 rows, but actually there are 20,000 rows.
+create table bigger_than_it_looks as
+  select generate_series(1, 20000) as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE bigger_than_it_looks AS SELECT generate_series(1, 20000) AS id, 'aaaaaaaaaaaaaaaaaaa..."
+== 011
+-- truncate_limit: 100
+alter table bigger_than_it_looks set (autovacuum_enabled = 'false')
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE bigger_than_it_looks SET (autovacuum_enabled=false)"
+== 012
+-- truncate_limit: 100
+alter table bigger_than_it_looks set (parallel_workers = 2)
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE bigger_than_it_looks SET (parallel_workers=2)"
+== 013
+-- truncate_limit: 100
+analyze bigger_than_it_looks
+--
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "ANALYZE bigger_than_it_looks"
+== 014
+-- truncate_limit: 100
+update pg_class set reltuples = 1000 where relname = 'bigger_than_it_looks'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+STMT: UpdateStmt
+TRUNCATED: "UPDATE pg_class SET reltuples = 1000 WHERE relname = 'bigger_than_it_looks'"
+== 015
+-- truncate_limit: 100
+-- Make a relation whose size we underestimate and that also has a
+-- kind of skew that breaks our batching scheme.  We want stats to say
+-- 2 rows, but actually there are 20,000 rows with the same key.
+create table extremely_skewed (id int, t text)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE extremely_skewed (id int, t text)"
+== 016
+-- truncate_limit: 100
+alter table extremely_skewed set (autovacuum_enabled = 'false')
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE extremely_skewed SET (autovacuum_enabled=false)"
+== 017
+-- truncate_limit: 100
+alter table extremely_skewed set (parallel_workers = 2)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE extremely_skewed SET (parallel_workers=2)"
+== 018
+-- truncate_limit: 100
+analyze extremely_skewed
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "ANALYZE extremely_skewed"
+== 019
+-- truncate_limit: 100
+insert into extremely_skewed
+  select 42 as id, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  from generate_series(1, 20000)
+--
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO extremely_skewed SELECT ... FROM generate_series(1, 20000)"
+== 020
+-- truncate_limit: 100
+update pg_class
+  set reltuples = 2, relpages = pg_relation_size('extremely_skewed') / 8192
+  where relname = 'extremely_skewed'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE pg_class SET ... = ... WHERE relname = 'extremely_skewed'"
+== 021
+-- truncate_limit: 100
+-- Make a relation with a couple of enormous tuples.
+create table wide as select generate_series(1, 2) as id, rpad('', 320000, 'x') as t
+--
+TABLE: name="wide" schema="" table="wide" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="rpad" function="rpad" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE wide AS SELECT generate_series(1, 2) AS id, rpad('', 320000, 'x') AS t"
+== 022
+-- truncate_limit: 100
+alter table wide set (parallel_workers = 2)
+--
+TABLE: name="wide" schema="" table="wide" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE wide SET (parallel_workers=2)"
+== 023
+-- truncate_limit: 100
+-- The "optimal" case: the hash table fits in memory; we plan for 1
+-- batch, we stick to that number, and peak memory usage stays within
+-- our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 024
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 025
+-- truncate_limit: 100
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"4MB\""
+== 026
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 027
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 028
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 029
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 030
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 031
+-- truncate_limit: 100
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 032
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 033
+-- truncate_limit: 100
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"4MB\""
+== 034
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 035
+-- truncate_limit: 100
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO OFF"
+== 036
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 037
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 038
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 039
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 040
+-- truncate_limit: 100
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 041
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 042
+-- truncate_limit: 100
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"4MB\""
+== 043
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 044
+-- truncate_limit: 100
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO ON"
+== 045
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 046
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 047
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 048
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 049
+-- truncate_limit: 100
+-- The "good" case: batches required, but we plan the right number; we
+-- plan for some number of batches, and we stick to that number, and
+-- peak memory usage says within our work_mem budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 050
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 051
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 052
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 053
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 054
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 055
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 056
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 057
+-- truncate_limit: 100
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 058
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 059
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 060
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 061
+-- truncate_limit: 100
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO OFF"
+== 062
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 063
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 064
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 065
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 066
+-- truncate_limit: 100
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 067
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 068
+-- truncate_limit: 100
+set local work_mem = '192kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"192kB\""
+== 069
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 070
+-- truncate_limit: 100
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO ON"
+== 071
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 072
+-- truncate_limit: 100
+select count(*) from simple r join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN simple s USING (id)"
+== 073
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 074
+-- truncate_limit: 100
+-- parallel full multi-batch hash join
+select count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 075
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 076
+-- truncate_limit: 100
+-- The "bad" case: during execution we need to increase number of
+-- batches; in this case we plan for 1 batch, and increase at least a
+-- couple of times, and peak memory usage stays within our work_mem
+-- budget
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 077
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 078
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 079
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 080
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 081
+-- truncate_limit: 100
+select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 082
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) FROM simple r JOIN bigger_than_it_looks s USING (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) FROM simple r JOIN bigger_than_it_looks s U..."
+== 083
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 084
+-- truncate_limit: 100
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 085
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 086
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 087
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 088
+-- truncate_limit: 100
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO OFF"
+== 089
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 090
+-- truncate_limit: 100
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 091
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join bigger_than_it_looks s u..."
+== 092
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 093
+-- truncate_limit: 100
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 094
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 1
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 1"
+== 095
+-- truncate_limit: 100
+set local work_mem = '192kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"192kB\""
+== 096
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 097
+-- truncate_limit: 100
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO ON"
+== 098
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 099
+-- truncate_limit: 100
+select count(*) from simple r join bigger_than_it_looks s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="bigger_than_it_looks" schema="" table="bigger_than_it_looks" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="bigger_than_it_looks"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN bigger_than_it_looks s USING (id)"
+== 100
+-- truncate_limit: 100
+select original > 1 as initially_multibatch, final > original as increased_batches
+  from hash_join_batches(
+$$
+  select count(*) from simple r join bigger_than_it_looks s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from simple r join bigger_than_it_looks s u..."
+== 101
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 102
+-- truncate_limit: 100
+-- The "ugly" case: increasing the number of batches during execution
+-- doesn't help, so stop trying to fit in work_mem and hope for the
+-- best; in this case we plan for 1 batch, increases just once and
+-- then stop increasing because that didn't help at all, so we blow
+-- right through the work_mem budget and hope for the best...
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 103
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 104
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 105
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 106
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 107
+-- truncate_limit: 100
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 108
+-- truncate_limit: 100
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hash_join_batches('\n  select count(*) from simple r join extremely_skewed s using (..."
+== 109
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 110
+-- truncate_limit: 100
+-- parallel with parallel-oblivious hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 111
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 112
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 113
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 114
+-- truncate_limit: 100
+set local enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO OFF"
+== 115
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 116
+-- truncate_limit: 100
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 117
+-- truncate_limit: 100
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hash_join_batches('\n  select count(*) from simple r join extremely_skewed s using (..."
+== 118
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 119
+-- truncate_limit: 100
+-- parallel with parallel-aware hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 120
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 1
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 1"
+== 121
+-- truncate_limit: 100
+set local work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"128kB\""
+== 122
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 123
+-- truncate_limit: 100
+set local enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_parallel_hash TO ON"
+== 124
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 125
+-- truncate_limit: 100
+select count(*) from simple r join extremely_skewed s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="extremely_skewed" schema="" table="extremely_skewed" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="extremely_skewed"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r JOIN extremely_skewed s USING (id)"
+== 126
+-- truncate_limit: 100
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join extremely_skewed s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hash_join_batches('\n  select count(*) from simple r join extremely_skewed s using (..."
+== 127
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 128
+-- truncate_limit: 100
+-- A couple of other hash join tests unrelated to work_mem management.
+
+-- Check that EXPLAIN ANALYZE has data even if the leader doesn't participate
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 129
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 130
+-- truncate_limit: 100
+set local work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL work_mem TO \"4MB\""
+== 131
+-- truncate_limit: 100
+set local hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL hash_mem_multiplier TO 1.0"
+== 132
+-- truncate_limit: 100
+set local parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL parallel_leader_participation TO OFF"
+== 133
+-- truncate_limit: 100
+select * from hash_join_batches(
+$$
+  select count(*) from simple r join simple s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hash_join_batches('\n  select count(*) from simple r join simple s using (id);\n')"
+== 134
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 135
+-- truncate_limit: 100
+-- Exercise rescans.  We'll turn off parallel_leader_participation so
+-- that we can check that instrumentation comes back correctly.
+
+create table join_foo as select generate_series(1, 3) as id, 'xxxxx'::text as t
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE join_foo AS SELECT generate_series(1, 3) AS id, 'xxxxx'::text AS t"
+== 136
+-- truncate_limit: 100
+alter table join_foo set (parallel_workers = 0)
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE join_foo SET (parallel_workers=0)"
+== 137
+-- truncate_limit: 100
+create table join_bar as select generate_series(1, 10000) as id, 'xxxxx'::text as t
+--
+TABLE: name="join_bar" schema="" table="join_bar" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE join_bar AS SELECT generate_series(1, 10000) AS id, 'xxxxx'::text AS t"
+== 138
+-- truncate_limit: 100
+alter table join_bar set (parallel_workers = 2)
+--
+TABLE: name="join_bar" schema="" table="join_bar" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE join_bar SET (parallel_workers=2)"
+== 139
+-- truncate_limit: 100
+-- multi-batch with rescan, parallel-oblivious
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 140
+-- truncate_limit: 100
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO OFF"
+== 141
+-- truncate_limit: 100
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_leader_participation TO OFF"
+== 142
+-- truncate_limit: 100
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET min_parallel_table_scan_size TO 0"
+== 143
+-- truncate_limit: 100
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_setup_cost TO 0"
+== 144
+-- truncate_limit: 100
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_tuple_cost TO 0"
+== 145
+-- truncate_limit: 100
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
+== 146
+-- truncate_limit: 100
+set enable_material = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_material TO OFF"
+== 147
+-- truncate_limit: 100
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 148
+-- truncate_limit: 100
+set work_mem = '64kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET work_mem TO \"64kB\""
+== 149
+-- truncate_limit: 100
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET hash_mem_multiplier TO 1.0"
+== 150
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM join_foo LEFT JOIN (SELECT b1.id, b1.t FROM join_bar b1 ..."
+== 151
+-- truncate_limit: 100
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM join_foo LEFT JOIN (SELECT ... FROM join_bar b1 JOIN join_bar b2 USING (id)) ss O..."
+== 152
+-- truncate_limit: 100
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from join_foo\n    left join (select b1.id, ..."
+== 153
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 154
+-- truncate_limit: 100
+-- single-batch with rescan, parallel-oblivious
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 155
+-- truncate_limit: 100
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO OFF"
+== 156
+-- truncate_limit: 100
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_leader_participation TO OFF"
+== 157
+-- truncate_limit: 100
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET min_parallel_table_scan_size TO 0"
+== 158
+-- truncate_limit: 100
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_setup_cost TO 0"
+== 159
+-- truncate_limit: 100
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_tuple_cost TO 0"
+== 160
+-- truncate_limit: 100
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
+== 161
+-- truncate_limit: 100
+set enable_material = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_material TO OFF"
+== 162
+-- truncate_limit: 100
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 163
+-- truncate_limit: 100
+set work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET work_mem TO \"4MB\""
+== 164
+-- truncate_limit: 100
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET hash_mem_multiplier TO 1.0"
+== 165
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM join_foo LEFT JOIN (SELECT b1.id, b1.t FROM join_bar b1 ..."
+== 166
+-- truncate_limit: 100
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM join_foo LEFT JOIN (SELECT ... FROM join_bar b1 JOIN join_bar b2 USING (id)) ss O..."
+== 167
+-- truncate_limit: 100
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from join_foo\n    left join (select b1.id, ..."
+== 168
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 169
+-- truncate_limit: 100
+-- multi-batch with rescan, parallel-aware
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 170
+-- truncate_limit: 100
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO ON"
+== 171
+-- truncate_limit: 100
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_leader_participation TO OFF"
+== 172
+-- truncate_limit: 100
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET min_parallel_table_scan_size TO 0"
+== 173
+-- truncate_limit: 100
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_setup_cost TO 0"
+== 174
+-- truncate_limit: 100
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_tuple_cost TO 0"
+== 175
+-- truncate_limit: 100
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
+== 176
+-- truncate_limit: 100
+set enable_material = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_material TO OFF"
+== 177
+-- truncate_limit: 100
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 178
+-- truncate_limit: 100
+set work_mem = '64kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET work_mem TO \"64kB\""
+== 179
+-- truncate_limit: 100
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET hash_mem_multiplier TO 1.0"
+== 180
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM join_foo LEFT JOIN (SELECT b1.id, b1.t FROM join_bar b1 ..."
+== 181
+-- truncate_limit: 100
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM join_foo LEFT JOIN (SELECT ... FROM join_bar b1 JOIN join_bar b2 USING (id)) ss O..."
+== 182
+-- truncate_limit: 100
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from join_foo\n    left join (select b1.id, ..."
+== 183
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 184
+-- truncate_limit: 100
+-- single-batch with rescan, parallel-aware
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 185
+-- truncate_limit: 100
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO ON"
+== 186
+-- truncate_limit: 100
+set parallel_leader_participation = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_leader_participation TO OFF"
+== 187
+-- truncate_limit: 100
+set min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET min_parallel_table_scan_size TO 0"
+== 188
+-- truncate_limit: 100
+set parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_setup_cost TO 0"
+== 189
+-- truncate_limit: 100
+set parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_tuple_cost TO 0"
+== 190
+-- truncate_limit: 100
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
+== 191
+-- truncate_limit: 100
+set enable_material = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_material TO OFF"
+== 192
+-- truncate_limit: 100
+set enable_mergejoin = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_mergejoin TO OFF"
+== 193
+-- truncate_limit: 100
+set work_mem = '4MB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET work_mem TO \"4MB\""
+== 194
+-- truncate_limit: 100
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET hash_mem_multiplier TO 1.0"
+== 195
+-- truncate_limit: 100
+explain (costs off)
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM join_foo LEFT JOIN (SELECT b1.id, b1.t FROM join_bar b1 ..."
+== 196
+-- truncate_limit: 100
+select count(*) from join_foo
+  left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+  on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1
+--
+TABLE: name="join_foo" schema="" table="join_foo" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+TABLE: name="join_bar" schema="" table="join_bar" ctx=Select
+ALIAS: "b1"="join_bar"
+ALIAS: "b2"="join_bar"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM join_foo LEFT JOIN (SELECT ... FROM join_bar b1 JOIN join_bar b2 USING (id)) ss O..."
+== 197
+-- truncate_limit: 100
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select count(*) from join_foo
+    left join (select b1.id, b1.t from join_bar b1 join join_bar b2 using (id)) ss
+    on join_foo.id < ss.id + 1 and join_foo.id > ss.id - 1;
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select count(*) from join_foo\n    left join (select b1.id, ..."
+== 198
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 199
+-- truncate_limit: 100
+-- A full outer join where every record is matched.
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 200
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 201
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 202
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 203
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 204
+-- truncate_limit: 100
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 205
+-- truncate_limit: 100
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO OFF"
+== 206
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 207
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 208
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 209
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 210
+-- truncate_limit: 100
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 211
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 212
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 213
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s using (id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s USING (id)"
+== 214
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 215
+-- truncate_limit: 100
+-- A full outer join where every record is not matched.
+
+-- non-parallel
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 216
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 0"
+== 217
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 218
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 219
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 220
+-- truncate_limit: 100
+-- parallelism not possible with parallel-oblivious full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 221
+-- truncate_limit: 100
+set enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO OFF"
+== 222
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 223
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 224
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 225
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 226
+-- truncate_limit: 100
+-- parallelism is possible with parallel-aware full hash join
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 227
+-- truncate_limit: 100
+set local max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL max_parallel_workers_per_gather TO 2"
+== 228
+-- truncate_limit: 100
+explain (costs off)
+     select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 229
+-- truncate_limit: 100
+select  count(*) from simple r full outer join simple s on (r.id = 0 - s.id)
+--
+TABLE: name="simple" schema="" table="simple" ctx=Select
+TABLE: name="simple" schema="" table="simple" ctx=Select
+ALIAS: "r"="simple"
+ALIAS: "s"="simple"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM simple r FULL JOIN simple s ON r.id = (0 - s.id)"
+== 230
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 231
+-- truncate_limit: 100
+-- exercise special code paths for huge tuples (note use of non-strict
+-- expression and left join required to get the detoasted tuple into
+-- the hash table)
+
+-- parallel with parallel-aware hash join (hits ExecParallelHashLoadTuple and
+-- sts_puttuple oversized tuple cases because it's multi-batch)
+savepoint settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 232
+-- truncate_limit: 100
+set max_parallel_workers_per_gather = 2
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET max_parallel_workers_per_gather TO 2"
+== 233
+-- truncate_limit: 100
+set enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO ON"
+== 234
+-- truncate_limit: 100
+set work_mem = '128kB'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET work_mem TO \"128kB\""
+== 235
+-- truncate_limit: 100
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET hash_mem_multiplier TO 1.0"
+== 236
+-- truncate_limit: 100
+explain (costs off)
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+TABLE: name="wide" schema="" table="wide" ctx=Select
+TABLE: name="wide" schema="" table="wide" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT length(max(s.t)) FROM wide LEFT JOIN (SELECT id, COALESCE(t, '') || ''..."
+== 237
+-- truncate_limit: 100
+select length(max(s.t))
+from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id)
+--
+TABLE: name="wide" schema="" table="wide" ctx=Select
+TABLE: name="wide" schema="" table="wide" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT length(max(s.t)) FROM wide LEFT JOIN (SELECT ... FROM wide) s USING (id)"
+== 238
+-- truncate_limit: 100
+select final > 1 as multibatch
+  from hash_join_batches(
+$$
+  select length(max(s.t))
+  from wide left join (select id, coalesce(t, '') || '' as t from wide) s using (id);
+$$)
+--
+FUNCTION: name="hash_join_batches" function="hash_join_batches" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hash_join_batches('\n  select length(max(s.t))\n  from wide left join (select id, c..."
+== 239
+-- truncate_limit: 100
+rollback to settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 240
+-- truncate_limit: 100
+-- Hash join reuses the HOT status bit to indicate match status. This can only
+-- be guaranteed to produce correct results if all the hash join tuple match
+-- bits are reset before reuse. This is done upon loading them into the
+-- hashtable.
+SAVEPOINT settings
+--
+STMT: TransactionStmt
+TRUNCATED: "SAVEPOINT settings"
+== 241
+-- truncate_limit: 100
+SET enable_parallel_hash = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO ON"
+== 242
+-- truncate_limit: 100
+SET min_parallel_table_scan_size = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET min_parallel_table_scan_size TO 0"
+== 243
+-- truncate_limit: 100
+SET parallel_setup_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_setup_cost TO 0"
+== 244
+-- truncate_limit: 100
+SET parallel_tuple_cost = 0
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET parallel_tuple_cost TO 0"
+== 245
+-- truncate_limit: 100
+CREATE TABLE hjtest_matchbits_t1(id int)
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE hjtest_matchbits_t1 (id int)"
+== 246
+-- truncate_limit: 100
+CREATE TABLE hjtest_matchbits_t2(id int)
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE hjtest_matchbits_t2 (id int)"
+== 247
+-- truncate_limit: 100
+INSERT INTO hjtest_matchbits_t1 VALUES (1)
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_matchbits_t1 VALUES (1)"
+== 248
+-- truncate_limit: 100
+INSERT INTO hjtest_matchbits_t2 VALUES (2)
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_matchbits_t2 VALUES (2)"
+== 249
+-- truncate_limit: 100
+-- Update should create a HOT tuple. If this status bit isn't cleared, we won't
+-- correctly emit the NULL-extended unmatching tuple in full hash join.
+UPDATE hjtest_matchbits_t2 set id = 2
+--
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=DML
+STMT: UpdateStmt
+TRUNCATED: "UPDATE hjtest_matchbits_t2 SET id = 2"
+== 250
+-- truncate_limit: 100
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+  ORDER BY t1.id
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=Select
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=Select
+ALIAS: "t1"="hjtest_matchbits_t1"
+ALIAS: "t2"="hjtest_matchbits_t2"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id ORDER BY t..."
+== 251
+-- truncate_limit: 100
+-- Test serial full hash join.
+-- Resetting parallel_setup_cost should force a serial plan.
+-- Just to be safe, however, set enable_parallel_hash to off, as parallel full
+-- hash joins are only supported with shared hashtables.
+RESET parallel_setup_cost
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET parallel_setup_cost"
+== 252
+-- truncate_limit: 100
+SET enable_parallel_hash = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_parallel_hash TO OFF"
+== 253
+-- truncate_limit: 100
+SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id
+--
+TABLE: name="hjtest_matchbits_t1" schema="" table="hjtest_matchbits_t1" ctx=Select
+TABLE: name="hjtest_matchbits_t2" schema="" table="hjtest_matchbits_t2" ctx=Select
+ALIAS: "t1"="hjtest_matchbits_t1"
+ALIAS: "t2"="hjtest_matchbits_t2"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM hjtest_matchbits_t1 t1 FULL JOIN hjtest_matchbits_t2 t2 ON t1.id = t2.id"
+== 254
+-- truncate_limit: 100
+ROLLBACK TO settings
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK TO SAVEPOINT settings"
+== 255
+-- truncate_limit: 100
+rollback
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"
+== 256
+-- truncate_limit: 100
+-- Verify that hash key expressions reference the correct
+-- nodes. Hashjoin's hashkeys need to reference its outer plan, Hash's
+-- need to reference Hash's outer plan (which is below HashJoin's
+-- inner plan). It's not trivial to verify that the references are
+-- correct (we don't display the hashkeys themselves), but if the
+-- hashkeys contain subplan references, those will be displayed. Force
+-- subplans to appear just about everywhere.
+|--
+-- Bug report:
+-- https://www.postgresql.org/message-id/CAPpHfdvGVegF_TKKRiBrSmatJL2dR9uwFCuR%2BteQ_8tEXU8mxg%40mail.gmail.com
+|--
+BEGIN
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 257
+-- truncate_limit: 100
+SET LOCAL enable_sort = OFF
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_sort TO OFF"
+== 258
+-- truncate_limit: 100
+-- avoid mergejoins
+SET LOCAL from_collapse_limit = 1
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL from_collapse_limit TO 1"
+== 259
+-- truncate_limit: 100
+-- allows easy changing of join order
+
+CREATE TABLE hjtest_1 (a text, b int, id int, c bool)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE hjtest_1 (a text, b int, id int, c bool)"
+== 260
+-- truncate_limit: 100
+CREATE TABLE hjtest_2 (a bool, id int, b text, c int)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE hjtest_2 (a bool, id int, b text, c int)"
+== 261
+-- truncate_limit: 100
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 2, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_1 (a, b, id, c) VALUES ('text', 2, 1, false)"
+== 262
+-- truncate_limit: 100
+-- matches
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 2, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_1 (a, b, id, c) VALUES ('text', 1, 2, false)"
+== 263
+-- truncate_limit: 100
+-- fails id join condition
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 20, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_1 (a, b, id, c) VALUES ('text', 20, 1, false)"
+== 264
+-- truncate_limit: 100
+-- fails < 50
+INSERT INTO hjtest_1(a, b, id, c) VALUES ('text', 1, 1, false)
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_1 (a, b, id, c) VALUES ('text', 1, 1, false)"
+== 265
+-- truncate_limit: 100
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 2)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_2 (a, id, b, c) VALUES (true, 1, 'another', 2)"
+== 266
+-- truncate_limit: 100
+-- matches
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 3, 'another', 7)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_2 (a, id, b, c) VALUES (true, 3, 'another', 7)"
+== 267
+-- truncate_limit: 100
+-- fails id join condition
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 90)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_2 (a, id, b, c) VALUES (true, 1, 'another', 90)"
+== 268
+-- truncate_limit: 100
+-- fails < 55
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'another', 3)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_2 (a, id, b, c) VALUES (true, 1, 'another', 3)"
+== 269
+-- truncate_limit: 100
+-- fails (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+INSERT INTO hjtest_2(a, id, b, c) VALUES (true, 1, 'text', 1)
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO hjtest_2 (a, id, b, c) VALUES (true, 1, 'text', 1)"
+== 270
+-- truncate_limit: 100
+--  fails hjtest_1.a <> hjtest_2.b;
+
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF, VERBOSE) SELECT hjtest_1.a AS a1, hjtest_2.a AS a2, hjtest_1.tableoid::regcla..."
+== 271
+-- truncate_limit: 100
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_1, hjtest_2
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hjtest_1, hjtest_2 WHERE ..."
+== 272
+-- truncate_limit: 100
+EXPLAIN (COSTS OFF, VERBOSE)
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF, VERBOSE) SELECT hjtest_1.a AS a1, hjtest_2.a AS a2, hjtest_1.tableoid::regcla..."
+== 273
+-- truncate_limit: 100
+SELECT hjtest_1.a a1, hjtest_2.a a2,hjtest_1.tableoid::regclass t1, hjtest_2.tableoid::regclass t2
+FROM hjtest_2, hjtest_1
+WHERE
+    hjtest_1.id = (SELECT 1 WHERE hjtest_2.id = 1)
+    AND (SELECT hjtest_1.b * 5) = (SELECT hjtest_2.c*5)
+    AND (SELECT hjtest_1.b * 5) < 50
+    AND (SELECT hjtest_2.c * 5) < 55
+    AND hjtest_1.a <> hjtest_2.b
+--
+TABLE: name="hjtest_2" schema="" table="hjtest_2" ctx=Select
+TABLE: name="hjtest_1" schema="" table="hjtest_1" ctx=Select
+FILTER: schema="" table="hjtest_1" column="id"
+FILTER: schema="" table="hjtest_2" column="id"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM hjtest_2, hjtest_1 WHERE ..."
+== 274
+-- truncate_limit: 100
+ROLLBACK
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"
+== 275
+-- truncate_limit: 100
+-- Verify that we behave sanely when the inner hash keys contain parameters
+-- (that is, outer or lateral references).  This situation has to defeat
+-- re-use of the inner hash table across rescans.
+begin
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 276
+-- truncate_limit: 100
+set local enable_hashjoin = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL enable_hashjoin TO ON"
+== 277
+-- truncate_limit: 100
+explain (costs off)
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t1"="tenk1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT i8.q2, ss.* FROM int8_tbl i8, LATERAL (SELECT t1.fivethous, i4.f1 FROM..."
+== 278
+-- truncate_limit: 100
+select i8.q2, ss.* from
+int8_tbl i8,
+lateral (select t1.fivethous, i4.f1 from tenk1 t1 join int4_tbl i4
+         on t1.fivethous = i4.f1+i8.q2 order by 1,2) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t1"="tenk1"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM int8_tbl i8, LATERAL (SELECT ... FROM tenk1 t1 JOIN int4_tbl i4 ON t1.fivethous =..."
+== 279
+-- truncate_limit: 100
+rollback
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"

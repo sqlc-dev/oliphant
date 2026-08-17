@@ -1,0 +1,524 @@
+== 001
+-- ensure we get stable results regardless of installation's default
+SET default_toast_compression = 'pglz'
+--
+STMT: VariableSetStmt
+== 002
+-- test creating table with compression method
+CREATE TABLE cmdata(f1 text COMPRESSION pglz)
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DDL
+STMT: CreateStmt
+== 003
+CREATE INDEX idx ON cmdata(f1)
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DDL
+STMT: IndexStmt
+== 004
+INSERT INTO cmdata VALUES(repeat('1234567890', 1000))
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+CREATE TABLE cmdata1(f1 TEXT COMPRESSION lz4)
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=DDL
+STMT: CreateStmt
+== 006
+INSERT INTO cmdata1 VALUES(repeat('1234567890', 1004))
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 007
+-- verify stored compression method in the data
+SELECT pg_column_compression(f1) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 008
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 009
+-- decompress data slice
+SELECT SUBSTR(f1, 200, 5) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="substr" function="substr" schema="" ctx=Call
+STMT: SelectStmt
+== 010
+SELECT SUBSTR(f1, 2000, 50) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="substr" function="substr" schema="" ctx=Call
+STMT: SelectStmt
+== 011
+-- copy with table creation
+SELECT * INTO cmmove1 FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+TABLE: name="cmmove1" schema="" table="cmmove1" ctx=DDL
+STMT: SelectStmt
+== 012
+SELECT pg_column_compression(f1) FROM cmmove1
+--
+TABLE: name="cmmove1" schema="" table="cmmove1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 013
+-- copy to existing table
+CREATE TABLE cmmove3(f1 text COMPRESSION pglz)
+--
+TABLE: name="cmmove3" schema="" table="cmmove3" ctx=DDL
+STMT: CreateStmt
+== 014
+INSERT INTO cmmove3 SELECT * FROM cmdata
+--
+TABLE: name="cmmove3" schema="" table="cmmove3" ctx=DML
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+STMT: InsertStmt
+STMT: SelectStmt
+== 015
+INSERT INTO cmmove3 SELECT * FROM cmdata1
+--
+TABLE: name="cmmove3" schema="" table="cmmove3" ctx=DML
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+SELECT pg_column_compression(f1) FROM cmmove3
+--
+TABLE: name="cmmove3" schema="" table="cmmove3" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 017
+-- test LIKE INCLUDING COMPRESSION
+CREATE TABLE cmdata2 (LIKE cmdata1 INCLUDING COMPRESSION)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: CreateStmt
+== 018
+DROP TABLE cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: DropStmt
+== 019
+-- try setting compression for incompressible data type
+CREATE TABLE cmdata2 (f1 int COMPRESSION pglz)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: CreateStmt
+== 020
+-- update using datum from different table
+CREATE TABLE cmmove2(f1 text COMPRESSION pglz)
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=DDL
+STMT: CreateStmt
+== 021
+INSERT INTO cmmove2 VALUES (repeat('1234567890', 1004))
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 022
+SELECT pg_column_compression(f1) FROM cmmove2
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 023
+UPDATE cmmove2 SET f1 = cmdata1.f1 FROM cmdata1
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=DML
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+STMT: UpdateStmt
+== 024
+SELECT pg_column_compression(f1) FROM cmmove2
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 025
+-- test externally stored compressed data
+CREATE OR REPLACE FUNCTION large_val() RETURNS TEXT LANGUAGE SQL AS
+'select array_agg(fipshash(g::text))::text from generate_series(1, 256) g'
+--
+FUNCTION: name="large_val" function="large_val" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 026
+CREATE TABLE cmdata2 (f1 text COMPRESSION pglz)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: CreateStmt
+== 027
+INSERT INTO cmdata2 SELECT large_val() || repeat('a', 4000)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DML
+FUNCTION: name="large_val" function="large_val" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 028
+SELECT pg_column_compression(f1) FROM cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 029
+INSERT INTO cmdata1 SELECT large_val() || repeat('a', 4000)
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=DML
+FUNCTION: name="large_val" function="large_val" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 030
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+SELECT SUBSTR(f1, 200, 5) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="substr" function="substr" schema="" ctx=Call
+STMT: SelectStmt
+== 032
+SELECT SUBSTR(f1, 200, 5) FROM cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=Select
+FUNCTION: name="substr" function="substr" schema="" ctx=Call
+STMT: SelectStmt
+== 033
+DROP TABLE cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: DropStmt
+== 034
+--test column type update varlena/non-varlena
+CREATE TABLE cmdata2 (f1 int)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: CreateStmt
+== 035
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE varchar
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 036
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE int USING f1::integer
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 037
+--changing column storage should not impact the compression method
+--but the data should not be compressed
+ALTER TABLE cmdata2 ALTER COLUMN f1 TYPE varchar
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 038
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET COMPRESSION pglz
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 039
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET STORAGE plain
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 040
+INSERT INTO cmdata2 VALUES (repeat('123456789', 800))
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 041
+SELECT pg_column_compression(f1) FROM cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 042
+-- test compression with materialized view
+CREATE MATERIALIZED VIEW compressmv(x) AS SELECT * FROM cmdata1
+--
+TABLE: name="compressmv" schema="" table="compressmv" ctx=DDL
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 043
+SELECT pg_column_compression(f1) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 044
+SELECT pg_column_compression(x) FROM compressmv
+--
+TABLE: name="compressmv" schema="" table="compressmv" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 045
+-- test compression with partition
+CREATE TABLE cmpart(f1 text COMPRESSION lz4) PARTITION BY HASH(f1)
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DDL
+STMT: CreateStmt
+== 046
+CREATE TABLE cmpart1 PARTITION OF cmpart FOR VALUES WITH (MODULUS 2, REMAINDER 0)
+--
+TABLE: name="cmpart1" schema="" table="cmpart1" ctx=DDL
+STMT: CreateStmt
+== 047
+CREATE TABLE cmpart2(f1 text COMPRESSION pglz)
+--
+TABLE: name="cmpart2" schema="" table="cmpart2" ctx=DDL
+STMT: CreateStmt
+== 048
+ALTER TABLE cmpart ATTACH PARTITION cmpart2 FOR VALUES WITH (MODULUS 2, REMAINDER 1)
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DDL
+STMT: AlterTableStmt
+== 049
+INSERT INTO cmpart VALUES (repeat('123456789', 1004))
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 050
+INSERT INTO cmpart VALUES (repeat('123456789', 4004))
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 051
+SELECT pg_column_compression(f1) FROM cmpart1
+--
+TABLE: name="cmpart1" schema="" table="cmpart1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 052
+SELECT pg_column_compression(f1) FROM cmpart2
+--
+TABLE: name="cmpart2" schema="" table="cmpart2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 053
+-- test compression with inheritance
+CREATE TABLE cminh() INHERITS(cmdata, cmdata1)
+--
+TABLE: name="cminh" schema="" table="cminh" ctx=DDL
+STMT: CreateStmt
+== 054
+-- error
+CREATE TABLE cminh(f1 TEXT COMPRESSION lz4) INHERITS(cmdata)
+--
+TABLE: name="cminh" schema="" table="cminh" ctx=DDL
+STMT: CreateStmt
+== 055
+-- error
+CREATE TABLE cmdata3(f1 text)
+--
+TABLE: name="cmdata3" schema="" table="cmdata3" ctx=DDL
+STMT: CreateStmt
+== 056
+CREATE TABLE cminh() INHERITS (cmdata, cmdata3)
+--
+TABLE: name="cminh" schema="" table="cminh" ctx=DDL
+STMT: CreateStmt
+== 057
+-- test default_toast_compression GUC
+SET default_toast_compression = ''
+--
+STMT: VariableSetStmt
+== 058
+SET default_toast_compression = 'I do not exist compression'
+--
+STMT: VariableSetStmt
+== 059
+SET default_toast_compression = 'lz4'
+--
+STMT: VariableSetStmt
+== 060
+SET default_toast_compression = 'pglz'
+--
+STMT: VariableSetStmt
+== 061
+-- test alter compression method
+ALTER TABLE cmdata ALTER COLUMN f1 SET COMPRESSION lz4
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DDL
+STMT: AlterTableStmt
+== 062
+INSERT INTO cmdata VALUES (repeat('123456789', 4004))
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+SELECT pg_column_compression(f1) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 064
+ALTER TABLE cmdata2 ALTER COLUMN f1 SET COMPRESSION default
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: AlterTableStmt
+== 065
+-- test alter compression method for materialized views
+ALTER MATERIALIZED VIEW compressmv ALTER COLUMN x SET COMPRESSION lz4
+--
+TABLE: name="compressmv" schema="" table="compressmv" ctx=DDL
+STMT: AlterTableStmt
+== 066
+-- test alter compression method for partitioned tables
+ALTER TABLE cmpart1 ALTER COLUMN f1 SET COMPRESSION pglz
+--
+TABLE: name="cmpart1" schema="" table="cmpart1" ctx=DDL
+STMT: AlterTableStmt
+== 067
+ALTER TABLE cmpart2 ALTER COLUMN f1 SET COMPRESSION lz4
+--
+TABLE: name="cmpart2" schema="" table="cmpart2" ctx=DDL
+STMT: AlterTableStmt
+== 068
+-- new data should be compressed with the current compression method
+INSERT INTO cmpart VALUES (repeat('123456789', 1004))
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 069
+INSERT INTO cmpart VALUES (repeat('123456789', 4004))
+--
+TABLE: name="cmpart" schema="" table="cmpart" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 070
+SELECT pg_column_compression(f1) FROM cmpart1
+--
+TABLE: name="cmpart1" schema="" table="cmpart1" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 071
+SELECT pg_column_compression(f1) FROM cmpart2
+--
+TABLE: name="cmpart2" schema="" table="cmpart2" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 072
+-- VACUUM FULL does not recompress
+SELECT pg_column_compression(f1) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 073
+VACUUM FULL cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=DDL
+STMT: VacuumStmt
+== 074
+SELECT pg_column_compression(f1) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="pg_column_compression" function="pg_column_compression" schema="" ctx=Call
+STMT: SelectStmt
+== 075
+-- test expression index
+DROP TABLE cmdata2
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: DropStmt
+== 076
+CREATE TABLE cmdata2 (f1 TEXT COMPRESSION pglz, f2 TEXT COMPRESSION lz4)
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: CreateStmt
+== 077
+CREATE UNIQUE INDEX idx1 ON cmdata2 ((f1 || f2))
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DDL
+STMT: IndexStmt
+== 078
+INSERT INTO cmdata2 VALUES((SELECT array_agg(fipshash(g::TEXT))::TEXT FROM
+generate_series(1, 50) g), VERSION())
+--
+TABLE: name="cmdata2" schema="" table="cmdata2" ctx=DML
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="fipshash" function="fipshash" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="version" function="version" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 079
+-- check data is ok
+SELECT length(f1) FROM cmdata
+--
+TABLE: name="cmdata" schema="" table="cmdata" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 080
+SELECT length(f1) FROM cmdata1
+--
+TABLE: name="cmdata1" schema="" table="cmdata1" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 081
+SELECT length(f1) FROM cmmove1
+--
+TABLE: name="cmmove1" schema="" table="cmmove1" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 082
+SELECT length(f1) FROM cmmove2
+--
+TABLE: name="cmmove2" schema="" table="cmmove2" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 083
+SELECT length(f1) FROM cmmove3
+--
+TABLE: name="cmmove3" schema="" table="cmmove3" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 084
+CREATE TABLE badcompresstbl (a text COMPRESSION I_Do_Not_Exist_Compression)
+--
+TABLE: name="badcompresstbl" schema="" table="badcompresstbl" ctx=DDL
+STMT: CreateStmt
+== 085
+-- fails
+CREATE TABLE badcompresstbl (a text)
+--
+TABLE: name="badcompresstbl" schema="" table="badcompresstbl" ctx=DDL
+STMT: CreateStmt
+== 086
+ALTER TABLE badcompresstbl ALTER a SET COMPRESSION I_Do_Not_Exist_Compression
+--
+TABLE: name="badcompresstbl" schema="" table="badcompresstbl" ctx=DDL
+STMT: AlterTableStmt
+== 087
+-- fails
+DROP TABLE badcompresstbl
+--
+TABLE: name="badcompresstbl" schema="" table="badcompresstbl" ctx=DDL
+STMT: DropStmt

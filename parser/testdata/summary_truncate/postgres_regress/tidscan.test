@@ -1,0 +1,438 @@
+== 001
+-- truncate_limit: 100
+-- tests for tidscans
+
+CREATE TABLE tidscan(id integer)
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE tidscan (id int)"
+== 002
+-- truncate_limit: 100
+-- only insert a few rows, we don't want to spill onto a second table page
+INSERT INTO tidscan VALUES (1), (2), (3)
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO tidscan VALUES (1), (2), (3)"
+== 003
+-- truncate_limit: 100
+-- show ctids
+SELECT ctid, * FROM tidscan
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan"
+== 004
+-- truncate_limit: 100
+-- ctid equality - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'"
+== 005
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE ctid = '(0,1)'"
+== 006
+-- truncate_limit: 100
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid"
+== 007
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE '(0,1)' = ctid"
+== 008
+-- truncate_limit: 100
+-- OR'd clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="ctid"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid"
+== 009
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE ctid = '(0,2)' OR '(0,1)' = ctid"
+== 010
+-- truncate_limit: 100
+-- ctid = ScalarArrayOp - implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])"
+== 011
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])"
+== 012
+-- truncate_limit: 100
+-- ctid != ScalarArrayOp - can't be implemented as tidscan
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE ctid <> ANY(ARRAY['(0,1)', '(0,2)']::tid[])"
+== 013
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan WHERE ctid != ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE ctid <> ANY(ARRAY['(0,1)', '(0,2)']::tid[])"
+== 014
+-- truncate_limit: 100
+-- tid equality extracted from sub-AND clauses
+EXPLAIN (COSTS OFF)
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT ctid, * FROM tidscan WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR ..."
+== 015
+-- truncate_limit: 100
+SELECT ctid, * FROM tidscan
+WHERE (id = 3 AND ctid IN ('(0,2)', '(0,3)')) OR (ctid = '(0,1)' AND id = 1)
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="ctid"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "SELECT ctid, * FROM tidscan WHERE ..."
+== 016
+-- truncate_limit: 100
+-- nestloop-with-inner-tidscan joins on tid
+SET enable_hashjoin TO off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_hashjoin TO OFF"
+== 017
+-- truncate_limit: 100
+-- otherwise hash join might win
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+ALIAS: "t1"="tidscan"
+ALIAS: "t2"="tidscan"
+FILTER: schema="" table="t1" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 JOIN tidscan t2 ON t1.cti..."
+== 018
+-- truncate_limit: 100
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+ALIAS: "t1"="tidscan"
+ALIAS: "t2"="tidscan"
+FILTER: schema="" table="t1" column="id"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM tidscan t1 JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1"
+== 019
+-- truncate_limit: 100
+EXPLAIN (COSTS OFF)
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+ALIAS: "t1"="tidscan"
+ALIAS: "t2"="tidscan"
+FILTER: schema="" table="t1" column="id"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT t1.ctid, t1.*, t2.ctid, t2.* FROM tidscan t1 LEFT JOIN tidscan t2 ON t..."
+== 020
+-- truncate_limit: 100
+SELECT t1.ctid, t1.*, t2.ctid, t2.*
+FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+ALIAS: "t1"="tidscan"
+ALIAS: "t2"="tidscan"
+FILTER: schema="" table="t1" column="id"
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM tidscan t1 LEFT JOIN tidscan t2 ON t1.ctid = t2.ctid WHERE t1.id = 1"
+== 021
+-- truncate_limit: 100
+RESET enable_hashjoin
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_hashjoin"
+== 022
+-- truncate_limit: 100
+-- exercise backward scan and rewind
+BEGIN
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 023
+-- truncate_limit: 100
+DECLARE c CURSOR FOR
+SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])
+--
+STMT: DeclareCursorStmt
+TRUNCATED: "DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan WHERE ctid = ANY(ARRAY['(0,1)', '(0,2)']::tid[])"
+== 024
+-- truncate_limit: 100
+FETCH ALL FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH ALL c"
+== 025
+-- truncate_limit: 100
+FETCH BACKWARD 1 FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH PRIOR c"
+== 026
+-- truncate_limit: 100
+FETCH FIRST FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH FIRST c"
+== 027
+-- truncate_limit: 100
+ROLLBACK
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"
+== 028
+-- truncate_limit: 100
+-- tidscan via CURRENT OF
+BEGIN
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 029
+-- truncate_limit: 100
+DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan
+--
+STMT: DeclareCursorStmt
+TRUNCATED: "DECLARE c CURSOR FOR SELECT ctid, * FROM tidscan"
+== 030
+-- truncate_limit: 100
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH c"
+== 031
+-- truncate_limit: 100
+-- skip one row
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH c"
+== 032
+-- truncate_limit: 100
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DML
+STMT: ExplainStmt
+STMT: UpdateStmt
+TRUNCATED: "EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT ..."
+== 033
+-- truncate_limit: 100
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH c"
+== 034
+-- truncate_limit: 100
+-- perform update
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DML
+STMT: ExplainStmt
+STMT: UpdateStmt
+TRUNCATED: "EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT ..."
+== 035
+-- truncate_limit: 100
+SELECT * FROM tidscan
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM tidscan"
+== 036
+-- truncate_limit: 100
+-- position cursor past any rows
+FETCH NEXT FROM c
+--
+STMT: FetchStmt
+TRUNCATED: "FETCH c"
+== 037
+-- truncate_limit: 100
+-- should error out
+EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
+UPDATE tidscan SET id = -id WHERE CURRENT OF c RETURNING *
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DML
+STMT: ExplainStmt
+STMT: UpdateStmt
+TRUNCATED: "EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF) UPDATE tidscan SET id = - id WHERE CURRENT ..."
+== 038
+-- truncate_limit: 100
+ROLLBACK
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"
+== 039
+-- truncate_limit: 100
+-- bulk joins on CTID
+-- (these plans don't use TID scans, but this still seems like an
+-- appropriate place for these tests)
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid"
+== 040
+-- truncate_limit: 100
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid"
+== 041
+-- truncate_limit: 100
+SET enable_hashjoin TO off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_hashjoin TO OFF"
+== 042
+-- truncate_limit: 100
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid"
+== 043
+-- truncate_limit: 100
+SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM tenk1 t1 JOIN tenk1 t2 ON t1.ctid = t2.ctid"
+== 044
+-- truncate_limit: 100
+RESET enable_hashjoin
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_hashjoin"
+== 045
+-- truncate_limit: 100
+-- check predicate lock on CTID
+BEGIN ISOLATION LEVEL SERIALIZABLE
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN ISOLATION LEVEL SERIALIZABLE"
+== 046
+-- truncate_limit: 100
+SELECT * FROM tidscan WHERE ctid = '(0,1)'
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=Select
+FILTER: schema="" table="" column="ctid"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM tidscan WHERE ctid = '(0,1)'"
+== 047
+-- truncate_limit: 100
+-- locktype should be 'tuple'
+SELECT locktype, mode FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'SIReadLock'
+--
+TABLE: name="pg_locks" schema="" table="pg_locks" ctx=Select
+FUNCTION: name="pg_backend_pid" function="pg_backend_pid" schema="" ctx=Call
+FUNCTION: name="pg_backend_pid" function="pg_backend_pid" schema="" ctx=Call
+FILTER: schema="" table="" column="pid"
+FILTER: schema="" table="" column="mode"
+STMT: SelectStmt
+TRUNCATED: "SELECT locktype, mode FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'SIReadLock'"
+== 048
+-- truncate_limit: 100
+ROLLBACK
+--
+STMT: TransactionStmt
+TRUNCATED: "ROLLBACK"
+== 049
+-- truncate_limit: 100
+DROP TABLE tidscan
+--
+TABLE: name="tidscan" schema="" table="tidscan" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE tidscan"

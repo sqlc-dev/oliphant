@@ -1,0 +1,1032 @@
+== 001
+|--
+-- Tests for psql features that aren't closely connected to any
+-- specific server features
+|--
+
+-- \set
+
+-- fail: invalid name
+-- fail: invalid value for special variable
+-- check handling of built-in boolean variable
+
+-- ;
+
+SELECT 1 as one, 2 as two
+--
+STMT: SelectStmt
+== 002
+SELECT 3 as three, 4 as four \gx
+
+-- \gx should work in FETCH_COUNT mode too
+
+SELECT 1 as one, 2 as two
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 30
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 003
+SELECT 3 as three, 4 as four \gx
+
+
+-- ;
+
+SELECT 1 as one, 2 as two \g (format=csv csv_fieldsep='\t')
+SELECT 1 as one, 2 as two \gx (title='foo bar')
+
+-- \bind (extended query protocol)
+
+SELECT 1 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 30
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 004
+SELECT $1 \bind 'foo'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 11
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 005
+SELECT $1, $2 \bind 'foo' 'bar'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 15
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 006
+-- errors
+-- parse error
+SELECT foo \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 37
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 007
+-- tcop error
+SELECT 1 \
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 24
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 008
+SELECT 2 \bind
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 10
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 009
+-- bind error
+SELECT $1, $2 \bind 'foo'
+--
+ERROR: syntax error at or near "\"
+CURSORPOS: 29
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 010
+-- ;
+
+select 10 as test01, 20 as test02, 'Hello' as test03
+--
+STMT: SelectStmt
+== 011
+-- should fail: bad variable name
+select 10 as "bad name"
+
+select 97 as "EOF", 'ok' as _foo
+--
+ERROR: syntax error at or near "select"
+CURSORPOS: 60
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 012
+-- multiple backslash commands in one line
+select 1 as x, 2 as y
+--
+STMT: SelectStmt
+== 013
+select 3 as x, 4 as y
+--
+STMT: SelectStmt
+== 014
+select 5 as x, 6 as y
+--
+STMT: SelectStmt
+== 015
+select 7 as x, 8 as y
+--
+STMT: SelectStmt
+== 016
+-- NULL should unset the variable
+select 1 as var1, NULL as var2, 3 as var3
+--
+STMT: SelectStmt
+== 017
+-- ;
+select 10 as test01, 20 as test02 from generate_series(1,3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 018
+select 10 as test01, 20 as test02 from generate_series(1,0)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 019
+-- ;
+select a from generate_series(1, 10) as a where a = 11
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 020
+-- ;
+
+select 1 as x, 2 as y
+--
+STMT: SelectStmt
+== 021
+select 3 as x, 4 as y
+--
+STMT: SelectStmt
+== 022
+select 10 as test01, 20 as test02 from generate_series(1,3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 023
+select 10 as test01, 20 as test02 from generate_series(1,0)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 024
+-- ;
+
+SELECT
+    NULL AS zero,
+    1 AS one,
+    2.0 AS two,
+    'three' AS three,
+    $1 AS four,
+    sin($2) as five,
+    'foo'::varchar(4) as six,
+    CURRENT_DATE AS now
+
+-- should work with tuple-returning utilities, such as EXECUTE
+PREPARE test AS SELECT 1 AS first, 2 AS second
+--
+ERROR: syntax error at or near "PREPARE"
+CURSORPOS: 239
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 025
+EXECUTE test
+--
+STMT: ExecuteStmt
+== 026
+EXPLAIN EXECUTE test
+--
+STMT: ExplainStmt
+STMT: ExecuteStmt
+== 027
+-- should fail cleanly - syntax error
+SELECT 1 +
+--
+ERROR: syntax error at end of input
+CURSORPOS: 49
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 028
+-- check behavior with empty results
+SELECT
+--
+STMT: SelectStmt
+== 029
+CREATE TABLE bububu(a int)
+--
+TABLE: name="bububu" schema="" table="bububu" ctx=DDL
+STMT: CreateStmt
+== 030
+-- subject command should not have executed
+TABLE bububu
+--
+TABLE: name="bububu" schema="" table="bububu" ctx=Select
+STMT: SelectStmt
+== 031
+-- fail
+
+-- query buffer should remain unchanged
+SELECT 1 AS x, 'Hello', 2 AS y, true AS "dirty\name"
+
+-- all on one line
+SELECT 3 AS x, 'Hello', 4 AS y, true AS "dirty\name"
+--
+ERROR: syntax error at or near "SELECT"
+CURSORPOS: 123
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 032
+-- test for server bug #17983 with empty statement in aborted transaction
+set search_path = default
+--
+STMT: VariableSetStmt
+== 033
+begin
+--
+STMT: TransactionStmt
+== 034
+rollback
+--
+STMT: TransactionStmt
+== 035
+-- ;
+
+create temporary table gexec_test(a int, b text, c date, d float)
+--
+TABLE: name="gexec_test" schema="" table="gexec_test" ctx=DDL
+STMT: CreateStmt
+== 036
+select format('create index on gexec_test(%I)', attname)
+from pg_attribute
+where attrelid = 'gexec_test'::regclass and attnum > 0
+order by attnum
+
+-- ;
+-- (though the fetch limit applies to the executed queries not the meta query)
+
+select 'select 1 as ones', 'select x.y, x.y*2 as double from generate_series(1,4) as x(y)'
+union all
+select 'drop table gexec_test', NULL
+union all
+select 'drop table gexec_test', 'select ''2000-01-01''::date as party_over'
+
+
+-- \setenv, \getenv
+
+-- ensure MYVAR isn't set
+-- in which case, reading it doesn't change the target
+-- now set it
+
+-- show all pset options
+
+-- test multi-line headers, wrapping, and newline indicators
+-- in aligned, unaligned, and wrapped formats
+prepare q as select array_to_string(array_agg(repeat('x',2*n)),E'\n') as "ab
+
+c", array_to_string(array_agg(repeat('y',20-2*n)),E'\n') as "a
+bc" from generate_series(1,10) as n(n) group by n>1 order by n>1
+--
+ERROR: syntax error at or near "select"
+CURSORPOS: 233
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 037
+execute q
+--
+STMT: ExecuteStmt
+== 038
+execute q
+--
+STMT: ExecuteStmt
+== 039
+execute q
+--
+STMT: ExecuteStmt
+== 040
+execute q
+--
+STMT: ExecuteStmt
+== 041
+execute q
+--
+STMT: ExecuteStmt
+== 042
+execute q
+--
+STMT: ExecuteStmt
+== 043
+execute q
+--
+STMT: ExecuteStmt
+== 044
+execute q
+--
+STMT: ExecuteStmt
+== 045
+execute q
+--
+STMT: ExecuteStmt
+== 046
+execute q
+--
+STMT: ExecuteStmt
+== 047
+execute q
+--
+STMT: ExecuteStmt
+== 048
+execute q
+--
+STMT: ExecuteStmt
+== 049
+execute q
+--
+STMT: ExecuteStmt
+== 050
+execute q
+--
+STMT: ExecuteStmt
+== 051
+execute q
+--
+STMT: ExecuteStmt
+== 052
+execute q
+--
+STMT: ExecuteStmt
+== 053
+execute q
+--
+STMT: ExecuteStmt
+== 054
+execute q
+--
+STMT: ExecuteStmt
+== 055
+execute q
+--
+STMT: ExecuteStmt
+== 056
+execute q
+--
+STMT: ExecuteStmt
+== 057
+execute q
+--
+STMT: ExecuteStmt
+== 058
+execute q
+--
+STMT: ExecuteStmt
+== 059
+execute q
+--
+STMT: ExecuteStmt
+== 060
+execute q
+--
+STMT: ExecuteStmt
+== 061
+execute q
+--
+STMT: ExecuteStmt
+== 062
+execute q
+--
+STMT: ExecuteStmt
+== 063
+execute q
+--
+STMT: ExecuteStmt
+== 064
+execute q
+--
+STMT: ExecuteStmt
+== 065
+execute q
+--
+STMT: ExecuteStmt
+== 066
+execute q
+--
+STMT: ExecuteStmt
+== 067
+execute q
+--
+STMT: ExecuteStmt
+== 068
+execute q
+--
+STMT: ExecuteStmt
+== 069
+execute q
+--
+STMT: ExecuteStmt
+== 070
+execute q
+--
+STMT: ExecuteStmt
+== 071
+execute q
+--
+STMT: ExecuteStmt
+== 072
+execute q
+--
+STMT: ExecuteStmt
+== 073
+deallocate q
+--
+STMT: DeallocateStmt
+== 074
+-- test single-line header and data
+prepare q as select repeat('x',2*n) as "0123456789abcdef", repeat('y',20-2*n) as "0123456789" from generate_series(1,10) as n
+--
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 075
+execute q
+--
+STMT: ExecuteStmt
+== 076
+execute q
+--
+STMT: ExecuteStmt
+== 077
+execute q
+--
+STMT: ExecuteStmt
+== 078
+execute q
+--
+STMT: ExecuteStmt
+== 079
+execute q
+--
+STMT: ExecuteStmt
+== 080
+execute q
+--
+STMT: ExecuteStmt
+== 081
+execute q
+--
+STMT: ExecuteStmt
+== 082
+execute q
+--
+STMT: ExecuteStmt
+== 083
+execute q
+--
+STMT: ExecuteStmt
+== 084
+execute q
+--
+STMT: ExecuteStmt
+== 085
+execute q
+--
+STMT: ExecuteStmt
+== 086
+execute q
+--
+STMT: ExecuteStmt
+== 087
+execute q
+--
+STMT: ExecuteStmt
+== 088
+execute q
+--
+STMT: ExecuteStmt
+== 089
+execute q
+--
+STMT: ExecuteStmt
+== 090
+execute q
+--
+STMT: ExecuteStmt
+== 091
+execute q
+--
+STMT: ExecuteStmt
+== 092
+execute q
+--
+STMT: ExecuteStmt
+== 093
+execute q
+--
+STMT: ExecuteStmt
+== 094
+execute q
+--
+STMT: ExecuteStmt
+== 095
+execute q
+--
+STMT: ExecuteStmt
+== 096
+execute q
+--
+STMT: ExecuteStmt
+== 097
+execute q
+--
+STMT: ExecuteStmt
+== 098
+execute q
+--
+STMT: ExecuteStmt
+== 099
+execute q
+--
+STMT: ExecuteStmt
+== 100
+execute q
+--
+STMT: ExecuteStmt
+== 101
+execute q
+--
+STMT: ExecuteStmt
+== 102
+execute q
+--
+STMT: ExecuteStmt
+== 103
+execute q
+--
+STMT: ExecuteStmt
+== 104
+execute q
+--
+STMT: ExecuteStmt
+== 105
+execute q
+--
+STMT: ExecuteStmt
+== 106
+execute q
+--
+STMT: ExecuteStmt
+== 107
+execute q
+--
+STMT: ExecuteStmt
+== 108
+execute q
+--
+STMT: ExecuteStmt
+== 109
+execute q
+--
+STMT: ExecuteStmt
+== 110
+execute q
+--
+STMT: ExecuteStmt
+== 111
+execute q
+--
+STMT: ExecuteStmt
+== 112
+execute q
+--
+STMT: ExecuteStmt
+== 113
+execute q
+--
+STMT: ExecuteStmt
+== 114
+execute q
+--
+STMT: ExecuteStmt
+== 115
+execute q
+--
+STMT: ExecuteStmt
+== 116
+execute q
+--
+STMT: ExecuteStmt
+== 117
+execute q
+--
+STMT: ExecuteStmt
+== 118
+execute q
+--
+STMT: ExecuteStmt
+== 119
+execute q
+--
+STMT: ExecuteStmt
+== 120
+deallocate q
+--
+STMT: DeallocateStmt
+== 121
+-- support table for output-format tests (useful to create a footer)
+
+create table psql_serial_tab (id serial)
+--
+TABLE: name="psql_serial_tab" schema="" table="psql_serial_tab" ctx=DDL
+STMT: CreateStmt
+== 122
+-- test header/footer/tuples_only behavior in aligned/unaligned/wrapped cases
+
+
+-- empty table is a special case for this format
+select 1 where false
+--
+STMT: SelectStmt
+== 123
+-- check conditional am display
+
+CREATE SCHEMA tableam_display
+--
+STMT: CreateSchemaStmt
+== 124
+CREATE ROLE regress_display_role
+--
+STMT: CreateRoleStmt
+== 125
+ALTER SCHEMA tableam_display OWNER TO regress_display_role
+--
+STMT: AlterOwnerStmt
+== 126
+SET search_path TO tableam_display
+--
+STMT: VariableSetStmt
+== 127
+CREATE ACCESS METHOD heap_psql TYPE TABLE HANDLER heap_tableam_handler
+--
+STMT: CreateAmStmt
+== 128
+SET ROLE TO regress_display_role
+--
+STMT: VariableSetStmt
+== 129
+-- Use only relations with a physical size of zero.
+CREATE TABLE tbl_heap_psql(f1 int, f2 char(100)) using heap_psql
+--
+TABLE: name="tbl_heap_psql" schema="" table="tbl_heap_psql" ctx=DDL
+STMT: CreateStmt
+== 130
+CREATE TABLE tbl_heap(f1 int, f2 char(100)) using heap
+--
+TABLE: name="tbl_heap" schema="" table="tbl_heap" ctx=DDL
+STMT: CreateStmt
+== 131
+CREATE VIEW view_heap_psql AS SELECT f1 from tbl_heap_psql
+--
+TABLE: name="view_heap_psql" schema="" table="view_heap_psql" ctx=DDL
+TABLE: name="tbl_heap_psql" schema="" table="tbl_heap_psql" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 132
+CREATE MATERIALIZED VIEW mat_view_heap_psql USING heap_psql AS SELECT f1 from tbl_heap_psql
+--
+TABLE: name="mat_view_heap_psql" schema="" table="mat_view_heap_psql" ctx=DDL
+TABLE: name="tbl_heap_psql" schema="" table="tbl_heap_psql" ctx=Select
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 133
+-- AM is displayed for tables, indexes and materialized views.
+-- But not for views and sequences.
+RESET ROLE
+--
+STMT: VariableSetStmt
+== 134
+RESET search_path
+--
+STMT: VariableSetStmt
+== 135
+DROP SCHEMA tableam_display CASCADE
+--
+STMT: DropStmt
+== 136
+DROP ACCESS METHOD heap_psql
+--
+STMT: DropStmt
+== 137
+DROP ROLE regress_display_role
+--
+STMT: DropRoleStmt
+== 138
+-- test numericlocale (as best we can without control of psql's locale)
+
+
+select n, -n as m, n * 111 as x, '1e90'::float8 as f
+from generate_series(0,3) n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 139
+-- test asciidoc output format
+
+
+
+prepare q as
+  select 'some|text' as "a|title", '        ' as "empty ", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 140
+execute q
+--
+STMT: ExecuteStmt
+== 141
+execute q
+--
+STMT: ExecuteStmt
+== 142
+execute q
+--
+STMT: ExecuteStmt
+== 143
+execute q
+--
+STMT: ExecuteStmt
+== 144
+execute q
+--
+STMT: ExecuteStmt
+== 145
+execute q
+--
+STMT: ExecuteStmt
+== 146
+deallocate q
+--
+STMT: DeallocateStmt
+== 147
+-- test csv output format
+
+
+
+prepare q as
+  select 'some"text' as "a""title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 148
+execute q
+--
+STMT: ExecuteStmt
+== 149
+execute q
+--
+STMT: ExecuteStmt
+== 150
+deallocate q
+--
+STMT: DeallocateStmt
+== 151
+-- special cases
+select 'comma,comma' as comma, 'semi;semi' as semi
+--
+STMT: SelectStmt
+== 152
+select 'comma,comma' as comma, 'semi;semi' as semi
+--
+STMT: SelectStmt
+== 153
+select '\.' as data
+--
+STMT: SelectStmt
+== 154
+select '\' as d1, '' as d2
+--
+STMT: SelectStmt
+== 155
+-- illegal csv separators
+
+
+-- test html output format
+
+
+
+prepare q as
+  select 'some"text' as "a&title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 156
+execute q
+--
+STMT: ExecuteStmt
+== 157
+execute q
+--
+STMT: ExecuteStmt
+== 158
+execute q
+--
+STMT: ExecuteStmt
+== 159
+execute q
+--
+STMT: ExecuteStmt
+== 160
+execute q
+--
+STMT: ExecuteStmt
+== 161
+execute q
+--
+STMT: ExecuteStmt
+== 162
+deallocate q
+--
+STMT: DeallocateStmt
+== 163
+-- test latex output format
+
+
+
+prepare q as
+  select 'some\more_text' as "a$title", E'  #<foo>%&^~|\n{bar}' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 164
+execute q
+--
+STMT: ExecuteStmt
+== 165
+execute q
+--
+STMT: ExecuteStmt
+== 166
+execute q
+--
+STMT: ExecuteStmt
+== 167
+execute q
+--
+STMT: ExecuteStmt
+== 168
+execute q
+--
+STMT: ExecuteStmt
+== 169
+execute q
+--
+STMT: ExecuteStmt
+== 170
+execute q
+--
+STMT: ExecuteStmt
+== 171
+execute q
+--
+STMT: ExecuteStmt
+== 172
+deallocate q
+--
+STMT: DeallocateStmt
+== 173
+-- test latex-longtable output format
+
+
+
+prepare q as
+  select 'some\more_text' as "a$title", E'  #<foo>%&^~|\n{bar}' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 174
+execute q
+--
+STMT: ExecuteStmt
+== 175
+execute q
+--
+STMT: ExecuteStmt
+== 176
+execute q
+--
+STMT: ExecuteStmt
+== 177
+execute q
+--
+STMT: ExecuteStmt
+== 178
+execute q
+--
+STMT: ExecuteStmt
+== 179
+execute q
+--
+STMT: ExecuteStmt
+== 180
+execute q
+--
+STMT: ExecuteStmt
+== 181
+execute q
+--
+STMT: ExecuteStmt
+== 182
+execute q
+--
+STMT: ExecuteStmt
+== 183
+execute q
+--
+STMT: ExecuteStmt
+== 184
+deallocate q
+--
+STMT: DeallocateStmt
+== 185
+-- test troff-ms output format
+
+
+
+prepare q as
+  select 'some\text' as "a\title", E'  <foo>\n<bar>' as "junk",
+         '   ' as "empty", n as int
+  from generate_series(1,2) as n
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: PrepareStmt
+STMT: SelectStmt
+== 186
+execute q
+--
+STMT: ExecuteStmt
+== 187
+execute q
+--
+STMT: ExecuteStmt
+== 188
+execute q
+--
+STMT: ExecuteStmt
+== 189
+execute q
+--
+STMT: ExecuteStmt
+== 190
+execute q
+--
+STMT: ExecuteStmt
+== 191
+execute q
+--
+STMT: ExecuteStmt
+== 192
+deallocate q
+--
+STMT: DeallocateStmt
+== 193
+-- check ambiguous format requests
+
+
+-- clean up after output format tests
+
+drop table psql_serial_tab
+--
+TABLE: name="psql_serial_tab" schema="" table="psql_serial_tab" ctx=DDL
+STMT: DropStmt
+== 194
+-- \echo and allied features
+
+
+
+
+
+-- tests for \if ... \endif
+
+  select 'okay'
+--
+STMT: SelectStmt
+== 195
+select 'still okay'
+--
+STMT: SelectStmt
+== 196
+not okay
+--
+ERROR: syntax error at or near "not"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror

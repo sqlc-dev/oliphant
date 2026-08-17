@@ -1,0 +1,2560 @@
+== 001
+|--
+-- SUBSELECT
+|--
+
+SELECT 1 AS one WHERE 1 IN (SELECT 1)
+--
+STMT: SelectStmt
+== 002
+SELECT 1 AS zero WHERE 1 NOT IN (SELECT 1)
+--
+STMT: SelectStmt
+== 003
+SELECT 1 AS zero WHERE 1 IN (SELECT 2)
+--
+STMT: SelectStmt
+== 004
+-- Check grammar's handling of extra parens in assorted contexts
+
+SELECT * FROM (SELECT 1 AS x) ss
+--
+STMT: SelectStmt
+== 005
+SELECT * FROM ((SELECT 1 AS x)) ss
+--
+STMT: SelectStmt
+== 006
+SELECT * FROM ((SELECT 1 AS x)), ((SELECT * FROM ((SELECT 2 AS y))))
+--
+STMT: SelectStmt
+== 007
+(SELECT 2) UNION SELECT 2
+--
+STMT: SelectStmt
+== 008
+((SELECT 2)) UNION SELECT 2
+--
+STMT: SelectStmt
+== 009
+SELECT ((SELECT 2) UNION SELECT 2)
+--
+STMT: SelectStmt
+== 010
+SELECT (((SELECT 2)) UNION SELECT 2)
+--
+STMT: SelectStmt
+== 011
+SELECT (SELECT ARRAY[1,2,3])[1]
+--
+STMT: SelectStmt
+== 012
+SELECT ((SELECT ARRAY[1,2,3]))[2]
+--
+STMT: SelectStmt
+== 013
+SELECT (((SELECT ARRAY[1,2,3])))[3]
+--
+STMT: SelectStmt
+== 014
+-- Set up some simple test tables
+
+CREATE TABLE SUBSELECT_TBL (
+  f1 integer,
+  f2 integer,
+  f3 float
+)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DDL
+STMT: CreateStmt
+== 015
+INSERT INTO SUBSELECT_TBL VALUES (1, 2, 3)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+INSERT INTO SUBSELECT_TBL VALUES (2, 3, 4)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+INSERT INTO SUBSELECT_TBL VALUES (3, 4, 5)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 018
+INSERT INTO SUBSELECT_TBL VALUES (1, 1, 1)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+INSERT INTO SUBSELECT_TBL VALUES (2, 2, 2)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 020
+INSERT INTO SUBSELECT_TBL VALUES (3, 3, 3)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 021
+INSERT INTO SUBSELECT_TBL VALUES (6, 7, 8)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 022
+INSERT INTO SUBSELECT_TBL VALUES (8, 9, NULL)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 023
+SELECT * FROM SUBSELECT_TBL
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: SelectStmt
+== 024
+-- Uncorrelated subselects
+
+SELECT f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 025
+SELECT f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 026
+SELECT f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL))
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f2"
+STMT: SelectStmt
+== 027
+SELECT f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f2"
+FILTER: schema="" table="" column="f3"
+STMT: SelectStmt
+== 028
+-- Correlated subselects
+
+SELECT f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+ALIAS: "upper"="subselect_tbl"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="upper" column="f1"
+STMT: SelectStmt
+== 029
+SELECT f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+ALIAS: "upper"="subselect_tbl"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="upper" column="f2"
+FILTER: schema="" table="" column="f3"
+STMT: SelectStmt
+== 030
+SELECT f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer))
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+ALIAS: "upper"="subselect_tbl"
+FILTER: schema="" table="" column="f3"
+FILTER: schema="" table="" column="f2"
+FILTER: schema="" table="" column="f3"
+STMT: SelectStmt
+== 031
+SELECT f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f2"
+FILTER: schema="" table="" column="f3"
+STMT: SelectStmt
+== 032
+-- Check ROWCOMPARE cases, both correlated and not
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT ROW(1, 2) = (SELECT f1, f2) AS eq FROM SUBSELECT_TBL
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 033
+SELECT ROW(1, 2) = (SELECT f1, f2) AS eq FROM SUBSELECT_TBL
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: SelectStmt
+== 034
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT ROW(1, 2) = (SELECT 3, 4) AS eq FROM SUBSELECT_TBL
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 035
+SELECT ROW(1, 2) = (SELECT 3, 4) AS eq FROM SUBSELECT_TBL
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: SelectStmt
+== 036
+SELECT ROW(1, 2) = (SELECT f1, f2 FROM SUBSELECT_TBL)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+STMT: SelectStmt
+== 037
+-- error
+
+-- Subselects without aliases
+
+SELECT count FROM (SELECT COUNT(DISTINCT name) FROM road)
+--
+TABLE: name="road" schema="" table="road" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+SELECT COUNT(*) FROM (SELECT DISTINCT name FROM road)
+--
+TABLE: name="road" schema="" table="road" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+SELECT * FROM (SELECT * FROM int4_tbl), (VALUES (123456)) WHERE f1 = column1
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="column1"
+STMT: SelectStmt
+== 040
+CREATE VIEW view_unnamed_ss AS
+SELECT * FROM (SELECT * FROM (SELECT abs(f1) AS a1 FROM int4_tbl)),
+              (SELECT * FROM int8_tbl)
+  WHERE a1 < 10 AND q1 > a1 ORDER BY q1, q2
+--
+TABLE: name="view_unnamed_ss" schema="" table="view_unnamed_ss" ctx=DDL
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FUNCTION: name="abs" function="abs" schema="" ctx=Call
+FILTER: schema="" table="" column="a1"
+FILTER: schema="" table="" column="q1"
+FILTER: schema="" table="" column="a1"
+STMT: ViewStmt
+STMT: SelectStmt
+== 041
+SELECT * FROM view_unnamed_ss
+--
+TABLE: name="view_unnamed_ss" schema="" table="view_unnamed_ss" ctx=Select
+STMT: SelectStmt
+== 042
+DROP VIEW view_unnamed_ss
+--
+STMT: DropStmt
+== 043
+-- Test matching of locking clause to correct alias
+
+CREATE VIEW view_unnamed_ss_locking AS
+SELECT * FROM (SELECT * FROM int4_tbl), int8_tbl AS unnamed_subquery
+  WHERE f1 = q1
+  FOR UPDATE OF unnamed_subquery
+--
+TABLE: name="view_unnamed_ss_locking" schema="" table="view_unnamed_ss_locking" ctx=DDL
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "unnamed_subquery"="int8_tbl"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="q1"
+STMT: ViewStmt
+STMT: SelectStmt
+== 044
+DROP VIEW view_unnamed_ss_locking
+--
+STMT: DropStmt
+== 045
+|--
+-- Use some existing tables in the regression test
+|--
+
+SELECT ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647)
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "ss"="subselect_tbl"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="ss" column="f1"
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 046
+select q1, float8(count(*)) / (select count(*) from int8_tbl)
+from int8_tbl group by q1 order by q1
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FUNCTION: name="float8" function="float8" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 047
+-- Unspecified-type literals in output columns should resolve as text
+
+SELECT *, pg_typeof(f1) FROM
+  (SELECT 'foo' AS f1 FROM generate_series(1,3)) ss ORDER BY 1
+--
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 048
+-- ... unless there's context to suggest differently
+
+explain (verbose, costs off) select '42' union all select '43'
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 049
+explain (verbose, costs off) select '42' union all select 43
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 050
+-- check materialization of an initplan reference (bug #14524)
+explain (verbose, costs off)
+select 1 = all (select (select 1))
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 051
+select 1 = all (select (select 1))
+--
+STMT: SelectStmt
+== 052
+|--
+-- Check EXISTS simplification with LIMIT
+|--
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit null)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="int4_tbl"
+ALIAS: "o"="int4_tbl"
+FILTER: schema="" table="i" column="f1"
+FILTER: schema="" table="o" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 053
+explain (costs off)
+select * from int4_tbl o where not exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 1)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="int4_tbl"
+ALIAS: "o"="int4_tbl"
+FILTER: schema="" table="i" column="f1"
+FILTER: schema="" table="o" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 054
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 0)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="int4_tbl"
+ALIAS: "o"="int4_tbl"
+FILTER: schema="" table="i" column="f1"
+FILTER: schema="" table="o" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 055
+|--
+-- Test cases to catch unpleasant interactions between IN-join processing
+-- and subquery pullup.
+|--
+
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: SelectStmt
+== 056
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: SelectStmt
+== 057
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: SelectStmt
+== 058
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: SelectStmt
+== 059
+|--
+-- Test cases to check for overenthusiastic optimization of
+-- "IN (SELECT DISTINCT ...)" and related cases.  Per example from
+-- Luca Pireddu and Michael Fuhr.
+|--
+
+CREATE TEMP TABLE foo (id integer)
+--
+TABLE: name="foo" schema="" table="foo" ctx=DDL
+STMT: CreateStmt
+== 060
+CREATE TEMP TABLE bar (id1 integer, id2 integer)
+--
+TABLE: name="bar" schema="" table="bar" ctx=DDL
+STMT: CreateStmt
+== 061
+INSERT INTO foo VALUES (1)
+--
+TABLE: name="foo" schema="" table="foo" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+INSERT INTO bar VALUES (1, 1)
+--
+TABLE: name="bar" schema="" table="bar" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+INSERT INTO bar VALUES (2, 2)
+--
+TABLE: name="bar" schema="" table="bar" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 064
+INSERT INTO bar VALUES (3, 1)
+--
+TABLE: name="bar" schema="" table="bar" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 065
+-- These cases require an extra level of distinct-ing above subquery s
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM bar) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 066
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM bar GROUP BY id1,id2) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 067
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM bar UNION
+                      SELECT id1, id2 FROM bar) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 068
+-- These cases do not
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM bar) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 069
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM bar GROUP BY id2) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 070
+SELECT * FROM foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM bar UNION
+                      SELECT id2 FROM bar) AS s)
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+TABLE: name="bar" schema="" table="bar" ctx=Select
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+== 071
+|--
+-- Test case to catch problems with multiply nested sub-SELECTs not getting
+-- recalculated properly.  Per bug report from Didier Moens.
+|--
+
+CREATE TABLE orderstest (
+    approver_ref integer,
+    po_ref integer,
+    ordercanceled boolean
+)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DDL
+STMT: CreateStmt
+== 072
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 073
+INSERT INTO orderstest VALUES (66, 5, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 074
+INSERT INTO orderstest VALUES (66, 6, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 075
+INSERT INTO orderstest VALUES (66, 7, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 076
+INSERT INTO orderstest VALUES (66, 1, true)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 077
+INSERT INTO orderstest VALUES (66, 8, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 078
+INSERT INTO orderstest VALUES (66, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 079
+INSERT INTO orderstest VALUES (77, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 080
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 081
+INSERT INTO orderstest VALUES (66, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 082
+INSERT INTO orderstest VALUES (1, 1, false)
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 083
+CREATE VIEW orders_view AS
+SELECT *,
+(SELECT CASE
+   WHEN ord.approver_ref=1 THEN '---' ELSE 'Approved'
+ END) AS "Approved",
+(SELECT CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (SELECT CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (SELECT CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status",
+(CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status_OK"
+FROM orderstest ord
+--
+TABLE: name="orders_view" schema="" table="orders_view" ctx=DDL
+TABLE: name="orderstest" schema="" table="orderstest" ctx=Select
+ALIAS: "ord"="orderstest"
+STMT: ViewStmt
+STMT: SelectStmt
+== 084
+SELECT * FROM orders_view
+--
+TABLE: name="orders_view" schema="" table="orders_view" ctx=Select
+STMT: SelectStmt
+== 085
+DROP TABLE orderstest cascade
+--
+TABLE: name="orderstest" schema="" table="orderstest" ctx=DDL
+STMT: DropStmt
+== 086
+|--
+-- Test cases to catch situations where rule rewriter fails to propagate
+-- hasSubLinks flag correctly.  Per example from Kyle Bateman.
+|--
+
+create temp table parts (
+    partnum     text,
+    cost        float8
+)
+--
+TABLE: name="parts" schema="" table="parts" ctx=DDL
+STMT: CreateStmt
+== 087
+create temp table shipped (
+    ttype       char(2),
+    ordnum      int4,
+    partnum     text,
+    value       float8
+)
+--
+TABLE: name="shipped" schema="" table="shipped" ctx=DDL
+STMT: CreateStmt
+== 088
+create temp view shipped_view as
+    select * from shipped where ttype = 'wt'
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=DDL
+TABLE: name="shipped" schema="" table="shipped" ctx=Select
+FILTER: schema="" table="" column="ttype"
+STMT: ViewStmt
+STMT: SelectStmt
+== 089
+create rule shipped_view_insert as on insert to shipped_view do instead
+    insert into shipped values('wt', new.ordnum, new.partnum, new.value)
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=DDL
+STMT: RuleStmt
+== 090
+insert into parts (partnum, cost) values (1, 1234.56)
+--
+TABLE: name="parts" schema="" table="parts" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 091
+insert into shipped_view (ordnum, partnum, value)
+    values (0, 1, (select cost from parts where partnum = '1'))
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=DML
+TABLE: name="parts" schema="" table="parts" ctx=Select
+FILTER: schema="" table="" column="partnum"
+STMT: InsertStmt
+STMT: SelectStmt
+== 092
+select * from shipped_view
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=Select
+STMT: SelectStmt
+== 093
+create rule shipped_view_update as on update to shipped_view do instead
+    update shipped set partnum = new.partnum, value = new.value
+        where ttype = new.ttype and ordnum = new.ordnum
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=DDL
+STMT: RuleStmt
+== 094
+update shipped_view set value = 11
+    from int4_tbl a join int4_tbl b
+      on (a.f1 = (select f1 from int4_tbl c where c.f1=b.f1))
+    where ordnum = a.f1
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=DML
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "a"="int4_tbl"
+ALIAS: "b"="int4_tbl"
+ALIAS: "c"="int4_tbl"
+FILTER: schema="" table="c" column="f1"
+FILTER: schema="" table="b" column="f1"
+STMT: UpdateStmt
+STMT: SelectStmt
+== 095
+select * from shipped_view
+--
+TABLE: name="shipped_view" schema="" table="shipped_view" ctx=Select
+STMT: SelectStmt
+== 096
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "a"="int4_tbl"
+ALIAS: "b"="int4_tbl"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="a" column="f1"
+STMT: SelectStmt
+== 097
+|--
+-- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
+-- Per bug report from David Sanchez i Gregori.
+|--
+
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FILTER: schema="" table="b" column="thousand"
+FILTER: schema="" table="a" column="unique2"
+STMT: SelectStmt
+== 098
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FILTER: schema="" table="b" column="unique2"
+STMT: SelectStmt
+== 099
+|--
+-- Test that an IN implemented using a UniquePath does unique-ification
+-- with the right semantics, as per bug #4113.  (Unfortunately we have
+-- no simple way to ensure that this test case actually chooses that type
+-- of plan, but it does in releases 7.4-8.3.  Note that an ordering difference
+-- here might mean that some other plan type is being used, rendering the test
+-- pointless.)
+|--
+
+create temp table numeric_table (num_col numeric)
+--
+TABLE: name="numeric_table" schema="" table="numeric_table" ctx=DDL
+STMT: CreateStmt
+== 100
+insert into numeric_table values (1), (1.000000000000000000001), (2), (3)
+--
+TABLE: name="numeric_table" schema="" table="numeric_table" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 101
+create temp table float_table (float_col float8)
+--
+TABLE: name="float_table" schema="" table="float_table" ctx=DDL
+STMT: CreateStmt
+== 102
+insert into float_table values (1), (2), (3)
+--
+TABLE: name="float_table" schema="" table="float_table" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 103
+select * from float_table
+  where float_col in (select num_col from numeric_table)
+--
+TABLE: name="float_table" schema="" table="float_table" ctx=Select
+TABLE: name="numeric_table" schema="" table="numeric_table" ctx=Select
+FILTER: schema="" table="" column="float_col"
+STMT: SelectStmt
+== 104
+select * from numeric_table
+  where num_col in (select float_col from float_table)
+--
+TABLE: name="numeric_table" schema="" table="numeric_table" ctx=Select
+TABLE: name="float_table" schema="" table="float_table" ctx=Select
+FILTER: schema="" table="" column="num_col"
+STMT: SelectStmt
+== 105
+|--
+-- Test case for bug #4290: bogus calculation of subplan param sets
+|--
+
+create temp table ta (id int primary key, val int)
+--
+TABLE: name="ta" schema="" table="ta" ctx=DDL
+STMT: CreateStmt
+== 106
+insert into ta values(1,1)
+--
+TABLE: name="ta" schema="" table="ta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 107
+insert into ta values(2,2)
+--
+TABLE: name="ta" schema="" table="ta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 108
+create temp table tb (id int primary key, aval int)
+--
+TABLE: name="tb" schema="" table="tb" ctx=DDL
+STMT: CreateStmt
+== 109
+insert into tb values(1,1)
+--
+TABLE: name="tb" schema="" table="tb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 110
+insert into tb values(2,1)
+--
+TABLE: name="tb" schema="" table="tb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 111
+insert into tb values(3,2)
+--
+TABLE: name="tb" schema="" table="tb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 112
+insert into tb values(4,2)
+--
+TABLE: name="tb" schema="" table="tb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 113
+create temp table tc (id int primary key, aid int)
+--
+TABLE: name="tc" schema="" table="tc" ctx=DDL
+STMT: CreateStmt
+== 114
+insert into tc values(1,1)
+--
+TABLE: name="tc" schema="" table="tc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 115
+insert into tc values(2,2)
+--
+TABLE: name="tc" schema="" table="tc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 116
+select
+  ( select min(tb.id) from tb
+    where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
+from tc
+--
+TABLE: name="tc" schema="" table="tc" ctx=Select
+TABLE: name="tb" schema="" table="tb" ctx=Select
+TABLE: name="ta" schema="" table="ta" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FILTER: schema="" table="tb" column="aval"
+FILTER: schema="" table="ta" column="id"
+FILTER: schema="" table="tc" column="aid"
+STMT: SelectStmt
+== 117
+|--
+-- Test case for 8.3 "failed to locate grouping columns" bug
+|--
+
+create temp table t1 (f1 numeric(14,0), f2 varchar(30))
+--
+TABLE: name="t1" schema="" table="t1" ctx=DDL
+STMT: CreateStmt
+== 118
+select * from
+  (select distinct f1, f2, (select f2 from t1 x where x.f1 = up.f1) as fs
+   from t1 up) ss
+group by f1,f2,fs
+--
+TABLE: name="t1" schema="" table="t1" ctx=Select
+TABLE: name="t1" schema="" table="t1" ctx=Select
+ALIAS: "up"="t1"
+ALIAS: "x"="t1"
+FILTER: schema="" table="x" column="f1"
+FILTER: schema="" table="up" column="f1"
+STMT: SelectStmt
+== 119
+|--
+-- Test case for bug #5514 (mishandling of whole-row Vars in subselects)
+|--
+
+create temp table table_a(id integer)
+--
+TABLE: name="table_a" schema="" table="table_a" ctx=DDL
+STMT: CreateStmt
+== 120
+insert into table_a values (42)
+--
+TABLE: name="table_a" schema="" table="table_a" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 121
+create temp view view_a as select * from table_a
+--
+TABLE: name="view_a" schema="" table="view_a" ctx=DDL
+TABLE: name="table_a" schema="" table="table_a" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 122
+select view_a from view_a
+--
+TABLE: name="view_a" schema="" table="view_a" ctx=Select
+STMT: SelectStmt
+== 123
+select (select view_a) from view_a
+--
+TABLE: name="view_a" schema="" table="view_a" ctx=Select
+STMT: SelectStmt
+== 124
+select (select (select view_a)) from view_a
+--
+TABLE: name="view_a" schema="" table="view_a" ctx=Select
+STMT: SelectStmt
+== 125
+select (select (a.*)::text) from view_a a
+--
+TABLE: name="view_a" schema="" table="view_a" ctx=Select
+ALIAS: "a"="view_a"
+STMT: SelectStmt
+== 126
+|--
+-- Test case for bug #19037: no relation entry for relid N
+|--
+
+explain (costs off)
+select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 127
+select (1 = any(array_agg(f1))) = any (select false) from int4_tbl
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 128
+|--
+-- Check that whole-row Vars reading the result of a subselect don't include
+-- any junk columns therein
+|--
+
+select q from (select max(f1) from int4_tbl group by f1 order by f1) q
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 129
+with q as (select max(f1) from int4_tbl group by f1 order by f1)
+  select q from q
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "q"
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 130
+|--
+-- Test case for sublinks pulled up into joinaliasvars lists in an
+-- inherited update/delete query
+|--
+
+begin
+--
+STMT: TransactionStmt
+== 131
+--  this shouldn't delete anything, but be safe
+
+delete from road
+where exists (
+  select 1
+  from
+    int4_tbl cross join
+    ( select f1, array(select q1 from int8_tbl) as arr
+      from text_tbl ) ss
+  where road.name = ss.f1 )
+--
+TABLE: name="road" schema="" table="road" ctx=DML
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="text_tbl" schema="" table="text_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FILTER: schema="" table="road" column="name"
+FILTER: schema="" table="ss" column="f1"
+STMT: DeleteStmt
+STMT: SelectStmt
+== 132
+rollback
+--
+STMT: TransactionStmt
+== 133
+|--
+-- Test case for sublinks pushed down into subselects via join alias expansion
+|--
+
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = q2) as sq1, 42 as dummy
+   from int8_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="q2"
+STMT: SelectStmt
+== 134
+|--
+-- Test case for subselect within UPDATE of INSERT...ON CONFLICT DO UPDATE
+|--
+create temp table upsert(key int4 primary key, val text)
+--
+TABLE: name="upsert" schema="" table="upsert" ctx=DDL
+STMT: CreateStmt
+== 135
+insert into upsert values(1, 'val') on conflict (key) do update set val = 'not seen'
+--
+TABLE: name="upsert" schema="" table="upsert" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 136
+insert into upsert values(1, 'val') on conflict (key) do update set val = 'seen with subselect ' || (select f1 from int4_tbl where f1 != 0 limit 1)::text
+--
+TABLE: name="upsert" schema="" table="upsert" ctx=DML
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: InsertStmt
+STMT: SelectStmt
+== 137
+select * from upsert
+--
+TABLE: name="upsert" schema="" table="upsert" ctx=Select
+STMT: SelectStmt
+== 138
+with aa as (select 'int4_tbl' u from int4_tbl limit 1)
+insert into upsert values (1, 'x'), (999, 'y')
+on conflict (key) do update set val = (select u from aa)
+returning *
+--
+TABLE: name="upsert" schema="" table="upsert" ctx=DML
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "aa"
+STMT: InsertStmt
+STMT: SelectStmt
+== 139
+|--
+-- Test case for cross-type partial matching in hashed subplan (bug #7597)
+|--
+
+create temp table outer_7597 (f1 int4, f2 int4)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=DDL
+STMT: CreateStmt
+== 140
+insert into outer_7597 values (0, 0)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 141
+insert into outer_7597 values (1, 0)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 142
+insert into outer_7597 values (0, null)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 143
+insert into outer_7597 values (1, null)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 144
+create temp table inner_7597(c1 int8, c2 int8)
+--
+TABLE: name="inner_7597" schema="" table="inner_7597" ctx=DDL
+STMT: CreateStmt
+== 145
+insert into inner_7597 values(0, null)
+--
+TABLE: name="inner_7597" schema="" table="inner_7597" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 146
+select * from outer_7597 where (f1, f2) not in (select * from inner_7597)
+--
+TABLE: name="outer_7597" schema="" table="outer_7597" ctx=Select
+TABLE: name="inner_7597" schema="" table="inner_7597" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f2"
+STMT: SelectStmt
+== 147
+|--
+-- Similar test case using text that verifies that collation
+-- information is passed through by execTuplesEqual() in nodeSubplan.c
+-- (otherwise it would error in texteq())
+|--
+
+create temp table outer_text (f1 text, f2 text)
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=DDL
+STMT: CreateStmt
+== 148
+insert into outer_text values ('a', 'a')
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 149
+insert into outer_text values ('b', 'a')
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 150
+insert into outer_text values ('a', null)
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 151
+insert into outer_text values ('b', null)
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 152
+create temp table inner_text (c1 text, c2 text)
+--
+TABLE: name="inner_text" schema="" table="inner_text" ctx=DDL
+STMT: CreateStmt
+== 153
+insert into inner_text values ('a', null)
+--
+TABLE: name="inner_text" schema="" table="inner_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 154
+insert into inner_text values ('123', '456')
+--
+TABLE: name="inner_text" schema="" table="inner_text" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 155
+select * from outer_text where (f1, f2) not in (select * from inner_text)
+--
+TABLE: name="outer_text" schema="" table="outer_text" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f2"
+STMT: SelectStmt
+== 156
+|--
+-- Another test case for cross-type hashed subplans: comparison of
+-- inner-side values must be done with appropriate operator
+|--
+
+explain (verbose, costs off)
+select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 157
+select 'foo'::text in (select 'bar'::name union all select 'bar'::name)
+--
+STMT: SelectStmt
+== 158
+|--
+-- Test that we don't try to hash nested records (bug #17363)
+-- (Hashing could be supported, but for now we don't)
+|--
+
+explain (verbose, costs off)
+select row(row(row(1))) = any (select row(row(1)))
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 159
+select row(row(row(1))) = any (select row(row(1)))
+--
+STMT: SelectStmt
+== 160
+|--
+-- Test case for premature memory release during hashing of subplan output
+|--
+
+select '1'::text in (select '1'::name union all select '1'::name)
+--
+STMT: SelectStmt
+== 161
+|--
+-- Test that we don't try to use a hashed subplan if the simplified
+-- testexpr isn't of the right shape
+|--
+
+-- this fails by default, of course
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: SelectStmt
+== 162
+begin
+--
+STMT: TransactionStmt
+== 163
+-- make an operator to allow it to succeed
+create function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $1::text = $2'
+--
+FUNCTION: name="bogus_int8_text_eq" function="bogus_int8_text_eq" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 164
+create operator = (procedure=bogus_int8_text_eq, leftarg=int8, rightarg=text)
+--
+STMT: DefineStmt
+== 165
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 166
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: SelectStmt
+== 167
+-- inlining of this function results in unusual number of hash clauses,
+-- which we can still cope with
+create or replace function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $1::text = $2 and $1::text = $2'
+--
+FUNCTION: name="bogus_int8_text_eq" function="bogus_int8_text_eq" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 168
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 169
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: SelectStmt
+== 170
+-- inlining of this function causes LHS and RHS to be switched,
+-- which we can't cope with, so hashing should be abandoned
+create or replace function bogus_int8_text_eq(int8, text) returns boolean
+language sql as 'select $2 = $1::text'
+--
+FUNCTION: name="bogus_int8_text_eq" function="bogus_int8_text_eq" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 171
+explain (costs off)
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 172
+select * from int8_tbl where q1 in (select c1 from inner_text)
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="inner_text" schema="" table="inner_text" ctx=Select
+FILTER: schema="" table="" column="q1"
+STMT: SelectStmt
+== 173
+rollback
+--
+STMT: TransactionStmt
+== 174
+-- to get rid of the bogus operator
+
+|--
+-- Test resolution of hashed vs non-hashed implementation of EXISTS subplan
+|--
+explain (costs off)
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "k"="tenk1"
+ALIAS: "t"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="k" column="unique1"
+FILTER: schema="" table="t" column="unique2"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 175
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "k"="tenk1"
+ALIAS: "t"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="k" column="unique1"
+FILTER: schema="" table="t" column="unique2"
+STMT: SelectStmt
+== 176
+explain (costs off)
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+  and thousand = 1
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "k"="tenk1"
+ALIAS: "t"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="k" column="unique1"
+FILTER: schema="" table="t" column="unique2"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 177
+select count(*) from tenk1 t
+where (exists(select 1 from tenk1 k where k.unique1 = t.unique2) or ten < 0)
+  and thousand = 1
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "k"="tenk1"
+ALIAS: "t"="tenk1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="k" column="unique1"
+FILTER: schema="" table="t" column="unique2"
+STMT: SelectStmt
+== 178
+-- It's possible for the same EXISTS to get resolved both ways
+create temp table exists_tbl (c1 int, c2 int, c3 int) partition by list (c1)
+--
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=DDL
+STMT: CreateStmt
+== 179
+create temp table exists_tbl_null partition of exists_tbl for values in (null)
+--
+TABLE: name="exists_tbl_null" schema="" table="exists_tbl_null" ctx=DDL
+STMT: CreateStmt
+== 180
+create temp table exists_tbl_def partition of exists_tbl default
+--
+TABLE: name="exists_tbl_def" schema="" table="exists_tbl_def" ctx=DDL
+STMT: CreateStmt
+== 181
+insert into exists_tbl select x, x/2, x+1 from generate_series(0,10) x
+--
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 182
+analyze exists_tbl
+--
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=DDL
+STMT: VacuumStmt
+== 183
+explain (costs off)
+select * from exists_tbl t1
+  where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
+--
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=Select
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=Select
+ALIAS: "t1"="exists_tbl"
+ALIAS: "t2"="exists_tbl"
+FILTER: schema="" table="t1" column="c1"
+FILTER: schema="" table="t2" column="c2"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 184
+select * from exists_tbl t1
+  where (exists(select 1 from exists_tbl t2 where t1.c1 = t2.c2) or c3 < 0)
+--
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=Select
+TABLE: name="exists_tbl" schema="" table="exists_tbl" ctx=Select
+ALIAS: "t1"="exists_tbl"
+ALIAS: "t2"="exists_tbl"
+FILTER: schema="" table="t1" column="c1"
+FILTER: schema="" table="t2" column="c2"
+STMT: SelectStmt
+== 185
+|--
+-- Test case for planner bug with nested EXISTS handling
+|--
+select a.thousand from tenk1 a, tenk1 b
+where a.thousand = b.thousand
+  and exists ( select 1 from tenk1 c where b.hundred = c.hundred
+                   and not exists ( select 1 from tenk1 d
+                                    where a.thousand = d.thousand ) )
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+ALIAS: "c"="tenk1"
+ALIAS: "d"="tenk1"
+FILTER: schema="" table="a" column="thousand"
+FILTER: schema="" table="b" column="thousand"
+FILTER: schema="" table="b" column="hundred"
+FILTER: schema="" table="c" column="hundred"
+FILTER: schema="" table="a" column="thousand"
+FILTER: schema="" table="d" column="thousand"
+STMT: SelectStmt
+== 186
+|--
+-- Check that nested sub-selects are not pulled up if they contain volatiles
+|--
+explain (verbose, costs off)
+  select x, x from
+    (select (select now()) as x from (values(1),(2)) v(y)) ss
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 187
+explain (verbose, costs off)
+  select x, x from
+    (select (select random()) as x from (values(1),(2)) v(y)) ss
+--
+FUNCTION: name="random" function="random" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 188
+explain (verbose, costs off)
+  select x, x from
+    (select (select now() where y=y) as x from (values(1),(2)) v(y)) ss
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+FILTER: schema="" table="" column="y"
+FILTER: schema="" table="" column="y"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 189
+explain (verbose, costs off)
+  select x, x from
+    (select (select random() where y=y) as x from (values(1),(2)) v(y)) ss
+--
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="" column="y"
+FILTER: schema="" table="" column="y"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 190
+|--
+-- Test rescan of a hashed subplan (the use of random() is to prevent the
+-- sub-select from being pulled up, which would result in not hashing)
+|--
+explain (verbose, costs off)
+select sum(ss.tst::int) from
+  onek o cross join lateral (
+  select i.ten in (select f1 from int4_tbl where f1 <= o.hundred) as tst,
+         random() as r
+  from onek i where i.unique1 = o.unique1 ) ss
+where o.ten = 0
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="onek"
+ALIAS: "o"="onek"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="i" column="unique1"
+FILTER: schema="" table="o" column="unique1"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="o" column="hundred"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 191
+select sum(ss.tst::int) from
+  onek o cross join lateral (
+  select i.ten in (select f1 from int4_tbl where f1 <= o.hundred) as tst,
+         random() as r
+  from onek i where i.unique1 = o.unique1 ) ss
+where o.ten = 0
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="onek"
+ALIAS: "o"="onek"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="i" column="unique1"
+FILTER: schema="" table="o" column="unique1"
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="o" column="hundred"
+STMT: SelectStmt
+== 192
+|--
+-- Test rescan of a SetOp node
+|--
+explain (costs off)
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "i1"="onek"
+ALIAS: "i2"="onek"
+ALIAS: "o"="onek"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="i1" column="unique1"
+FILTER: schema="" table="o" column="unique1"
+FILTER: schema="" table="i2" column="unique1"
+FILTER: schema="" table="o" column="unique2"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 193
+select count(*) from
+  onek o cross join lateral (
+    select * from onek i1 where i1.unique1 = o.unique1
+    except
+    select * from onek i2 where i2.unique1 = o.unique2
+  ) ss
+where o.ten = 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "i1"="onek"
+ALIAS: "i2"="onek"
+ALIAS: "o"="onek"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="i1" column="unique1"
+FILTER: schema="" table="o" column="unique1"
+FILTER: schema="" table="i2" column="unique1"
+FILTER: schema="" table="o" column="unique2"
+STMT: SelectStmt
+== 194
+|--
+-- Test rescan of a RecursiveUnion node
+|--
+explain (costs off)
+select sum(o.four), sum(ss.a) from
+  onek o cross join lateral (
+    with recursive x(a) as
+      (select o.four as a
+       union
+       select a + 1 from x
+       where a < 10)
+    select * from x
+  ) ss
+where o.ten = 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "o"="onek"
+CTE: "x"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 195
+select sum(o.four), sum(ss.a) from
+  onek o cross join lateral (
+    with recursive x(a) as
+      (select o.four as a
+       union
+       select a + 1 from x
+       where a < 10)
+    select * from x
+  ) ss
+where o.ten = 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "o"="onek"
+CTE: "x"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="o" column="ten"
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 196
+|--
+-- Check we don't misoptimize a NOT IN where the subquery returns no rows.
+|--
+create temp table notinouter (a int)
+--
+TABLE: name="notinouter" schema="" table="notinouter" ctx=DDL
+STMT: CreateStmt
+== 197
+create temp table notininner (b int not null)
+--
+TABLE: name="notininner" schema="" table="notininner" ctx=DDL
+STMT: CreateStmt
+== 198
+insert into notinouter values (null), (1)
+--
+TABLE: name="notinouter" schema="" table="notinouter" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 199
+select * from notinouter where a not in (select b from notininner)
+--
+TABLE: name="notinouter" schema="" table="notinouter" ctx=Select
+TABLE: name="notininner" schema="" table="notininner" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 200
+|--
+-- Check we behave sanely in corner case of empty SELECT list (bug #8648)
+|--
+create temp table nocolumns()
+--
+TABLE: name="nocolumns" schema="" table="nocolumns" ctx=DDL
+STMT: CreateStmt
+== 201
+select exists(select * from nocolumns)
+--
+TABLE: name="nocolumns" schema="" table="nocolumns" ctx=Select
+STMT: SelectStmt
+== 202
+|--
+-- Check behavior with a SubPlan in VALUES (bug #14924)
+|--
+select val.x
+  from generate_series(1,10) as s(i),
+  lateral (
+    values ((select s.i + 1)), (s.i + 101)
+  ) as val(x)
+where s.i < 10 and (select val.x) < 110
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="s" column="i"
+STMT: SelectStmt
+== 203
+-- another variant of that (bug #16213)
+explain (verbose, costs off)
+select * from
+(values
+  (3 not in (select * from (values (1), (2)) ss1)),
+  (false)
+) ss
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 204
+select * from
+(values
+  (3 not in (select * from (values (1), (2)) ss1)),
+  (false)
+) ss
+--
+STMT: SelectStmt
+== 205
+|--
+-- Check sane behavior with nested IN SubLinks
+|--
+explain (verbose, costs off)
+select * from int4_tbl where
+  (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
+  (select ten from tenk1 b)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 206
+select * from int4_tbl where
+  (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
+  (select ten from tenk1 b)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 207
+|--
+-- Check for incorrect optimization when IN subquery contains a SRF
+|--
+explain (verbose, costs off)
+select * from int4_tbl o where (f1, f1) in
+  (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="int4_tbl"
+ALIAS: "o"="int4_tbl"
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 208
+select * from int4_tbl o where (f1, f1) in
+  (select f1, generate_series(1,50) / 10 g from int4_tbl i group by f1)
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i"="int4_tbl"
+ALIAS: "o"="int4_tbl"
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 209
+|--
+-- check for over-optimization of whole-row Var referencing an Append plan
+|--
+select (select q from
+         (select 1,2,3 where f1 > 0
+          union all
+          select 4,5,6.0 where f1 <= 0
+         ) q )
+from int4_tbl
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+FILTER: schema="" table="" column="f1"
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 210
+|--
+-- Check for sane handling of a lateral reference in a subquery's quals
+-- (most of the complication here is to prevent the test case from being
+-- flattened too much)
+|--
+explain (verbose, costs off)
+select * from
+    int4_tbl i4,
+    lateral (
+        select i4.f1 > 1 as b, 1 as id
+        from (select random() order by 1) as t1
+      union all
+        select true as b, 2 as id
+    ) as t2
+where b and f1 >= 0
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 211
+select * from
+    int4_tbl i4,
+    lateral (
+        select i4.f1 > 1 as b, 1 as id
+        from (select random() order by 1) as t1
+      union all
+        select true as b, 2 as id
+    ) as t2
+where b and f1 >= 0
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="" column="b"
+FILTER: schema="" table="" column="f1"
+STMT: SelectStmt
+== 212
+|--
+-- Check that volatile quals aren't pushed down past a DISTINCT:
+-- nextval() should not be called more than the nominal number of times
+|--
+create temp sequence ts1
+--
+STMT: CreateSeqStmt
+== 213
+select * from
+  (select distinct ten from tenk1) ss
+  where ten < 10 + nextval('ts1')
+  order by 1
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="nextval" function="nextval" schema="" ctx=Call
+FUNCTION: name="nextval" function="nextval" schema="" ctx=Call
+FILTER: schema="" table="" column="ten"
+STMT: SelectStmt
+== 214
+select nextval('ts1')
+--
+FUNCTION: name="nextval" function="nextval" schema="" ctx=Call
+STMT: SelectStmt
+== 215
+|--
+-- Check that volatile quals aren't pushed down past a set-returning function;
+-- while a nonvolatile qual can be, if it doesn't reference the SRF.
+|--
+create function tattle(x int, y int) returns bool
+volatile language plpgsql as $$
+begin
+  raise notice 'x = %, y = %', x, y;
+  return x > y;
+end$$
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 216
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 217
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+STMT: SelectStmt
+== 218
+-- if we pretend it's stable, we get different results:
+alter function tattle(x int, y int) stable
+--
+STMT: AlterFunctionStmt
+== 219
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 220
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, 8)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+STMT: SelectStmt
+== 221
+-- although even a stable qual should not be pushed down if it references SRF
+explain (verbose, costs off)
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, u)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+FILTER: schema="" table="" column="u"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 222
+select * from
+  (select 9 as x, unnest(array[1,2,3,11,12,13]) as u) ss
+  where tattle(x, u)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="tattle" function="tattle" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+FILTER: schema="" table="" column="u"
+STMT: SelectStmt
+== 223
+drop function tattle(x int, y int)
+--
+FUNCTION: name="tattle" function="tattle" schema="" ctx=DDL
+STMT: DropStmt
+== 224
+|--
+-- Test that LIMIT can be pushed to SORT through a subquery that just projects
+-- columns.  We check for that having happened by looking to see if EXPLAIN
+-- ANALYZE shows that a top-N sort was used.  We must suppress or filter away
+-- all the non-invariant parts of the EXPLAIN ANALYZE output.
+|--
+create table sq_limit (pk int primary key, c1 int, c2 int)
+--
+TABLE: name="sq_limit" schema="" table="sq_limit" ctx=DDL
+STMT: CreateStmt
+== 225
+insert into sq_limit values
+    (1, 1, 1),
+    (2, 2, 2),
+    (3, 3, 3),
+    (4, 4, 4),
+    (5, 1, 1),
+    (6, 2, 2),
+    (7, 3, 3),
+    (8, 4, 4)
+--
+TABLE: name="sq_limit" schema="" table="sq_limit" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 226
+create function explain_sq_limit() returns setof text language plpgsql as
+$$
+declare ln text;
+begin
+    for ln in
+        explain (analyze, summary off, timing off, costs off)
+        select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
+    loop
+        ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
+        return next ln;
+    end loop;
+end;
+$$
+--
+FUNCTION: name="explain_sq_limit" function="explain_sq_limit" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 227
+select * from explain_sq_limit()
+--
+FUNCTION: name="explain_sq_limit" function="explain_sq_limit" schema="" ctx=Call
+STMT: SelectStmt
+== 228
+select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
+--
+TABLE: name="sq_limit" schema="" table="sq_limit" ctx=Select
+STMT: SelectStmt
+== 229
+drop function explain_sq_limit()
+--
+FUNCTION: name="explain_sq_limit" function="explain_sq_limit" schema="" ctx=DDL
+STMT: DropStmt
+== 230
+drop table sq_limit
+--
+TABLE: name="sq_limit" schema="" table="sq_limit" ctx=DDL
+STMT: DropStmt
+== 231
+|--
+-- Ensure that backward scan direction isn't propagated into
+-- expression subqueries (bug #15336)
+|--
+
+begin
+--
+STMT: TransactionStmt
+== 232
+declare c1 scroll cursor for
+ select * from generate_series(1,4) i
+  where i <> all (values (2),(3))
+--
+STMT: DeclareCursorStmt
+== 233
+move forward all in c1
+--
+STMT: FetchStmt
+== 234
+fetch backward all in c1
+--
+STMT: FetchStmt
+== 235
+commit
+--
+STMT: TransactionStmt
+== 236
+|--
+-- Check that JsonConstructorExpr is treated as non-strict, and thus can be
+-- wrapped in a PlaceHolderVar
+|--
+
+begin
+--
+STMT: TransactionStmt
+== 237
+create temp table json_tab (a int)
+--
+TABLE: name="json_tab" schema="" table="json_tab" ctx=DDL
+STMT: CreateStmt
+== 238
+insert into json_tab values (1)
+--
+TABLE: name="json_tab" schema="" table="json_tab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 239
+explain (verbose, costs off)
+select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
+--
+TABLE: name="json_tab" schema="" table="json_tab" ctx=Select
+TABLE: name="json_tab" schema="" table="json_tab" ctx=Select
+ALIAS: "t1"="json_tab"
+ALIAS: "t2"="json_tab"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 240
+select * from json_tab t1 left join (select json_array(1, a) from json_tab t2) s on false
+--
+TABLE: name="json_tab" schema="" table="json_tab" ctx=Select
+TABLE: name="json_tab" schema="" table="json_tab" ctx=Select
+ALIAS: "t1"="json_tab"
+ALIAS: "t2"="json_tab"
+STMT: SelectStmt
+== 241
+rollback
+--
+STMT: TransactionStmt
+== 242
+|--
+-- Verify that we correctly flatten cases involving a subquery output
+-- expression that doesn't need to be wrapped in a PlaceHolderVar
+|--
+
+explain (costs off)
+select tname, attname from (
+select relname::information_schema.sql_identifier as tname, * from
+  (select * from pg_class c) ss1) ss2
+  right join pg_attribute a on a.attrelid = ss2.oid
+where tname = 'tenk1' and attnum = 1
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "a"="pg_attribute"
+ALIAS: "c"="pg_class"
+FILTER: schema="" table="" column="tname"
+FILTER: schema="" table="" column="attnum"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 243
+select tname, attname from (
+select relname::information_schema.sql_identifier as tname, * from
+  (select * from pg_class c) ss1) ss2
+  right join pg_attribute a on a.attrelid = ss2.oid
+where tname = 'tenk1' and attnum = 1
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+ALIAS: "a"="pg_attribute"
+ALIAS: "c"="pg_class"
+FILTER: schema="" table="" column="tname"
+FILTER: schema="" table="" column="attnum"
+STMT: SelectStmt
+== 244
+-- Check behavior when there's a lateral reference in the output expression
+explain (verbose, costs off)
+select t1.ten, sum(x) from
+  tenk1 t1 left join lateral (
+    select t1.ten + t2.ten as x, t2.fivethous from tenk1 t2
+  ) ss on t1.unique1 = ss.fivethous
+group by t1.ten
+order by t1.ten
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 245
+select t1.ten, sum(x) from
+  tenk1 t1 left join lateral (
+    select t1.ten + t2.ten as x, t2.fivethous from tenk1 t2
+  ) ss on t1.unique1 = ss.fivethous
+group by t1.ten
+order by t1.ten
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "t1"="tenk1"
+ALIAS: "t2"="tenk1"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 246
+explain (verbose, costs off)
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+t3.q1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "t1"="int8_tbl"
+ALIAS: "t2"="int8_tbl"
+ALIAS: "t3"="int8_tbl"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 247
+select t1.q1, x from
+  int8_tbl t1 left join
+  (int8_tbl t2 left join
+   lateral (select t2.q1+t3.q1 as x, * from int8_tbl t3) t3 on t2.q2 = t3.q2)
+  on t1.q2 = t2.q2
+order by 1, 2
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "t1"="int8_tbl"
+ALIAS: "t2"="int8_tbl"
+ALIAS: "t3"="int8_tbl"
+STMT: SelectStmt
+== 248
+|--
+-- Tests for CTE inlining behavior
+|--
+
+-- Basic subquery that can be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 249
+-- Explicitly request materialization
+explain (verbose, costs off)
+with x as materialized (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 250
+-- Stable functions are safe to inline
+explain (verbose, costs off)
+with x as (select * from (select f1, now() from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+FUNCTION: name="now" function="now" schema="" ctx=Call
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 251
+-- Volatile functions prevent inlining
+explain (verbose, costs off)
+with x as (select * from (select f1, random() from subselect_tbl) ss)
+select * from x where f1 = 1
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 252
+-- SELECT FOR UPDATE cannot be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl for update) ss)
+select * from x where f1 = 1
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 253
+-- Multiply-referenced CTEs are inlined only when requested
+explain (verbose, costs off)
+with x as (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+ALIAS: "x2"="x"
+CTE: "x"
+FUNCTION: name="now" function="now" schema="" ctx=Call
+FILTER: schema="" table="x" column="n"
+FILTER: schema="" table="x2" column="n"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 254
+explain (verbose, costs off)
+with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+ALIAS: "x2"="x"
+CTE: "x"
+FUNCTION: name="now" function="now" schema="" ctx=Call
+FILTER: schema="" table="x" column="n"
+FILTER: schema="" table="x2" column="n"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 255
+-- Multiply-referenced CTEs can't be inlined if they contain outer self-refs
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x
+--
+ALIAS: "z1"="z"
+CTE: "x"
+CTE: "z"
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FILTER: schema="" table="z" column="a"
+FILTER: schema="" table="z1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 256
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x
+--
+ALIAS: "z1"="z"
+CTE: "x"
+CTE: "z"
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FILTER: schema="" table="z" column="a"
+FILTER: schema="" table="z1" column="a"
+STMT: SelectStmt
+== 257
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x
+--
+CTE: "x"
+CTE: "z"
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FILTER: schema="" table="z" column="a"
+FILTER: schema="" table="z" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 258
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x
+--
+CTE: "x"
+CTE: "z"
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FILTER: schema="" table="z" column="a"
+FILTER: schema="" table="z" column="a"
+STMT: SelectStmt
+== 259
+-- Check handling of outer references
+explain (verbose, costs off)
+with x as (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "y"
+CTE: "x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 260
+explain (verbose, costs off)
+with x as materialized (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "y"
+CTE: "x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 261
+-- Ensure that we inline the correct CTE when there are
+-- multiple CTEs with the same name
+explain (verbose, costs off)
+with x as (select 1 as y)
+select * from (with x as (select 2 as y) select * from x) ss
+--
+CTE: "x"
+CTE: "x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 262
+-- Row marks are not pushed into CTEs
+explain (verbose, costs off)
+with x as (select * from subselect_tbl)
+select * from x for update
+--
+TABLE: name="subselect_tbl" schema="" table="subselect_tbl" ctx=Select
+CTE: "x"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 263
+-- Pull up direct-correlated ANY_SUBLINKs
+explain (costs off)
+select * from tenk1 A where hundred in (select hundred from tenk2 B where B.odd = A.odd)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+FILTER: schema="" table="" column="hundred"
+FILTER: schema="" table="b" column="odd"
+FILTER: schema="" table="a" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 264
+explain (costs off)
+select * from tenk1 A where exists
+(select 1 from tenk2 B
+where A.hundred in (select C.hundred FROM tenk2 C
+WHERE c.odd = b.odd))
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FILTER: schema="" table="a" column="hundred"
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="b" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 265
+-- we should only try to pull up the sublink into RHS of a left join
+-- but a.hundred is not available.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="b" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 266
+-- we should only try to pull up the sublink into RHS of a left join
+-- but a.odd is not available for this.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = a.odd)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="a" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 267
+-- should be able to pull up since all the references are available.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="b" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 268
+-- we can pull up the sublink into the inner JoinExpr.
+explain (costs off)
+SELECT * FROM tenk1 A INNER JOIN tenk2 B
+ON A.hundred in (SELECT c.hundred FROM tenk2 C WHERE c.odd = b.odd)
+WHERE a.thousand < 750
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FILTER: schema="" table="a" column="thousand"
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="b" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 269
+-- we can pull up the aggregate sublink into RHS of a left join.
+explain (costs off)
+SELECT * FROM tenk1 A LEFT JOIN tenk2 B
+ON B.hundred in (SELECT min(c.hundred) FROM tenk2 C WHERE c.odd = b.odd)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+TABLE: name="tenk2" schema="" table="tenk2" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk2"
+ALIAS: "c"="tenk2"
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FILTER: schema="" table="c" column="odd"
+FILTER: schema="" table="b" column="odd"
+STMT: ExplainStmt
+STMT: SelectStmt

@@ -1,0 +1,342 @@
+== 001
+CREATE TABLE test_replica_identity (
+       id serial primary key,
+       keya text not null,
+       keyb text not null,
+       nonkey text,
+       CONSTRAINT test_replica_identity_unique_defer UNIQUE (keya, keyb) DEFERRABLE,
+       CONSTRAINT test_replica_identity_unique_nondefer UNIQUE (keya, keyb)
+)
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: CreateStmt
+== 002
+CREATE TABLE test_replica_identity_othertable (id serial primary key)
+--
+TABLE: name="test_replica_identity_othertable" schema="" table="test_replica_identity_othertable" ctx=DDL
+STMT: CreateStmt
+== 003
+CREATE TABLE test_replica_identity_t3 (id serial constraint pk primary key deferrable)
+--
+TABLE: name="test_replica_identity_t3" schema="" table="test_replica_identity_t3" ctx=DDL
+STMT: CreateStmt
+== 004
+CREATE INDEX test_replica_identity_keyab ON test_replica_identity (keya, keyb)
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 005
+CREATE UNIQUE INDEX test_replica_identity_keyab_key ON test_replica_identity (keya, keyb)
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 006
+CREATE UNIQUE INDEX test_replica_identity_nonkey ON test_replica_identity (keya, nonkey)
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 007
+CREATE INDEX test_replica_identity_hash ON test_replica_identity USING hash (nonkey)
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 008
+CREATE UNIQUE INDEX test_replica_identity_expr ON test_replica_identity (keya, keyb, (3))
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 009
+CREATE UNIQUE INDEX test_replica_identity_partial ON test_replica_identity (keya, keyb) WHERE keyb != '3'
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: IndexStmt
+== 010
+-- default is 'd'/DEFAULT for user created tables
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 011
+-- but 'none' for system tables
+SELECT relreplident FROM pg_class WHERE oid = 'pg_class'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 012
+SELECT relreplident FROM pg_class WHERE oid = 'pg_constraint'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 013
+----
+-- Make sure we detect ineligible indexes
+----
+
+-- fail, not unique
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 014
+-- fail, not a candidate key, nullable column
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_nonkey
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 015
+-- fail, hash indexes cannot do uniqueness
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_hash
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 016
+-- fail, expression index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_expr
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 017
+-- fail, partial index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_partial
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 018
+-- fail, not our index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_othertable_pkey
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 019
+-- fail, deferrable
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_unique_defer
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 020
+-- fail, deferrable
+ALTER TABLE test_replica_identity_t3 REPLICA IDENTITY USING INDEX pk
+--
+TABLE: name="test_replica_identity_t3" schema="" table="test_replica_identity_t3" ctx=DDL
+STMT: AlterTableStmt
+== 021
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 022
+----
+-- Make sure index cases succeed
+----
+
+-- succeed, primary key
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_pkey
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 023
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 024
+-- succeed, nondeferrable unique constraint over nonnullable cols
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_unique_nondefer
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 025
+-- succeed unique index over nonnullable cols
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab_key
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 026
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab_key
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 027
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 028
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="indrelid"
+FILTER: schema="" table="" column="indisreplident"
+STMT: SelectStmt
+== 029
+----
+-- Make sure non index cases work
+----
+ALTER TABLE test_replica_identity REPLICA IDENTITY DEFAULT
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 030
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 031
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident
+--
+TABLE: name="pg_index" schema="" table="pg_index" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="indrelid"
+FILTER: schema="" table="" column="indisreplident"
+STMT: SelectStmt
+== 032
+ALTER TABLE test_replica_identity REPLICA IDENTITY FULL
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 033
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 034
+ALTER TABLE test_replica_identity REPLICA IDENTITY NOTHING
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: AlterTableStmt
+== 035
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FILTER: schema="" table="" column="oid"
+STMT: SelectStmt
+== 036
+---
+-- Test that ALTER TABLE rewrite preserves nondefault replica identity
+---
+
+-- constraint variant
+CREATE TABLE test_replica_identity2 (id int UNIQUE NOT NULL)
+--
+TABLE: name="test_replica_identity2" schema="" table="test_replica_identity2" ctx=DDL
+STMT: CreateStmt
+== 037
+ALTER TABLE test_replica_identity2 REPLICA IDENTITY USING INDEX test_replica_identity2_id_key
+--
+TABLE: name="test_replica_identity2" schema="" table="test_replica_identity2" ctx=DDL
+STMT: AlterTableStmt
+== 038
+ALTER TABLE test_replica_identity2 ALTER COLUMN id TYPE bigint
+--
+TABLE: name="test_replica_identity2" schema="" table="test_replica_identity2" ctx=DDL
+STMT: AlterTableStmt
+== 039
+-- straight index variant
+CREATE TABLE test_replica_identity3 (id int NOT NULL)
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: CreateStmt
+== 040
+CREATE UNIQUE INDEX test_replica_identity3_id_key ON test_replica_identity3 (id)
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: IndexStmt
+== 041
+ALTER TABLE test_replica_identity3 REPLICA IDENTITY USING INDEX test_replica_identity3_id_key
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: AlterTableStmt
+== 042
+ALTER TABLE test_replica_identity3 ALTER COLUMN id TYPE bigint
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: AlterTableStmt
+== 043
+-- ALTER TABLE DROP NOT NULL is not allowed for columns part of an index
+-- used as replica identity.
+ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: AlterTableStmt
+== 044
+|--
+-- Test that replica identity can be set on an index that's not yet valid.
+-- (This matches the way pg_dump will try to dump a partitioned table.)
+|--
+CREATE TABLE test_replica_identity4(id integer NOT NULL) PARTITION BY LIST (id)
+--
+TABLE: name="test_replica_identity4" schema="" table="test_replica_identity4" ctx=DDL
+STMT: CreateStmt
+== 045
+CREATE TABLE test_replica_identity4_1(id integer NOT NULL)
+--
+TABLE: name="test_replica_identity4_1" schema="" table="test_replica_identity4_1" ctx=DDL
+STMT: CreateStmt
+== 046
+ALTER TABLE ONLY test_replica_identity4
+  ATTACH PARTITION test_replica_identity4_1 FOR VALUES IN (1)
+--
+TABLE: name="test_replica_identity4" schema="" table="test_replica_identity4" ctx=DDL
+STMT: AlterTableStmt
+== 047
+ALTER TABLE ONLY test_replica_identity4
+  ADD CONSTRAINT test_replica_identity4_pkey PRIMARY KEY (id)
+--
+TABLE: name="test_replica_identity4" schema="" table="test_replica_identity4" ctx=DDL
+STMT: AlterTableStmt
+== 048
+ALTER TABLE ONLY test_replica_identity4
+  REPLICA IDENTITY USING INDEX test_replica_identity4_pkey
+--
+TABLE: name="test_replica_identity4" schema="" table="test_replica_identity4" ctx=DDL
+STMT: AlterTableStmt
+== 049
+ALTER TABLE ONLY test_replica_identity4_1
+  ADD CONSTRAINT test_replica_identity4_1_pkey PRIMARY KEY (id)
+--
+TABLE: name="test_replica_identity4_1" schema="" table="test_replica_identity4_1" ctx=DDL
+STMT: AlterTableStmt
+== 050
+ALTER INDEX test_replica_identity4_pkey
+  ATTACH PARTITION test_replica_identity4_1_pkey
+--
+STMT: AlterTableStmt
+== 051
+DROP TABLE test_replica_identity
+--
+TABLE: name="test_replica_identity" schema="" table="test_replica_identity" ctx=DDL
+STMT: DropStmt
+== 052
+DROP TABLE test_replica_identity2
+--
+TABLE: name="test_replica_identity2" schema="" table="test_replica_identity2" ctx=DDL
+STMT: DropStmt
+== 053
+DROP TABLE test_replica_identity3
+--
+TABLE: name="test_replica_identity3" schema="" table="test_replica_identity3" ctx=DDL
+STMT: DropStmt
+== 054
+DROP TABLE test_replica_identity4
+--
+TABLE: name="test_replica_identity4" schema="" table="test_replica_identity4" ctx=DDL
+STMT: DropStmt
+== 055
+DROP TABLE test_replica_identity_othertable
+--
+TABLE: name="test_replica_identity_othertable" schema="" table="test_replica_identity_othertable" ctx=DDL
+STMT: DropStmt
+== 056
+DROP TABLE test_replica_identity_t3
+--
+TABLE: name="test_replica_identity_t3" schema="" table="test_replica_identity_t3" ctx=DDL
+STMT: DropStmt

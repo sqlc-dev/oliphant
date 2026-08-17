@@ -1,0 +1,253 @@
+== 001
+-- truncate_limit: 100
+|--
+-- Tests for external toast datums
+|--
+
+-- directory paths and dlsuffix are passed to us in environment variables
+
+
+CREATE FUNCTION make_tuple_indirect (record)
+        RETURNS record
+        AS :'regresslib'
+        LANGUAGE C STRICT
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 198
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 002
+-- truncate_limit: 100
+-- Other compression algorithms may cause the compressed data to be stored
+-- inline.  pglz guarantees that the data is externalized, so stick to it.
+SET default_toast_compression = 'pglz'
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET default_toast_compression TO pglz"
+== 003
+-- truncate_limit: 100
+CREATE TABLE indtoasttest(descr text, cnt int DEFAULT 0, f1 text, f2 text)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE indtoasttest (descr text, cnt int DEFAULT 0, f1 text, f2 text)"
+== 004
+-- truncate_limit: 100
+INSERT INTO indtoasttest(descr, f1, f2) VALUES('two-compressed', repeat('1234567890',1000), repeat('1234567890',1000))
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO indtoasttest (descr, f1, f2) VALUES (...)"
+== 005
+-- truncate_limit: 100
+INSERT INTO indtoasttest(descr, f1, f2) VALUES('two-toasted', repeat('1234567890',30000), repeat('1234567890',50000))
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO indtoasttest (descr, f1, f2) VALUES (...)"
+== 006
+-- truncate_limit: 100
+INSERT INTO indtoasttest(descr, f1, f2) VALUES('one-compressed,one-null', NULL, repeat('1234567890',1000))
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO indtoasttest (descr, f1, f2) VALUES (...)"
+== 007
+-- truncate_limit: 100
+INSERT INTO indtoasttest(descr, f1, f2) VALUES('one-toasted,one-null', NULL, repeat('1234567890',50000))
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO indtoasttest (descr, f1, f2) VALUES (...)"
+== 008
+-- truncate_limit: 100
+-- check whether indirect tuples works on the most basic level
+SELECT descr, substring(make_tuple_indirect(indtoasttest)::text, 1, 200) FROM indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=Select
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+FUNCTION: name="make_tuple_indirect" function="make_tuple_indirect" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT descr, \"substring\"(make_tuple_indirect(indtoasttest)::text, 1, 200) FROM indtoasttest"
+== 009
+-- truncate_limit: 100
+-- modification without changing varlenas
+UPDATE indtoasttest SET cnt = cnt +1 RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET cnt = cnt + 1 RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 010
+-- truncate_limit: 100
+-- modification without modifying assigned value
+UPDATE indtoasttest SET cnt = cnt +1, f1 = f1 RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET cnt = cnt + 1, f1 = f1 RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 011
+-- truncate_limit: 100
+-- modification modifying, but effectively not changing
+UPDATE indtoasttest SET cnt = cnt +1, f1 = f1||'' RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET ... = ... RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 012
+-- truncate_limit: 100
+UPDATE indtoasttest SET cnt = cnt +1, f1 = '-'||f1||'-' RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET ... = ... RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 013
+-- truncate_limit: 100
+SELECT substring(indtoasttest::text, 1, 200) FROM indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=Select
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT \"substring\"(indtoasttest::text, 1, 200) FROM indtoasttest"
+== 014
+-- truncate_limit: 100
+-- check we didn't screw with main/toast tuple visibility
+VACUUM FREEZE indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM (FREEZE) indtoasttest"
+== 015
+-- truncate_limit: 100
+SELECT substring(indtoasttest::text, 1, 200) FROM indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=Select
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT \"substring\"(indtoasttest::text, 1, 200) FROM indtoasttest"
+== 016
+-- truncate_limit: 100
+-- now create a trigger that forces all Datums to be indirect ones
+CREATE FUNCTION update_using_indirect()
+        RETURNS trigger
+        LANGUAGE plpgsql AS $$
+BEGIN
+    NEW := make_tuple_indirect(NEW);
+    RETURN NEW;
+END$$
+--
+FUNCTION: name="update_using_indirect" function="update_using_indirect" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION update_using_indirect() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n    NEW := m..."
+== 017
+-- truncate_limit: 100
+CREATE TRIGGER indtoasttest_update_indirect
+        BEFORE INSERT OR UPDATE
+        ON indtoasttest
+        FOR EACH ROW
+        EXECUTE PROCEDURE update_using_indirect()
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DDL
+STMT: CreateTrigStmt
+TRUNCATED: "CREATE TRIGGER indtoasttest_update_indirect BEFORE INSERT OR UPDATE ON indtoasttest FOR EACH ROW ..."
+== 018
+-- truncate_limit: 100
+-- modification without changing varlenas
+UPDATE indtoasttest SET cnt = cnt +1 RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET cnt = cnt + 1 RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 019
+-- truncate_limit: 100
+-- modification without modifying assigned value
+UPDATE indtoasttest SET cnt = cnt +1, f1 = f1 RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET cnt = cnt + 1, f1 = f1 RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 020
+-- truncate_limit: 100
+-- modification modifying, but effectively not changing
+UPDATE indtoasttest SET cnt = cnt +1, f1 = f1||'' RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET ... = ... RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 021
+-- truncate_limit: 100
+UPDATE indtoasttest SET cnt = cnt +1, f1 = '-'||f1||'-' RETURNING substring(indtoasttest::text, 1, 200)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: UpdateStmt
+TRUNCATED: "UPDATE indtoasttest SET ... = ... RETURNING \"substring\"(indtoasttest::text, 1, 200)"
+== 022
+-- truncate_limit: 100
+INSERT INTO indtoasttest(descr, f1, f2) VALUES('one-toasted,one-null, via indirect', repeat('1234567890',30000), NULL)
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO indtoasttest (descr, f1, f2) VALUES (...)"
+== 023
+-- truncate_limit: 100
+SELECT substring(indtoasttest::text, 1, 200) FROM indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=Select
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT \"substring\"(indtoasttest::text, 1, 200) FROM indtoasttest"
+== 024
+-- truncate_limit: 100
+-- check we didn't screw with main/toast tuple visibility
+VACUUM FREEZE indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM (FREEZE) indtoasttest"
+== 025
+-- truncate_limit: 100
+SELECT substring(indtoasttest::text, 1, 200) FROM indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=Select
+FUNCTION: name="substring" function="substring" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT \"substring\"(indtoasttest::text, 1, 200) FROM indtoasttest"
+== 026
+-- truncate_limit: 100
+DROP TABLE indtoasttest
+--
+TABLE: name="indtoasttest" schema="" table="indtoasttest" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE indtoasttest"
+== 027
+-- truncate_limit: 100
+DROP FUNCTION update_using_indirect()
+--
+FUNCTION: name="update_using_indirect" function="update_using_indirect" schema="" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP FUNCTION update_using_indirect()"
+== 028
+-- truncate_limit: 100
+RESET default_toast_compression
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET default_toast_compression"

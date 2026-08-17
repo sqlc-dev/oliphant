@@ -1,0 +1,973 @@
+== 001
+|--
+-- Tests for PL/pgSQL control structures
+|--
+
+-- integer FOR loop
+
+do $$
+begin
+  -- basic case
+  for i in 1..3 loop
+    raise notice '1..3: i = %', i;
+  end loop;
+  -- with BY, end matches exactly
+  for i in 1..10 by 3 loop
+    raise notice '1..10 by 3: i = %', i;
+  end loop;
+  -- with BY, end does not match
+  for i in 1..11 by 3 loop
+    raise notice '1..11 by 3: i = %', i;
+  end loop;
+  -- zero iterations
+  for i in 1..0 by 3 loop
+    raise notice '1..0 by 3: i = %', i;
+  end loop;
+  -- REVERSE
+  for i in reverse 10..0 by 3 loop
+    raise notice 'reverse 10..0 by 3: i = %', i;
+  end loop;
+  -- potential overflow
+  for i in 2147483620..2147483647 by 10 loop
+    raise notice '2147483620..2147483647 by 10: i = %', i;
+  end loop;
+  -- potential overflow, reverse direction
+  for i in reverse -2147483620..-2147483647 by 10 loop
+    raise notice 'reverse -2147483620..-2147483647 by 10: i = %', i;
+  end loop;
+end$$
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 43 SQL_COMMENT NO_KEYWORD
+44 46 SQL_COMMENT NO_KEYWORD
+48 67 SQL_COMMENT NO_KEYWORD
+69 71 DO RESERVED_KEYWORD
+72 924 SCONST NO_KEYWORD
+== 002
+-- BY can't be zero or negative
+do $$
+begin
+  for i in 1..3 by 0 loop
+    raise notice '1..3 by 0: i = %', i;
+  end loop;
+end$$
+--
+0 31 SQL_COMMENT NO_KEYWORD
+32 34 DO RESERVED_KEYWORD
+35 127 SCONST NO_KEYWORD
+== 003
+do $$
+begin
+  for i in 1..3 by -1 loop
+    raise notice '1..3 by -1: i = %', i;
+  end loop;
+end$$
+--
+0 2 DO RESERVED_KEYWORD
+3 97 SCONST NO_KEYWORD
+== 004
+do $$
+begin
+  for i in reverse 1..3 by -1 loop
+    raise notice 'reverse 1..3 by -1: i = %', i;
+  end loop;
+end$$
+--
+0 2 DO RESERVED_KEYWORD
+3 113 SCONST NO_KEYWORD
+== 005
+-- CONTINUE statement
+
+create table conttesttbl(idx serial, v integer)
+--
+0 21 SQL_COMMENT NO_KEYWORD
+23 29 CREATE RESERVED_KEYWORD
+30 35 TABLE RESERVED_KEYWORD
+36 47 IDENT NO_KEYWORD
+47 48 ASCII_40 NO_KEYWORD
+48 51 IDENT NO_KEYWORD
+52 58 IDENT NO_KEYWORD
+58 59 ASCII_44 NO_KEYWORD
+60 61 IDENT NO_KEYWORD
+62 69 INTEGER COL_NAME_KEYWORD
+69 70 ASCII_41 NO_KEYWORD
+== 006
+insert into conttesttbl(v) values(10)
+--
+0 6 INSERT UNRESERVED_KEYWORD
+7 11 INTO RESERVED_KEYWORD
+12 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 25 IDENT NO_KEYWORD
+25 26 ASCII_41 NO_KEYWORD
+27 33 VALUES COL_NAME_KEYWORD
+33 34 ASCII_40 NO_KEYWORD
+34 36 ICONST NO_KEYWORD
+36 37 ASCII_41 NO_KEYWORD
+== 007
+insert into conttesttbl(v) values(20)
+--
+0 6 INSERT UNRESERVED_KEYWORD
+7 11 INTO RESERVED_KEYWORD
+12 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 25 IDENT NO_KEYWORD
+25 26 ASCII_41 NO_KEYWORD
+27 33 VALUES COL_NAME_KEYWORD
+33 34 ASCII_40 NO_KEYWORD
+34 36 ICONST NO_KEYWORD
+36 37 ASCII_41 NO_KEYWORD
+== 008
+insert into conttesttbl(v) values(30)
+--
+0 6 INSERT UNRESERVED_KEYWORD
+7 11 INTO RESERVED_KEYWORD
+12 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 25 IDENT NO_KEYWORD
+25 26 ASCII_41 NO_KEYWORD
+27 33 VALUES COL_NAME_KEYWORD
+33 34 ASCII_40 NO_KEYWORD
+34 36 ICONST NO_KEYWORD
+36 37 ASCII_41 NO_KEYWORD
+== 009
+insert into conttesttbl(v) values(40)
+--
+0 6 INSERT UNRESERVED_KEYWORD
+7 11 INTO RESERVED_KEYWORD
+12 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 25 IDENT NO_KEYWORD
+25 26 ASCII_41 NO_KEYWORD
+27 33 VALUES COL_NAME_KEYWORD
+33 34 ASCII_40 NO_KEYWORD
+34 36 ICONST NO_KEYWORD
+36 37 ASCII_41 NO_KEYWORD
+== 010
+create function continue_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  raise notice '---1---';
+  loop
+    _i := _i + 1;
+    raise notice '%', _i;
+    continue when _i < 10;
+    exit;
+  end loop;
+
+  raise notice '---2---';
+  <<lbl>>
+  loop
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end loop;
+
+  raise notice '---3---';
+  <<the_loop>>
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_loop when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop;
+
+  raise notice '---4---';
+  for _i in 1..10 loop
+    begin
+      -- applies to outer loop, not the nested begin block
+      continue when _i < 5;
+      raise notice '%', _i;
+    end;
+  end loop;
+
+  raise notice '---5---';
+  for _r in select * from conttesttbl loop
+    continue when _r.v <= 20;
+    raise notice '%', _r.v;
+  end loop;
+
+  raise notice '---6---';
+  for _r in execute 'select * from conttesttbl' loop
+    continue when _r.v <= 20;
+    raise notice '%', _r.v;
+  end loop;
+
+  raise notice '---7---';
+  <<looplabel>>
+  for _i in 1..3 loop
+    continue looplabel when _i = 2;
+    raise notice '%', _i;
+  end loop;
+
+  raise notice '---8---';
+  _i := 1;
+  while _i <= 3 loop
+    raise notice '%', _i;
+    _i := _i + 1;
+    continue when _i = 3;
+  end loop;
+
+  raise notice '---9---';
+  for _r in select * from conttesttbl order by v limit 1 loop
+    raise notice '%', _r.v;
+    continue;
+  end loop;
+
+  raise notice '---10---';
+  for _r in execute 'select * from conttesttbl order by v limit 1' loop
+    raise notice '%', _r.v;
+    continue;
+  end loop;
+
+  raise notice '---11---';
+  <<outerlooplabel>>
+  for _i in 1..2 loop
+    raise notice 'outer %', _i;
+    <<innerlooplabel>>
+    for _j in 1..3 loop
+      continue outerlooplabel when _j = 2;
+      raise notice 'inner %', _j;
+    end loop;
+  end loop;
+end; $$ language plpgsql
+--
+0 6 CREATE RESERVED_KEYWORD
+7 15 FUNCTION UNRESERVED_KEYWORD
+16 30 IDENT NO_KEYWORD
+30 31 ASCII_40 NO_KEYWORD
+31 32 ASCII_41 NO_KEYWORD
+33 40 RETURNS UNRESERVED_KEYWORD
+41 45 IDENT NO_KEYWORD
+46 48 AS RESERVED_KEYWORD
+49 1873 SCONST NO_KEYWORD
+1874 1882 LANGUAGE UNRESERVED_KEYWORD
+1883 1890 IDENT NO_KEYWORD
+== 011
+select continue_test1()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 21 IDENT NO_KEYWORD
+21 22 ASCII_40 NO_KEYWORD
+22 23 ASCII_41 NO_KEYWORD
+== 012
+-- should fail: CONTINUE is only legal inside a loop
+create function continue_error1() returns void as $$
+begin
+    begin
+        continue;
+    end;
+end;
+$$ language plpgsql
+--
+0 52 SQL_COMMENT NO_KEYWORD
+53 59 CREATE RESERVED_KEYWORD
+60 68 FUNCTION UNRESERVED_KEYWORD
+69 84 IDENT NO_KEYWORD
+84 85 ASCII_40 NO_KEYWORD
+85 86 ASCII_41 NO_KEYWORD
+87 94 RETURNS UNRESERVED_KEYWORD
+95 99 IDENT NO_KEYWORD
+100 102 AS RESERVED_KEYWORD
+103 156 SCONST NO_KEYWORD
+157 165 LANGUAGE UNRESERVED_KEYWORD
+166 173 IDENT NO_KEYWORD
+== 013
+-- should fail: unlabeled EXIT is only legal inside a loop
+create function exit_error1() returns void as $$
+begin
+    begin
+        exit;
+    end;
+end;
+$$ language plpgsql
+--
+0 58 SQL_COMMENT NO_KEYWORD
+59 65 CREATE RESERVED_KEYWORD
+66 74 FUNCTION UNRESERVED_KEYWORD
+75 86 IDENT NO_KEYWORD
+86 87 ASCII_40 NO_KEYWORD
+87 88 ASCII_41 NO_KEYWORD
+89 96 RETURNS UNRESERVED_KEYWORD
+97 101 IDENT NO_KEYWORD
+102 104 AS RESERVED_KEYWORD
+105 154 SCONST NO_KEYWORD
+155 163 LANGUAGE UNRESERVED_KEYWORD
+164 171 IDENT NO_KEYWORD
+== 014
+-- should fail: no such label
+create function continue_error2() returns void as $$
+begin
+    begin
+        loop
+            continue no_such_label;
+        end loop;
+    end;
+end;
+$$ language plpgsql
+--
+0 29 SQL_COMMENT NO_KEYWORD
+30 36 CREATE RESERVED_KEYWORD
+37 45 FUNCTION UNRESERVED_KEYWORD
+46 61 IDENT NO_KEYWORD
+61 62 ASCII_40 NO_KEYWORD
+62 63 ASCII_41 NO_KEYWORD
+64 71 RETURNS UNRESERVED_KEYWORD
+72 76 IDENT NO_KEYWORD
+77 79 AS RESERVED_KEYWORD
+80 182 SCONST NO_KEYWORD
+183 191 LANGUAGE UNRESERVED_KEYWORD
+192 199 IDENT NO_KEYWORD
+== 015
+-- should fail: no such label
+create function exit_error2() returns void as $$
+begin
+    begin
+        loop
+            exit no_such_label;
+        end loop;
+    end;
+end;
+$$ language plpgsql
+--
+0 29 SQL_COMMENT NO_KEYWORD
+30 36 CREATE RESERVED_KEYWORD
+37 45 FUNCTION UNRESERVED_KEYWORD
+46 57 IDENT NO_KEYWORD
+57 58 ASCII_40 NO_KEYWORD
+58 59 ASCII_41 NO_KEYWORD
+60 67 RETURNS UNRESERVED_KEYWORD
+68 72 IDENT NO_KEYWORD
+73 75 AS RESERVED_KEYWORD
+76 174 SCONST NO_KEYWORD
+175 183 LANGUAGE UNRESERVED_KEYWORD
+184 191 IDENT NO_KEYWORD
+== 016
+-- should fail: CONTINUE can't reference the label of a named block
+create function continue_error3() returns void as $$
+begin
+    <<begin_block1>>
+    begin
+        loop
+            continue begin_block1;
+        end loop;
+    end;
+end;
+$$ language plpgsql
+--
+0 67 SQL_COMMENT NO_KEYWORD
+68 74 CREATE RESERVED_KEYWORD
+75 83 FUNCTION UNRESERVED_KEYWORD
+84 99 IDENT NO_KEYWORD
+99 100 ASCII_40 NO_KEYWORD
+100 101 ASCII_41 NO_KEYWORD
+102 109 RETURNS UNRESERVED_KEYWORD
+110 114 IDENT NO_KEYWORD
+115 117 AS RESERVED_KEYWORD
+118 240 SCONST NO_KEYWORD
+241 249 LANGUAGE UNRESERVED_KEYWORD
+250 257 IDENT NO_KEYWORD
+== 017
+-- On the other hand, EXIT *can* reference the label of a named block
+create function exit_block1() returns void as $$
+begin
+    <<begin_block1>>
+    begin
+        loop
+            exit begin_block1;
+            raise exception 'should not get here';
+        end loop;
+    end;
+end;
+$$ language plpgsql
+--
+0 69 SQL_COMMENT NO_KEYWORD
+70 76 CREATE RESERVED_KEYWORD
+77 85 FUNCTION UNRESERVED_KEYWORD
+86 97 IDENT NO_KEYWORD
+97 98 ASCII_40 NO_KEYWORD
+98 99 ASCII_41 NO_KEYWORD
+100 107 RETURNS UNRESERVED_KEYWORD
+108 112 IDENT NO_KEYWORD
+113 115 AS RESERVED_KEYWORD
+116 285 SCONST NO_KEYWORD
+286 294 LANGUAGE UNRESERVED_KEYWORD
+295 302 IDENT NO_KEYWORD
+== 018
+select exit_block1()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 18 IDENT NO_KEYWORD
+18 19 ASCII_40 NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 019
+-- verbose end block and end loop
+create function end_label1() returns void as $$
+<<blbl>>
+begin
+  <<flbl1>>
+  for i in 1 .. 10 loop
+    raise notice 'i = %', i;
+    exit flbl1;
+  end loop flbl1;
+  <<flbl2>>
+  for j in 1 .. 10 loop
+    raise notice 'j = %', j;
+    exit flbl2;
+  end loop;
+end blbl;
+$$ language plpgsql
+--
+0 33 SQL_COMMENT NO_KEYWORD
+34 40 CREATE RESERVED_KEYWORD
+41 49 FUNCTION UNRESERVED_KEYWORD
+50 60 IDENT NO_KEYWORD
+60 61 ASCII_40 NO_KEYWORD
+61 62 ASCII_41 NO_KEYWORD
+63 70 RETURNS UNRESERVED_KEYWORD
+71 75 IDENT NO_KEYWORD
+76 78 AS RESERVED_KEYWORD
+79 301 SCONST NO_KEYWORD
+302 310 LANGUAGE UNRESERVED_KEYWORD
+311 318 IDENT NO_KEYWORD
+== 020
+select end_label1()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 17 IDENT NO_KEYWORD
+17 18 ASCII_40 NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 021
+-- should fail: undefined end label
+create function end_label2() returns void as $$
+begin
+  for _i in 1 .. 10 loop
+    exit;
+  end loop flbl1;
+end;
+$$ language plpgsql
+--
+0 35 SQL_COMMENT NO_KEYWORD
+36 42 CREATE RESERVED_KEYWORD
+43 51 FUNCTION UNRESERVED_KEYWORD
+52 62 IDENT NO_KEYWORD
+62 63 ASCII_40 NO_KEYWORD
+63 64 ASCII_41 NO_KEYWORD
+65 72 RETURNS UNRESERVED_KEYWORD
+73 77 IDENT NO_KEYWORD
+78 80 AS RESERVED_KEYWORD
+81 150 SCONST NO_KEYWORD
+151 159 LANGUAGE UNRESERVED_KEYWORD
+160 167 IDENT NO_KEYWORD
+== 022
+-- should fail: end label does not match start label
+create function end_label3() returns void as $$
+<<outer_label>>
+begin
+  <<inner_label>>
+  for _i in 1 .. 10 loop
+    exit;
+  end loop outer_label;
+end;
+$$ language plpgsql
+--
+0 52 SQL_COMMENT NO_KEYWORD
+53 59 CREATE RESERVED_KEYWORD
+60 68 FUNCTION UNRESERVED_KEYWORD
+69 79 IDENT NO_KEYWORD
+79 80 ASCII_40 NO_KEYWORD
+80 81 ASCII_41 NO_KEYWORD
+82 89 RETURNS UNRESERVED_KEYWORD
+90 94 IDENT NO_KEYWORD
+95 97 AS RESERVED_KEYWORD
+98 207 SCONST NO_KEYWORD
+208 216 LANGUAGE UNRESERVED_KEYWORD
+217 224 IDENT NO_KEYWORD
+== 023
+-- should fail: end label on a block without a start label
+create function end_label4() returns void as $$
+<<outer_label>>
+begin
+  for _i in 1 .. 10 loop
+    exit;
+  end loop outer_label;
+end;
+$$ language plpgsql
+--
+0 58 SQL_COMMENT NO_KEYWORD
+59 65 CREATE RESERVED_KEYWORD
+66 74 FUNCTION UNRESERVED_KEYWORD
+75 85 IDENT NO_KEYWORD
+85 86 ASCII_40 NO_KEYWORD
+86 87 ASCII_41 NO_KEYWORD
+88 95 RETURNS UNRESERVED_KEYWORD
+96 100 IDENT NO_KEYWORD
+101 103 AS RESERVED_KEYWORD
+104 195 SCONST NO_KEYWORD
+196 204 LANGUAGE UNRESERVED_KEYWORD
+205 212 IDENT NO_KEYWORD
+== 024
+-- unlabeled exit matches no blocks
+do $$
+begin
+for i in 1..10 loop
+  <<innerblock>>
+  begin
+    begin  -- unlabeled block
+      exit;
+      raise notice 'should not get here';
+    end;
+    raise notice 'should not get here, either';
+  end;
+  raise notice 'nor here';
+end loop;
+raise notice 'should get here';
+end$$
+--
+0 35 SQL_COMMENT NO_KEYWORD
+36 38 DO RESERVED_KEYWORD
+39 315 SCONST NO_KEYWORD
+== 025
+-- check exit out of an unlabeled block to a labeled one
+do $$
+<<outerblock>>
+begin
+  <<innerblock>>
+  begin
+    <<moreinnerblock>>
+    begin
+      begin  -- unlabeled block
+        exit innerblock;
+        raise notice 'should not get here';
+      end;
+      raise notice 'should not get here, either';
+    end;
+    raise notice 'nor here';
+  end;
+  raise notice 'should get here';
+end$$
+--
+0 56 SQL_COMMENT NO_KEYWORD
+57 59 DO RESERVED_KEYWORD
+60 388 SCONST NO_KEYWORD
+== 026
+-- check exit out of outermost block
+do $$
+<<outerblock>>
+begin
+  <<innerblock>>
+  begin
+    exit outerblock;
+    raise notice 'should not get here';
+  end;
+  raise notice 'should not get here, either';
+end$$
+--
+0 36 SQL_COMMENT NO_KEYWORD
+37 39 DO RESERVED_KEYWORD
+40 208 SCONST NO_KEYWORD
+== 027
+-- unlabeled exit does match a while loop
+do $$
+begin
+  <<outermostwhile>>
+  while 1 > 0 loop
+    <<outerwhile>>
+    while 1 > 0 loop
+      <<innerwhile>>
+      while 1 > 0 loop
+        exit;
+        raise notice 'should not get here';
+      end loop;
+      raise notice 'should get here';
+      exit outermostwhile;
+      raise notice 'should not get here, either';
+    end loop;
+    raise notice 'nor here';
+  end loop;
+  raise notice 'should get here, too';
+end$$
+--
+0 41 SQL_COMMENT NO_KEYWORD
+42 44 DO RESERVED_KEYWORD
+45 466 SCONST NO_KEYWORD
+== 028
+-- check exit out of an unlabeled while to a labeled one
+do $$
+begin
+  <<outerwhile>>
+  while 1 > 0 loop
+    while 1 > 0 loop
+      exit outerwhile;
+      raise notice 'should not get here';
+    end loop;
+    raise notice 'should not get here, either';
+  end loop;
+  raise notice 'should get here';
+end$$
+--
+0 56 SQL_COMMENT NO_KEYWORD
+57 59 DO RESERVED_KEYWORD
+60 304 SCONST NO_KEYWORD
+== 029
+-- continue to an outer while
+do $$
+declare i int := 0;
+begin
+  <<outermostwhile>>
+  while i < 2 loop
+    raise notice 'outermostwhile, i = %', i;
+    i := i + 1;
+    <<outerwhile>>
+    while 1 > 0 loop
+      <<innerwhile>>
+      while 1 > 0 loop
+        continue outermostwhile;
+        raise notice 'should not get here';
+      end loop;
+      raise notice 'should not get here, either';
+    end loop;
+    raise notice 'nor here';
+  end loop;
+  raise notice 'out of outermostwhile, i = %', i;
+end$$
+--
+0 29 SQL_COMMENT NO_KEYWORD
+30 32 DO RESERVED_KEYWORD
+33 500 SCONST NO_KEYWORD
+== 030
+-- return out of a while
+create function return_from_while() returns int language plpgsql as $$
+declare i int := 0;
+begin
+  while i < 10 loop
+    if i > 2 then
+      return i;
+    end if;
+    i := i + 1;
+  end loop;
+  return null;
+end$$
+--
+0 24 SQL_COMMENT NO_KEYWORD
+25 31 CREATE RESERVED_KEYWORD
+32 40 FUNCTION UNRESERVED_KEYWORD
+41 58 IDENT NO_KEYWORD
+58 59 ASCII_40 NO_KEYWORD
+59 60 ASCII_41 NO_KEYWORD
+61 68 RETURNS UNRESERVED_KEYWORD
+69 72 INT_P COL_NAME_KEYWORD
+73 81 LANGUAGE UNRESERVED_KEYWORD
+82 89 IDENT NO_KEYWORD
+90 92 AS RESERVED_KEYWORD
+93 236 SCONST NO_KEYWORD
+== 031
+select return_from_while()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 24 IDENT NO_KEYWORD
+24 25 ASCII_40 NO_KEYWORD
+25 26 ASCII_41 NO_KEYWORD
+== 032
+-- using list of scalars in fori and fore stmts
+create function for_vect() returns void as $proc$
+<<lbl>>declare a integer; b varchar; c varchar; r record;
+begin
+  -- fori
+  for i in 1 .. 3 loop
+    raise notice '%', i;
+  end loop;
+  -- fore with record var
+  for r in select gs as aa, 'BB' as bb, 'CC' as cc from generate_series(1,4) gs loop
+    raise notice '% % %', r.aa, r.bb, r.cc;
+  end loop;
+  -- fore with single scalar
+  for a in select gs from generate_series(1,4) gs loop
+    raise notice '%', a;
+  end loop;
+  -- fore with multiple scalars
+  for a,b,c in select gs, 'BB','CC' from generate_series(1,4) gs loop
+    raise notice '% % %', a, b, c;
+  end loop;
+  -- using qualified names in fors, fore is enabled, disabled only for fori
+  for lbl.a, lbl.b, lbl.c in execute $$select gs, 'bb','cc' from generate_series(1,4) gs$$ loop
+    raise notice '% % %', a, b, c;
+  end loop;
+end;
+$proc$ language plpgsql
+--
+0 47 SQL_COMMENT NO_KEYWORD
+48 54 CREATE RESERVED_KEYWORD
+55 63 FUNCTION UNRESERVED_KEYWORD
+64 72 IDENT NO_KEYWORD
+72 73 ASCII_40 NO_KEYWORD
+73 74 ASCII_41 NO_KEYWORD
+75 82 RETURNS UNRESERVED_KEYWORD
+83 87 IDENT NO_KEYWORD
+88 90 AS RESERVED_KEYWORD
+91 899 SCONST NO_KEYWORD
+900 908 LANGUAGE UNRESERVED_KEYWORD
+909 916 IDENT NO_KEYWORD
+== 033
+select for_vect()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 15 IDENT NO_KEYWORD
+15 16 ASCII_40 NO_KEYWORD
+16 17 ASCII_41 NO_KEYWORD
+== 034
+-- CASE statement
+
+create or replace function case_test(bigint) returns text as $$
+declare a int = 10;
+        b int = 1;
+begin
+  case $1
+    when 1 then
+      return 'one';
+    when 2 then
+      return 'two';
+    when 3,4,3+5 then
+      return 'three, four or eight';
+    when a then
+      return 'ten';
+    when a+b, a+b+1 then
+      return 'eleven, twelve';
+  end case;
+end;
+$$ language plpgsql immutable
+--
+0 17 SQL_COMMENT NO_KEYWORD
+19 25 CREATE RESERVED_KEYWORD
+26 28 OR RESERVED_KEYWORD
+29 36 REPLACE UNRESERVED_KEYWORD
+37 45 FUNCTION UNRESERVED_KEYWORD
+46 55 IDENT NO_KEYWORD
+55 56 ASCII_40 NO_KEYWORD
+56 62 BIGINT COL_NAME_KEYWORD
+62 63 ASCII_41 NO_KEYWORD
+64 71 RETURNS UNRESERVED_KEYWORD
+72 76 TEXT_P UNRESERVED_KEYWORD
+77 79 AS RESERVED_KEYWORD
+80 380 SCONST NO_KEYWORD
+381 389 LANGUAGE UNRESERVED_KEYWORD
+390 397 IDENT NO_KEYWORD
+398 407 IMMUTABLE UNRESERVED_KEYWORD
+== 035
+select case_test(1)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 036
+select case_test(2)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 037
+select case_test(3)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 038
+select case_test(4)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 039
+select case_test(5)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 040
+-- fails
+select case_test(8)
+--
+0 8 SQL_COMMENT NO_KEYWORD
+9 15 SELECT RESERVED_KEYWORD
+16 25 IDENT NO_KEYWORD
+25 26 ASCII_40 NO_KEYWORD
+26 27 ICONST NO_KEYWORD
+27 28 ASCII_41 NO_KEYWORD
+== 041
+select case_test(10)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 042
+select case_test(11)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 043
+select case_test(12)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 044
+select case_test(13)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 045
+-- fails
+
+create or replace function catch() returns void as $$
+begin
+  raise notice '%', case_test(6);
+exception
+  when case_not_found then
+    raise notice 'caught case_not_found % %', SQLSTATE, SQLERRM;
+end
+$$ language plpgsql
+--
+0 8 SQL_COMMENT NO_KEYWORD
+10 16 CREATE RESERVED_KEYWORD
+17 19 OR RESERVED_KEYWORD
+20 27 REPLACE UNRESERVED_KEYWORD
+28 36 FUNCTION UNRESERVED_KEYWORD
+37 42 IDENT NO_KEYWORD
+42 43 ASCII_40 NO_KEYWORD
+43 44 ASCII_41 NO_KEYWORD
+45 52 RETURNS UNRESERVED_KEYWORD
+53 57 IDENT NO_KEYWORD
+58 60 AS RESERVED_KEYWORD
+61 212 SCONST NO_KEYWORD
+213 221 LANGUAGE UNRESERVED_KEYWORD
+222 229 IDENT NO_KEYWORD
+== 046
+select catch()
+--
+0 6 SELECT RESERVED_KEYWORD
+7 12 IDENT NO_KEYWORD
+12 13 ASCII_40 NO_KEYWORD
+13 14 ASCII_41 NO_KEYWORD
+== 047
+-- test the searched variant too, as well as ELSE
+create or replace function case_test(bigint) returns text as $$
+declare a int = 10;
+begin
+  case
+    when $1 = 1 then
+      return 'one';
+    when $1 = a + 2 then
+      return 'twelve';
+    else
+      return 'other';
+  end case;
+end;
+$$ language plpgsql immutable
+--
+0 49 SQL_COMMENT NO_KEYWORD
+50 56 CREATE RESERVED_KEYWORD
+57 59 OR RESERVED_KEYWORD
+60 67 REPLACE UNRESERVED_KEYWORD
+68 76 FUNCTION UNRESERVED_KEYWORD
+77 86 IDENT NO_KEYWORD
+86 87 ASCII_40 NO_KEYWORD
+87 93 BIGINT COL_NAME_KEYWORD
+93 94 ASCII_41 NO_KEYWORD
+95 102 RETURNS UNRESERVED_KEYWORD
+103 107 TEXT_P UNRESERVED_KEYWORD
+108 110 AS RESERVED_KEYWORD
+111 286 SCONST NO_KEYWORD
+287 295 LANGUAGE UNRESERVED_KEYWORD
+296 303 IDENT NO_KEYWORD
+304 313 IMMUTABLE UNRESERVED_KEYWORD
+== 048
+select case_test(1)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 049
+select case_test(2)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 18 ICONST NO_KEYWORD
+18 19 ASCII_41 NO_KEYWORD
+== 050
+select case_test(12)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 051
+select case_test(13)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 16 IDENT NO_KEYWORD
+16 17 ASCII_40 NO_KEYWORD
+17 19 ICONST NO_KEYWORD
+19 20 ASCII_41 NO_KEYWORD
+== 052
+-- test line comment between WHEN and THEN
+create or replace function case_comment(int) returns text as $$
+begin
+  case $1
+    when 1 -- comment before THEN
+      then return 'one';
+    else
+      return 'other';
+  end case;
+end;
+$$ language plpgsql immutable
+--
+0 42 SQL_COMMENT NO_KEYWORD
+43 49 CREATE RESERVED_KEYWORD
+50 52 OR RESERVED_KEYWORD
+53 60 REPLACE UNRESERVED_KEYWORD
+61 69 FUNCTION UNRESERVED_KEYWORD
+70 82 IDENT NO_KEYWORD
+82 83 ASCII_40 NO_KEYWORD
+83 86 INT_P COL_NAME_KEYWORD
+86 87 ASCII_41 NO_KEYWORD
+88 95 RETURNS UNRESERVED_KEYWORD
+96 100 TEXT_P UNRESERVED_KEYWORD
+101 103 AS RESERVED_KEYWORD
+104 232 SCONST NO_KEYWORD
+233 241 LANGUAGE UNRESERVED_KEYWORD
+242 249 IDENT NO_KEYWORD
+250 259 IMMUTABLE UNRESERVED_KEYWORD
+== 053
+select case_comment(1)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 19 IDENT NO_KEYWORD
+19 20 ASCII_40 NO_KEYWORD
+20 21 ICONST NO_KEYWORD
+21 22 ASCII_41 NO_KEYWORD

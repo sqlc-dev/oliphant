@@ -1,0 +1,5586 @@
+== 001
+-- directory paths are passed to us in environment variables
+
+CREATE TABLE testjsonb (
+       j jsonb
+)
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=DDL
+STMT: CreateStmt
+== 002
+COPY testjsonb FROM :'filename'
+--
+ERROR: syntax error at or near ":"
+CURSORPOS: 21
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 003
+-- Strings.
+SELECT '""'::jsonb
+--
+STMT: SelectStmt
+== 004
+-- OK.
+SELECT $$''$$::jsonb
+--
+STMT: SelectStmt
+== 005
+-- ERROR, single quotes are not allowed
+SELECT '"abc"'::jsonb
+--
+STMT: SelectStmt
+== 006
+-- OK
+SELECT '"abc'::jsonb
+--
+STMT: SelectStmt
+== 007
+-- ERROR, quotes not closed
+SELECT '"abc
+def"'::jsonb
+--
+STMT: SelectStmt
+== 008
+-- ERROR, unescaped newline in string constant
+SELECT '"\n\"\\"'::jsonb
+--
+STMT: SelectStmt
+== 009
+-- OK, legal escapes
+SELECT '"\v"'::jsonb
+--
+STMT: SelectStmt
+== 010
+-- ERROR, not a valid JSON escape
+-- see json_encoding test for input with unicode escapes
+
+-- Numbers.
+SELECT '1'::jsonb
+--
+STMT: SelectStmt
+== 011
+-- OK
+SELECT '0'::jsonb
+--
+STMT: SelectStmt
+== 012
+-- OK
+SELECT '01'::jsonb
+--
+STMT: SelectStmt
+== 013
+-- ERROR, not valid according to JSON spec
+SELECT '0.1'::jsonb
+--
+STMT: SelectStmt
+== 014
+-- OK
+SELECT '9223372036854775808'::jsonb
+--
+STMT: SelectStmt
+== 015
+-- OK, even though it's too large for int8
+SELECT '1e100'::jsonb
+--
+STMT: SelectStmt
+== 016
+-- OK
+SELECT '1.3e100'::jsonb
+--
+STMT: SelectStmt
+== 017
+-- OK
+SELECT '1f2'::jsonb
+--
+STMT: SelectStmt
+== 018
+-- ERROR
+SELECT '0.x1'::jsonb
+--
+STMT: SelectStmt
+== 019
+-- ERROR
+SELECT '1.3ex100'::jsonb
+--
+STMT: SelectStmt
+== 020
+-- ERROR
+
+-- Arrays.
+SELECT '[]'::jsonb
+--
+STMT: SelectStmt
+== 021
+-- OK
+SELECT '[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]'::jsonb
+--
+STMT: SelectStmt
+== 022
+-- OK
+SELECT '[1,2]'::jsonb
+--
+STMT: SelectStmt
+== 023
+-- OK
+SELECT '[1,2,]'::jsonb
+--
+STMT: SelectStmt
+== 024
+-- ERROR, trailing comma
+SELECT '[1,2'::jsonb
+--
+STMT: SelectStmt
+== 025
+-- ERROR, no closing bracket
+SELECT '[1,[2]'::jsonb
+--
+STMT: SelectStmt
+== 026
+-- ERROR, no closing bracket
+
+-- Objects.
+SELECT '{}'::jsonb
+--
+STMT: SelectStmt
+== 027
+-- OK
+SELECT '{"abc"}'::jsonb
+--
+STMT: SelectStmt
+== 028
+-- ERROR, no value
+SELECT '{"abc":1}'::jsonb
+--
+STMT: SelectStmt
+== 029
+-- OK
+SELECT '{1:"abc"}'::jsonb
+--
+STMT: SelectStmt
+== 030
+-- ERROR, keys must be strings
+SELECT '{"abc",1}'::jsonb
+--
+STMT: SelectStmt
+== 031
+-- ERROR, wrong separator
+SELECT '{"abc"=1}'::jsonb
+--
+STMT: SelectStmt
+== 032
+-- ERROR, totally wrong separator
+SELECT '{"abc"::1}'::jsonb
+--
+STMT: SelectStmt
+== 033
+-- ERROR, another wrong separator
+SELECT '{"abc":1,"def":2,"ghi":[3,4],"hij":{"klm":5,"nop":[6]}}'::jsonb
+--
+STMT: SelectStmt
+== 034
+-- OK
+SELECT '{"abc":1:2}'::jsonb
+--
+STMT: SelectStmt
+== 035
+-- ERROR, colon in wrong spot
+SELECT '{"abc":1,3}'::jsonb
+--
+STMT: SelectStmt
+== 036
+-- ERROR, no value
+
+-- Recursion.
+SET max_stack_depth = '100kB'
+--
+STMT: VariableSetStmt
+== 037
+SELECT repeat('[', 10000)::jsonb
+--
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+SELECT repeat('{"a":', 10000)::jsonb
+--
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+RESET max_stack_depth
+--
+STMT: VariableSetStmt
+== 040
+-- Miscellaneous stuff.
+SELECT 'true'::jsonb
+--
+STMT: SelectStmt
+== 041
+-- OK
+SELECT 'false'::jsonb
+--
+STMT: SelectStmt
+== 042
+-- OK
+SELECT 'null'::jsonb
+--
+STMT: SelectStmt
+== 043
+-- OK
+SELECT ' true '::jsonb
+--
+STMT: SelectStmt
+== 044
+-- OK, even with extra whitespace
+SELECT 'true false'::jsonb
+--
+STMT: SelectStmt
+== 045
+-- ERROR, too many values
+SELECT 'true, false'::jsonb
+--
+STMT: SelectStmt
+== 046
+-- ERROR, too many values
+SELECT 'truf'::jsonb
+--
+STMT: SelectStmt
+== 047
+-- ERROR, not a keyword
+SELECT 'trues'::jsonb
+--
+STMT: SelectStmt
+== 048
+-- ERROR, not a keyword
+SELECT ''::jsonb
+--
+STMT: SelectStmt
+== 049
+-- ERROR, no value
+SELECT '    '::jsonb
+--
+STMT: SelectStmt
+== 050
+-- ERROR, no value
+
+-- Multi-line JSON input to check ERROR reporting
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"three":
+		true}'::jsonb
+--
+STMT: SelectStmt
+== 051
+-- OK
+SELECT '{
+		"one": 1,
+		"two":,"two",  -- ERROR extraneous comma before field "two"
+		"three":
+		true}'::jsonb
+--
+STMT: SelectStmt
+== 052
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"averyveryveryveryveryveryveryveryveryverylongfieldname":}'::jsonb
+--
+STMT: SelectStmt
+== 053
+-- ERROR missing value for last field
+
+-- test non-error-throwing input
+select pg_input_is_valid('{"a":true}', 'jsonb')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+select pg_input_is_valid('{"a":true', 'jsonb')
+--
+FUNCTION: name="pg_input_is_valid" function="pg_input_is_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 055
+select * from pg_input_error_info('{"a":true', 'jsonb')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 056
+select * from pg_input_error_info('{"a":1e1000000}', 'jsonb')
+--
+FUNCTION: name="pg_input_error_info" function="pg_input_error_info" schema="" ctx=Call
+STMT: SelectStmt
+== 057
+-- make sure jsonb is passed through json generators without being escaped
+SELECT array_to_json(ARRAY [jsonb '{"a":1}', jsonb '{"b":[2,3]}'])
+--
+FUNCTION: name="array_to_json" function="array_to_json" schema="" ctx=Call
+STMT: SelectStmt
+== 058
+-- anyarray column
+
+CREATE TEMP TABLE rows AS
+SELECT x, 'txt' || x as y
+FROM generate_series(1,3) AS x
+--
+TABLE: name="rows" schema="" table="rows" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 059
+analyze rows
+--
+TABLE: name="rows" schema="" table="rows" ctx=DDL
+STMT: VacuumStmt
+== 060
+select attname, to_jsonb(histogram_bounds) histogram_bounds
+from pg_stats
+where tablename = 'rows' and
+      schemaname = pg_my_temp_schema()::regnamespace::text
+order by 1
+--
+TABLE: name="pg_stats" schema="" table="pg_stats" ctx=Select
+FUNCTION: name="pg_my_temp_schema" function="pg_my_temp_schema" schema="" ctx=Call
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+FUNCTION: name="pg_my_temp_schema" function="pg_my_temp_schema" schema="" ctx=Call
+FILTER: schema="" table="" column="tablename"
+FILTER: schema="" table="" column="schemaname"
+STMT: SelectStmt
+== 061
+-- to_jsonb, timestamps
+
+select to_jsonb(timestamp '2014-05-28 12:22:35.614298')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 062
+BEGIN
+--
+STMT: TransactionStmt
+== 063
+SET LOCAL TIME ZONE 10.5
+--
+STMT: VariableSetStmt
+== 064
+select to_jsonb(timestamptz '2014-05-28 12:22:35.614298-04')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 065
+SET LOCAL TIME ZONE -8
+--
+STMT: VariableSetStmt
+== 066
+select to_jsonb(timestamptz '2014-05-28 12:22:35.614298-04')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 067
+COMMIT
+--
+STMT: TransactionStmt
+== 068
+select to_jsonb(date '2014-05-28')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 069
+select to_jsonb(date 'Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 070
+select to_jsonb(date '-Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 071
+select to_jsonb(timestamp 'Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 072
+select to_jsonb(timestamp '-Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 073
+select to_jsonb(timestamptz 'Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 074
+select to_jsonb(timestamptz '-Infinity')
+--
+FUNCTION: name="to_jsonb" function="to_jsonb" schema="" ctx=Call
+STMT: SelectStmt
+== 075
+--jsonb_agg
+
+SELECT jsonb_agg(q)
+  FROM ( SELECT $$a$$ || x AS b, y AS c,
+               ARRAY[ROW(x.*,ARRAY[1,2,3]),
+               ROW(y.*,ARRAY[4,5,6])] AS z
+         FROM generate_series(1,2) x,
+              generate_series(4,5) y) q
+--
+FUNCTION: name="jsonb_agg" function="jsonb_agg" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 076
+SELECT jsonb_agg(q ORDER BY x, y)
+  FROM rows q
+--
+TABLE: name="rows" schema="" table="rows" ctx=Select
+ALIAS: "q"="rows"
+FUNCTION: name="jsonb_agg" function="jsonb_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 077
+UPDATE rows SET x = NULL WHERE x = 1
+--
+TABLE: name="rows" schema="" table="rows" ctx=DML
+STMT: UpdateStmt
+== 078
+SELECT jsonb_agg(q ORDER BY x NULLS FIRST, y)
+  FROM rows q
+--
+TABLE: name="rows" schema="" table="rows" ctx=Select
+ALIAS: "q"="rows"
+FUNCTION: name="jsonb_agg" function="jsonb_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 079
+-- jsonb extraction functions
+CREATE TEMP TABLE test_jsonb (
+       json_type text,
+       test_json jsonb
+)
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=DDL
+STMT: CreateStmt
+== 080
+INSERT INTO test_jsonb VALUES
+('scalar','"a scalar"'),
+('array','["zero", "one","two",null,"four","five", [1,2,3],{"f1":9}]'),
+('object','{"field1":"val1","field2":"val2","field3":null, "field4": 4, "field5": [1,2,3], "field6": {"f1":9}}')
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 081
+SELECT test_json -> 'x' FROM test_jsonb WHERE json_type = 'scalar'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 082
+SELECT test_json -> 'x' FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 083
+SELECT test_json -> 'x' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 084
+SELECT test_json -> 'field2' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 085
+SELECT test_json ->> 'field2' FROM test_jsonb WHERE json_type = 'scalar'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 086
+SELECT test_json ->> 'field2' FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 087
+SELECT test_json ->> 'field2' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 088
+SELECT test_json -> 2 FROM test_jsonb WHERE json_type = 'scalar'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 089
+SELECT test_json -> 2 FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 090
+SELECT test_json -> 9 FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 091
+SELECT test_json -> 2 FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 092
+SELECT test_json ->> 6 FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 093
+SELECT test_json ->> 7 FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 094
+SELECT test_json ->> 'field4' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 095
+SELECT test_json ->> 'field5' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 096
+SELECT test_json ->> 'field6' FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 097
+SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'scalar'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 098
+SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 099
+SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 100
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'scalar'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FUNCTION: name="jsonb_object_keys" function="jsonb_object_keys" schema="" ctx=Call
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 101
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FUNCTION: name="jsonb_object_keys" function="jsonb_object_keys" schema="" ctx=Call
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 102
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FUNCTION: name="jsonb_object_keys" function="jsonb_object_keys" schema="" ctx=Call
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 103
+-- nulls
+SELECT (test_json->'field3') IS NULL AS expect_false FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 104
+SELECT (test_json->>'field3') IS NULL AS expect_true FROM test_jsonb WHERE json_type = 'object'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 105
+SELECT (test_json->3) IS NULL AS expect_false FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 106
+SELECT (test_json->>3) IS NULL AS expect_true FROM test_jsonb WHERE json_type = 'array'
+--
+TABLE: name="test_jsonb" schema="" table="test_jsonb" ctx=Select
+FILTER: schema="" table="" column="json_type"
+STMT: SelectStmt
+== 107
+-- corner cases
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::text
+--
+STMT: SelectStmt
+== 108
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::int
+--
+STMT: SelectStmt
+== 109
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> 1
+--
+STMT: SelectStmt
+== 110
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> 'z'
+--
+STMT: SelectStmt
+== 111
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> ''
+--
+STMT: SelectStmt
+== 112
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb -> 1
+--
+STMT: SelectStmt
+== 113
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb -> 3
+--
+STMT: SelectStmt
+== 114
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb -> 'z'
+--
+STMT: SelectStmt
+== 115
+select '{"a": "c", "b": null}'::jsonb -> 'b'
+--
+STMT: SelectStmt
+== 116
+select '"foo"'::jsonb -> 1
+--
+STMT: SelectStmt
+== 117
+select '"foo"'::jsonb -> 'z'
+--
+STMT: SelectStmt
+== 118
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb ->> null::text
+--
+STMT: SelectStmt
+== 119
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb ->> null::int
+--
+STMT: SelectStmt
+== 120
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb ->> 1
+--
+STMT: SelectStmt
+== 121
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb ->> 'z'
+--
+STMT: SelectStmt
+== 122
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb ->> ''
+--
+STMT: SelectStmt
+== 123
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb ->> 1
+--
+STMT: SelectStmt
+== 124
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb ->> 3
+--
+STMT: SelectStmt
+== 125
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb ->> 'z'
+--
+STMT: SelectStmt
+== 126
+select '{"a": "c", "b": null}'::jsonb ->> 'b'
+--
+STMT: SelectStmt
+== 127
+select '"foo"'::jsonb ->> 1
+--
+STMT: SelectStmt
+== 128
+select '"foo"'::jsonb ->> 'z'
+--
+STMT: SelectStmt
+== 129
+-- equality and inequality
+SELECT '{"x":"y"}'::jsonb = '{"x":"y"}'::jsonb
+--
+STMT: SelectStmt
+== 130
+SELECT '{"x":"y"}'::jsonb = '{"x":"z"}'::jsonb
+--
+STMT: SelectStmt
+== 131
+SELECT '{"x":"y"}'::jsonb <> '{"x":"y"}'::jsonb
+--
+STMT: SelectStmt
+== 132
+SELECT '{"x":"y"}'::jsonb <> '{"x":"z"}'::jsonb
+--
+STMT: SelectStmt
+== 133
+-- containment
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 134
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":null}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 135
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "g":null}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 136
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"g":null}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 137
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"c"}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 138
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 139
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":"q"}')
+--
+FUNCTION: name="jsonb_contains" function="jsonb_contains" schema="" ctx=Call
+STMT: SelectStmt
+== 140
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}'
+--
+STMT: SelectStmt
+== 141
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":null}'
+--
+STMT: SelectStmt
+== 142
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "g":null}'
+--
+STMT: SelectStmt
+== 143
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"g":null}'
+--
+STMT: SelectStmt
+== 144
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"c"}'
+--
+STMT: SelectStmt
+== 145
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}'
+--
+STMT: SelectStmt
+== 146
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":"q"}'
+--
+STMT: SelectStmt
+== 147
+SELECT '[1,2]'::jsonb @> '[1,2,2]'::jsonb
+--
+STMT: SelectStmt
+== 148
+SELECT '[1,1,2]'::jsonb @> '[1,2,2]'::jsonb
+--
+STMT: SelectStmt
+== 149
+SELECT '[[1,2]]'::jsonb @> '[[1,2,2]]'::jsonb
+--
+STMT: SelectStmt
+== 150
+SELECT '[1,2,2]'::jsonb <@ '[1,2]'::jsonb
+--
+STMT: SelectStmt
+== 151
+SELECT '[1,2,2]'::jsonb <@ '[1,1,2]'::jsonb
+--
+STMT: SelectStmt
+== 152
+SELECT '[[1,2,2]]'::jsonb <@ '[[1,2]]'::jsonb
+--
+STMT: SelectStmt
+== 153
+SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 154
+SELECT jsonb_contained('{"a":"b", "c":null}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 155
+SELECT jsonb_contained('{"a":"b", "g":null}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 156
+SELECT jsonb_contained('{"g":null}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 157
+SELECT jsonb_contained('{"a":"c"}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 158
+SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 159
+SELECT jsonb_contained('{"a":"b", "c":"q"}', '{"a":"b", "b":1, "c":null}')
+--
+FUNCTION: name="jsonb_contained" function="jsonb_contained" schema="" ctx=Call
+STMT: SelectStmt
+== 160
+SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 161
+SELECT '{"a":"b", "c":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 162
+SELECT '{"a":"b", "g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 163
+SELECT '{"g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 164
+SELECT '{"a":"c"}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 165
+SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 166
+SELECT '{"a":"b", "c":"q"}'::jsonb <@ '{"a":"b", "b":1, "c":null}'
+--
+STMT: SelectStmt
+== 167
+-- Raw scalar may contain another raw scalar, array may contain a raw scalar
+SELECT '[5]'::jsonb @> '[5]'
+--
+STMT: SelectStmt
+== 168
+SELECT '5'::jsonb @> '5'
+--
+STMT: SelectStmt
+== 169
+SELECT '[5]'::jsonb @> '5'
+--
+STMT: SelectStmt
+== 170
+-- But a raw scalar cannot contain an array
+SELECT '5'::jsonb @> '[5]'
+--
+STMT: SelectStmt
+== 171
+-- In general, one thing should always contain itself. Test array containment:
+SELECT '["9", ["7", "3"], 1]'::jsonb @> '["9", ["7", "3"], 1]'::jsonb
+--
+STMT: SelectStmt
+== 172
+SELECT '["9", ["7", "3"], ["1"]]'::jsonb @> '["9", ["7", "3"], ["1"]]'::jsonb
+--
+STMT: SelectStmt
+== 173
+-- array containment string matching confusion bug
+SELECT '{ "name": "Bob", "tags": [ "enim", "qui"]}'::jsonb @> '{"tags":["qu"]}'
+--
+STMT: SelectStmt
+== 174
+-- array length
+SELECT jsonb_array_length('[1,2,3,{"f1":1,"f2":[5,6]},4]')
+--
+FUNCTION: name="jsonb_array_length" function="jsonb_array_length" schema="" ctx=Call
+STMT: SelectStmt
+== 175
+SELECT jsonb_array_length('[]')
+--
+FUNCTION: name="jsonb_array_length" function="jsonb_array_length" schema="" ctx=Call
+STMT: SelectStmt
+== 176
+SELECT jsonb_array_length('{"f1":1,"f2":[5,6]}')
+--
+FUNCTION: name="jsonb_array_length" function="jsonb_array_length" schema="" ctx=Call
+STMT: SelectStmt
+== 177
+SELECT jsonb_array_length('4')
+--
+FUNCTION: name="jsonb_array_length" function="jsonb_array_length" schema="" ctx=Call
+STMT: SelectStmt
+== 178
+-- each
+SELECT jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}')
+--
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 179
+SELECT jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q
+--
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 180
+SELECT * FROM jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q
+--
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 181
+SELECT * FROM jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q
+--
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 182
+SELECT jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":"null"}')
+--
+FUNCTION: name="jsonb_each_text" function="jsonb_each_text" schema="" ctx=Call
+STMT: SelectStmt
+== 183
+SELECT jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q
+--
+FUNCTION: name="jsonb_each_text" function="jsonb_each_text" schema="" ctx=Call
+STMT: SelectStmt
+== 184
+SELECT * FROM jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q
+--
+FUNCTION: name="jsonb_each_text" function="jsonb_each_text" schema="" ctx=Call
+STMT: SelectStmt
+== 185
+SELECT * FROM jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q
+--
+FUNCTION: name="jsonb_each_text" function="jsonb_each_text" schema="" ctx=Call
+STMT: SelectStmt
+== 186
+-- exists
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'a')
+--
+FUNCTION: name="jsonb_exists" function="jsonb_exists" schema="" ctx=Call
+STMT: SelectStmt
+== 187
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'b')
+--
+FUNCTION: name="jsonb_exists" function="jsonb_exists" schema="" ctx=Call
+STMT: SelectStmt
+== 188
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'c')
+--
+FUNCTION: name="jsonb_exists" function="jsonb_exists" schema="" ctx=Call
+STMT: SelectStmt
+== 189
+SELECT jsonb_exists('{"a":"null", "b":"qq"}', 'a')
+--
+FUNCTION: name="jsonb_exists" function="jsonb_exists" schema="" ctx=Call
+STMT: SelectStmt
+== 190
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'a'
+--
+STMT: SelectStmt
+== 191
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'b'
+--
+STMT: SelectStmt
+== 192
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'c'
+--
+STMT: SelectStmt
+== 193
+SELECT jsonb '{"a":"null", "b":"qq"}' ? 'a'
+--
+STMT: SelectStmt
+== 194
+-- array exists - array elements should behave as keys
+SELECT count(*) from testjsonb  WHERE j->'array' ? 'bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 195
+-- type sensitive array exists - should return no rows (since "exists" only
+-- matches strings that are either object keys or array elements)
+SELECT count(*) from testjsonb  WHERE j->'array' ? '5'::text
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 196
+-- However, a raw scalar is *contained* within the array
+SELECT count(*) from testjsonb  WHERE j->'array' @> '5'::jsonb
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 197
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['a','b'])
+--
+FUNCTION: name="jsonb_exists_any" function="jsonb_exists_any" schema="" ctx=Call
+STMT: SelectStmt
+== 198
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['b','a'])
+--
+FUNCTION: name="jsonb_exists_any" function="jsonb_exists_any" schema="" ctx=Call
+STMT: SelectStmt
+== 199
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','a'])
+--
+FUNCTION: name="jsonb_exists_any" function="jsonb_exists_any" schema="" ctx=Call
+STMT: SelectStmt
+== 200
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','d'])
+--
+FUNCTION: name="jsonb_exists_any" function="jsonb_exists_any" schema="" ctx=Call
+STMT: SelectStmt
+== 201
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', '{}'::text[])
+--
+FUNCTION: name="jsonb_exists_any" function="jsonb_exists_any" schema="" ctx=Call
+STMT: SelectStmt
+== 202
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['a','b']
+--
+STMT: SelectStmt
+== 203
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['b','a']
+--
+STMT: SelectStmt
+== 204
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','a']
+--
+STMT: SelectStmt
+== 205
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','d']
+--
+STMT: SelectStmt
+== 206
+SELECT jsonb '{"a":null, "b":"qq"}' ?| '{}'::text[]
+--
+STMT: SelectStmt
+== 207
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['a','b'])
+--
+FUNCTION: name="jsonb_exists_all" function="jsonb_exists_all" schema="" ctx=Call
+STMT: SelectStmt
+== 208
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['b','a'])
+--
+FUNCTION: name="jsonb_exists_all" function="jsonb_exists_all" schema="" ctx=Call
+STMT: SelectStmt
+== 209
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','a'])
+--
+FUNCTION: name="jsonb_exists_all" function="jsonb_exists_all" schema="" ctx=Call
+STMT: SelectStmt
+== 210
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','d'])
+--
+FUNCTION: name="jsonb_exists_all" function="jsonb_exists_all" schema="" ctx=Call
+STMT: SelectStmt
+== 211
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', '{}'::text[])
+--
+FUNCTION: name="jsonb_exists_all" function="jsonb_exists_all" schema="" ctx=Call
+STMT: SelectStmt
+== 212
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','b']
+--
+STMT: SelectStmt
+== 213
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['b','a']
+--
+STMT: SelectStmt
+== 214
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','a']
+--
+STMT: SelectStmt
+== 215
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','d']
+--
+STMT: SelectStmt
+== 216
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','a', 'b', 'b', 'b']
+--
+STMT: SelectStmt
+== 217
+SELECT jsonb '{"a":null, "b":"qq"}' ?& '{}'::text[]
+--
+STMT: SelectStmt
+== 218
+-- typeof
+SELECT jsonb_typeof('{}') AS object
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 219
+SELECT jsonb_typeof('{"c":3,"p":"o"}') AS object
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 220
+SELECT jsonb_typeof('[]') AS array
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 221
+SELECT jsonb_typeof('["a", 1]') AS array
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 222
+SELECT jsonb_typeof('null') AS "null"
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 223
+SELECT jsonb_typeof('1') AS number
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 224
+SELECT jsonb_typeof('-1') AS number
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 225
+SELECT jsonb_typeof('1.0') AS number
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 226
+SELECT jsonb_typeof('1e2') AS number
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 227
+SELECT jsonb_typeof('-1.0') AS number
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 228
+SELECT jsonb_typeof('true') AS boolean
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 229
+SELECT jsonb_typeof('false') AS boolean
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 230
+SELECT jsonb_typeof('"hello"') AS string
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 231
+SELECT jsonb_typeof('"true"') AS string
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 232
+SELECT jsonb_typeof('"1.0"') AS string
+--
+FUNCTION: name="jsonb_typeof" function="jsonb_typeof" schema="" ctx=Call
+STMT: SelectStmt
+== 233
+-- jsonb_build_array, jsonb_build_object, jsonb_object_agg
+
+SELECT jsonb_build_array('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}')
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 234
+SELECT jsonb_build_array('a', NULL)
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 235
+-- ok
+SELECT jsonb_build_array(VARIADIC NULL::text[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 236
+-- ok
+SELECT jsonb_build_array(VARIADIC '{}'::text[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 237
+-- ok
+SELECT jsonb_build_array(VARIADIC '{a,b,c}'::text[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 238
+-- ok
+SELECT jsonb_build_array(VARIADIC ARRAY['a', NULL]::text[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 239
+-- ok
+SELECT jsonb_build_array(VARIADIC '{1,2,3,4}'::text[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 240
+-- ok
+SELECT jsonb_build_array(VARIADIC '{1,2,3,4}'::int[])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 241
+-- ok
+SELECT jsonb_build_array(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][])
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 242
+-- ok
+
+SELECT jsonb_build_object('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}')
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 243
+SELECT jsonb_build_object(
+       'a', jsonb_build_object('b',false,'c',99),
+       'd', jsonb_build_object('e',array[9,8,7]::int[],
+           'f', (select row_to_json(r) from ( select relkind, oid::regclass as name from pg_class where relname = 'pg_class') r)))
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=Select
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+FUNCTION: name="row_to_json" function="row_to_json" schema="" ctx=Call
+FILTER: schema="" table="" column="relname"
+STMT: SelectStmt
+== 244
+SELECT jsonb_build_object('{a,b,c}'::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 245
+-- error
+SELECT jsonb_build_object('{a,b,c}'::text[], '{d,e,f}'::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 246
+-- error, key cannot be array
+SELECT jsonb_build_object('a', 'b', 'c')
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 247
+-- error
+SELECT jsonb_build_object(NULL, 'a')
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 248
+-- error, key cannot be NULL
+SELECT jsonb_build_object('a', NULL)
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 249
+-- ok
+SELECT jsonb_build_object(VARIADIC NULL::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 250
+-- ok
+SELECT jsonb_build_object(VARIADIC '{}'::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 251
+-- ok
+SELECT jsonb_build_object(VARIADIC '{a,b,c}'::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 252
+-- error
+SELECT jsonb_build_object(VARIADIC ARRAY['a', NULL]::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 253
+-- ok
+SELECT jsonb_build_object(VARIADIC ARRAY[NULL, 'a']::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 254
+-- error, key cannot be NULL
+SELECT jsonb_build_object(VARIADIC '{1,2,3,4}'::text[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 255
+-- ok
+SELECT jsonb_build_object(VARIADIC '{1,2,3,4}'::int[])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 256
+-- ok
+SELECT jsonb_build_object(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][])
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 257
+-- ok
+
+-- empty objects/arrays
+SELECT jsonb_build_array()
+--
+FUNCTION: name="jsonb_build_array" function="jsonb_build_array" schema="" ctx=Call
+STMT: SelectStmt
+== 258
+SELECT jsonb_build_object()
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 259
+-- make sure keys are quoted
+SELECT jsonb_build_object(1,2)
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 260
+-- keys must be scalar and not null
+SELECT jsonb_build_object(null,2)
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 261
+SELECT jsonb_build_object(r,2) FROM (SELECT 1 AS a, 2 AS b) r
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 262
+SELECT jsonb_build_object(json '{"a":1,"b":2}', 3)
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 263
+SELECT jsonb_build_object('{1,2,3}'::int[], 3)
+--
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 264
+-- handling of NULL values
+SELECT jsonb_object_agg(1, NULL::jsonb)
+--
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 265
+SELECT jsonb_object_agg(NULL, '{"a":1}')
+--
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 266
+CREATE TEMP TABLE foo (serial_num int, name text, type text)
+--
+TABLE: name="foo" schema="" table="foo" ctx=DDL
+STMT: CreateStmt
+== 267
+INSERT INTO foo VALUES (847001,'t15','GE1043')
+--
+TABLE: name="foo" schema="" table="foo" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 268
+INSERT INTO foo VALUES (847002,'t16','GE1043')
+--
+TABLE: name="foo" schema="" table="foo" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 269
+INSERT INTO foo VALUES (847003,'sub-alpha','GESS90')
+--
+TABLE: name="foo" schema="" table="foo" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 270
+SELECT jsonb_build_object('turbines',jsonb_object_agg(serial_num,jsonb_build_object('name',name,'type',type)))
+FROM foo
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+FUNCTION: name="jsonb_build_object" function="jsonb_build_object" schema="" ctx=Call
+STMT: SelectStmt
+== 271
+SELECT jsonb_object_agg(name, type) FROM foo
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 272
+INSERT INTO foo VALUES (999999, NULL, 'bar')
+--
+TABLE: name="foo" schema="" table="foo" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 273
+SELECT jsonb_object_agg(name, type) FROM foo
+--
+TABLE: name="foo" schema="" table="foo" ctx=Select
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 274
+-- edge case for parser
+SELECT jsonb_object_agg(DISTINCT 'a', 'abc')
+--
+FUNCTION: name="jsonb_object_agg" function="jsonb_object_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 275
+-- jsonb_object
+
+-- empty object, one dimension
+SELECT jsonb_object('{}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 276
+-- empty object, two dimensions
+SELECT jsonb_object('{}', '{}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 277
+-- one dimension
+SELECT jsonb_object('{a,1,b,2,3,NULL,"d e f","a b c"}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 278
+-- same but with two dimensions
+SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 279
+-- odd number error
+SELECT jsonb_object('{a,b,c}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 280
+-- one column error
+SELECT jsonb_object('{{a},{b}}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 281
+-- too many columns error
+SELECT jsonb_object('{{a,b,c},{b,c,d}}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 282
+-- too many dimensions error
+SELECT jsonb_object('{{{a,b},{c,d}},{{b,c},{d,e}}}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 283
+--two argument form of jsonb_object
+
+select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c"}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 284
+-- too many dimensions
+SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}', '{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 285
+-- mismatched dimensions
+
+select jsonb_object('{a,b,c,"d e f",g}','{1,2,3,"a b c"}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 286
+select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c",g}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 287
+-- null key error
+
+select jsonb_object('{a,b,NULL,"d e f"}','{1,2,3,"a b c"}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 288
+-- empty key is allowed
+
+select jsonb_object('{a,b,"","d e f"}','{1,2,3,"a b c"}')
+--
+FUNCTION: name="jsonb_object" function="jsonb_object" schema="" ctx=Call
+STMT: SelectStmt
+== 289
+-- extract_path, extract_path_as_text
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6')
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 290
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2')
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 291
+SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text)
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 292
+SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text)
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 293
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6')
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 294
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2')
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 295
+SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text)
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 296
+SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text)
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 297
+-- extract_path nulls
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_false
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 298
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_true
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 299
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_false
+--
+FUNCTION: name="jsonb_extract_path" function="jsonb_extract_path" schema="" ctx=Call
+STMT: SelectStmt
+== 300
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_true
+--
+FUNCTION: name="jsonb_extract_path_text" function="jsonb_extract_path_text" schema="" ctx=Call
+STMT: SelectStmt
+== 301
+-- extract_path operators
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f4','f6']
+--
+STMT: SelectStmt
+== 302
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2']
+--
+STMT: SelectStmt
+== 303
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','0']
+--
+STMT: SelectStmt
+== 304
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','1']
+--
+STMT: SelectStmt
+== 305
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f4','f6']
+--
+STMT: SelectStmt
+== 306
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2']
+--
+STMT: SelectStmt
+== 307
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','0']
+--
+STMT: SelectStmt
+== 308
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','1']
+--
+STMT: SelectStmt
+== 309
+-- corner cases for same
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> '{}'
+--
+STMT: SelectStmt
+== 310
+select '[1,2,3]'::jsonb #> '{}'
+--
+STMT: SelectStmt
+== 311
+select '"foo"'::jsonb #> '{}'
+--
+STMT: SelectStmt
+== 312
+select '42'::jsonb #> '{}'
+--
+STMT: SelectStmt
+== 313
+select 'null'::jsonb #> '{}'
+--
+STMT: SelectStmt
+== 314
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a']
+--
+STMT: SelectStmt
+== 315
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', null]
+--
+STMT: SelectStmt
+== 316
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', '']
+--
+STMT: SelectStmt
+== 317
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b']
+--
+STMT: SelectStmt
+== 318
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c']
+--
+STMT: SelectStmt
+== 319
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c','d']
+--
+STMT: SelectStmt
+== 320
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','z','c']
+--
+STMT: SelectStmt
+== 321
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','1','b']
+--
+STMT: SelectStmt
+== 322
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','z','b']
+--
+STMT: SelectStmt
+== 323
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['1','b']
+--
+STMT: SelectStmt
+== 324
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['z','b']
+--
+STMT: SelectStmt
+== 325
+select '[{"b": "c"}, {"b": null}]'::jsonb #> array['1','b']
+--
+STMT: SelectStmt
+== 326
+select '"foo"'::jsonb #> array['z']
+--
+STMT: SelectStmt
+== 327
+select '42'::jsonb #> array['f2']
+--
+STMT: SelectStmt
+== 328
+select '42'::jsonb #> array['0']
+--
+STMT: SelectStmt
+== 329
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> '{}'
+--
+STMT: SelectStmt
+== 330
+select '[1,2,3]'::jsonb #>> '{}'
+--
+STMT: SelectStmt
+== 331
+select '"foo"'::jsonb #>> '{}'
+--
+STMT: SelectStmt
+== 332
+select '42'::jsonb #>> '{}'
+--
+STMT: SelectStmt
+== 333
+select 'null'::jsonb #>> '{}'
+--
+STMT: SelectStmt
+== 334
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a']
+--
+STMT: SelectStmt
+== 335
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', null]
+--
+STMT: SelectStmt
+== 336
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', '']
+--
+STMT: SelectStmt
+== 337
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b']
+--
+STMT: SelectStmt
+== 338
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c']
+--
+STMT: SelectStmt
+== 339
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c','d']
+--
+STMT: SelectStmt
+== 340
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','z','c']
+--
+STMT: SelectStmt
+== 341
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','1','b']
+--
+STMT: SelectStmt
+== 342
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','z','b']
+--
+STMT: SelectStmt
+== 343
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['1','b']
+--
+STMT: SelectStmt
+== 344
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['z','b']
+--
+STMT: SelectStmt
+== 345
+select '[{"b": "c"}, {"b": null}]'::jsonb #>> array['1','b']
+--
+STMT: SelectStmt
+== 346
+select '"foo"'::jsonb #>> array['z']
+--
+STMT: SelectStmt
+== 347
+select '42'::jsonb #>> array['f2']
+--
+STMT: SelectStmt
+== 348
+select '42'::jsonb #>> array['0']
+--
+STMT: SelectStmt
+== 349
+-- array_elements
+SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]')
+--
+FUNCTION: name="jsonb_array_elements" function="jsonb_array_elements" schema="" ctx=Call
+STMT: SelectStmt
+== 350
+SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]') q
+--
+FUNCTION: name="jsonb_array_elements" function="jsonb_array_elements" schema="" ctx=Call
+STMT: SelectStmt
+== 351
+SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]')
+--
+FUNCTION: name="jsonb_array_elements_text" function="jsonb_array_elements_text" schema="" ctx=Call
+STMT: SelectStmt
+== 352
+SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]') q
+--
+FUNCTION: name="jsonb_array_elements_text" function="jsonb_array_elements_text" schema="" ctx=Call
+STMT: SelectStmt
+== 353
+-- populate_record
+CREATE TYPE jbpop AS (a text, b int, c timestamp)
+--
+STMT: CompositeTypeStmt
+== 354
+CREATE DOMAIN jsb_int_not_null  AS int     NOT NULL
+--
+STMT: CreateDomainStmt
+== 355
+CREATE DOMAIN jsb_int_array_1d  AS int[]   CHECK(array_length(VALUE, 1) = 3)
+--
+STMT: CreateDomainStmt
+== 356
+CREATE DOMAIN jsb_int_array_2d  AS int[][] CHECK(array_length(VALUE, 2) = 3)
+--
+STMT: CreateDomainStmt
+== 357
+create type jb_unordered_pair as (x int, y int)
+--
+STMT: CompositeTypeStmt
+== 358
+create domain jb_ordered_pair as jb_unordered_pair check((value).x <= (value).y)
+--
+STMT: CreateDomainStmt
+== 359
+CREATE TYPE jsbrec AS (
+	i	int,
+	ia	_int4,
+	ia1	int[],
+	ia2	int[][],
+	ia3	int[][][],
+	ia1d	jsb_int_array_1d,
+	ia2d	jsb_int_array_2d,
+	t	text,
+	ta	text[],
+	c	char(10),
+	ca	char(10)[],
+	ts	timestamp,
+	js	json,
+	jsb	jsonb,
+	jsa	json[],
+	rec	jbpop,
+	reca	jbpop[]
+)
+--
+STMT: CompositeTypeStmt
+== 360
+CREATE TYPE jsbrec_i_not_null AS (
+	i	jsb_int_not_null
+)
+--
+STMT: CompositeTypeStmt
+== 361
+SELECT * FROM jsonb_populate_record(NULL::jbpop,'{"a":"blurfl","x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 362
+SELECT * FROM jsonb_populate_record(row('x',3,'2012-12-31 15:30:56')::jbpop,'{"a":"blurfl","x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 363
+SELECT * FROM jsonb_populate_record(NULL::jbpop,'{"a":"blurfl","x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 364
+SELECT * FROM jsonb_populate_record(row('x',3,'2012-12-31 15:30:56')::jbpop,'{"a":"blurfl","x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 365
+SELECT * FROM jsonb_populate_record(NULL::jbpop,'{"a":[100,200,false],"x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 366
+SELECT * FROM jsonb_populate_record(row('x',3,'2012-12-31 15:30:56')::jbpop,'{"a":[100,200,false],"x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 367
+SELECT * FROM jsonb_populate_record(row('x',3,'2012-12-31 15:30:56')::jbpop,'{"c":[100,200,false],"x":43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 368
+SELECT * FROM jsonb_populate_record(row('x',3,'2012-12-31 15:30:56')::jbpop, '{}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 369
+SELECT i FROM jsonb_populate_record(NULL::jsbrec_i_not_null, '{"x": 43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 370
+SELECT i FROM jsonb_populate_record(NULL::jsbrec_i_not_null, '{"i": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 371
+SELECT i FROM jsonb_populate_record(NULL::jsbrec_i_not_null, '{"i": 12345}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 372
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 373
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 374
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 375
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": [[1, 2], [3, 4]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 376
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": [[1], 2]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 377
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": [[1], [2, 3]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 378
+SELECT ia FROM jsonb_populate_record(NULL::jsbrec, '{"ia": "{1,2,3}"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 379
+SELECT ia1 FROM jsonb_populate_record(NULL::jsbrec, '{"ia1": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 380
+SELECT ia1 FROM jsonb_populate_record(NULL::jsbrec, '{"ia1": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 381
+SELECT ia1 FROM jsonb_populate_record(NULL::jsbrec, '{"ia1": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 382
+SELECT ia1 FROM jsonb_populate_record(NULL::jsbrec, '{"ia1": [[1, 2, 3]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 383
+SELECT ia1d FROM jsonb_populate_record(NULL::jsbrec, '{"ia1d": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 384
+SELECT ia1d FROM jsonb_populate_record(NULL::jsbrec, '{"ia1d": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 385
+SELECT ia1d FROM jsonb_populate_record(NULL::jsbrec, '{"ia1d": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 386
+SELECT ia1d FROM jsonb_populate_record(NULL::jsbrec, '{"ia1d": [1, "2", null]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 387
+SELECT ia2 FROM jsonb_populate_record(NULL::jsbrec, '{"ia2": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 388
+SELECT ia2 FROM jsonb_populate_record(NULL::jsbrec, '{"ia2": [[1, 2], [null, 4]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 389
+SELECT ia2 FROM jsonb_populate_record(NULL::jsbrec, '{"ia2": [[], []]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 390
+SELECT ia2 FROM jsonb_populate_record(NULL::jsbrec, '{"ia2": [[1, 2], [3]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 391
+SELECT ia2 FROM jsonb_populate_record(NULL::jsbrec, '{"ia2": [[1, 2], 3, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 392
+SELECT ia2d FROM jsonb_populate_record(NULL::jsbrec, '{"ia2d": [[1, "2"], [null, 4]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 393
+SELECT ia2d FROM jsonb_populate_record(NULL::jsbrec, '{"ia2d": [[1, "2", 3], [null, 5, 6]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 394
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 395
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [[1, 2], [null, 4]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 396
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [ [[], []], [[], []], [[], []] ]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 397
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [ [[1, 2]], [[3, 4]] ]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 398
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [ [[1, 2], [3, 4]], [[5, 6], [7, 8]] ]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 399
+SELECT ia3 FROM jsonb_populate_record(NULL::jsbrec, '{"ia3": [ [[1, 2], [3, 4]], [[5, 6], [7, 8], [9, 10]] ]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 400
+SELECT ta FROM jsonb_populate_record(NULL::jsbrec, '{"ta": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 401
+SELECT ta FROM jsonb_populate_record(NULL::jsbrec, '{"ta": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 402
+SELECT ta FROM jsonb_populate_record(NULL::jsbrec, '{"ta": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 403
+SELECT ta FROM jsonb_populate_record(NULL::jsbrec, '{"ta": [[1, 2, 3], {"k": "v"}]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 404
+SELECT c FROM jsonb_populate_record(NULL::jsbrec, '{"c": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 405
+SELECT c FROM jsonb_populate_record(NULL::jsbrec, '{"c": "aaa"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 406
+SELECT c FROM jsonb_populate_record(NULL::jsbrec, '{"c": "aaaaaaaaaa"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 407
+SELECT c FROM jsonb_populate_record(NULL::jsbrec, '{"c": "aaaaaaaaaaaaa"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 408
+SELECT ca FROM jsonb_populate_record(NULL::jsbrec, '{"ca": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 409
+SELECT ca FROM jsonb_populate_record(NULL::jsbrec, '{"ca": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 410
+SELECT ca FROM jsonb_populate_record(NULL::jsbrec, '{"ca": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 411
+SELECT ca FROM jsonb_populate_record(NULL::jsbrec, '{"ca": ["aaaaaaaaaaaaaaaa"]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 412
+SELECT ca FROM jsonb_populate_record(NULL::jsbrec, '{"ca": [[1, 2, 3], {"k": "v"}]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 413
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 414
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": true}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 415
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": 123.45}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 416
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": "123.45"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 417
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": "abc"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 418
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": [123, "123", null, {"key": "value"}]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 419
+SELECT js FROM jsonb_populate_record(NULL::jsbrec, '{"js": {"a": "bbb", "b": null, "c": 123.45}}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 420
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 421
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": true}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 422
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": 123.45}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 423
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": "123.45"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 424
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": "abc"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 425
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": [123, "123", null, {"key": "value"}]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 426
+SELECT jsb FROM jsonb_populate_record(NULL::jsbrec, '{"jsb": {"a": "bbb", "b": null, "c": 123.45}}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 427
+SELECT jsa FROM jsonb_populate_record(NULL::jsbrec, '{"jsa": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 428
+SELECT jsa FROM jsonb_populate_record(NULL::jsbrec, '{"jsa": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 429
+SELECT jsa FROM jsonb_populate_record(NULL::jsbrec, '{"jsa": [1, "2", null, 4]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 430
+SELECT jsa FROM jsonb_populate_record(NULL::jsbrec, '{"jsa": ["aaa", null, [1, 2, "3", {}], { "k" : "v" }]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 431
+SELECT rec FROM jsonb_populate_record(NULL::jsbrec, '{"rec": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 432
+SELECT rec FROM jsonb_populate_record(NULL::jsbrec, '{"rec": [1, 2]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 433
+SELECT rec FROM jsonb_populate_record(NULL::jsbrec, '{"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2}}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 434
+SELECT rec FROM jsonb_populate_record(NULL::jsbrec, '{"rec": "(abc,42,01.02.2003)"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 435
+SELECT reca FROM jsonb_populate_record(NULL::jsbrec, '{"reca": 123}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 436
+SELECT reca FROM jsonb_populate_record(NULL::jsbrec, '{"reca": [1, 2]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 437
+SELECT reca FROM jsonb_populate_record(NULL::jsbrec, '{"reca": [{"a": "abc", "b": 456}, null, {"c": "01.02.2003", "x": 43.2}]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 438
+SELECT reca FROM jsonb_populate_record(NULL::jsbrec, '{"reca": ["(abc,42,01.02.2003)"]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 439
+SELECT reca FROM jsonb_populate_record(NULL::jsbrec, '{"reca": "{\"(abc,42,01.02.2003)\"}"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 440
+SELECT rec FROM jsonb_populate_record(
+	row(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
+		row('x',3,'2012-12-31 15:30:56')::jbpop,NULL)::jsbrec,
+	'{"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2}}'
+) q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 441
+-- Tests to check soft-error support for populate_record_field()
+
+-- populate_scalar()
+create type jsb_char2 as (a char(2))
+--
+STMT: CompositeTypeStmt
+== 442
+select jsonb_populate_record_valid(NULL::jsb_char2, '{"a": "aaa"}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 443
+select * from jsonb_populate_record(NULL::jsb_char2, '{"a": "aaa"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 444
+select jsonb_populate_record_valid(NULL::jsb_char2, '{"a": "aa"}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 445
+select * from jsonb_populate_record(NULL::jsb_char2, '{"a": "aa"}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 446
+-- populate_array()
+create type jsb_ia as (a int[])
+--
+STMT: CompositeTypeStmt
+== 447
+create type jsb_ia2 as (a int[][])
+--
+STMT: CompositeTypeStmt
+== 448
+select jsonb_populate_record_valid(NULL::jsb_ia, '{"a": 43.2}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 449
+select * from jsonb_populate_record(NULL::jsb_ia, '{"a": 43.2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 450
+select jsonb_populate_record_valid(NULL::jsb_ia, '{"a": [1, 2]}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 451
+select * from jsonb_populate_record(NULL::jsb_ia, '{"a": [1, 2]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 452
+select jsonb_populate_record_valid(NULL::jsb_ia2, '{"a": [[1], [2, 3]]}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 453
+select * from jsonb_populate_record(NULL::jsb_ia2, '{"a": [[1], [2, 3]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 454
+select jsonb_populate_record_valid(NULL::jsb_ia2, '{"a": [[1, 0], [2, 3]]}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 455
+select * from jsonb_populate_record(NULL::jsb_ia2, '{"a": [[1, 0], [2, 3]]}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 456
+-- populate_domain()
+create domain jsb_i_not_null as int not null
+--
+STMT: CreateDomainStmt
+== 457
+create domain jsb_i_gt_1 as int check (value > 1)
+--
+STMT: CreateDomainStmt
+== 458
+create type jsb_i_not_null_rec as (a jsb_i_not_null)
+--
+STMT: CompositeTypeStmt
+== 459
+create type jsb_i_gt_1_rec as (a jsb_i_gt_1)
+--
+STMT: CompositeTypeStmt
+== 460
+select jsonb_populate_record_valid(NULL::jsb_i_not_null_rec, '{"a": null}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 461
+select * from jsonb_populate_record(NULL::jsb_i_not_null_rec, '{"a": null}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 462
+select jsonb_populate_record_valid(NULL::jsb_i_not_null_rec, '{"a": 1}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 463
+select * from jsonb_populate_record(NULL::jsb_i_not_null_rec, '{"a": 1}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 464
+select jsonb_populate_record_valid(NULL::jsb_i_gt_1_rec, '{"a": 1}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 465
+select * from jsonb_populate_record(NULL::jsb_i_gt_1_rec, '{"a": 1}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 466
+select jsonb_populate_record_valid(NULL::jsb_i_gt_1_rec, '{"a": 2}')
+--
+FUNCTION: name="jsonb_populate_record_valid" function="jsonb_populate_record_valid" schema="" ctx=Call
+STMT: SelectStmt
+== 467
+select * from jsonb_populate_record(NULL::jsb_i_gt_1_rec, '{"a": 2}') q
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 468
+drop type jsb_ia, jsb_ia2, jsb_char2, jsb_i_not_null_rec, jsb_i_gt_1_rec
+--
+STMT: DropStmt
+== 469
+drop domain jsb_i_not_null, jsb_i_gt_1
+--
+STMT: DropStmt
+== 470
+-- anonymous record type
+SELECT jsonb_populate_record(null::record, '{"x": 0, "y": 1}')
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 471
+SELECT jsonb_populate_record(row(1,2), '{"f1": 0, "f2": 1}')
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 472
+SELECT * FROM
+  jsonb_populate_record(null::record, '{"x": 776}') AS (x int, y int)
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 473
+-- composite domain
+SELECT jsonb_populate_record(null::jb_ordered_pair, '{"x": 0, "y": 1}')
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 474
+SELECT jsonb_populate_record(row(1,2)::jb_ordered_pair, '{"x": 0}')
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 475
+SELECT jsonb_populate_record(row(1,2)::jb_ordered_pair, '{"x": 1, "y": 0}')
+--
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 476
+-- populate_recordset
+SELECT * FROM jsonb_populate_recordset(NULL::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 477
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 478
+SELECT * FROM jsonb_populate_recordset(NULL::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 479
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 480
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 481
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"c":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 482
+SELECT * FROM jsonb_populate_recordset(NULL::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 483
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 484
+SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 485
+-- anonymous record type
+SELECT jsonb_populate_recordset(null::record, '[{"x": 0, "y": 1}]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 486
+SELECT jsonb_populate_recordset(row(1,2), '[{"f1": 0, "f2": 1}]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 487
+SELECT i, jsonb_populate_recordset(row(i,50), '[{"f1":"42"},{"f2":"43"}]')
+FROM (VALUES (1),(2)) v(i)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 488
+SELECT * FROM
+  jsonb_populate_recordset(null::record, '[{"x": 776}]') AS (x int, y int)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 489
+-- empty array is a corner case
+SELECT jsonb_populate_recordset(null::record, '[]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 490
+SELECT jsonb_populate_recordset(row(1,2), '[]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 491
+SELECT * FROM jsonb_populate_recordset(NULL::jbpop,'[]') q
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 492
+SELECT * FROM
+  jsonb_populate_recordset(null::record, '[]') AS (x int, y int)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 493
+-- composite domain
+SELECT jsonb_populate_recordset(null::jb_ordered_pair, '[{"x": 0, "y": 1}]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 494
+SELECT jsonb_populate_recordset(row(1,2)::jb_ordered_pair, '[{"x": 0}, {"y": 3}]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 495
+SELECT jsonb_populate_recordset(row(1,2)::jb_ordered_pair, '[{"x": 1, "y": 0}]')
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 496
+-- negative cases where the wrong record type is supplied
+select * from jsonb_populate_recordset(row(0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 497
+select * from jsonb_populate_recordset(row(0::int,0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 498
+select * from jsonb_populate_recordset(row(0::int,0::int,0::int),'[{"a":"1","b":"2"},{"a":"3"}]') q (a text, b text)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 499
+select * from jsonb_populate_recordset(row(1000000000::int,50::int),'[{"b":"2"},{"a":"3"}]') q (a text, b text)
+--
+FUNCTION: name="jsonb_populate_recordset" function="jsonb_populate_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 500
+-- jsonb_to_record and jsonb_to_recordset
+
+select * from jsonb_to_record('{"a":1,"b":"foo","c":"bar"}')
+    as x(a int, b text, d text)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 501
+select * from jsonb_to_recordset('[{"a":1,"b":"foo","d":false},{"a":2,"b":"bar","c":true}]')
+    as x(a int, b text, c boolean)
+--
+FUNCTION: name="jsonb_to_recordset" function="jsonb_to_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 502
+select *, c is null as c_is_null
+from jsonb_to_record('{"a":1, "b":{"c":16, "d":2}, "x":8, "ca": ["1 2", 3], "ia": [[1,2],[3,4]], "r": {"a": "aaa", "b": 123}}'::jsonb)
+    as t(a int, b jsonb, c text, x int, ca char(5)[], ia int[][], r jbpop)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 503
+select *, c is null as c_is_null
+from jsonb_to_recordset('[{"a":1, "b":{"c":16, "d":2}, "x":8}]'::jsonb)
+    as t(a int, b jsonb, c text, x int)
+--
+FUNCTION: name="jsonb_to_recordset" function="jsonb_to_recordset" schema="" ctx=Call
+STMT: SelectStmt
+== 504
+select * from jsonb_to_record('{"ia": null}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 505
+select * from jsonb_to_record('{"ia": 123}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 506
+select * from jsonb_to_record('{"ia": [1, "2", null, 4]}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 507
+select * from jsonb_to_record('{"ia": [[1, 2], [3, 4]]}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 508
+select * from jsonb_to_record('{"ia": [[1], 2]}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 509
+select * from jsonb_to_record('{"ia": [[1], [2, 3]]}') as x(ia _int4)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 510
+select * from jsonb_to_record('{"ia2": [1, 2, 3]}') as x(ia2 int[][])
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 511
+select * from jsonb_to_record('{"ia2": [[1, 2], [3, 4]]}') as x(ia2 int4[][])
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 512
+select * from jsonb_to_record('{"ia2": [[[1], [2], [3]]]}') as x(ia2 int4[][])
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 513
+select * from jsonb_to_record('{"out": {"key": 1}}') as x(out json)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 514
+select * from jsonb_to_record('{"out": [{"key": 1}]}') as x(out json)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 515
+select * from jsonb_to_record('{"out": "{\"key\": 1}"}') as x(out json)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 516
+select * from jsonb_to_record('{"out": {"key": 1}}') as x(out jsonb)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 517
+select * from jsonb_to_record('{"out": [{"key": 1}]}') as x(out jsonb)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 518
+select * from jsonb_to_record('{"out": "{\"key\": 1}"}') as x(out jsonb)
+--
+FUNCTION: name="jsonb_to_record" function="jsonb_to_record" schema="" ctx=Call
+STMT: SelectStmt
+== 519
+-- test type info caching in jsonb_populate_record()
+CREATE TEMP TABLE jsbpoptest (js jsonb)
+--
+TABLE: name="jsbpoptest" schema="" table="jsbpoptest" ctx=DDL
+STMT: CreateStmt
+== 520
+INSERT INTO jsbpoptest
+SELECT '{
+	"jsa": [1, "2", null, 4],
+	"rec": {"a": "abc", "c": "01.02.2003", "x": 43.2},
+	"reca": [{"a": "abc", "b": 456}, null, {"c": "01.02.2003", "x": 43.2}]
+}'::jsonb
+FROM generate_series(1, 3)
+--
+TABLE: name="jsbpoptest" schema="" table="jsbpoptest" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 521
+SELECT (jsonb_populate_record(NULL::jsbrec, js)).* FROM jsbpoptest
+--
+TABLE: name="jsbpoptest" schema="" table="jsbpoptest" ctx=Select
+FUNCTION: name="jsonb_populate_record" function="jsonb_populate_record" schema="" ctx=Call
+STMT: SelectStmt
+== 522
+DROP TYPE jsbrec
+--
+STMT: DropStmt
+== 523
+DROP TYPE jsbrec_i_not_null
+--
+STMT: DropStmt
+== 524
+DROP DOMAIN jsb_int_not_null
+--
+STMT: DropStmt
+== 525
+DROP DOMAIN jsb_int_array_1d
+--
+STMT: DropStmt
+== 526
+DROP DOMAIN jsb_int_array_2d
+--
+STMT: DropStmt
+== 527
+DROP DOMAIN jb_ordered_pair
+--
+STMT: DropStmt
+== 528
+DROP TYPE jb_unordered_pair
+--
+STMT: DropStmt
+== 529
+-- indexing
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":null}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 530
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC"}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 531
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC", "public":true}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 532
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 533
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25.0}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 534
+SELECT count(*) FROM testjsonb WHERE j ? 'public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 535
+SELECT count(*) FROM testjsonb WHERE j ? 'bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 536
+SELECT count(*) FROM testjsonb WHERE j ?| ARRAY['public','disabled']
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 537
+SELECT count(*) FROM testjsonb WHERE j ?& ARRAY['public','disabled']
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 538
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == null'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 539
+SELECT count(*) FROM testjsonb WHERE j @@ '"CC" == $.wait'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 540
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == "CC" && true == $.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 541
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 542
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25.0'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 543
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 544
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 545
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.bar)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 546
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public) || exists($.disabled)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 547
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public) && exists($.disabled)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 548
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? (@ == null)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 549
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? ("CC" == @)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 550
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.wait == "CC" && true == @.public)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 551
+SELECT count(*) FROM testjsonb WHERE j @? '$.age ? (@ == 25)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 552
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.age == 25.0)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 553
+SELECT count(*) FROM testjsonb WHERE j @? '$'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 554
+SELECT count(*) FROM testjsonb WHERE j @? '$.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 555
+SELECT count(*) FROM testjsonb WHERE j @? '$.bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 556
+CREATE INDEX jidx ON testjsonb USING gin (j)
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=DDL
+STMT: IndexStmt
+== 557
+SET enable_seqscan = off
+--
+STMT: VariableSetStmt
+== 558
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":null}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 559
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC"}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 560
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC", "public":true}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 561
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 562
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25.0}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 563
+SELECT count(*) FROM testjsonb WHERE j @> '{"array":["foo"]}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 564
+SELECT count(*) FROM testjsonb WHERE j @> '{"array":["bar"]}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 565
+-- exercise GIN_SEARCH_MODE_ALL
+SELECT count(*) FROM testjsonb WHERE j @> '{}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 566
+SELECT count(*) FROM testjsonb WHERE j ? 'public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 567
+SELECT count(*) FROM testjsonb WHERE j ? 'bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 568
+SELECT count(*) FROM testjsonb WHERE j ?| ARRAY['public','disabled']
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 569
+SELECT count(*) FROM testjsonb WHERE j ?& ARRAY['public','disabled']
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 570
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == null'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 571
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == null'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 572
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($ ? (@.wait == null))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 573
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.wait ? (@ == null))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 574
+SELECT count(*) FROM testjsonb WHERE j @@ '"CC" == $.wait'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 575
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == "CC" && true == $.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 576
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 577
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25.0'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 578
+SELECT count(*) FROM testjsonb WHERE j @@ '$.array[*] == "foo"'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 579
+SELECT count(*) FROM testjsonb WHERE j @@ '$.array[*] == "bar"'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 580
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($ ? (@.array[*] == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 581
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.array ? (@[*] == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 582
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.array[*] ? (@ == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 583
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 584
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 585
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.bar)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 586
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public) || exists($.disabled)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 587
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.public) && exists($.disabled)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 588
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? (@ == null)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 589
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? (@ == null)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 590
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? ("CC" == @)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 591
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.wait == "CC" && true == @.public)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 592
+SELECT count(*) FROM testjsonb WHERE j @? '$.age ? (@ == 25)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 593
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.age == 25.0)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 594
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.array[*] == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 595
+SELECT count(*) FROM testjsonb WHERE j @? '$.array ? (@[*] == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 596
+SELECT count(*) FROM testjsonb WHERE j @? '$.array[*] ? (@ == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 597
+SELECT count(*) FROM testjsonb WHERE j @? '$'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 598
+SELECT count(*) FROM testjsonb WHERE j @? '$.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 599
+SELECT count(*) FROM testjsonb WHERE j @? '$.bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 600
+-- array exists - array elements should behave as keys (for GIN index scans too)
+CREATE INDEX jidx_array ON testjsonb USING gin((j->'array'))
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=DDL
+STMT: IndexStmt
+== 601
+SELECT count(*) from testjsonb  WHERE j->'array' ? 'bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 602
+-- type sensitive array exists - should return no rows (since "exists" only
+-- matches strings that are either object keys or array elements)
+SELECT count(*) from testjsonb  WHERE j->'array' ? '5'::text
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 603
+-- However, a raw scalar is *contained* within the array
+SELECT count(*) from testjsonb  WHERE j->'array' @> '5'::jsonb
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 604
+RESET enable_seqscan
+--
+STMT: VariableSetStmt
+== 605
+SELECT count(*) FROM (SELECT (jsonb_each(j)).key FROM testjsonb) AS wow
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 606
+SELECT key, count(*) FROM (SELECT (jsonb_each(j)).key FROM testjsonb) AS wow GROUP BY key ORDER BY count DESC, key
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="jsonb_each" function="jsonb_each" schema="" ctx=Call
+STMT: SelectStmt
+== 607
+-- sort/hash
+SELECT count(distinct j) FROM testjsonb
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 608
+SET enable_hashagg = off
+--
+STMT: VariableSetStmt
+== 609
+SELECT count(*) FROM (SELECT j FROM (SELECT * FROM testjsonb UNION ALL SELECT * FROM testjsonb) js GROUP BY j) js2
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 610
+SET enable_hashagg = on
+--
+STMT: VariableSetStmt
+== 611
+SET enable_sort = off
+--
+STMT: VariableSetStmt
+== 612
+SELECT count(*) FROM (SELECT j FROM (SELECT * FROM testjsonb UNION ALL SELECT * FROM testjsonb) js GROUP BY j) js2
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 613
+SELECT distinct * FROM (values (jsonb '{}' || ''::text),('{}')) v(j)
+--
+STMT: SelectStmt
+== 614
+SET enable_sort = on
+--
+STMT: VariableSetStmt
+== 615
+RESET enable_hashagg
+--
+STMT: VariableSetStmt
+== 616
+RESET enable_sort
+--
+STMT: VariableSetStmt
+== 617
+DROP INDEX jidx
+--
+STMT: DropStmt
+== 618
+DROP INDEX jidx_array
+--
+STMT: DropStmt
+== 619
+-- btree
+CREATE INDEX jidx ON testjsonb USING btree (j)
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=DDL
+STMT: IndexStmt
+== 620
+SET enable_seqscan = off
+--
+STMT: VariableSetStmt
+== 621
+SELECT count(*) FROM testjsonb WHERE j > '{"p":1}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 622
+SELECT count(*) FROM testjsonb WHERE j = '{"pos":98, "line":371, "node":"CBA", "indexed":true}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 623
+--gin path opclass
+DROP INDEX jidx
+--
+STMT: DropStmt
+== 624
+CREATE INDEX jidx ON testjsonb USING gin (j jsonb_path_ops)
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=DDL
+STMT: IndexStmt
+== 625
+SET enable_seqscan = off
+--
+STMT: VariableSetStmt
+== 626
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":null}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 627
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC"}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 628
+SELECT count(*) FROM testjsonb WHERE j @> '{"wait":"CC", "public":true}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 629
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 630
+SELECT count(*) FROM testjsonb WHERE j @> '{"age":25.0}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 631
+-- exercise GIN_SEARCH_MODE_ALL
+SELECT count(*) FROM testjsonb WHERE j @> '{}'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 632
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == null'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 633
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($ ? (@.wait == null))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 634
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.wait ? (@ == null))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 635
+SELECT count(*) FROM testjsonb WHERE j @@ '"CC" == $.wait'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 636
+SELECT count(*) FROM testjsonb WHERE j @@ '$.wait == "CC" && true == $.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 637
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 638
+SELECT count(*) FROM testjsonb WHERE j @@ '$.age == 25.0'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 639
+SELECT count(*) FROM testjsonb WHERE j @@ '$.array[*] == "foo"'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 640
+SELECT count(*) FROM testjsonb WHERE j @@ '$.array[*] == "bar"'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 641
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($ ? (@.array[*] == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 642
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.array ? (@[*] == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 643
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($.array[*] ? (@ == "bar"))'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 644
+SELECT count(*) FROM testjsonb WHERE j @@ 'exists($)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 645
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? (@ == null)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 646
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? (@ == null)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 647
+SELECT count(*) FROM testjsonb WHERE j @? '$.wait ? ("CC" == @)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 648
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.wait == "CC" && true == @.public)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 649
+SELECT count(*) FROM testjsonb WHERE j @? '$.age ? (@ == 25)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 650
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.age == 25.0)'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 651
+SELECT count(*) FROM testjsonb WHERE j @? '$ ? (@.array[*] == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 652
+SELECT count(*) FROM testjsonb WHERE j @? '$.array ? (@[*] == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 653
+SELECT count(*) FROM testjsonb WHERE j @? '$.array[*] ? (@ == "bar")'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 654
+SELECT count(*) FROM testjsonb WHERE j @? '$'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 655
+SELECT count(*) FROM testjsonb WHERE j @? '$.public'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 656
+SELECT count(*) FROM testjsonb WHERE j @? '$.bar'
+--
+TABLE: name="testjsonb" schema="" table="testjsonb" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 657
+RESET enable_seqscan
+--
+STMT: VariableSetStmt
+== 658
+DROP INDEX jidx
+--
+STMT: DropStmt
+== 659
+-- nested tests
+SELECT '{"ff":{"a":12,"b":16}}'::jsonb
+--
+STMT: SelectStmt
+== 660
+SELECT '{"ff":{"a":12,"b":16},"qq":123}'::jsonb
+--
+STMT: SelectStmt
+== 661
+SELECT '{"aa":["a","aaa"],"qq":{"a":12,"b":16,"c":["c1","c2"],"d":{"d1":"d1","d2":"d2","d1":"d3"}}}'::jsonb
+--
+STMT: SelectStmt
+== 662
+SELECT '{"aa":["a","aaa"],"qq":{"a":"12","b":"16","c":["c1","c2"],"d":{"d1":"d1","d2":"d2"}}}'::jsonb
+--
+STMT: SelectStmt
+== 663
+SELECT '{"aa":["a","aaa"],"qq":{"a":"12","b":"16","c":["c1","c2",["c3"],{"c4":4}],"d":{"d1":"d1","d2":"d2"}}}'::jsonb
+--
+STMT: SelectStmt
+== 664
+SELECT '{"ff":["a","aaa"]}'::jsonb
+--
+STMT: SelectStmt
+== 665
+SELECT
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'ff',
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'qq',
+  ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'Y') IS NULL AS f,
+  ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb ->> 'Y') IS NULL AS t,
+   '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'x'
+--
+STMT: SelectStmt
+== 666
+-- nested containment
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1,2]}'
+--
+STMT: SelectStmt
+== 667
+SELECT '{"a":[2,1],"c":"b"}'::jsonb @> '{"a":[1,2]}'
+--
+STMT: SelectStmt
+== 668
+SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":[1,2]}'
+--
+STMT: SelectStmt
+== 669
+SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":[1,2]}'
+--
+STMT: SelectStmt
+== 670
+SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":{"1":2}}'
+--
+STMT: SelectStmt
+== 671
+SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":{"1":2}}'
+--
+STMT: SelectStmt
+== 672
+SELECT '["a","b"]'::jsonb @> '["a","b","c","b"]'
+--
+STMT: SelectStmt
+== 673
+SELECT '["a","b","c","b"]'::jsonb @> '["a","b"]'
+--
+STMT: SelectStmt
+== 674
+SELECT '["a","b","c",[1,2]]'::jsonb @> '["a",[1,2]]'
+--
+STMT: SelectStmt
+== 675
+SELECT '["a","b","c",[1,2]]'::jsonb @> '["b",[1,2]]'
+--
+STMT: SelectStmt
+== 676
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1]}'
+--
+STMT: SelectStmt
+== 677
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[2]}'
+--
+STMT: SelectStmt
+== 678
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[3]}'
+--
+STMT: SelectStmt
+== 679
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"c":3}]}'
+--
+STMT: SelectStmt
+== 680
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4}]}'
+--
+STMT: SelectStmt
+== 681
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},3]}'
+--
+STMT: SelectStmt
+== 682
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},1]}'
+--
+STMT: SelectStmt
+== 683
+-- check some corner cases for indexed nested containment (bug #13756)
+create temp table nestjsonb (j jsonb)
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=DDL
+STMT: CreateStmt
+== 684
+insert into nestjsonb (j) values ('{"a":[["b",{"x":1}],["b",{"x":2}]],"c":3}')
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 685
+insert into nestjsonb (j) values ('[[14,2,3]]')
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 686
+insert into nestjsonb (j) values ('[1,[14,2,3]]')
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 687
+create index on nestjsonb using gin(j jsonb_path_ops)
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=DDL
+STMT: IndexStmt
+== 688
+set enable_seqscan = on
+--
+STMT: VariableSetStmt
+== 689
+set enable_bitmapscan = off
+--
+STMT: VariableSetStmt
+== 690
+select * from nestjsonb where j @> '{"a":[[{"x":2}]]}'::jsonb
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 691
+select * from nestjsonb where j @> '{"c":3}'
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 692
+select * from nestjsonb where j @> '[[14]]'
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 693
+set enable_seqscan = off
+--
+STMT: VariableSetStmt
+== 694
+set enable_bitmapscan = on
+--
+STMT: VariableSetStmt
+== 695
+select * from nestjsonb where j @> '{"a":[[{"x":2}]]}'::jsonb
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 696
+select * from nestjsonb where j @> '{"c":3}'
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 697
+select * from nestjsonb where j @> '[[14]]'
+--
+TABLE: name="nestjsonb" schema="" table="nestjsonb" ctx=Select
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+== 698
+reset enable_seqscan
+--
+STMT: VariableSetStmt
+== 699
+reset enable_bitmapscan
+--
+STMT: VariableSetStmt
+== 700
+-- nested object field / array index lookup
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'n'
+--
+STMT: SelectStmt
+== 701
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'a'
+--
+STMT: SelectStmt
+== 702
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'b'
+--
+STMT: SelectStmt
+== 703
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'c'
+--
+STMT: SelectStmt
+== 704
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'd'
+--
+STMT: SelectStmt
+== 705
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'd' -> '1'
+--
+STMT: SelectStmt
+== 706
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'e'
+--
+STMT: SelectStmt
+== 707
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 0
+--
+STMT: SelectStmt
+== 708
+--expecting error
+
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 0
+--
+STMT: SelectStmt
+== 709
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 1
+--
+STMT: SelectStmt
+== 710
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 2
+--
+STMT: SelectStmt
+== 711
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 3
+--
+STMT: SelectStmt
+== 712
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 3 -> 1
+--
+STMT: SelectStmt
+== 713
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 4
+--
+STMT: SelectStmt
+== 714
+SELECT '["a","b","c",[1,2],null]'::jsonb -> 5
+--
+STMT: SelectStmt
+== 715
+SELECT '["a","b","c",[1,2],null]'::jsonb -> -1
+--
+STMT: SelectStmt
+== 716
+SELECT '["a","b","c",[1,2],null]'::jsonb -> -5
+--
+STMT: SelectStmt
+== 717
+SELECT '["a","b","c",[1,2],null]'::jsonb -> -6
+--
+STMT: SelectStmt
+== 718
+--nested path extraction
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{0}'
+--
+STMT: SelectStmt
+== 719
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{a}'
+--
+STMT: SelectStmt
+== 720
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c}'
+--
+STMT: SelectStmt
+== 721
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,0}'
+--
+STMT: SelectStmt
+== 722
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,1}'
+--
+STMT: SelectStmt
+== 723
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,2}'
+--
+STMT: SelectStmt
+== 724
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,3}'
+--
+STMT: SelectStmt
+== 725
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-1}'
+--
+STMT: SelectStmt
+== 726
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-3}'
+--
+STMT: SelectStmt
+== 727
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-4}'
+--
+STMT: SelectStmt
+== 728
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{0}'
+--
+STMT: SelectStmt
+== 729
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{3}'
+--
+STMT: SelectStmt
+== 730
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4}'
+--
+STMT: SelectStmt
+== 731
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4,5}'
+--
+STMT: SelectStmt
+== 732
+--nested exists
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'n'
+--
+STMT: SelectStmt
+== 733
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'a'
+--
+STMT: SelectStmt
+== 734
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'b'
+--
+STMT: SelectStmt
+== 735
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'c'
+--
+STMT: SelectStmt
+== 736
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'd'
+--
+STMT: SelectStmt
+== 737
+SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'e'
+--
+STMT: SelectStmt
+== 738
+-- jsonb_strip_nulls
+
+select jsonb_strip_nulls(null)
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 739
+select jsonb_strip_nulls('1')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 740
+select jsonb_strip_nulls('"a string"')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 741
+select jsonb_strip_nulls('null')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 742
+select jsonb_strip_nulls('[1,2,null,3,4]')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 743
+select jsonb_strip_nulls('{"a":1,"b":null,"c":[2,null,3],"d":{"e":4,"f":null}}')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 744
+select jsonb_strip_nulls('[1,{"a":1,"b":null,"c":2},3]')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 745
+-- an empty object is not null and should not be stripped
+select jsonb_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }')
+--
+FUNCTION: name="jsonb_strip_nulls" function="jsonb_strip_nulls" schema="" ctx=Call
+STMT: SelectStmt
+== 746
+select jsonb_pretty('{"a": "test", "b": [1, 2, 3], "c": "test3", "d":{"dd": "test4", "dd2":{"ddd": "test5"}}}')
+--
+FUNCTION: name="jsonb_pretty" function="jsonb_pretty" schema="" ctx=Call
+STMT: SelectStmt
+== 747
+select jsonb_pretty('[{"f1":1,"f2":null},2,null,[[{"x":true},6,7],8],3]')
+--
+FUNCTION: name="jsonb_pretty" function="jsonb_pretty" schema="" ctx=Call
+STMT: SelectStmt
+== 748
+select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}')
+--
+FUNCTION: name="jsonb_pretty" function="jsonb_pretty" schema="" ctx=Call
+STMT: SelectStmt
+== 749
+select jsonb_concat('{"d": "test", "a": [1, 2]}', '{"g": "test2", "c": {"c1":1, "c2":2}}')
+--
+FUNCTION: name="jsonb_concat" function="jsonb_concat" schema="" ctx=Call
+STMT: SelectStmt
+== 750
+select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"cq":"l", "b":"g", "fg":false}'
+--
+STMT: SelectStmt
+== 751
+select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aq":"l"}'
+--
+STMT: SelectStmt
+== 752
+select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aa":"l"}'
+--
+STMT: SelectStmt
+== 753
+select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{}'
+--
+STMT: SelectStmt
+== 754
+select '["a", "b"]'::jsonb || '["c"]'
+--
+STMT: SelectStmt
+== 755
+select '["a", "b"]'::jsonb || '["c", "d"]'
+--
+STMT: SelectStmt
+== 756
+select '["c"]' || '["a", "b"]'::jsonb
+--
+STMT: SelectStmt
+== 757
+select '["a", "b"]'::jsonb || '"c"'
+--
+STMT: SelectStmt
+== 758
+select '"c"' || '["a", "b"]'::jsonb
+--
+STMT: SelectStmt
+== 759
+select '[]'::jsonb || '["a"]'::jsonb
+--
+STMT: SelectStmt
+== 760
+select '[]'::jsonb || '"a"'::jsonb
+--
+STMT: SelectStmt
+== 761
+select '"b"'::jsonb || '"a"'::jsonb
+--
+STMT: SelectStmt
+== 762
+select '{}'::jsonb || '{"a":"b"}'::jsonb
+--
+STMT: SelectStmt
+== 763
+select '[]'::jsonb || '{"a":"b"}'::jsonb
+--
+STMT: SelectStmt
+== 764
+select '{"a":"b"}'::jsonb || '[]'::jsonb
+--
+STMT: SelectStmt
+== 765
+select '"a"'::jsonb || '{"a":1}'
+--
+STMT: SelectStmt
+== 766
+select '{"a":1}' || '"a"'::jsonb
+--
+STMT: SelectStmt
+== 767
+select '[3]'::jsonb || '{}'::jsonb
+--
+STMT: SelectStmt
+== 768
+select '3'::jsonb || '[]'::jsonb
+--
+STMT: SelectStmt
+== 769
+select '3'::jsonb || '4'::jsonb
+--
+STMT: SelectStmt
+== 770
+select '3'::jsonb || '{}'::jsonb
+--
+STMT: SelectStmt
+== 771
+select '["a", "b"]'::jsonb || '{"c":1}'
+--
+STMT: SelectStmt
+== 772
+select '{"c": 1}'::jsonb || '["a", "b"]'
+--
+STMT: SelectStmt
+== 773
+select '{}'::jsonb || '{"cq":"l", "b":"g", "fg":false}'
+--
+STMT: SelectStmt
+== 774
+select pg_column_size('{}'::jsonb || '{}'::jsonb) = pg_column_size('{}'::jsonb)
+--
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+STMT: SelectStmt
+== 775
+select pg_column_size('{"aa":1}'::jsonb || '{"b":2}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb)
+--
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+STMT: SelectStmt
+== 776
+select pg_column_size('{"aa":1, "b":2}'::jsonb || '{}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb)
+--
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+STMT: SelectStmt
+== 777
+select pg_column_size('{}'::jsonb || '{"aa":1, "b":2}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb)
+--
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+STMT: SelectStmt
+== 778
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'a')
+--
+FUNCTION: name="jsonb_delete" function="jsonb_delete" schema="" ctx=Call
+STMT: SelectStmt
+== 779
+select jsonb_delete('{"a":null , "b":2, "c":3}'::jsonb, 'a')
+--
+FUNCTION: name="jsonb_delete" function="jsonb_delete" schema="" ctx=Call
+STMT: SelectStmt
+== 780
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'b')
+--
+FUNCTION: name="jsonb_delete" function="jsonb_delete" schema="" ctx=Call
+STMT: SelectStmt
+== 781
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'c')
+--
+FUNCTION: name="jsonb_delete" function="jsonb_delete" schema="" ctx=Call
+STMT: SelectStmt
+== 782
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'd')
+--
+FUNCTION: name="jsonb_delete" function="jsonb_delete" schema="" ctx=Call
+STMT: SelectStmt
+== 783
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'a'
+--
+STMT: SelectStmt
+== 784
+select '{"a":null , "b":2, "c":3}'::jsonb - 'a'
+--
+STMT: SelectStmt
+== 785
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'b'
+--
+STMT: SelectStmt
+== 786
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'c'
+--
+STMT: SelectStmt
+== 787
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'd'
+--
+STMT: SelectStmt
+== 788
+select pg_column_size('{"a":1 , "b":2, "c":3}'::jsonb - 'b') = pg_column_size('{"a":1, "b":2}'::jsonb)
+--
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+FUNCTION: name="pg_column_size" function="pg_column_size" schema="" ctx=Call
+STMT: SelectStmt
+== 789
+select '["a","b","c"]'::jsonb - 3
+--
+STMT: SelectStmt
+== 790
+select '["a","b","c"]'::jsonb - 2
+--
+STMT: SelectStmt
+== 791
+select '["a","b","c"]'::jsonb - 1
+--
+STMT: SelectStmt
+== 792
+select '["a","b","c"]'::jsonb - 0
+--
+STMT: SelectStmt
+== 793
+select '["a","b","c"]'::jsonb - -1
+--
+STMT: SelectStmt
+== 794
+select '["a","b","c"]'::jsonb - -2
+--
+STMT: SelectStmt
+== 795
+select '["a","b","c"]'::jsonb - -3
+--
+STMT: SelectStmt
+== 796
+select '["a","b","c"]'::jsonb - -4
+--
+STMT: SelectStmt
+== 797
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{b}'::text[]
+--
+STMT: SelectStmt
+== 798
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{c,b}'::text[]
+--
+STMT: SelectStmt
+== 799
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{}'::text[]
+--
+STMT: SelectStmt
+== 800
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{n}', '[1,2,3]')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 801
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '[1,2,3]')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 802
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{d,1,0}', '[1,2,3]')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 803
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{d,NULL,0}', '[1,2,3]')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 804
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{n}', '{"1": 2}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 805
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '{"1": 2}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 806
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{d,1,0}', '{"1": 2}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 807
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{d,NULL,0}', '{"1": 2}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 808
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '"test"')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 809
+select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '{"f": "test"}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 810
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{n}')
+--
+FUNCTION: name="jsonb_delete_path" function="jsonb_delete_path" schema="" ctx=Call
+STMT: SelectStmt
+== 811
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{b,-1}')
+--
+FUNCTION: name="jsonb_delete_path" function="jsonb_delete_path" schema="" ctx=Call
+STMT: SelectStmt
+== 812
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{d,1,0}')
+--
+FUNCTION: name="jsonb_delete_path" function="jsonb_delete_path" schema="" ctx=Call
+STMT: SelectStmt
+== 813
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{n}'
+--
+STMT: SelectStmt
+== 814
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1}'
+--
+STMT: SelectStmt
+== 815
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1e}'
+--
+STMT: SelectStmt
+== 816
+-- invalid array subscript
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{d,1,0}'
+--
+STMT: SelectStmt
+== 817
+-- empty structure and error conditions for delete and replace
+
+select '"a"'::jsonb - 'a'
+--
+STMT: SelectStmt
+== 818
+-- error
+select '{}'::jsonb - 'a'
+--
+STMT: SelectStmt
+== 819
+select '[]'::jsonb - 'a'
+--
+STMT: SelectStmt
+== 820
+select '"a"'::jsonb - 1
+--
+STMT: SelectStmt
+== 821
+-- error
+select '{}'::jsonb -  1
+--
+STMT: SelectStmt
+== 822
+-- error
+select '[]'::jsonb - 1
+--
+STMT: SelectStmt
+== 823
+select '"a"'::jsonb #- '{a}'
+--
+STMT: SelectStmt
+== 824
+-- error
+select '{}'::jsonb #- '{a}'
+--
+STMT: SelectStmt
+== 825
+select '[]'::jsonb #- '{a}'
+--
+STMT: SelectStmt
+== 826
+select jsonb_set('"a"','{a}','"b"')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 827
+--error
+select jsonb_set('{}','{a}','"b"', false)
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 828
+select jsonb_set('[]','{1}','"b"', false)
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 829
+select jsonb_set('[{"f1":1,"f2":null},2,null,3]', '{0}','[2,3,4]', false)
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 830
+-- jsonb_set adding instead of replacing
+
+-- prepend to array
+select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{b,-33}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 831
+-- append to array
+select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{b,33}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 832
+-- check nesting levels addition
+select jsonb_set('{"a":1,"b":[4,5,[0,1,2],6,7],"c":{"d":4}}','{b,2,33}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 833
+-- add new key
+select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{c,e}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 834
+-- adding doesn't do anything if elements before last aren't present
+select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{x,-33}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 835
+select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{x,y}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 836
+-- add to empty object
+select jsonb_set('{}','{x}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 837
+--add to empty array
+select jsonb_set('[]','{0}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 838
+select jsonb_set('[]','{99}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 839
+select jsonb_set('[]','{-99}','{"foo":123}')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 840
+select jsonb_set('{"a": [1, 2, 3]}', '{a, non_integer}', '"new_value"')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 841
+select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, non_integer}', '"new_value"')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 842
+select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, NULL}', '"new_value"')
+--
+FUNCTION: name="jsonb_set" function="jsonb_set" schema="" ctx=Call
+STMT: SelectStmt
+== 843
+-- jsonb_set_lax
+
+
+-- pass though non nulls to jsonb_set
+select jsonb_set_lax('{"a":1,"b":2}','{b}','5')
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 844
+select jsonb_set_lax('{"a":1,"b":2}','{d}','6', true)
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 845
+-- using the default treatment
+select jsonb_set_lax('{"a":1,"b":2}','{b}',null)
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 846
+select jsonb_set_lax('{"a":1,"b":2}','{d}',null,true)
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 847
+-- errors
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, true, null)
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 848
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, true, 'no_such_treatment')
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 849
+-- explicit treatments
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, null_value_treatment => 'raise_exception') as raise_exception
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 850
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, null_value_treatment => 'return_target') as return_target
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 851
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, null_value_treatment => 'delete_key') as delete_key
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 852
+select jsonb_set_lax('{"a":1,"b":2}', '{b}', null, null_value_treatment => 'use_json_null') as use_json_null
+--
+FUNCTION: name="jsonb_set_lax" function="jsonb_set_lax" schema="" ctx=Call
+STMT: SelectStmt
+== 853
+-- jsonb_insert
+select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 854
+select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 855
+select jsonb_insert('{"a": {"b": {"c": [0, 1, "test1", "test2"]}}}', '{a, b, c, 2}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 856
+select jsonb_insert('{"a": {"b": {"c": [0, 1, "test1", "test2"]}}}', '{a, b, c, 2}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 857
+select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '{"b": "value"}')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 858
+select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '["value1", "value2"]')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 859
+-- edge cases
+select jsonb_insert('{"a": [0,1,2]}', '{a, 0}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 860
+select jsonb_insert('{"a": [0,1,2]}', '{a, 0}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 861
+select jsonb_insert('{"a": [0,1,2]}', '{a, 2}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 862
+select jsonb_insert('{"a": [0,1,2]}', '{a, 2}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 863
+select jsonb_insert('{"a": [0,1,2]}', '{a, -1}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 864
+select jsonb_insert('{"a": [0,1,2]}', '{a, -1}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 865
+select jsonb_insert('[]', '{1}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 866
+select jsonb_insert('[]', '{1}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 867
+select jsonb_insert('{"a": []}', '{a, 1}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 868
+select jsonb_insert('{"a": []}', '{a, 1}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 869
+select jsonb_insert('{"a": [0,1,2]}', '{a, 10}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 870
+select jsonb_insert('{"a": [0,1,2]}', '{a, -10}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 871
+-- jsonb_insert should be able to insert new value for objects, but not to replace
+select jsonb_insert('{"a": {"b": "value"}}', '{a, c}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 872
+select jsonb_insert('{"a": {"b": "value"}}', '{a, c}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 873
+select jsonb_insert('{"a": {"b": "value"}}', '{a, b}', '"new_value"')
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 874
+select jsonb_insert('{"a": {"b": "value"}}', '{a, b}', '"new_value"', true)
+--
+FUNCTION: name="jsonb_insert" function="jsonb_insert" schema="" ctx=Call
+STMT: SelectStmt
+== 875
+-- jsonb subscript
+select ('123'::jsonb)['a']
+--
+STMT: SelectStmt
+== 876
+select ('123'::jsonb)[0]
+--
+STMT: SelectStmt
+== 877
+select ('123'::jsonb)[NULL]
+--
+STMT: SelectStmt
+== 878
+select ('{"a": 1}'::jsonb)['a']
+--
+STMT: SelectStmt
+== 879
+select ('{"a": 1}'::jsonb)[0]
+--
+STMT: SelectStmt
+== 880
+select ('{"a": 1}'::jsonb)['not_exist']
+--
+STMT: SelectStmt
+== 881
+select ('{"a": 1}'::jsonb)[NULL]
+--
+STMT: SelectStmt
+== 882
+select ('[1, "2", null]'::jsonb)['a']
+--
+STMT: SelectStmt
+== 883
+select ('[1, "2", null]'::jsonb)[0]
+--
+STMT: SelectStmt
+== 884
+select ('[1, "2", null]'::jsonb)['1']
+--
+STMT: SelectStmt
+== 885
+select ('[1, "2", null]'::jsonb)[1.0]
+--
+STMT: SelectStmt
+== 886
+select ('[1, "2", null]'::jsonb)[2]
+--
+STMT: SelectStmt
+== 887
+select ('[1, "2", null]'::jsonb)[3]
+--
+STMT: SelectStmt
+== 888
+select ('[1, "2", null]'::jsonb)[-2]
+--
+STMT: SelectStmt
+== 889
+select ('[1, "2", null]'::jsonb)[1]['a']
+--
+STMT: SelectStmt
+== 890
+select ('[1, "2", null]'::jsonb)[1][0]
+--
+STMT: SelectStmt
+== 891
+select ('{"a": 1, "b": "c", "d": [1, 2, 3]}'::jsonb)['b']
+--
+STMT: SelectStmt
+== 892
+select ('{"a": 1, "b": "c", "d": [1, 2, 3]}'::jsonb)['d']
+--
+STMT: SelectStmt
+== 893
+select ('{"a": 1, "b": "c", "d": [1, 2, 3]}'::jsonb)['d'][1]
+--
+STMT: SelectStmt
+== 894
+select ('{"a": 1, "b": "c", "d": [1, 2, 3]}'::jsonb)['d']['a']
+--
+STMT: SelectStmt
+== 895
+select ('{"a": {"a1": {"a2": "aaa"}}, "b": "bbb", "c": "ccc"}'::jsonb)['a']['a1']
+--
+STMT: SelectStmt
+== 896
+select ('{"a": {"a1": {"a2": "aaa"}}, "b": "bbb", "c": "ccc"}'::jsonb)['a']['a1']['a2']
+--
+STMT: SelectStmt
+== 897
+select ('{"a": {"a1": {"a2": "aaa"}}, "b": "bbb", "c": "ccc"}'::jsonb)['a']['a1']['a2']['a3']
+--
+STMT: SelectStmt
+== 898
+select ('{"a": ["a1", {"b1": ["aaa", "bbb", "ccc"]}], "b": "bb"}'::jsonb)['a'][1]['b1']
+--
+STMT: SelectStmt
+== 899
+select ('{"a": ["a1", {"b1": ["aaa", "bbb", "ccc"]}], "b": "bb"}'::jsonb)['a'][1]['b1'][2]
+--
+STMT: SelectStmt
+== 900
+-- slices are not supported
+select ('{"a": 1}'::jsonb)['a':'b']
+--
+STMT: SelectStmt
+== 901
+select ('[1, "2", null]'::jsonb)[1:2]
+--
+STMT: SelectStmt
+== 902
+select ('[1, "2", null]'::jsonb)[:2]
+--
+STMT: SelectStmt
+== 903
+select ('[1, "2", null]'::jsonb)[1:]
+--
+STMT: SelectStmt
+== 904
+select ('[1, "2", null]'::jsonb)[:]
+--
+STMT: SelectStmt
+== 905
+create TEMP TABLE test_jsonb_subscript (
+       id int,
+       test_json jsonb
+)
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DDL
+STMT: CreateStmt
+== 906
+insert into test_jsonb_subscript values
+(1, '{}'), -- empty jsonb
+(2, '{"key": "value"}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 907
+-- jsonb with data
+
+-- update empty jsonb
+update test_jsonb_subscript set test_json['a'] = '1' where id = 1
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 908
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 909
+-- update jsonb with some data
+update test_jsonb_subscript set test_json['a'] = '1' where id = 2
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 910
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 911
+-- replace jsonb
+update test_jsonb_subscript set test_json['a'] = '"test"'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 912
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 913
+-- replace by object
+update test_jsonb_subscript set test_json['a'] = '{"b": 1}'::jsonb
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 914
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 915
+-- replace by array
+update test_jsonb_subscript set test_json['a'] = '[1, 2, 3]'::jsonb
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 916
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 917
+-- use jsonb subscription in where clause
+select * from test_jsonb_subscript where test_json['key'] = '"value"'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+FILTER: schema="" table="" column="test_json"
+STMT: SelectStmt
+== 918
+select * from test_jsonb_subscript where test_json['key_doesnt_exists'] = '"value"'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+FILTER: schema="" table="" column="test_json"
+STMT: SelectStmt
+== 919
+select * from test_jsonb_subscript where test_json['key'] = '"wrong_value"'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+FILTER: schema="" table="" column="test_json"
+STMT: SelectStmt
+== 920
+-- NULL
+update test_jsonb_subscript set test_json[NULL] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 921
+update test_jsonb_subscript set test_json['another_key'] = NULL
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 922
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 923
+-- NULL as jsonb source
+insert into test_jsonb_subscript values (3, NULL)
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 924
+update test_jsonb_subscript set test_json['a'] = '1' where id = 3
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 925
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 926
+update test_jsonb_subscript set test_json = NULL where id = 3
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 927
+update test_jsonb_subscript set test_json[0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 928
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 929
+-- Fill the gaps logic
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 930
+insert into test_jsonb_subscript values (1, '[0]')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 931
+update test_jsonb_subscript set test_json[5] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 932
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 933
+update test_jsonb_subscript set test_json[-4] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 934
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 935
+update test_jsonb_subscript set test_json[-8] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 936
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 937
+-- keep consistent values position
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 938
+insert into test_jsonb_subscript values (1, '[]')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 939
+update test_jsonb_subscript set test_json[5] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 940
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 941
+-- create the whole path
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 942
+insert into test_jsonb_subscript values (1, '{}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 943
+update test_jsonb_subscript set test_json['a'][0]['b'][0]['c'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 944
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 945
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 946
+insert into test_jsonb_subscript values (1, '{}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 947
+update test_jsonb_subscript set test_json['a'][2]['b'][2]['c'][2] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 948
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 949
+-- create the whole path with already existing keys
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 950
+insert into test_jsonb_subscript values (1, '{"b": 1}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 951
+update test_jsonb_subscript set test_json['a'][0] = '2'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 952
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 953
+-- the start jsonb is an object, first subscript is treated as a key
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 954
+insert into test_jsonb_subscript values (1, '{}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 955
+update test_jsonb_subscript set test_json[0]['a'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 956
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 957
+-- the start jsonb is an array
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 958
+insert into test_jsonb_subscript values (1, '[]')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 959
+update test_jsonb_subscript set test_json[0]['a'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 960
+update test_jsonb_subscript set test_json[2]['b'] = '2'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 961
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 962
+-- overwriting an existing path
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 963
+insert into test_jsonb_subscript values (1, '{}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 964
+update test_jsonb_subscript set test_json['a']['b'][1] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 965
+update test_jsonb_subscript set test_json['a']['b'][10] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 966
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 967
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 968
+insert into test_jsonb_subscript values (1, '[]')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 969
+update test_jsonb_subscript set test_json[0][0][0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 970
+update test_jsonb_subscript set test_json[0][0][1] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 971
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 972
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 973
+insert into test_jsonb_subscript values (1, '{}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 974
+update test_jsonb_subscript set test_json['a']['b'][10] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 975
+update test_jsonb_subscript set test_json['a'][10][10] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 976
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 977
+-- an empty sub element
+
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 978
+insert into test_jsonb_subscript values (1, '{"a": {}}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 979
+update test_jsonb_subscript set test_json['a']['b']['c'][2] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 980
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 981
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 982
+insert into test_jsonb_subscript values (1, '{"a": []}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 983
+update test_jsonb_subscript set test_json['a'][1]['c'][2] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 984
+select * from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 985
+-- trying replace assuming a composite object, but it's an element or a value
+
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 986
+insert into test_jsonb_subscript values (1, '{"a": 1}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 987
+update test_jsonb_subscript set test_json['a']['b'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 988
+update test_jsonb_subscript set test_json['a']['b']['c'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 989
+update test_jsonb_subscript set test_json['a'][0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 990
+update test_jsonb_subscript set test_json['a'][0]['c'] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 991
+update test_jsonb_subscript set test_json['a'][0][0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 992
+-- trying replace assuming a composite object, but it's a raw scalar
+
+delete from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: DeleteStmt
+== 993
+insert into test_jsonb_subscript values (1, 'null')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 994
+update test_jsonb_subscript set test_json[0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 995
+update test_jsonb_subscript set test_json[0][0] = '1'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 996
+-- try some things with short-header and toasted subscript values
+
+drop table test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DDL
+STMT: DropStmt
+== 997
+create temp table test_jsonb_subscript (
+       id text,
+       test_json jsonb
+)
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DDL
+STMT: CreateStmt
+== 998
+insert into test_jsonb_subscript values('foo', '{"foo": "bar"}')
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 999
+insert into test_jsonb_subscript
+  select s, ('{"' || s || '": "bar"}')::jsonb from repeat('xyzzy', 500) s
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 1000
+select length(id), test_json[id] from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 1001
+update test_jsonb_subscript set test_json[id] = '"baz"'
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=DML
+STMT: UpdateStmt
+== 1002
+select length(id), test_json[id] from test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 1003
+table test_jsonb_subscript
+--
+TABLE: name="test_jsonb_subscript" schema="" table="test_jsonb_subscript" ctx=Select
+STMT: SelectStmt
+== 1004
+-- jsonb to tsvector
+select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1005
+-- jsonb to tsvector with config
+select to_tsvector('simple', '{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1006
+-- jsonb to tsvector with stop words
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": ["the eee fff ggg"], "c": {"d": "hhh. iii"}}'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1007
+-- jsonb to tsvector with numeric values
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1008
+-- jsonb_to_tsvector
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1009
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"key"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1010
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"string"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1011
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"numeric"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1012
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"boolean"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1013
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '["string", "numeric"]')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1014
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1015
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"key"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1016
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"string"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1017
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"numeric"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1018
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '"boolean"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1019
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '["string", "numeric"]')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1020
+-- to_tsvector corner cases
+select to_tsvector('""'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1021
+select to_tsvector('{}'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1022
+select to_tsvector('[]'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1023
+select to_tsvector('null'::jsonb)
+--
+FUNCTION: name="to_tsvector" function="to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1024
+-- jsonb_to_tsvector corner cases
+select jsonb_to_tsvector('""'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1025
+select jsonb_to_tsvector('{}'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1026
+select jsonb_to_tsvector('[]'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1027
+select jsonb_to_tsvector('null'::jsonb, '"all"')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1028
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '""')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1029
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '{}')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1030
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '[]')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1031
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, 'null')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1032
+select jsonb_to_tsvector('english', '{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '["all", null]')
+--
+FUNCTION: name="jsonb_to_tsvector" function="jsonb_to_tsvector" schema="" ctx=Call
+STMT: SelectStmt
+== 1033
+-- ts_headline for jsonb
+select ts_headline('{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::jsonb, tsquery('bbb & ddd & hhh'))
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1034
+select ts_headline('english', '{"a": "aaa bbb", "b": {"c": "ccc ddd fff"}, "d": ["ggg hhh", "iii jjj"]}'::jsonb, tsquery('bbb & ddd & hhh'))
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1035
+select ts_headline('{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::jsonb, tsquery('bbb & ddd & hhh'), 'StartSel = <, StopSel = >')
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1036
+select ts_headline('english', '{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::jsonb, tsquery('bbb & ddd & hhh'), 'StartSel = <, StopSel = >')
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1037
+-- corner cases for ts_headline with jsonb
+select ts_headline('null'::jsonb, tsquery('aaa & bbb'))
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1038
+select ts_headline('{}'::jsonb, tsquery('aaa & bbb'))
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1039
+select ts_headline('[]'::jsonb, tsquery('aaa & bbb'))
+--
+FUNCTION: name="ts_headline" function="ts_headline" schema="" ctx=Call
+FUNCTION: name="tsquery" function="tsquery" schema="" ctx=Call
+STMT: SelectStmt
+== 1040
+-- casts
+select 'true'::jsonb::bool
+--
+STMT: SelectStmt
+== 1041
+select '[]'::jsonb::bool
+--
+STMT: SelectStmt
+== 1042
+select '1.0'::jsonb::float
+--
+STMT: SelectStmt
+== 1043
+select '[1.0]'::jsonb::float
+--
+STMT: SelectStmt
+== 1044
+select '12345'::jsonb::int4
+--
+STMT: SelectStmt
+== 1045
+select '"hello"'::jsonb::int4
+--
+STMT: SelectStmt
+== 1046
+select '12345'::jsonb::numeric
+--
+STMT: SelectStmt
+== 1047
+select '{}'::jsonb::numeric
+--
+STMT: SelectStmt
+== 1048
+select '12345.05'::jsonb::numeric
+--
+STMT: SelectStmt
+== 1049
+select '12345.05'::jsonb::float4
+--
+STMT: SelectStmt
+== 1050
+select '12345.05'::jsonb::float8
+--
+STMT: SelectStmt
+== 1051
+select '12345.05'::jsonb::int2
+--
+STMT: SelectStmt
+== 1052
+select '12345.05'::jsonb::int4
+--
+STMT: SelectStmt
+== 1053
+select '12345.05'::jsonb::int8
+--
+STMT: SelectStmt
+== 1054
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::numeric
+--
+STMT: SelectStmt
+== 1055
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::float4
+--
+STMT: SelectStmt
+== 1056
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::float8
+--
+STMT: SelectStmt
+== 1057
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int2
+--
+STMT: SelectStmt
+== 1058
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int4
+--
+STMT: SelectStmt
+== 1059
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int8
+--
+STMT: SelectStmt

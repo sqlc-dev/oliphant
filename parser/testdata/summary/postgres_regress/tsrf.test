@@ -1,0 +1,547 @@
+== 001
+|--
+-- tsrf - targetlist set returning function tests
+|--
+
+-- simple srf
+SELECT generate_series(1, 3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 002
+-- parallel iteration
+SELECT generate_series(1, 3), generate_series(3,5)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 003
+-- parallel iteration, different number of rows
+SELECT generate_series(1, 2), generate_series(1,4)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 004
+-- srf, with SRF argument
+SELECT generate_series(1, generate_series(1, 3))
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 005
+-- but we've traditionally rejected the same in FROM
+SELECT * FROM generate_series(1, generate_series(1, 3))
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 006
+-- srf, with two SRF arguments
+SELECT generate_series(generate_series(1,3), generate_series(2, 4))
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 007
+-- check proper nesting of SRFs in different expressions
+explain (verbose, costs off)
+SELECT generate_series(1, generate_series(1, 3)), generate_series(2, 4)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 008
+SELECT generate_series(1, generate_series(1, 3)), generate_series(2, 4)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 009
+CREATE TABLE few(id int, dataa text, datab text)
+--
+TABLE: name="few" schema="" table="few" ctx=DDL
+STMT: CreateStmt
+== 010
+INSERT INTO few VALUES(1, 'a', 'foo'),(2, 'a', 'bar'),(3, 'b', 'bar')
+--
+TABLE: name="few" schema="" table="few" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 011
+-- SRF with a provably-dummy relation
+explain (verbose, costs off)
+SELECT unnest(ARRAY[1, 2]) FROM few WHERE false
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 012
+SELECT unnest(ARRAY[1, 2]) FROM few WHERE false
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: SelectStmt
+== 013
+-- SRF shouldn't prevent upper query from recognizing lower as dummy
+explain (verbose, costs off)
+SELECT * FROM few f1,
+  (SELECT unnest(ARRAY[1,2]) FROM few f2 WHERE false OFFSET 0) ss
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+TABLE: name="few" schema="" table="few" ctx=Select
+ALIAS: "f1"="few"
+ALIAS: "f2"="few"
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 014
+SELECT * FROM few f1,
+  (SELECT unnest(ARRAY[1,2]) FROM few f2 WHERE false OFFSET 0) ss
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+TABLE: name="few" schema="" table="few" ctx=Select
+ALIAS: "f1"="few"
+ALIAS: "f2"="few"
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: SelectStmt
+== 015
+-- SRF output order of sorting is maintained, if SRF is not referenced
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id DESC
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 016
+-- but SRFs can be referenced in sort
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id, g DESC
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 017
+SELECT few.id, generate_series(1,3) g FROM few ORDER BY id, generate_series(1,3) DESC
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 018
+-- it's weird to have ORDER BYs that increase the number of results
+SELECT few.id FROM few ORDER BY id, generate_series(1,3) DESC
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 019
+-- SRFs are computed after aggregation
+SET enable_hashagg TO 0
+--
+STMT: VariableSetStmt
+== 020
+-- stable output order
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FILTER: schema="" table="few" column="id"
+STMT: SelectStmt
+== 021
+-- unless referenced in GROUP BY clause
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa, unnest('{1,1,3}'::int[])
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FILTER: schema="" table="few" column="id"
+STMT: SelectStmt
+== 022
+SELECT few.dataa, count(*), min(id), max(id), unnest('{1,1,3}'::int[]) FROM few WHERE few.id = 1 GROUP BY few.dataa, 5
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FILTER: schema="" table="few" column="id"
+STMT: SelectStmt
+== 023
+RESET enable_hashagg
+--
+STMT: VariableSetStmt
+== 024
+-- check HAVING works when GROUP BY does [not] reference SRF output
+SELECT dataa, generate_series(1,1), count(*) FROM few GROUP BY 1 HAVING count(*) > 1
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 025
+SELECT dataa, generate_series(1,1), count(*) FROM few GROUP BY 1, 2 HAVING count(*) > 1
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 026
+-- it's weird to have GROUP BYs that increase the number of results
+SELECT few.dataa, count(*) FROM few WHERE dataa = 'a' GROUP BY few.dataa ORDER BY 2
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="dataa"
+STMT: SelectStmt
+== 027
+SELECT few.dataa, count(*) FROM few WHERE dataa = 'a' GROUP BY few.dataa, unnest('{1,1,3}'::int[]) ORDER BY 2
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+FILTER: schema="" table="" column="dataa"
+STMT: SelectStmt
+== 028
+-- SRFs are not allowed if they'd need to be conditionally executed
+SELECT q1, case when q1 > 0 then generate_series(1,3) else 0 end FROM int8_tbl
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 029
+SELECT q1, coalesce(generate_series(1,3), 0) FROM int8_tbl
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 030
+-- SRFs are not allowed in aggregate arguments
+SELECT min(generate_series(1, 3)) FROM few
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+-- ... unless they're within a sub-select
+SELECT sum((3 = ANY(SELECT generate_series(1,4)))::int)
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 032
+SELECT sum((3 = ANY(SELECT lag(x) over(order by x)
+                    FROM generate_series(1,4) x))::int)
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="lag" function="lag" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 033
+-- SRFs are not allowed in window function arguments, either
+SELECT min(generate_series(1, 3)) OVER() FROM few
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 034
+-- SRFs are normally computed after window functions
+SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="lag" function="lag" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 035
+-- unless referencing SRFs
+SELECT SUM(count(*)) OVER(PARTITION BY generate_series(1,3) ORDER BY generate_series(1,3)), generate_series(1,3) g FROM few GROUP BY g
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+-- sorting + grouping
+SELECT few.dataa, count(*), min(id), max(id), generate_series(1,3) FROM few GROUP BY few.dataa ORDER BY 5, 1
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 037
+-- grouping sets are a bit special, they produce NULLs in columns not actually NULL
+set enable_hashagg = false
+--
+STMT: VariableSetStmt
+== 038
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab)
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY dataa
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 040
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab) ORDER BY g
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 041
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g)
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 042
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g) ORDER BY dataa
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 043
+SELECT dataa, datab b, generate_series(1,2) g, count(*) FROM few GROUP BY CUBE(dataa, datab, g) ORDER BY g
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 044
+reset enable_hashagg
+--
+STMT: VariableSetStmt
+== 045
+-- case with degenerate ORDER BY
+explain (verbose, costs off)
+select 'foo' as f, generate_series(1,2) as g from few order by 1
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 046
+select 'foo' as f, generate_series(1,2) as g from few order by 1
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 047
+-- data modification
+CREATE TABLE fewmore AS SELECT generate_series(1,3) AS data
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 048
+INSERT INTO fewmore VALUES(generate_series(4,5))
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 049
+SELECT * FROM fewmore
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=Select
+STMT: SelectStmt
+== 050
+-- SRFs are not allowed in UPDATE (they once were, but it was nonsense)
+UPDATE fewmore SET data = generate_series(4,9)
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: UpdateStmt
+== 051
+-- SRFs are not allowed in RETURNING
+INSERT INTO fewmore VALUES(1) RETURNING generate_series(1,3)
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 052
+-- nor standalone VALUES (but surely this is a bug?)
+VALUES(1, generate_series(1,2))
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 053
+-- We allow tSRFs that are not at top level
+SELECT int4mul(generate_series(1,2), 10)
+--
+FUNCTION: name="int4mul" function="int4mul" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+SELECT generate_series(1,3) IS DISTINCT FROM 2
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 055
+-- but SRFs in function RTEs must be at top level (annoying restriction)
+SELECT * FROM int4mul(generate_series(1,2), 10)
+--
+FUNCTION: name="int4mul" function="int4mul" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 056
+-- DISTINCT ON is evaluated before tSRF evaluation if SRF is not
+-- referenced either in ORDER BY or in the DISTINCT ON list. The ORDER
+-- BY reference can be implicitly generated, if there's no other ORDER BY.
+
+-- implicit reference (via implicit ORDER) to all columns
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 057
+-- unreferenced in DISTINCT ON or ORDER BY
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 058
+-- referenced in ORDER BY
+SELECT DISTINCT ON (a) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC, g DESC
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 059
+-- referenced in ORDER BY and DISTINCT ON
+SELECT DISTINCT ON (a, b, g) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+ORDER BY a, b DESC, g DESC
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 060
+-- only SRF mentioned in DISTINCT ON
+SELECT DISTINCT ON (g) a, b, generate_series(1,3) g
+FROM (VALUES (3, 2), (3,1), (1,1), (1,4), (5,3), (5,1)) AS t(a, b)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 061
+-- LIMIT / OFFSET is evaluated after SRF evaluation
+SELECT a, generate_series(1,2) FROM (VALUES(1),(2),(3)) r(a) LIMIT 2 OFFSET 2
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 062
+-- SRFs are not allowed in LIMIT.
+SELECT 1 LIMIT generate_series(1,3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 063
+-- tSRF in correlated subquery, referencing table outside
+SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET few.id) FROM few
+--
+TABLE: name="few" schema="" table="few" ctx=Select
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 064
+-- tSRF in correlated subquery, referencing SRF outside
+SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET g.i) FROM generate_series(0,3) g(i)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 065
+-- Operators can return sets too
+CREATE OPERATOR |@| (PROCEDURE = unnest, RIGHTARG = ANYARRAY)
+--
+STMT: DefineStmt
+== 066
+SELECT |@|ARRAY[1,2,3]
+--
+STMT: SelectStmt
+== 067
+-- Some fun cases involving duplicate SRF calls
+explain (verbose, costs off)
+select generate_series(1,3) as x, generate_series(1,3) + 1 as xp1
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 068
+select generate_series(1,3) as x, generate_series(1,3) + 1 as xp1
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 069
+explain (verbose, costs off)
+select generate_series(1,3)+1 order by generate_series(1,3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 070
+select generate_series(1,3)+1 order by generate_series(1,3)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 071
+-- Check that SRFs of same nesting level run in lockstep
+explain (verbose, costs off)
+select generate_series(1,3) as x, generate_series(3,6) + 1 as y
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 072
+select generate_series(1,3) as x, generate_series(3,6) + 1 as y
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 073
+-- Clean up
+DROP TABLE few
+--
+TABLE: name="few" schema="" table="few" ctx=DDL
+STMT: DropStmt
+== 074
+DROP TABLE fewmore
+--
+TABLE: name="fewmore" schema="" table="fewmore" ctx=DDL
+STMT: DropStmt

@@ -22,6 +22,7 @@ var checkParse = flag.Bool("check-parse", false, "run todo cases and remove newl
 var suites = []string{
 	"parse", "scan", "normalize", "normalize_utility",
 	"fingerprint", "deparse", "split_scanner", "split_parser",
+	"summary", "summary_truncate", "plpgsql",
 }
 
 func TestCorpus(t *testing.T) {
@@ -162,8 +163,57 @@ func evaluate(suite, input string) string {
 			return renderErr(err)
 		}
 		return testfile.RenderSplit(stmts)
+	case "summary":
+		res, err := pg_query.Summary(input, -1)
+		if err != nil {
+			return renderErr(err)
+		}
+		return renderSummary(res)
+	case "summary_truncate":
+		limit, sql, err := testfile.SplitTruncateLimit(input)
+		if err != nil {
+			return "BAD CASE: " + err.Error()
+		}
+		res, err := pg_query.Summary(sql, limit)
+		if err != nil {
+			return renderErr(err)
+		}
+		return renderSummary(res)
+	case "plpgsql":
+		out, err := pg_query.ParsePlPgSqlToJSON(input)
+		if err != nil {
+			return renderErr(err)
+		}
+		return out
 	}
 	panic("unknown suite " + suite)
+}
+
+// renderSummary encodes a SummaryResult in the same byte format
+// cmd/regenerate writes from the oracle.
+func renderSummary(res *pg_query.SummaryResult) string {
+	e := testfile.SummaryExpectation{
+		Aliases:        res.Aliases,
+		CteNames:       res.CteNames,
+		StatementTypes: res.StatementTypes,
+		TruncatedQuery: res.TruncatedQuery,
+	}
+	for _, t := range res.Tables {
+		e.Tables = append(e.Tables, testfile.SummaryTable{
+			Name: t.Name, SchemaName: t.SchemaName, TableName: t.TableName, Context: t.Context.String(),
+		})
+	}
+	for _, f := range res.Functions {
+		e.Functions = append(e.Functions, testfile.SummaryFunction{
+			Name: f.Name, FunctionName: f.FunctionName, SchemaName: f.SchemaName, Context: f.Context.String(),
+		})
+	}
+	for _, f := range res.FilterColumns {
+		e.FilterColumns = append(e.FilterColumns, testfile.SummaryFilterColumn{
+			SchemaName: f.SchemaName, TableName: f.TableName, Column: f.Column,
+		})
+	}
+	return testfile.RenderSummary(e)
 }
 
 func renderErr(err error) string {

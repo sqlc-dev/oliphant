@@ -1,0 +1,1405 @@
+== 001
+|--
+-- grouping sets
+|--
+
+-- test data sources
+
+create temp view gstest1(a,b,v)
+  as values (1,1,10),(1,1,11),(1,2,12),(1,2,13),(1,3,14),
+            (2,3,15),
+            (3,3,16),(3,4,17),
+            (4,1,18),(4,1,19)
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=DDL
+STMT: ViewStmt
+STMT: SelectStmt
+== 002
+create temp table gstest2 (a integer, b integer, c integer, d integer,
+                           e integer, f integer, g integer, h integer)
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=DDL
+STMT: CreateStmt
+== 003
+copy gstest2 from stdin
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+STMT: CopyStmt
+== 004
+create temp table gstest3 (a integer, b integer, c integer, d integer)
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=DDL
+STMT: CreateStmt
+== 005
+copy gstest3 from stdin
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+STMT: CopyStmt
+== 006
+alter table gstest3 add primary key (a)
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=DDL
+STMT: AlterTableStmt
+== 007
+create temp table gstest4(id integer, v integer,
+                          unhashable_col bit(4), unsortable_col xid)
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=DDL
+STMT: CreateStmt
+== 008
+insert into gstest4
+values (1,1,b'0000','1'), (2,2,b'0001','1'),
+       (3,4,b'0010','2'), (4,8,b'0011','2'),
+       (5,16,b'0000','2'), (6,32,b'0001','2'),
+       (7,64,b'0010','1'), (8,128,b'0011','1')
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 009
+create temp table gstest_empty (a integer, b integer, v integer)
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=DDL
+STMT: CreateStmt
+== 010
+create function gstest_data(v integer, out a integer, out b integer)
+  returns setof record
+  as $f$
+    begin
+      return query select v, i from generate_series(1,3) i;
+    end;
+  $f$ language plpgsql
+--
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 011
+-- basic functionality
+
+set enable_hashagg = false
+--
+STMT: VariableSetStmt
+== 012
+-- test hashing explicitly later
+
+-- simple rollup with multiple plain aggregates, with and without ordering
+-- (and with ordering differing from grouping)
+
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b)
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 013
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by a,b
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 014
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by b desc, a
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 015
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by rollup (a,b) order by coalesce(a,0)+coalesce(b,0)
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 016
+-- various types of ordered aggs
+select a, b, grouping(a,b),
+       array_agg(v order by v),
+       string_agg(v::text, ':' order by v desc),
+       percentile_disc(0.5) within group (order by v),
+       rank(1,2,12) within group (order by a,b,v)
+  from gstest1 group by rollup (a,b) order by a,b
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="string_agg" function="string_agg" schema="" ctx=Call
+FUNCTION: name="percentile_disc" function="percentile_disc" schema="" ctx=Call
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+STMT: SelectStmt
+== 017
+-- test usage of grouped columns in direct args of aggs
+select grouping(a), a, array_agg(b),
+       rank(a) within group (order by b nulls first),
+       rank(a) within group (order by b nulls last)
+  from (values (1,1),(1,4),(1,5),(3,1),(3,2)) v(a,b)
+ group by rollup (a) order by a
+--
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+FUNCTION: name="rank" function="rank" schema="" ctx=Call
+STMT: SelectStmt
+== 018
+-- nesting with window functions
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by rollup (a,b) order by rsum, a, b
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 019
+-- nesting with grouping sets
+select sum(c) from gstest2
+  group by grouping sets((), grouping sets((), grouping sets(())))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 020
+select sum(c) from gstest2
+  group by grouping sets((), grouping sets((), grouping sets(((a, b)))))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 021
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(rollup(c), grouping sets(cube(c))))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 022
+select sum(c) from gstest2
+  group by grouping sets(a, grouping sets(a, cube(b)))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 023
+select sum(c) from gstest2
+  group by grouping sets(grouping sets((a, (b))))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 024
+select sum(c) from gstest2
+  group by grouping sets(grouping sets((a, b)))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 025
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(a, grouping sets(a), a))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 026
+select sum(c) from gstest2
+  group by grouping sets(grouping sets(a, grouping sets(a, grouping sets(a), ((a)), a, grouping sets(a), (a)), a))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 027
+select sum(c) from gstest2
+  group by grouping sets((a,(a,b)), grouping sets((a,(a,b)),a))
+  order by 1 desc
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 028
+-- empty input: first is 0 rows, second 1, third 3 etc.
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 029
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 030
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 032
+-- empty input with joins tests some important code paths
+select t1.a, t2.b, sum(t1.v), count(*) from gstest_empty t1, gstest_empty t2
+ group by grouping sets ((t1.a,t2.b),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+ALIAS: "t1"="gstest_empty"
+ALIAS: "t2"="gstest_empty"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 033
+-- simple joins, var resolution, GROUPING on join vars
+select t1.a, t2.b, grouping(t1.a, t2.b), sum(t1.v), max(t2.a)
+  from gstest1 t1, gstest2 t2
+ group by grouping sets ((t1.a, t2.b), ())
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+ALIAS: "t1"="gstest1"
+ALIAS: "t2"="gstest2"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 034
+select t1.a, t2.b, grouping(t1.a, t2.b), sum(t1.v), max(t2.a)
+  from gstest1 t1 join gstest2 t2 on (t1.a=t2.a)
+ group by grouping sets ((t1.a, t2.b), ())
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+ALIAS: "t1"="gstest1"
+ALIAS: "t2"="gstest2"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 035
+select a, b, grouping(a, b), sum(t1.v), max(t2.c)
+  from gstest1 t1 join gstest2 t2 using (a,b)
+ group by grouping sets ((a, b), ())
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+ALIAS: "t1"="gstest1"
+ALIAS: "t2"="gstest2"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+-- check that functionally dependent cols are not nulled
+select a, d, grouping(a,b,c)
+  from gstest3
+ group by grouping sets ((a,b), (a,c))
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+STMT: SelectStmt
+== 037
+-- check that distinct grouping columns are kept separate
+-- even if they are equal()
+explain (costs off)
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 038
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2)
+--
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+-- check that pulled-up subquery outputs still go to null when appropriate
+select four, x
+  from (select four, ten, 'foo'::text as x from tenk1) as t
+  group by grouping sets (four, x)
+  having x = 'foo'
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+STMT: SelectStmt
+== 040
+select four, x || 'x'
+  from (select four, ten, 'foo'::text as x from tenk1) as t
+  group by grouping sets (four, x)
+  order by four
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+STMT: SelectStmt
+== 041
+select (x+y)*1, sum(z)
+ from (select 1 as x, 2 as y, 3 as z) s
+ group by grouping sets (x+y, x)
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 042
+select x, not x as not_x, q2 from
+  (select *, q1 = 1 as x from int8_tbl i1) as t
+  group by grouping sets(x, q2)
+  order by x, q2
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+STMT: SelectStmt
+== 043
+-- check qual push-down rules for a subquery with grouping sets
+explain (verbose, costs off)
+select * from (
+  select 1 as x, q1, sum(q2)
+  from int8_tbl i1
+  group by grouping sets(1, 2)
+) ss
+where x = 1 and q1 = 123
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+FILTER: schema="" table="" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 044
+select * from (
+  select 1 as x, q1, sum(q2)
+  from int8_tbl i1
+  group by grouping sets(1, 2)
+) ss
+where x = 1 and q1 = 123
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="x"
+FILTER: schema="" table="" column="q1"
+STMT: SelectStmt
+== 045
+-- check handling of pulled-up SubPlan in GROUPING() argument (bug #17479)
+explain (verbose, costs off)
+select grouping(ss.x)
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 046
+select grouping(ss.x)
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+STMT: SelectStmt
+== 047
+explain (verbose, costs off)
+select (select grouping(ss.x))
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 048
+select (select grouping(ss.x))
+from int8_tbl i1
+cross join lateral (select (select i1.q1) as x) ss
+group by ss.x
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i1"="int8_tbl"
+STMT: SelectStmt
+== 049
+-- simple rescan tests
+
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by rollup (a,b)
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 050
+select *
+  from (values (1),(2)) v(x),
+       lateral (select a, b, sum(v.x) from gstest_data(v.x) group by rollup (a,b)) s
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 051
+-- min max optimization should still work with GROUP BY ()
+explain (costs off)
+  select min(unique1) from tenk1 GROUP BY ()
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 052
+-- Views with GROUPING SET queries
+CREATE VIEW gstest_view AS select a, b, grouping(a,b), sum(c), count(*), max(c)
+  from gstest2 group by rollup ((a,b,c),(c,d))
+--
+TABLE: name="gstest_view" schema="" table="gstest_view" ctx=DDL
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ViewStmt
+STMT: SelectStmt
+== 053
+select pg_get_viewdef('gstest_view'::regclass, true)
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+== 054
+-- Nested queries with 3 or more levels of nesting
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+STMT: SelectStmt
+== 055
+select(select (select grouping(e,f) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+STMT: SelectStmt
+== 056
+select(select (select grouping(c) from (values (1)) v2(c) GROUP BY c) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP(e,f)
+--
+STMT: SelectStmt
+== 057
+-- Combinations of operations
+select a, b, c, d from gstest2 group by rollup(a,b),grouping sets(c,d)
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+STMT: SelectStmt
+== 058
+select a, b from (values (1,2),(2,3)) v(a,b) group by a,b, grouping sets(a)
+--
+STMT: SelectStmt
+== 059
+-- Tests for chained aggregates
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 060
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY ROLLUP((e+1),(f+1))
+--
+STMT: SelectStmt
+== 061
+select(select (select grouping(a,b) from (values (1)) v2(c)) from (values (1,2)) v1(a,b) group by (a,b)) from (values(6,7)) v3(e,f) GROUP BY CUBE((e+1),(f+1)) ORDER BY (e+1),(f+1)
+--
+STMT: SelectStmt
+== 062
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by cube (a,b) order by rsum, a, b
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 063
+select a, b, sum(c) from (values (1,1,10),(1,1,11),(1,2,12),(1,2,13),(1,3,14),(2,3,15),(3,3,16),(3,4,17),(4,1,18),(4,1,19)) v(a,b,c) group by rollup (a,b)
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 064
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by cube (a,b) order by a,b
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 065
+-- Test reordering of grouping sets
+explain (costs off)
+select * from gstest1 group by grouping sets((a,b,v),(v)) order by v,b,a
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 066
+-- Agg level check. This query should error out.
+select (select grouping(a,b) from gstest2) from gstest2 group by a,b
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+STMT: SelectStmt
+== 067
+--Nested queries
+select a, b, sum(c), count(*) from gstest2 group by grouping sets (rollup(a,b),a)
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 068
+-- HAVING queries
+select ten, sum(distinct four) from onek a
+group by grouping sets((ten,four),(ten))
+having exists (select 1 from onek b where sum(distinct a.four) = b.four)
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "a"="onek"
+ALIAS: "b"="onek"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="a" column="four"
+FILTER: schema="" table="b" column="four"
+STMT: SelectStmt
+== 069
+-- Tests around pushdown of HAVING clauses, partially testing against previous bugs
+select a,count(*) from gstest2 group by rollup(a) order by a
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 070
+select a,count(*) from gstest2 group by rollup(a) having a is distinct from 1 order by a
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 071
+explain (costs off)
+  select a,count(*) from gstest2 group by rollup(a) having a is distinct from 1 order by a
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 072
+select v.c, (select count(*) from gstest2 group by () having v.c)
+  from (values (false),(true)) v(c) order by v.c
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 073
+explain (costs off)
+  select v.c, (select count(*) from gstest2 group by () having v.c)
+    from (values (false),(true)) v(c) order by v.c
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 074
+-- HAVING with GROUPING queries
+select ten, grouping(ten) from onek
+group by grouping sets(ten) having grouping(ten) >= 0
+order by 2,1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+STMT: SelectStmt
+== 075
+select ten, grouping(ten) from onek
+group by grouping sets(ten, four) having grouping(ten) > 0
+order by 2,1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+STMT: SelectStmt
+== 076
+select ten, grouping(ten) from onek
+group by rollup(ten) having grouping(ten) > 0
+order by 2,1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+STMT: SelectStmt
+== 077
+select ten, grouping(ten) from onek
+group by cube(ten) having grouping(ten) > 0
+order by 2,1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+STMT: SelectStmt
+== 078
+select ten, grouping(ten) from onek
+group by (ten) having grouping(ten) >= 0
+order by 2,1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+STMT: SelectStmt
+== 079
+-- FILTER queries
+select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
+group by rollup(ten)
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+ALIAS: "a"="onek"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 080
+-- More rescan tests
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by cube(four,ten)) s on true order by v.a,four,ten
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 081
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by cube(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 082
+-- Grouping on text columns
+select sum(ten) from onek group by two, rollup(four::text) order by 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 083
+select sum(ten) from onek group by rollup(four::text), two order by 1
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 084
+-- hashing support
+
+set enable_hashagg = true
+--
+STMT: VariableSetStmt
+== 085
+-- failure cases
+
+select count(*) from gstest4 group by rollup(unhashable_col,unsortable_col)
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 086
+select array_agg(v order by v) from gstest4 group by grouping sets ((id,unsortable_col),(id))
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+STMT: SelectStmt
+== 087
+-- simple cases
+
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a),(b)) order by 3,1,2
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 088
+explain (costs off) select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a),(b)) order by 3,1,2
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 089
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by cube(a,b) order by 3,1,2
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 090
+explain (costs off) select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by cube(a,b) order by 3,1,2
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 091
+-- shouldn't try and hash
+explain (costs off)
+  select a, b, grouping(a,b), array_agg(v order by v)
+    from gstest1 group by cube(a,b)
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="array_agg" function="array_agg" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 092
+-- unsortable cases
+select unsortable_col, count(*)
+  from gstest4 group by grouping sets ((unsortable_col),(unsortable_col))
+  order by unsortable_col::text
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 093
+-- mixed hashable/sortable cases
+select unhashable_col, unsortable_col,
+       grouping(unhashable_col, unsortable_col),
+       count(*), sum(v)
+  from gstest4 group by grouping sets ((unhashable_col),(unsortable_col))
+ order by 3, 5
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 094
+explain (costs off)
+  select unhashable_col, unsortable_col,
+         grouping(unhashable_col, unsortable_col),
+         count(*), sum(v)
+    from gstest4 group by grouping sets ((unhashable_col),(unsortable_col))
+   order by 3,5
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 095
+select unhashable_col, unsortable_col,
+       grouping(unhashable_col, unsortable_col),
+       count(*), sum(v)
+  from gstest4 group by grouping sets ((v,unhashable_col),(v,unsortable_col))
+ order by 3,5
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 096
+explain (costs off)
+  select unhashable_col, unsortable_col,
+         grouping(unhashable_col, unsortable_col),
+         count(*), sum(v)
+    from gstest4 group by grouping sets ((v,unhashable_col),(v,unsortable_col))
+   order by 3,5
+--
+TABLE: name="gstest4" schema="" table="gstest4" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 097
+-- empty input: first is 0 rows, second 1, third 3 etc.
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 098
+explain (costs off)
+  select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),a)
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 099
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 100
+select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 101
+explain (costs off)
+  select a, b, sum(v), count(*) from gstest_empty group by grouping sets ((a,b),(),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 102
+select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 103
+explain (costs off)
+  select sum(v), count(*) from gstest_empty group by grouping sets ((),(),())
+--
+TABLE: name="gstest_empty" schema="" table="gstest_empty" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 104
+-- check that functionally dependent cols are not nulled
+select a, d, grouping(a,b,c)
+  from gstest3
+ group by grouping sets ((a,b), (a,c))
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+STMT: SelectStmt
+== 105
+explain (costs off)
+  select a, d, grouping(a,b,c)
+    from gstest3
+   group by grouping sets ((a,b), (a,c))
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 106
+-- simple rescan tests
+
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by grouping sets (a,b)
+ order by 1, 2, 3
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 107
+explain (costs off)
+  select a, b, sum(v.x)
+    from (values (1),(2)) v(x), gstest_data(v.x)
+   group by grouping sets (a,b)
+   order by 3, 1, 2
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 108
+select *
+  from (values (1),(2)) v(x),
+       lateral (select a, b, sum(v.x) from gstest_data(v.x) group by grouping sets (a,b)) s
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 109
+explain (costs off)
+  select *
+    from (values (1),(2)) v(x),
+         lateral (select a, b, sum(v.x) from gstest_data(v.x) group by grouping sets (a,b)) s
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 110
+-- Tests for chained aggregates
+select a, b, grouping(a,b), sum(v), count(*), max(v)
+  from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 111
+explain (costs off)
+  select a, b, grouping(a,b), sum(v), count(*), max(v)
+    from gstest1 group by grouping sets ((a,b),(a+1,b+1),(a+2,b+2)) order by 3,6
+--
+TABLE: name="gstest1" schema="" table="gstest1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 112
+select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+  from gstest2 group by cube (a,b) order by rsum, a, b
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+== 113
+explain (costs off)
+  select a, b, sum(c), sum(sum(c)) over (order by a,b) as rsum
+    from gstest2 group by cube (a,b) order by rsum, a, b
+--
+TABLE: name="gstest2" schema="" table="gstest2" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 114
+select a, b, sum(v.x)
+  from (values (1),(2)) v(x), gstest_data(v.x)
+ group by cube (a,b) order by a,b
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: SelectStmt
+== 115
+explain (costs off)
+  select a, b, sum(v.x)
+    from (values (1),(2)) v(x), gstest_data(v.x)
+   group by cube (a,b) order by a,b
+--
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="gstest_data" function="gstest_data" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 116
+-- Verify that we correctly handle the child node returning a
+-- non-minimal slot, which happens if the input is pre-sorted,
+-- e.g. due to an index scan.
+BEGIN
+--
+STMT: TransactionStmt
+== 117
+SET LOCAL enable_hashagg = false
+--
+STMT: VariableSetStmt
+== 118
+EXPLAIN (COSTS OFF) SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 119
+SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 120
+SET LOCAL enable_seqscan = false
+--
+STMT: VariableSetStmt
+== 121
+EXPLAIN (COSTS OFF) SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 122
+SELECT a, b, count(*), max(a), max(b) FROM gstest3 GROUP BY GROUPING SETS(a, b,()) ORDER BY a, b
+--
+TABLE: name="gstest3" schema="" table="gstest3" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 123
+COMMIT
+--
+STMT: TransactionStmt
+== 124
+-- More rescan tests
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by cube(four,ten)) s on true order by v.a,four,ten
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 125
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by cube(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 126
+-- Rescan logic changes when there are no empty grouping sets, so test
+-- that too:
+select * from (values (1),(2)) v(a) left join lateral (select v.a, four, ten, count(*) from onek group by grouping sets(four,ten)) s on true order by v.a,four,ten
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 127
+select array(select row(v.a,s1.*) from (select two,four, count(*) from onek group by grouping sets(two,four) order by two,four) s1) from (values (1),(2)) v(a)
+--
+TABLE: name="onek" schema="" table="onek" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 128
+-- test the knapsack
+
+set enable_indexscan = false
+--
+STMT: VariableSetStmt
+== 129
+set hash_mem_multiplier = 1.0
+--
+STMT: VariableSetStmt
+== 130
+set work_mem = '64kB'
+--
+STMT: VariableSetStmt
+== 131
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,twothousand,thousand,hundred,ten,four,two)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 132
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,hundred,ten,four,two)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 133
+set work_mem = '384kB'
+--
+STMT: VariableSetStmt
+== 134
+explain (costs off)
+  select unique1,
+         count(two), count(four), count(ten),
+         count(hundred), count(thousand), count(twothousand),
+         count(*)
+    from tenk1 group by grouping sets (unique1,twothousand,thousand,hundred,ten,four,two)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 135
+-- check collation-sensitive matching between grouping expressions
+-- (similar to a check for aggregates, but there are additional code
+-- paths for GROUPING, so check again here)
+
+select v||'a', case grouping(v||'a') when 1 then 1 else 0 end, count(*)
+  from unnest(array[1,1], array['a','b']) u(i,v)
+ group by rollup(i, v||'a') order by 1,3
+--
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: SelectStmt
+== 136
+select v||'a', case when grouping(v||'a') = 1 then 1 else 0 end, count(*)
+  from unnest(array[1,1], array['a','b']) u(i,v)
+ group by rollup(i, v||'a') order by 1,3
+--
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="unnest" function="unnest" schema="" ctx=Call
+STMT: SelectStmt
+== 137
+-- Bug #16784
+create table bug_16784(i int, j int)
+--
+TABLE: name="bug_16784" schema="" table="bug_16784" ctx=DDL
+STMT: CreateStmt
+== 138
+analyze bug_16784
+--
+TABLE: name="bug_16784" schema="" table="bug_16784" ctx=DDL
+STMT: VacuumStmt
+== 139
+alter table bug_16784 set (autovacuum_enabled = 'false')
+--
+TABLE: name="bug_16784" schema="" table="bug_16784" ctx=DDL
+STMT: AlterTableStmt
+== 140
+update pg_class set reltuples = 10 where relname='bug_16784'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+STMT: UpdateStmt
+== 141
+insert into bug_16784 select g/10, g from generate_series(1,40) g
+--
+TABLE: name="bug_16784" schema="" table="bug_16784" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 142
+set work_mem='64kB'
+--
+STMT: VariableSetStmt
+== 143
+set enable_sort = false
+--
+STMT: VariableSetStmt
+== 144
+select * from
+  (values (1),(2)) v(a),
+  lateral (select a, i, j, count(*) from
+             bug_16784 group by cube(i,j)) s
+  order by v.a, i, j
+--
+TABLE: name="bug_16784" schema="" table="bug_16784" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 145
+|--
+-- Compare results between plans using sorting and plans using hash
+-- aggregation. Force spilling in both cases by setting work_mem low
+-- and altering the statistics.
+|--
+
+create table gs_data_1 as
+select g%1000 as g1000, g%100 as g100, g%10 as g10, g
+   from generate_series(0,1999) g
+--
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 146
+analyze gs_data_1
+--
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=DDL
+STMT: VacuumStmt
+== 147
+alter table gs_data_1 set (autovacuum_enabled = 'false')
+--
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=DDL
+STMT: AlterTableStmt
+== 148
+update pg_class set reltuples = 10 where relname='gs_data_1'
+--
+TABLE: name="pg_class" schema="" table="pg_class" ctx=DML
+STMT: UpdateStmt
+== 149
+set work_mem='64kB'
+--
+STMT: VariableSetStmt
+== 150
+-- Produce results with sorting.
+
+set enable_sort = true
+--
+STMT: VariableSetStmt
+== 151
+set enable_hashagg = false
+--
+STMT: VariableSetStmt
+== 152
+set jit_above_cost = 0
+--
+STMT: VariableSetStmt
+== 153
+explain (costs off)
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 154
+create table gs_group_1 as
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+TABLE: name="gs_group_1" schema="" table="gs_group_1" ctx=DDL
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 155
+-- Produce results with hash aggregation.
+
+set enable_hashagg = true
+--
+STMT: VariableSetStmt
+== 156
+set enable_sort = false
+--
+STMT: VariableSetStmt
+== 157
+explain (costs off)
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 158
+create table gs_hash_1 as
+select g100, g10, sum(g::numeric), count(*), max(g::text)
+from gs_data_1 group by cube (g1000, g100,g10)
+--
+TABLE: name="gs_hash_1" schema="" table="gs_hash_1" ctx=DDL
+TABLE: name="gs_data_1" schema="" table="gs_data_1" ctx=Select
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+== 159
+set enable_sort = true
+--
+STMT: VariableSetStmt
+== 160
+set work_mem to default
+--
+STMT: VariableSetStmt
+== 161
+set hash_mem_multiplier to default
+--
+STMT: VariableSetStmt
+== 162
+-- Compare results
+
+(select * from gs_hash_1 except select * from gs_group_1)
+  union all
+(select * from gs_group_1 except select * from gs_hash_1)
+--
+TABLE: name="gs_hash_1" schema="" table="gs_hash_1" ctx=Select
+TABLE: name="gs_group_1" schema="" table="gs_group_1" ctx=Select
+TABLE: name="gs_group_1" schema="" table="gs_group_1" ctx=Select
+TABLE: name="gs_hash_1" schema="" table="gs_hash_1" ctx=Select
+STMT: SelectStmt
+== 163
+drop table gs_group_1
+--
+TABLE: name="gs_group_1" schema="" table="gs_group_1" ctx=DDL
+STMT: DropStmt
+== 164
+drop table gs_hash_1
+--
+TABLE: name="gs_hash_1" schema="" table="gs_hash_1" ctx=DDL
+STMT: DropStmt
+== 165
+-- GROUP BY DISTINCT
+
+-- "normal" behavior...
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by all rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+STMT: SelectStmt
+== 166
+-- ...which is also the default
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+STMT: SelectStmt
+== 167
+-- "group by distinct" behavior...
+select a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by distinct rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+STMT: SelectStmt
+== 168
+-- ...which is not the same as "select distinct"
+select distinct a, b, c
+from (values (1, 2, 3), (4, null, 6), (7, 8, 9)) as t (a, b, c)
+group by rollup(a, b), rollup(a, c)
+order by a, b, c
+--
+STMT: SelectStmt
+== 169
+-- test handling of outer GroupingFunc within subqueries
+explain (costs off)
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by cube(v1)
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 170
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by cube(v1)
+--
+STMT: SelectStmt
+== 171
+explain (costs off)
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by v1
+--
+STMT: ExplainStmt
+STMT: SelectStmt
+== 172
+select (select grouping(v1)) from (values ((select 1))) v(v1) group by v1
+--
+STMT: SelectStmt

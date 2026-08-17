@@ -49,7 +49,10 @@ func main() {
 	check(err)
 	defer oracle.Close()
 
-	// Tier: PostgreSQL regression suite.
+	// Tier: PostgreSQL regression suite. The summary suite runs untruncated;
+	// summary_truncate re-runs every statement at limit 100 (the limit rides
+	// along as a directive line in the case input) to exercise the
+	// deparse-driven truncation machinery across the whole corpus.
 	regressDir := filepath.Join(*libpgQuery, "test", "sql", "postgres_regress")
 	regressFiles := sqlFiles(regressDir)
 	fmt.Fprintf(os.Stderr, "regenerate: postgres_regress: %d files\n", len(regressFiles))
@@ -59,8 +62,33 @@ func main() {
 		stmts := splitStatements(oracle, preprocessRegress(string(src)))
 		base := strings.TrimSuffix(f, ".sql")
 		emitSQLSuites(oracle, *out, "postgres_regress", base, stmts,
-			[]string{"parse", "scan", "normalize", "fingerprint", "deparse"})
+			[]string{"parse", "scan", "normalize", "fingerprint", "deparse", "summary"})
+		emitSQLSuites(oracle, *out, "postgres_regress", base, withTruncateLimit(stmts, 100),
+			[]string{"summary_truncate"})
 	}
+
+	// Tier: PL/pgSQL regression suite (test/sql/plpgsql_regress). The plpgsql
+	// suite is the milestone-11 gate; the standard SQL suites run over the
+	// same statements since CREATE FUNCTION bodies are plain SQL to them.
+	plpgsqlDir := filepath.Join(*libpgQuery, "test", "sql", "plpgsql_regress")
+	plpgsqlFiles := sqlFiles(plpgsqlDir)
+	fmt.Fprintf(os.Stderr, "regenerate: plpgsql_regress: %d files\n", len(plpgsqlFiles))
+	for _, f := range plpgsqlFiles {
+		src, err := os.ReadFile(filepath.Join(plpgsqlDir, f))
+		check(err)
+		stmts := splitStatements(oracle, preprocessRegress(string(src)))
+		base := strings.TrimSuffix(f, ".sql")
+		emitSQLSuites(oracle, *out, "plpgsql_regress", base, stmts,
+			[]string{"parse", "scan", "normalize", "fingerprint", "deparse", "summary", "plpgsql"})
+	}
+
+	// Tier: libpg_query's PL/pgSQL samples (test/plpgsql_samples.sql, the
+	// upstream acceptance corpus for pg_query_parse_plpgsql).
+	samplesSrc, err := os.ReadFile(filepath.Join(*libpgQuery, "test", "plpgsql_samples.sql"))
+	check(err)
+	samples := splitStatements(oracle, string(samplesSrc))
+	fmt.Fprintf(os.Stderr, "regenerate: plpgsql_samples.sql: %d statements\n", len(samples))
+	emitSQLSuites(oracle, *out, "", "plpgsql_samples", samples, []string{"plpgsql"})
 
 	// Tier: deparser roundtrip corpora. deparse/ is flat .sql files;
 	// deparse-depesz/ is <NN-topic>.d/ directories of .psql files.
@@ -133,6 +161,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "regenerate: %s: %d inputs\n", tbl.file, len(inputs))
 		emitSQLSuites(oracle, *out, "", "libpg_query", inputs, tbl.suites)
 	}
+
+	// Tier: libpg_query summary test calls (test/summary_tests.c,
+	// test/summary_truncate.c — call sites, not tests[] tables; see
+	// extract_summary.go). Untruncated calls feed the summary suite;
+	// truncating calls keep their exact upstream limits.
+	var summaryInputs, truncateInputs []string
+	for _, file := range []string{"summary_tests.c", "summary_truncate.c"} {
+		src, err := os.ReadFile(filepath.Join(*libpgQuery, "test", file))
+		check(err)
+		calls, err := extractSummaryCalls(string(src))
+		if err != nil {
+			check(fmt.Errorf("%s: %w", file, err))
+		}
+		fmt.Fprintf(os.Stderr, "regenerate: %s: %d calls\n", file, len(calls))
+		for _, c := range calls {
+			if c.Limit == -1 {
+				summaryInputs = append(summaryInputs, c.SQL)
+			} else {
+				truncateInputs = append(truncateInputs, testfile.WithTruncateLimit(c.Limit, c.SQL))
+			}
+		}
+	}
+	// Every untruncated summary input also runs at limit 50, so the inline
+	// tier exercises truncation beyond the handful of upstream limits.
+	for _, sql := range summaryInputs {
+		truncateInputs = append(truncateInputs, testfile.WithTruncateLimit(50, sql))
+	}
+	emitSQLSuites(oracle, *out, "", "libpg_query", summaryInputs, []string{"summary"})
+	emitSQLSuites(oracle, *out, "", "libpg_query", truncateInputs, []string{"summary_truncate"})
 
 	// Tier: pg_query_go fingerprint corpus (incl. the 1.1 MB stress insert).
 	var fpCases []struct {
@@ -281,8 +338,64 @@ func goldenFor(oracle *Oracle, suite, sql string) string {
 			return renderOracleError(oerr)
 		}
 		return testfile.RenderSplit(stmts)
+	case "summary":
+		sum, oerr, err := oracle.Summary(sql, -1)
+		check(err)
+		if oerr != nil {
+			return renderOracleError(oerr)
+		}
+		return renderOracleSummary(sum)
+	case "summary_truncate":
+		limit, raw, err := testfile.SplitTruncateLimit(sql)
+		check(err)
+		sum, oerr, err := oracle.Summary(raw, limit)
+		check(err)
+		if oerr != nil {
+			return renderOracleError(oerr)
+		}
+		return renderOracleSummary(sum)
+	case "plpgsql":
+		text, oerr, err := oracle.Text("parse_plpgsql", sql)
+		check(err)
+		if oerr != nil {
+			return renderOracleError(oerr)
+		}
+		return text
 	}
 	panic("unknown suite " + suite)
+}
+
+func withTruncateLimit(stmts []string, limit int) []string {
+	out := make([]string, len(stmts))
+	for i, s := range stmts {
+		out[i] = testfile.WithTruncateLimit(limit, s)
+	}
+	return out
+}
+
+func renderOracleSummary(s *oracleSummary) string {
+	e := testfile.SummaryExpectation{
+		Aliases:        s.Aliases,
+		CteNames:       s.CteNames,
+		StatementTypes: s.StatementTypes,
+		TruncatedQuery: s.TruncatedQuery,
+	}
+	for _, t := range s.Tables {
+		e.Tables = append(e.Tables, testfile.SummaryTable{
+			Name: t.Name, SchemaName: t.SchemaName, TableName: t.TableName, Context: t.Context,
+		})
+	}
+	for _, f := range s.Functions {
+		e.Functions = append(e.Functions, testfile.SummaryFunction{
+			Name: f.Name, FunctionName: f.FunctionName, SchemaName: f.SchemaName, Context: f.Context,
+		})
+	}
+	for _, f := range s.FilterColumns {
+		e.FilterColumns = append(e.FilterColumns, testfile.SummaryFilterColumn{
+			SchemaName: f.SchemaName, TableName: f.TableName, Column: f.Column,
+		})
+	}
+	return testfile.RenderSummary(e)
 }
 
 func renderOracleError(e *oracleError) string {

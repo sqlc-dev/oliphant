@@ -1,0 +1,4915 @@
+== 001
+|--
+-- PARTITION_JOIN
+-- Test partitionwise join between partitioned tables
+|--
+
+-- Enable partitionwise join, which by default is disabled.
+SET enable_partitionwise_join to true
+--
+STMT: VariableSetStmt
+== 002
+|--
+-- partitioned by a single column
+|--
+CREATE TABLE prt1 (a int, b int, c varchar) PARTITION BY RANGE(a)
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DDL
+STMT: CreateStmt
+== 003
+CREATE TABLE prt1_p1 PARTITION OF prt1 FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt1_p1" schema="" table="prt1_p1" ctx=DDL
+STMT: CreateStmt
+== 004
+CREATE TABLE prt1_p3 PARTITION OF prt1 FOR VALUES FROM (500) TO (600)
+--
+TABLE: name="prt1_p3" schema="" table="prt1_p3" ctx=DDL
+STMT: CreateStmt
+== 005
+CREATE TABLE prt1_p2 PARTITION OF prt1 FOR VALUES FROM (250) TO (500)
+--
+TABLE: name="prt1_p2" schema="" table="prt1_p2" ctx=DDL
+STMT: CreateStmt
+== 006
+INSERT INTO prt1 SELECT i, i % 25, to_char(i, 'FM0000') FROM generate_series(0, 599) i WHERE i % 2 = 0
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 007
+CREATE INDEX iprt1_p1_a on prt1_p1(a)
+--
+TABLE: name="prt1_p1" schema="" table="prt1_p1" ctx=DDL
+STMT: IndexStmt
+== 008
+CREATE INDEX iprt1_p2_a on prt1_p2(a)
+--
+TABLE: name="prt1_p2" schema="" table="prt1_p2" ctx=DDL
+STMT: IndexStmt
+== 009
+CREATE INDEX iprt1_p3_a on prt1_p3(a)
+--
+TABLE: name="prt1_p3" schema="" table="prt1_p3" ctx=DDL
+STMT: IndexStmt
+== 010
+ANALYZE prt1
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DDL
+STMT: VacuumStmt
+== 011
+CREATE TABLE prt2 (a int, b int, c varchar) PARTITION BY RANGE(b)
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DDL
+STMT: CreateStmt
+== 012
+CREATE TABLE prt2_p1 PARTITION OF prt2 FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt2_p1" schema="" table="prt2_p1" ctx=DDL
+STMT: CreateStmt
+== 013
+CREATE TABLE prt2_p2 PARTITION OF prt2 FOR VALUES FROM (250) TO (500)
+--
+TABLE: name="prt2_p2" schema="" table="prt2_p2" ctx=DDL
+STMT: CreateStmt
+== 014
+CREATE TABLE prt2_p3 PARTITION OF prt2 FOR VALUES FROM (500) TO (600)
+--
+TABLE: name="prt2_p3" schema="" table="prt2_p3" ctx=DDL
+STMT: CreateStmt
+== 015
+INSERT INTO prt2 SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(0, 599) i WHERE i % 3 = 0
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+CREATE INDEX iprt2_p1_b on prt2_p1(b)
+--
+TABLE: name="prt2_p1" schema="" table="prt2_p1" ctx=DDL
+STMT: IndexStmt
+== 017
+CREATE INDEX iprt2_p2_b on prt2_p2(b)
+--
+TABLE: name="prt2_p2" schema="" table="prt2_p2" ctx=DDL
+STMT: IndexStmt
+== 018
+CREATE INDEX iprt2_p3_b on prt2_p3(b)
+--
+TABLE: name="prt2_p3" schema="" table="prt2_p3" ctx=DDL
+STMT: IndexStmt
+== 019
+ANALYZE prt2
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DDL
+STMT: VacuumStmt
+== 020
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 021
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 022
+-- left outer join, 3-way
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) FROM prt1 t1
+  LEFT JOIN prt1 t2 ON t1.a = t2.a
+  LEFT JOIN prt1 t3 ON t2.a = t3.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 023
+SELECT COUNT(*) FROM prt1 t1
+  LEFT JOIN prt1 t2 ON t1.a = t2.a
+  LEFT JOIN prt1 t3 ON t2.a = t3.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+== 024
+-- left outer join, with whole-row reference; partitionwise join does not apply
+EXPLAIN (COSTS OFF)
+SELECT t1, t2 FROM prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 025
+SELECT t1, t2 FROM prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 026
+-- right outer join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 027
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t2" column="a"
+STMT: SelectStmt
+== 028
+-- full outer join, with placeholder vars
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1" column="b"
+FILTER: schema="" table="prt2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 029
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1" column="b"
+FILTER: schema="" table="prt2" column="a"
+STMT: SelectStmt
+== 030
+-- Join with pruned partitions from joining relations
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a < 450 AND t2.b > 250 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 031
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a < 450 AND t2.b > 250 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 032
+-- Currently we can't do partitioned join if nullable-side partitions are pruned
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 033
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 034
+-- Currently we can't do partitioned join if nullable-side partitions are pruned
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 FULL JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 OR t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 035
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 FULL JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 OR t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 036
+-- Semi-join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t2.b FROM prt2 t2 WHERE t2.a = 0) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 037
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t2.b FROM prt2 t2 WHERE t2.a = 0) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+STMT: SelectStmt
+== 038
+-- Anti-join with aggregates
+EXPLAIN (COSTS OFF)
+SELECT sum(t1.a), avg(t1.a), sum(t1.b), avg(t1.b) FROM prt1 t1 WHERE NOT EXISTS (SELECT 1 FROM prt2 t2 WHERE t1.a = t2.b)
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 039
+SELECT sum(t1.a), avg(t1.a), sum(t1.b), avg(t1.b) FROM prt1 t1 WHERE NOT EXISTS (SELECT 1 FROM prt2 t2 WHERE t1.a = t2.b)
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 040
+-- lateral reference
+EXPLAIN (COSTS OFF)
+SELECT * FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t3.a AS t3a, least(t1.a,t2.a,t3.b) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
+			  ON t1.a = ss.t2a WHERE t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt2"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 041
+SELECT * FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t3.a AS t3a, least(t1.a,t2.a,t3.b) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
+			  ON t1.a = ss.t2a WHERE t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt2"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 042
+EXPLAIN (COSTS OFF)
+SELECT t1.a, ss.t2a, ss.t2c FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t3.a AS t3a, t2.b t2b, t2.c t2c, least(t1.a,t2.a,t3.b) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
+			  ON t1.c = ss.t2c WHERE (t1.b + coalesce(ss.t2b, 0)) = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt2"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="ss" column="t2b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 043
+SELECT t1.a, ss.t2a, ss.t2c FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t3.a AS t3a, t2.b t2b, t2.c t2c, least(t1.a,t2.a,t3.a) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
+			  ON t1.c = ss.t2c WHERE (t1.b + coalesce(ss.t2b, 0)) = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt2"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="ss" column="t2b"
+STMT: SelectStmt
+== 044
+-- lateral reference in sample scan
+EXPLAIN (COSTS OFF)
+SELECT * FROM prt1 t1 JOIN LATERAL
+			  (SELECT * FROM prt1 t2 TABLESAMPLE SYSTEM (t1.a) REPEATABLE(t1.b)) s
+			  ON t1.a = s.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 045
+-- lateral reference in scan's restriction clauses
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2 t2) s
+			  ON t1.a = s.b WHERE s.t1b = s.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 046
+SELECT count(*) FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2 t2) s
+			  ON t1.a = s.b WHERE s.t1b = s.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="a"
+STMT: SelectStmt
+== 047
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2 t2) s
+			  ON t1.a = s.b WHERE s.t1b = s.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 048
+SELECT count(*) FROM prt1 t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2 t2) s
+			  ON t1.a = s.b WHERE s.t1b = s.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="b"
+STMT: SelectStmt
+== 049
+-- bug with inadequate sort key representation
+SET enable_partitionwise_aggregate TO true
+--
+STMT: VariableSetStmt
+== 050
+SET enable_hashjoin TO false
+--
+STMT: VariableSetStmt
+== 051
+EXPLAIN (COSTS OFF)
+SELECT a, b FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b)
+  WHERE a BETWEEN 490 AND 510
+  GROUP BY 1, 2 ORDER BY 1, 2
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "p2"="prt2"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 052
+SELECT a, b FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b)
+  WHERE a BETWEEN 490 AND 510
+  GROUP BY 1, 2 ORDER BY 1, 2
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "p2"="prt2"
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 053
+RESET enable_partitionwise_aggregate
+--
+STMT: VariableSetStmt
+== 054
+RESET enable_hashjoin
+--
+STMT: VariableSetStmt
+== 055
+-- bug in freeing the SpecialJoinInfo of a child-join
+EXPLAIN (COSTS OFF)
+SELECT * FROM prt1 t1 JOIN prt1 t2 ON t1.a = t2.a WHERE t1.a IN (SELECT a FROM prt1 t3)
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt1"
+ALIAS: "t3"="prt1"
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 056
+|--
+-- partitioned by expression
+|--
+CREATE TABLE prt1_e (a int, b int, c int) PARTITION BY RANGE(((a + b)/2))
+--
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=DDL
+STMT: CreateStmt
+== 057
+CREATE TABLE prt1_e_p1 PARTITION OF prt1_e FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt1_e_p1" schema="" table="prt1_e_p1" ctx=DDL
+STMT: CreateStmt
+== 058
+CREATE TABLE prt1_e_p2 PARTITION OF prt1_e FOR VALUES FROM (250) TO (500)
+--
+TABLE: name="prt1_e_p2" schema="" table="prt1_e_p2" ctx=DDL
+STMT: CreateStmt
+== 059
+CREATE TABLE prt1_e_p3 PARTITION OF prt1_e FOR VALUES FROM (500) TO (600)
+--
+TABLE: name="prt1_e_p3" schema="" table="prt1_e_p3" ctx=DDL
+STMT: CreateStmt
+== 060
+INSERT INTO prt1_e SELECT i, i, i % 25 FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 061
+CREATE INDEX iprt1_e_p1_ab2 on prt1_e_p1(((a+b)/2))
+--
+TABLE: name="prt1_e_p1" schema="" table="prt1_e_p1" ctx=DDL
+STMT: IndexStmt
+== 062
+CREATE INDEX iprt1_e_p2_ab2 on prt1_e_p2(((a+b)/2))
+--
+TABLE: name="prt1_e_p2" schema="" table="prt1_e_p2" ctx=DDL
+STMT: IndexStmt
+== 063
+CREATE INDEX iprt1_e_p3_ab2 on prt1_e_p3(((a+b)/2))
+--
+TABLE: name="prt1_e_p3" schema="" table="prt1_e_p3" ctx=DDL
+STMT: IndexStmt
+== 064
+ANALYZE prt1_e
+--
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=DDL
+STMT: VacuumStmt
+== 065
+CREATE TABLE prt2_e (a int, b int, c int) PARTITION BY RANGE(((b + a)/2))
+--
+TABLE: name="prt2_e" schema="" table="prt2_e" ctx=DDL
+STMT: CreateStmt
+== 066
+CREATE TABLE prt2_e_p1 PARTITION OF prt2_e FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt2_e_p1" schema="" table="prt2_e_p1" ctx=DDL
+STMT: CreateStmt
+== 067
+CREATE TABLE prt2_e_p2 PARTITION OF prt2_e FOR VALUES FROM (250) TO (500)
+--
+TABLE: name="prt2_e_p2" schema="" table="prt2_e_p2" ctx=DDL
+STMT: CreateStmt
+== 068
+CREATE TABLE prt2_e_p3 PARTITION OF prt2_e FOR VALUES FROM (500) TO (600)
+--
+TABLE: name="prt2_e_p3" schema="" table="prt2_e_p3" ctx=DDL
+STMT: CreateStmt
+== 069
+INSERT INTO prt2_e SELECT i, i, i % 25 FROM generate_series(0, 599, 3) i
+--
+TABLE: name="prt2_e" schema="" table="prt2_e" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 070
+ANALYZE prt2_e
+--
+TABLE: name="prt2_e" schema="" table="prt2_e" ctx=DDL
+STMT: VacuumStmt
+== 071
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_e t1, prt2_e t2 WHERE (t1.a + t1.b)/2 = (t2.b + t2.a)/2 AND t1.c = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+TABLE: name="prt2_e" schema="" table="prt2_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+ALIAS: "t2"="prt2_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 072
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_e t1, prt2_e t2 WHERE (t1.a + t1.b)/2 = (t2.b + t2.a)/2 AND t1.c = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+TABLE: name="prt2_e" schema="" table="prt2_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+ALIAS: "t2"="prt2_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 073
+|--
+-- N-way join
+|--
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM prt1 t1, prt2 t2, prt1_e t3 WHERE t1.a = t2.b AND t1.a = (t3.a + t3.b)/2 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t3" column="a"
+FILTER: schema="" table="t3" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 074
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM prt1 t1, prt2 t2, prt1_e t3 WHERE t1.a = t2.b AND t1.a = (t3.a + t3.b)/2 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t3" column="a"
+FILTER: schema="" table="t3" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 075
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) LEFT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 076
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) LEFT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 077
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t3" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 078
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t3" column="c"
+STMT: SelectStmt
+== 079
+|--
+-- 3-way full join
+|--
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b) FULL JOIN prt2 p3(b,a,c) USING (a, b)
+  WHERE a BETWEEN 490 AND 510
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "p2"="prt2"
+ALIAS: "p3"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 080
+SELECT COUNT(*) FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b) FULL JOIN prt2 p3(b,a,c) USING (a, b)
+  WHERE a BETWEEN 490 AND 510
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "p2"="prt2"
+ALIAS: "p3"="prt2"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 081
+|--
+-- 4-way full join
+|--
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b) FULL JOIN prt2 p3(b,a,c) USING (a, b) FULL JOIN prt1 p4 (a,b,c) USING (a, b)
+  WHERE a BETWEEN 490 AND 510
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "p2"="prt2"
+ALIAS: "p3"="prt2"
+ALIAS: "p4"="prt1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 082
+SELECT COUNT(*) FROM prt1 FULL JOIN prt2 p2(b,a,c) USING(a,b) FULL JOIN prt2 p3(b,a,c) USING (a, b) FULL JOIN prt1 p4 (a,b,c) USING (a, b)
+  WHERE a BETWEEN 490 AND 510
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "p2"="prt2"
+ALIAS: "p3"="prt2"
+ALIAS: "p4"="prt1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 083
+-- Cases with non-nullable expressions in subquery results;
+-- make sure these go to null as expected
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.phv, t2.b, t2.phv, t3.a + t3.b, t3.phv FROM ((SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b)) FULL JOIN (SELECT 50 phv, * FROM prt1_e WHERE prt1_e.c = 0) t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.a = t1.phv OR t2.b = t2.phv OR (t3.a + t3.b)/2 = t3.phv ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t3" column="a"
+FILTER: schema="" table="t3" column="b"
+FILTER: schema="" table="t3" column="phv"
+FILTER: schema="" table="prt1" column="b"
+FILTER: schema="" table="prt2" column="a"
+FILTER: schema="" table="prt1_e" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 084
+SELECT t1.a, t1.phv, t2.b, t2.phv, t3.a + t3.b, t3.phv FROM ((SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b)) FULL JOIN (SELECT 50 phv, * FROM prt1_e WHERE prt1_e.c = 0) t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.a = t1.phv OR t2.b = t2.phv OR (t3.a + t3.b)/2 = t3.phv ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t3" column="a"
+FILTER: schema="" table="t3" column="b"
+FILTER: schema="" table="t3" column="phv"
+FILTER: schema="" table="prt1" column="b"
+FILTER: schema="" table="prt2" column="a"
+FILTER: schema="" table="prt1_e" column="c"
+STMT: SelectStmt
+== 085
+-- Semi-join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1, prt1_e t2 WHERE t1.a = 0 AND t1.b = (t2.a + t2.b)/2) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt2"
+ALIAS: "t2"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 086
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1, prt1_e t2 WHERE t1.a = 0 AND t1.b = (t2.a + t2.b)/2) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt2"
+ALIAS: "t2"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 087
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 088
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 089
+-- test merge joins
+SET enable_hashjoin TO off
+--
+STMT: VariableSetStmt
+== 090
+SET enable_nestloop TO off
+--
+STMT: VariableSetStmt
+== 091
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 092
+SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1_e"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 093
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t3" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 094
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1_e" schema="" table="prt1_e" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1_e"
+FILTER: schema="" table="t3" column="c"
+STMT: SelectStmt
+== 095
+-- MergeAppend on nullable column
+-- This should generate a partitionwise join, but currently fails to
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t2.b FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 096
+SELECT t1.a, t2.b FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="b"
+STMT: SelectStmt
+== 097
+-- merge join when expression with whole-row reference needs to be sorted;
+-- partitionwise join does not apply
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t2.b FROM prt1 t1, prt2 t2 WHERE t1::text = t2::text AND t1.a = t2.b ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="" column="t1"
+FILTER: schema="" table="" column="t2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 098
+SELECT t1.a, t2.b FROM prt1 t1, prt2 t2 WHERE t1::text = t2::text AND t1.a = t2.b ORDER BY t1.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="" column="t1"
+FILTER: schema="" table="" column="t2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 099
+RESET enable_hashjoin
+--
+STMT: VariableSetStmt
+== 100
+RESET enable_nestloop
+--
+STMT: VariableSetStmt
+== 101
+|--
+-- partitioned by multiple columns
+|--
+CREATE TABLE prt1_m (a int, b int, c int) PARTITION BY RANGE(a, ((a + b)/2))
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=DDL
+STMT: CreateStmt
+== 102
+CREATE TABLE prt1_m_p1 PARTITION OF prt1_m FOR VALUES FROM (0, 0) TO (250, 250)
+--
+TABLE: name="prt1_m_p1" schema="" table="prt1_m_p1" ctx=DDL
+STMT: CreateStmt
+== 103
+CREATE TABLE prt1_m_p2 PARTITION OF prt1_m FOR VALUES FROM (250, 250) TO (500, 500)
+--
+TABLE: name="prt1_m_p2" schema="" table="prt1_m_p2" ctx=DDL
+STMT: CreateStmt
+== 104
+CREATE TABLE prt1_m_p3 PARTITION OF prt1_m FOR VALUES FROM (500, 500) TO (600, 600)
+--
+TABLE: name="prt1_m_p3" schema="" table="prt1_m_p3" ctx=DDL
+STMT: CreateStmt
+== 105
+INSERT INTO prt1_m SELECT i, i, i % 25 FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 106
+ANALYZE prt1_m
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=DDL
+STMT: VacuumStmt
+== 107
+CREATE TABLE prt2_m (a int, b int, c int) PARTITION BY RANGE(((b + a)/2), b)
+--
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=DDL
+STMT: CreateStmt
+== 108
+CREATE TABLE prt2_m_p1 PARTITION OF prt2_m FOR VALUES FROM (0, 0) TO (250, 250)
+--
+TABLE: name="prt2_m_p1" schema="" table="prt2_m_p1" ctx=DDL
+STMT: CreateStmt
+== 109
+CREATE TABLE prt2_m_p2 PARTITION OF prt2_m FOR VALUES FROM (250, 250) TO (500, 500)
+--
+TABLE: name="prt2_m_p2" schema="" table="prt2_m_p2" ctx=DDL
+STMT: CreateStmt
+== 110
+CREATE TABLE prt2_m_p3 PARTITION OF prt2_m FOR VALUES FROM (500, 500) TO (600, 600)
+--
+TABLE: name="prt2_m_p3" schema="" table="prt2_m_p3" ctx=DDL
+STMT: CreateStmt
+== 111
+INSERT INTO prt2_m SELECT i, i, i % 25 FROM generate_series(0, 599, 3) i
+--
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 112
+ANALYZE prt2_m
+--
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=DDL
+STMT: VacuumStmt
+== 113
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_m WHERE prt1_m.c = 0) t1 FULL JOIN (SELECT * FROM prt2_m WHERE prt2_m.c = 0) t2 ON (t1.a = (t2.b + t2.a)/2 AND t2.b = (t1.a + t1.b)/2) ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=Select
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=Select
+FILTER: schema="" table="prt1_m" column="c"
+FILTER: schema="" table="prt2_m" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 114
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_m WHERE prt1_m.c = 0) t1 FULL JOIN (SELECT * FROM prt2_m WHERE prt2_m.c = 0) t2 ON (t1.a = (t2.b + t2.a)/2 AND t2.b = (t1.a + t1.b)/2) ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=Select
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=Select
+FILTER: schema="" table="prt1_m" column="c"
+FILTER: schema="" table="prt2_m" column="c"
+STMT: SelectStmt
+== 115
+|--
+-- tests for list partitioned tables.
+|--
+CREATE TABLE plt1 (a int, b int, c text) PARTITION BY LIST(c)
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DDL
+STMT: CreateStmt
+== 116
+CREATE TABLE plt1_p1 PARTITION OF plt1 FOR VALUES IN ('0000', '0003', '0004', '0010')
+--
+TABLE: name="plt1_p1" schema="" table="plt1_p1" ctx=DDL
+STMT: CreateStmt
+== 117
+CREATE TABLE plt1_p2 PARTITION OF plt1 FOR VALUES IN ('0001', '0005', '0002', '0009')
+--
+TABLE: name="plt1_p2" schema="" table="plt1_p2" ctx=DDL
+STMT: CreateStmt
+== 118
+CREATE TABLE plt1_p3 PARTITION OF plt1 FOR VALUES IN ('0006', '0007', '0008', '0011')
+--
+TABLE: name="plt1_p3" schema="" table="plt1_p3" ctx=DDL
+STMT: CreateStmt
+== 119
+INSERT INTO plt1 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 120
+ANALYZE plt1
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DDL
+STMT: VacuumStmt
+== 121
+CREATE TABLE plt2 (a int, b int, c text) PARTITION BY LIST(c)
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DDL
+STMT: CreateStmt
+== 122
+CREATE TABLE plt2_p1 PARTITION OF plt2 FOR VALUES IN ('0000', '0003', '0004', '0010')
+--
+TABLE: name="plt2_p1" schema="" table="plt2_p1" ctx=DDL
+STMT: CreateStmt
+== 123
+CREATE TABLE plt2_p2 PARTITION OF plt2 FOR VALUES IN ('0001', '0005', '0002', '0009')
+--
+TABLE: name="plt2_p2" schema="" table="plt2_p2" ctx=DDL
+STMT: CreateStmt
+== 124
+CREATE TABLE plt2_p3 PARTITION OF plt2 FOR VALUES IN ('0006', '0007', '0008', '0011')
+--
+TABLE: name="plt2_p3" schema="" table="plt2_p3" ctx=DDL
+STMT: CreateStmt
+== 125
+INSERT INTO plt2 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 3) i
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 126
+ANALYZE plt2
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DDL
+STMT: VacuumStmt
+== 127
+|--
+-- list partitioned by expression
+|--
+CREATE TABLE plt1_e (a int, b int, c text) PARTITION BY LIST(ltrim(c, 'A'))
+--
+TABLE: name="plt1_e" schema="" table="plt1_e" ctx=DDL
+STMT: CreateStmt
+== 128
+CREATE TABLE plt1_e_p1 PARTITION OF plt1_e FOR VALUES IN ('0000', '0003', '0004', '0010')
+--
+TABLE: name="plt1_e_p1" schema="" table="plt1_e_p1" ctx=DDL
+STMT: CreateStmt
+== 129
+CREATE TABLE plt1_e_p2 PARTITION OF plt1_e FOR VALUES IN ('0001', '0005', '0002', '0009')
+--
+TABLE: name="plt1_e_p2" schema="" table="plt1_e_p2" ctx=DDL
+STMT: CreateStmt
+== 130
+CREATE TABLE plt1_e_p3 PARTITION OF plt1_e FOR VALUES IN ('0006', '0007', '0008', '0011')
+--
+TABLE: name="plt1_e_p3" schema="" table="plt1_e_p3" ctx=DDL
+STMT: CreateStmt
+== 131
+INSERT INTO plt1_e SELECT i, i, 'A' || to_char(i/50, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="plt1_e" schema="" table="plt1_e" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 132
+ANALYZE plt1_e
+--
+TABLE: name="plt1_e" schema="" table="plt1_e" ctx=DDL
+STMT: VacuumStmt
+== 133
+-- test partition matching with N-way join
+EXPLAIN (COSTS OFF)
+SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM plt1 t1, plt2 t2, plt1_e t3 WHERE t1.b = t2.b AND t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=Select
+TABLE: name="plt2" schema="" table="plt2" ctx=Select
+TABLE: name="plt1_e" schema="" table="plt1_e" ctx=Select
+ALIAS: "t1"="plt1"
+ALIAS: "t2"="plt2"
+ALIAS: "t3"="plt1_e"
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+FILTER: schema="" table="t3" column="c"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 134
+SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM plt1 t1, plt2 t2, plt1_e t3 WHERE t1.b = t2.b AND t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=Select
+TABLE: name="plt2" schema="" table="plt2" ctx=Select
+TABLE: name="plt1_e" schema="" table="plt1_e" ctx=Select
+ALIAS: "t1"="plt1"
+ALIAS: "t2"="plt2"
+ALIAS: "t3"="plt1_e"
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+FILTER: schema="" table="t3" column="c"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 135
+-- joins where one of the relations is proven empty
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a = 1 AND t1.a = 2
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 136
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1 LEFT JOIN prt2 t2 ON t1.a = t2.b
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 137
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b, prt1 t3 WHERE t2.b = t3.a
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t2"="prt2"
+ALIAS: "t3"="prt1"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t3" column="a"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 138
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1 FULL JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 139
+|--
+-- tests for hash partitioned tables.
+|--
+CREATE TABLE pht1 (a int, b int, c text) PARTITION BY HASH(c)
+--
+TABLE: name="pht1" schema="" table="pht1" ctx=DDL
+STMT: CreateStmt
+== 140
+CREATE TABLE pht1_p1 PARTITION OF pht1 FOR VALUES WITH (MODULUS 3, REMAINDER 0)
+--
+TABLE: name="pht1_p1" schema="" table="pht1_p1" ctx=DDL
+STMT: CreateStmt
+== 141
+CREATE TABLE pht1_p2 PARTITION OF pht1 FOR VALUES WITH (MODULUS 3, REMAINDER 1)
+--
+TABLE: name="pht1_p2" schema="" table="pht1_p2" ctx=DDL
+STMT: CreateStmt
+== 142
+CREATE TABLE pht1_p3 PARTITION OF pht1 FOR VALUES WITH (MODULUS 3, REMAINDER 2)
+--
+TABLE: name="pht1_p3" schema="" table="pht1_p3" ctx=DDL
+STMT: CreateStmt
+== 143
+INSERT INTO pht1 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="pht1" schema="" table="pht1" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 144
+ANALYZE pht1
+--
+TABLE: name="pht1" schema="" table="pht1" ctx=DDL
+STMT: VacuumStmt
+== 145
+CREATE TABLE pht2 (a int, b int, c text) PARTITION BY HASH(c)
+--
+TABLE: name="pht2" schema="" table="pht2" ctx=DDL
+STMT: CreateStmt
+== 146
+CREATE TABLE pht2_p1 PARTITION OF pht2 FOR VALUES WITH (MODULUS 3, REMAINDER 0)
+--
+TABLE: name="pht2_p1" schema="" table="pht2_p1" ctx=DDL
+STMT: CreateStmt
+== 147
+CREATE TABLE pht2_p2 PARTITION OF pht2 FOR VALUES WITH (MODULUS 3, REMAINDER 1)
+--
+TABLE: name="pht2_p2" schema="" table="pht2_p2" ctx=DDL
+STMT: CreateStmt
+== 148
+CREATE TABLE pht2_p3 PARTITION OF pht2 FOR VALUES WITH (MODULUS 3, REMAINDER 2)
+--
+TABLE: name="pht2_p3" schema="" table="pht2_p3" ctx=DDL
+STMT: CreateStmt
+== 149
+INSERT INTO pht2 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 3) i
+--
+TABLE: name="pht2" schema="" table="pht2" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 150
+ANALYZE pht2
+--
+TABLE: name="pht2" schema="" table="pht2" ctx=DDL
+STMT: VacuumStmt
+== 151
+|--
+-- hash partitioned by expression
+|--
+CREATE TABLE pht1_e (a int, b int, c text) PARTITION BY HASH(ltrim(c, 'A'))
+--
+TABLE: name="pht1_e" schema="" table="pht1_e" ctx=DDL
+STMT: CreateStmt
+== 152
+CREATE TABLE pht1_e_p1 PARTITION OF pht1_e FOR VALUES WITH (MODULUS 3, REMAINDER 0)
+--
+TABLE: name="pht1_e_p1" schema="" table="pht1_e_p1" ctx=DDL
+STMT: CreateStmt
+== 153
+CREATE TABLE pht1_e_p2 PARTITION OF pht1_e FOR VALUES WITH (MODULUS 3, REMAINDER 1)
+--
+TABLE: name="pht1_e_p2" schema="" table="pht1_e_p2" ctx=DDL
+STMT: CreateStmt
+== 154
+CREATE TABLE pht1_e_p3 PARTITION OF pht1_e FOR VALUES WITH (MODULUS 3, REMAINDER 2)
+--
+TABLE: name="pht1_e_p3" schema="" table="pht1_e_p3" ctx=DDL
+STMT: CreateStmt
+== 155
+INSERT INTO pht1_e SELECT i, i, 'A' || to_char(i/50, 'FM0000') FROM generate_series(0, 299, 2) i
+--
+TABLE: name="pht1_e" schema="" table="pht1_e" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 156
+ANALYZE pht1_e
+--
+TABLE: name="pht1_e" schema="" table="pht1_e" ctx=DDL
+STMT: VacuumStmt
+== 157
+-- test partition matching with N-way join
+EXPLAIN (COSTS OFF)
+SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM pht1 t1, pht2 t2, pht1_e t3 WHERE t1.b = t2.b AND t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c
+--
+TABLE: name="pht1" schema="" table="pht1" ctx=Select
+TABLE: name="pht2" schema="" table="pht2" ctx=Select
+TABLE: name="pht1_e" schema="" table="pht1_e" ctx=Select
+ALIAS: "t1"="pht1"
+ALIAS: "t2"="pht2"
+ALIAS: "t3"="pht1_e"
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+FILTER: schema="" table="t3" column="c"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 158
+SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM pht1 t1, pht2 t2, pht1_e t3 WHERE t1.b = t2.b AND t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c
+--
+TABLE: name="pht1" schema="" table="pht1" ctx=Select
+TABLE: name="pht2" schema="" table="pht2" ctx=Select
+TABLE: name="pht1_e" schema="" table="pht1_e" ctx=Select
+ALIAS: "t1"="pht1"
+ALIAS: "t2"="pht2"
+ALIAS: "t3"="pht1_e"
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="ltrim" function="ltrim" schema="" ctx=Call
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+FILTER: schema="" table="t3" column="c"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 159
+-- test default partition behavior for range
+ALTER TABLE prt1 DETACH PARTITION prt1_p3
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DDL
+STMT: AlterTableStmt
+== 160
+ALTER TABLE prt1 ATTACH PARTITION prt1_p3 DEFAULT
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DDL
+STMT: AlterTableStmt
+== 161
+ANALYZE prt1
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=DDL
+STMT: VacuumStmt
+== 162
+ALTER TABLE prt2 DETACH PARTITION prt2_p3
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DDL
+STMT: AlterTableStmt
+== 163
+ALTER TABLE prt2 ATTACH PARTITION prt2_p3 DEFAULT
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DDL
+STMT: AlterTableStmt
+== 164
+ANALYZE prt2
+--
+TABLE: name="prt2" schema="" table="prt2" ctx=DDL
+STMT: VacuumStmt
+== 165
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 166
+-- test default partition behavior for list
+ALTER TABLE plt1 DETACH PARTITION plt1_p3
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DDL
+STMT: AlterTableStmt
+== 167
+ALTER TABLE plt1 ATTACH PARTITION plt1_p3 DEFAULT
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DDL
+STMT: AlterTableStmt
+== 168
+ANALYZE plt1
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=DDL
+STMT: VacuumStmt
+== 169
+ALTER TABLE plt2 DETACH PARTITION plt2_p3
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DDL
+STMT: AlterTableStmt
+== 170
+ALTER TABLE plt2 ATTACH PARTITION plt2_p3 DEFAULT
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DDL
+STMT: AlterTableStmt
+== 171
+ANALYZE plt2
+--
+TABLE: name="plt2" schema="" table="plt2" ctx=DDL
+STMT: VacuumStmt
+== 172
+EXPLAIN (COSTS OFF)
+SELECT avg(t1.a), avg(t2.b), t1.c, t2.c FROM plt1 t1 RIGHT JOIN plt2 t2 ON t1.c = t2.c WHERE t1.a % 25 = 0 GROUP BY t1.c, t2.c ORDER BY t1.c, t2.c
+--
+TABLE: name="plt1" schema="" table="plt1" ctx=Select
+TABLE: name="plt2" schema="" table="plt2" ctx=Select
+ALIAS: "t1"="plt1"
+ALIAS: "t2"="plt2"
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FUNCTION: name="avg" function="avg" schema="" ctx=Call
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 173
+|--
+-- multiple levels of partitioning
+|--
+CREATE TABLE prt1_l (a int, b int, c varchar) PARTITION BY RANGE(a)
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=DDL
+STMT: CreateStmt
+== 174
+CREATE TABLE prt1_l_p1 PARTITION OF prt1_l FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt1_l_p1" schema="" table="prt1_l_p1" ctx=DDL
+STMT: CreateStmt
+== 175
+CREATE TABLE prt1_l_p2 PARTITION OF prt1_l FOR VALUES FROM (250) TO (500) PARTITION BY LIST (c)
+--
+TABLE: name="prt1_l_p2" schema="" table="prt1_l_p2" ctx=DDL
+STMT: CreateStmt
+== 176
+CREATE TABLE prt1_l_p2_p1 PARTITION OF prt1_l_p2 FOR VALUES IN ('0000', '0001')
+--
+TABLE: name="prt1_l_p2_p1" schema="" table="prt1_l_p2_p1" ctx=DDL
+STMT: CreateStmt
+== 177
+CREATE TABLE prt1_l_p2_p2 PARTITION OF prt1_l_p2 FOR VALUES IN ('0002', '0003')
+--
+TABLE: name="prt1_l_p2_p2" schema="" table="prt1_l_p2_p2" ctx=DDL
+STMT: CreateStmt
+== 178
+CREATE TABLE prt1_l_p3 PARTITION OF prt1_l FOR VALUES FROM (500) TO (600) PARTITION BY RANGE (b)
+--
+TABLE: name="prt1_l_p3" schema="" table="prt1_l_p3" ctx=DDL
+STMT: CreateStmt
+== 179
+CREATE TABLE prt1_l_p3_p1 PARTITION OF prt1_l_p3 FOR VALUES FROM (0) TO (13)
+--
+TABLE: name="prt1_l_p3_p1" schema="" table="prt1_l_p3_p1" ctx=DDL
+STMT: CreateStmt
+== 180
+CREATE TABLE prt1_l_p3_p2 PARTITION OF prt1_l_p3 FOR VALUES FROM (13) TO (25)
+--
+TABLE: name="prt1_l_p3_p2" schema="" table="prt1_l_p3_p2" ctx=DDL
+STMT: CreateStmt
+== 181
+INSERT INTO prt1_l SELECT i, i % 25, to_char(i % 4, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 182
+ANALYZE prt1_l
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=DDL
+STMT: VacuumStmt
+== 183
+CREATE TABLE prt2_l (a int, b int, c varchar) PARTITION BY RANGE(b)
+--
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=DDL
+STMT: CreateStmt
+== 184
+CREATE TABLE prt2_l_p1 PARTITION OF prt2_l FOR VALUES FROM (0) TO (250)
+--
+TABLE: name="prt2_l_p1" schema="" table="prt2_l_p1" ctx=DDL
+STMT: CreateStmt
+== 185
+CREATE TABLE prt2_l_p2 PARTITION OF prt2_l FOR VALUES FROM (250) TO (500) PARTITION BY LIST (c)
+--
+TABLE: name="prt2_l_p2" schema="" table="prt2_l_p2" ctx=DDL
+STMT: CreateStmt
+== 186
+CREATE TABLE prt2_l_p2_p1 PARTITION OF prt2_l_p2 FOR VALUES IN ('0000', '0001')
+--
+TABLE: name="prt2_l_p2_p1" schema="" table="prt2_l_p2_p1" ctx=DDL
+STMT: CreateStmt
+== 187
+CREATE TABLE prt2_l_p2_p2 PARTITION OF prt2_l_p2 FOR VALUES IN ('0002', '0003')
+--
+TABLE: name="prt2_l_p2_p2" schema="" table="prt2_l_p2_p2" ctx=DDL
+STMT: CreateStmt
+== 188
+CREATE TABLE prt2_l_p3 PARTITION OF prt2_l FOR VALUES FROM (500) TO (600) PARTITION BY RANGE (a)
+--
+TABLE: name="prt2_l_p3" schema="" table="prt2_l_p3" ctx=DDL
+STMT: CreateStmt
+== 189
+CREATE TABLE prt2_l_p3_p1 PARTITION OF prt2_l_p3 FOR VALUES FROM (0) TO (13)
+--
+TABLE: name="prt2_l_p3_p1" schema="" table="prt2_l_p3_p1" ctx=DDL
+STMT: CreateStmt
+== 190
+CREATE TABLE prt2_l_p3_p2 PARTITION OF prt2_l_p3 FOR VALUES FROM (13) TO (25)
+--
+TABLE: name="prt2_l_p3_p2" schema="" table="prt2_l_p3_p2" ctx=DDL
+STMT: CreateStmt
+== 191
+INSERT INTO prt2_l SELECT i % 25, i, to_char(i % 4, 'FM0000') FROM generate_series(0, 599, 3) i
+--
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 192
+ANALYZE prt2_l
+--
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=DDL
+STMT: VacuumStmt
+== 193
+-- inner join, qual covering only top-level partitions
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1, prt2_l t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 194
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1, prt2_l t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 195
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 LEFT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 196
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 LEFT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 197
+-- right join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 198
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t2.a = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="t2" column="a"
+STMT: SelectStmt
+== 199
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_l WHERE prt1_l.b = 0) t1 FULL JOIN (SELECT * FROM prt2_l WHERE prt2_l.a = 0) t2 ON (t1.a = t2.b AND t1.c = t2.c) ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+FILTER: schema="" table="prt1_l" column="b"
+FILTER: schema="" table="prt2_l" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 200
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_l WHERE prt1_l.b = 0) t1 FULL JOIN (SELECT * FROM prt2_l WHERE prt2_l.a = 0) t2 ON (t1.a = t2.b AND t1.c = t2.c) ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+FILTER: schema="" table="prt1_l" column="b"
+FILTER: schema="" table="prt2_l" column="a"
+STMT: SelectStmt
+== 201
+-- lateral partitionwise join
+EXPLAIN (COSTS OFF)
+SELECT * FROM prt1_l t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t2.c AS t2c, t2.b AS t2b, t3.b AS t3b, least(t1.a,t2.a,t3.b) FROM prt1_l t2 JOIN prt2_l t3 ON (t2.a = t3.b AND t2.c = t3.c)) ss
+			  ON t1.a = ss.t2a AND t1.c = ss.t2c WHERE t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt1_l"
+ALIAS: "t3"="prt2_l"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 202
+SELECT * FROM prt1_l t1 LEFT JOIN LATERAL
+			  (SELECT t2.a AS t2a, t2.c AS t2c, t2.b AS t2b, t3.b AS t3b, least(t1.a,t2.a,t3.b) FROM prt1_l t2 JOIN prt2_l t3 ON (t2.a = t3.b AND t2.c = t3.c)) ss
+			  ON t1.a = ss.t2a AND t1.c = ss.t2c WHERE t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt1_l"
+ALIAS: "t3"="prt2_l"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 203
+-- partitionwise join with lateral reference in sample scan
+EXPLAIN (COSTS OFF)
+SELECT * FROM prt1_l t1 JOIN LATERAL
+			  (SELECT * FROM prt1_l t2 TABLESAMPLE SYSTEM (t1.a) REPEATABLE(t1.b)) s
+			  ON t1.a = s.a AND t1.b = s.b AND t1.c = s.c
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt1_l"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 204
+-- partitionwise join with lateral reference in scan's restriction clauses
+EXPLAIN (COSTS OFF)
+SELECT COUNT(*) FROM prt1_l t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2_l t2) s
+			  ON t1.a = s.b AND t1.b = s.a AND t1.c = s.c
+			  WHERE s.t1b = s.a
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 205
+SELECT COUNT(*) FROM prt1_l t1 LEFT JOIN LATERAL
+			  (SELECT t1.b AS t1b, t2.* FROM prt2_l t2) s
+			  ON t1.a = s.b AND t1.b = s.a AND t1.c = s.c
+			  WHERE s.t1b = s.a
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+ALIAS: "t1"="prt1_l"
+ALIAS: "t2"="prt2_l"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="s" column="t1b"
+FILTER: schema="" table="s" column="a"
+STMT: SelectStmt
+== 206
+-- join with one side empty
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_l WHERE a = 1 AND a = 2) t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b AND t1.b = t2.a AND t1.c = t2.c
+--
+TABLE: name="prt2_l" schema="" table="prt2_l" ctx=Select
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=Select
+ALIAS: "t2"="prt2_l"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 207
+-- Test case to verify proper handling of subqueries in a partitioned delete.
+-- The weird-looking lateral join is just there to force creation of a
+-- nestloop parameter within the subquery, which exposes the problem if the
+-- planner fails to make multiple copies of the subquery as appropriate.
+EXPLAIN (COSTS OFF)
+DELETE FROM prt1_l
+WHERE EXISTS (
+  SELECT 1
+    FROM int4_tbl,
+         LATERAL (SELECT int4_tbl.f1 FROM int8_tbl LIMIT 2) ss
+    WHERE prt1_l.c IS NULL)
+--
+TABLE: name="prt1_l" schema="" table="prt1_l" ctx=DML
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+FILTER: schema="" table="prt1_l" column="c"
+STMT: ExplainStmt
+STMT: DeleteStmt
+STMT: SelectStmt
+== 208
+|--
+-- negative testcases
+|--
+CREATE TABLE prt1_n (a int, b int, c varchar) PARTITION BY RANGE(c)
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=DDL
+STMT: CreateStmt
+== 209
+CREATE TABLE prt1_n_p1 PARTITION OF prt1_n FOR VALUES FROM ('0000') TO ('0250')
+--
+TABLE: name="prt1_n_p1" schema="" table="prt1_n_p1" ctx=DDL
+STMT: CreateStmt
+== 210
+CREATE TABLE prt1_n_p2 PARTITION OF prt1_n FOR VALUES FROM ('0250') TO ('0500')
+--
+TABLE: name="prt1_n_p2" schema="" table="prt1_n_p2" ctx=DDL
+STMT: CreateStmt
+== 211
+INSERT INTO prt1_n SELECT i, i, to_char(i, 'FM0000') FROM generate_series(0, 499, 2) i
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 212
+ANALYZE prt1_n
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=DDL
+STMT: VacuumStmt
+== 213
+CREATE TABLE prt2_n (a int, b int, c text) PARTITION BY LIST(c)
+--
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=DDL
+STMT: CreateStmt
+== 214
+CREATE TABLE prt2_n_p1 PARTITION OF prt2_n FOR VALUES IN ('0000', '0003', '0004', '0010', '0006', '0007')
+--
+TABLE: name="prt2_n_p1" schema="" table="prt2_n_p1" ctx=DDL
+STMT: CreateStmt
+== 215
+CREATE TABLE prt2_n_p2 PARTITION OF prt2_n FOR VALUES IN ('0001', '0005', '0002', '0009', '0008', '0011')
+--
+TABLE: name="prt2_n_p2" schema="" table="prt2_n_p2" ctx=DDL
+STMT: CreateStmt
+== 216
+INSERT INTO prt2_n SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 217
+ANALYZE prt2_n
+--
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=DDL
+STMT: VacuumStmt
+== 218
+CREATE TABLE prt3_n (a int, b int, c text) PARTITION BY LIST(c)
+--
+TABLE: name="prt3_n" schema="" table="prt3_n" ctx=DDL
+STMT: CreateStmt
+== 219
+CREATE TABLE prt3_n_p1 PARTITION OF prt3_n FOR VALUES IN ('0000', '0004', '0006', '0007')
+--
+TABLE: name="prt3_n_p1" schema="" table="prt3_n_p1" ctx=DDL
+STMT: CreateStmt
+== 220
+CREATE TABLE prt3_n_p2 PARTITION OF prt3_n FOR VALUES IN ('0001', '0002', '0008', '0010')
+--
+TABLE: name="prt3_n_p2" schema="" table="prt3_n_p2" ctx=DDL
+STMT: CreateStmt
+== 221
+CREATE TABLE prt3_n_p3 PARTITION OF prt3_n FOR VALUES IN ('0003', '0005', '0009', '0011')
+--
+TABLE: name="prt3_n_p3" schema="" table="prt3_n_p3" ctx=DDL
+STMT: CreateStmt
+== 222
+INSERT INTO prt2_n SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 223
+ANALYZE prt3_n
+--
+TABLE: name="prt3_n" schema="" table="prt3_n" ctx=DDL
+STMT: VacuumStmt
+== 224
+CREATE TABLE prt4_n (a int, b int, c text) PARTITION BY RANGE(a)
+--
+TABLE: name="prt4_n" schema="" table="prt4_n" ctx=DDL
+STMT: CreateStmt
+== 225
+CREATE TABLE prt4_n_p1 PARTITION OF prt4_n FOR VALUES FROM (0) TO (300)
+--
+TABLE: name="prt4_n_p1" schema="" table="prt4_n_p1" ctx=DDL
+STMT: CreateStmt
+== 226
+CREATE TABLE prt4_n_p2 PARTITION OF prt4_n FOR VALUES FROM (300) TO (500)
+--
+TABLE: name="prt4_n_p2" schema="" table="prt4_n_p2" ctx=DDL
+STMT: CreateStmt
+== 227
+CREATE TABLE prt4_n_p3 PARTITION OF prt4_n FOR VALUES FROM (500) TO (600)
+--
+TABLE: name="prt4_n_p3" schema="" table="prt4_n_p3" ctx=DDL
+STMT: CreateStmt
+== 228
+INSERT INTO prt4_n SELECT i, i, to_char(i, 'FM0000') FROM generate_series(0, 599, 2) i
+--
+TABLE: name="prt4_n" schema="" table="prt4_n" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 229
+ANALYZE prt4_n
+--
+TABLE: name="prt4_n" schema="" table="prt4_n" ctx=DDL
+STMT: VacuumStmt
+== 230
+-- partitionwise join can not be applied if the partition ranges differ
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt4_n t2 WHERE t1.a = t2.a
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt4_n" schema="" table="prt4_n" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt4_n"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 231
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt4_n t2, prt2 t3 WHERE t1.a = t2.a and t1.a = t3.b
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt4_n" schema="" table="prt4_n" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt4_n"
+ALIAS: "t3"="prt2"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t3" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 232
+-- partitionwise join can not be applied if there are no equi-join conditions
+-- between partition keys
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 LEFT JOIN prt2 t2 ON (t1.a < t2.b)
+--
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+TABLE: name="prt2" schema="" table="prt2" ctx=Select
+ALIAS: "t1"="prt1"
+ALIAS: "t2"="prt2"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 233
+-- equi-join with join condition on partial keys does not qualify for
+-- partitionwise join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_m t1, prt2_m t2 WHERE t1.a = (t2.b + t2.a)/2
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=Select
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=Select
+ALIAS: "t1"="prt1_m"
+ALIAS: "t2"="prt2_m"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 234
+-- equi-join between out-of-order partition key columns does not qualify for
+-- partitionwise join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_m t1 LEFT JOIN prt2_m t2 ON t1.a = t2.b
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=Select
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=Select
+ALIAS: "t1"="prt1_m"
+ALIAS: "t2"="prt2_m"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 235
+-- equi-join between non-key columns does not qualify for partitionwise join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_m t1 LEFT JOIN prt2_m t2 ON t1.c = t2.c
+--
+TABLE: name="prt1_m" schema="" table="prt1_m" ctx=Select
+TABLE: name="prt2_m" schema="" table="prt2_m" ctx=Select
+ALIAS: "t1"="prt1_m"
+ALIAS: "t2"="prt2_m"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 236
+-- partitionwise join can not be applied for a join between list and range
+-- partitioned tables
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_n t1 LEFT JOIN prt2_n t2 ON (t1.c = t2.c)
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=Select
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=Select
+ALIAS: "t1"="prt1_n"
+ALIAS: "t2"="prt2_n"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 237
+-- partitionwise join can not be applied between tables with different
+-- partition lists
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_n t1 JOIN prt2_n t2 ON (t1.c = t2.c) JOIN plt1 t3 ON (t1.c = t3.c)
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=Select
+TABLE: name="prt2_n" schema="" table="prt2_n" ctx=Select
+TABLE: name="plt1" schema="" table="plt1" ctx=Select
+ALIAS: "t1"="prt1_n"
+ALIAS: "t2"="prt2_n"
+ALIAS: "t3"="plt1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 238
+-- partitionwise join can not be applied for a join between key column and
+-- non-key column
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_n t1 FULL JOIN prt1 t2 ON (t1.c = t2.c)
+--
+TABLE: name="prt1_n" schema="" table="prt1_n" ctx=Select
+TABLE: name="prt1" schema="" table="prt1" ctx=Select
+ALIAS: "t1"="prt1_n"
+ALIAS: "t2"="prt1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 239
+|--
+-- Test some other plan types in a partitionwise join (unfortunately,
+-- we need larger tables to get the planner to choose these plan types)
+|--
+create temp table prtx1 (a integer, b integer, c integer)
+  partition by range (a)
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=DDL
+STMT: CreateStmt
+== 240
+create temp table prtx1_1 partition of prtx1 for values from (1) to (11)
+--
+TABLE: name="prtx1_1" schema="" table="prtx1_1" ctx=DDL
+STMT: CreateStmt
+== 241
+create temp table prtx1_2 partition of prtx1 for values from (11) to (21)
+--
+TABLE: name="prtx1_2" schema="" table="prtx1_2" ctx=DDL
+STMT: CreateStmt
+== 242
+create temp table prtx1_3 partition of prtx1 for values from (21) to (31)
+--
+TABLE: name="prtx1_3" schema="" table="prtx1_3" ctx=DDL
+STMT: CreateStmt
+== 243
+create temp table prtx2 (a integer, b integer, c integer)
+  partition by range (a)
+--
+TABLE: name="prtx2" schema="" table="prtx2" ctx=DDL
+STMT: CreateStmt
+== 244
+create temp table prtx2_1 partition of prtx2 for values from (1) to (11)
+--
+TABLE: name="prtx2_1" schema="" table="prtx2_1" ctx=DDL
+STMT: CreateStmt
+== 245
+create temp table prtx2_2 partition of prtx2 for values from (11) to (21)
+--
+TABLE: name="prtx2_2" schema="" table="prtx2_2" ctx=DDL
+STMT: CreateStmt
+== 246
+create temp table prtx2_3 partition of prtx2 for values from (21) to (31)
+--
+TABLE: name="prtx2_3" schema="" table="prtx2_3" ctx=DDL
+STMT: CreateStmt
+== 247
+insert into prtx1 select 1 + i%30, i, i
+  from generate_series(1,1000) i
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 248
+insert into prtx2 select 1 + i%30, i, i
+  from generate_series(1,500) i, generate_series(1,10) j
+--
+TABLE: name="prtx2" schema="" table="prtx2" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 249
+create index on prtx2 (b)
+--
+TABLE: name="prtx2" schema="" table="prtx2" ctx=DDL
+STMT: IndexStmt
+== 250
+create index on prtx2 (c)
+--
+TABLE: name="prtx2" schema="" table="prtx2" ctx=DDL
+STMT: IndexStmt
+== 251
+analyze prtx1
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=DDL
+STMT: VacuumStmt
+== 252
+analyze prtx2
+--
+TABLE: name="prtx2" schema="" table="prtx2" ctx=DDL
+STMT: VacuumStmt
+== 253
+explain (costs off)
+select * from prtx1
+where not exists (select 1 from prtx2
+                  where prtx2.a=prtx1.a and prtx2.b=prtx1.b and prtx2.c=123)
+  and a<20 and c=120
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=Select
+TABLE: name="prtx2" schema="" table="prtx2" ctx=Select
+FILTER: schema="" table="prtx2" column="a"
+FILTER: schema="" table="prtx1" column="a"
+FILTER: schema="" table="prtx2" column="b"
+FILTER: schema="" table="prtx1" column="b"
+FILTER: schema="" table="prtx2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 254
+select * from prtx1
+where not exists (select 1 from prtx2
+                  where prtx2.a=prtx1.a and prtx2.b=prtx1.b and prtx2.c=123)
+  and a<20 and c=120
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=Select
+TABLE: name="prtx2" schema="" table="prtx2" ctx=Select
+FILTER: schema="" table="prtx2" column="a"
+FILTER: schema="" table="prtx1" column="a"
+FILTER: schema="" table="prtx2" column="b"
+FILTER: schema="" table="prtx1" column="b"
+FILTER: schema="" table="prtx2" column="c"
+STMT: SelectStmt
+== 255
+explain (costs off)
+select * from prtx1
+where not exists (select 1 from prtx2
+                  where prtx2.a=prtx1.a and (prtx2.b=prtx1.b+1 or prtx2.c=99))
+  and a<20 and c=91
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=Select
+TABLE: name="prtx2" schema="" table="prtx2" ctx=Select
+FILTER: schema="" table="prtx2" column="a"
+FILTER: schema="" table="prtx1" column="a"
+FILTER: schema="" table="prtx2" column="b"
+FILTER: schema="" table="prtx1" column="b"
+FILTER: schema="" table="prtx2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 256
+select * from prtx1
+where not exists (select 1 from prtx2
+                  where prtx2.a=prtx1.a and (prtx2.b=prtx1.b+1 or prtx2.c=99))
+  and a<20 and c=91
+--
+TABLE: name="prtx1" schema="" table="prtx1" ctx=Select
+TABLE: name="prtx2" schema="" table="prtx2" ctx=Select
+FILTER: schema="" table="prtx2" column="a"
+FILTER: schema="" table="prtx1" column="a"
+FILTER: schema="" table="prtx2" column="b"
+FILTER: schema="" table="prtx1" column="b"
+FILTER: schema="" table="prtx2" column="c"
+STMT: SelectStmt
+== 257
+|--
+-- Test advanced partition-matching algorithm for partitioned join
+|--
+
+-- Tests for range-partitioned tables
+CREATE TABLE prt1_adv (a int, b int, c varchar) PARTITION BY RANGE (a)
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: CreateStmt
+== 258
+CREATE TABLE prt1_adv_p1 PARTITION OF prt1_adv FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="prt1_adv_p1" schema="" table="prt1_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 259
+CREATE TABLE prt1_adv_p2 PARTITION OF prt1_adv FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="prt1_adv_p2" schema="" table="prt1_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 260
+CREATE TABLE prt1_adv_p3 PARTITION OF prt1_adv FOR VALUES FROM (300) TO (400)
+--
+TABLE: name="prt1_adv_p3" schema="" table="prt1_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 261
+CREATE INDEX prt1_adv_a_idx ON prt1_adv (a)
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: IndexStmt
+== 262
+INSERT INTO prt1_adv SELECT i, i % 25, to_char(i, 'FM0000') FROM generate_series(100, 399) i
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 263
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 264
+CREATE TABLE prt2_adv (a int, b int, c varchar) PARTITION BY RANGE (b)
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: CreateStmt
+== 265
+CREATE TABLE prt2_adv_p1 PARTITION OF prt2_adv FOR VALUES FROM (100) TO (150)
+--
+TABLE: name="prt2_adv_p1" schema="" table="prt2_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 266
+CREATE TABLE prt2_adv_p2 PARTITION OF prt2_adv FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="prt2_adv_p2" schema="" table="prt2_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 267
+CREATE TABLE prt2_adv_p3 PARTITION OF prt2_adv FOR VALUES FROM (350) TO (500)
+--
+TABLE: name="prt2_adv_p3" schema="" table="prt2_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 268
+CREATE INDEX prt2_adv_b_idx ON prt2_adv (b)
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: IndexStmt
+== 269
+INSERT INTO prt2_adv_p1 SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(100, 149) i
+--
+TABLE: name="prt2_adv_p1" schema="" table="prt2_adv_p1" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 270
+INSERT INTO prt2_adv_p2 SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(200, 299) i
+--
+TABLE: name="prt2_adv_p2" schema="" table="prt2_adv_p2" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 271
+INSERT INTO prt2_adv_p3 SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(350, 499) i
+--
+TABLE: name="prt2_adv_p3" schema="" table="prt2_adv_p3" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 272
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 273
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 274
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 275
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 276
+SELECT t1.* FROM prt1_adv t1 WHERE EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 277
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 278
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 279
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 280
+SELECT t1.* FROM prt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 281
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 175 phv, * FROM prt1_adv WHERE prt1_adv.b = 0) t1 FULL JOIN (SELECT 425 phv, * FROM prt2_adv WHERE prt2_adv.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1_adv" column="b"
+FILTER: schema="" table="prt2_adv" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 282
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 175 phv, * FROM prt1_adv WHERE prt1_adv.b = 0) t1 FULL JOIN (SELECT 425 phv, * FROM prt2_adv WHERE prt2_adv.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1_adv" column="b"
+FILTER: schema="" table="prt2_adv" column="a"
+STMT: SelectStmt
+== 283
+-- Test cases where one side has an extra partition
+CREATE TABLE prt2_adv_extra PARTITION OF prt2_adv FOR VALUES FROM (500) TO (MAXVALUE)
+--
+TABLE: name="prt2_adv_extra" schema="" table="prt2_adv_extra" ctx=DDL
+STMT: CreateStmt
+== 284
+INSERT INTO prt2_adv SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(500, 599) i
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 285
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 286
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 287
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 288
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 289
+SELECT t1.* FROM prt1_adv t1 WHERE EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 290
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 291
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 292
+-- left join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.b, t1.c, t2.a, t2.c FROM prt2_adv t1 LEFT JOIN prt1_adv t2 ON (t1.b = t2.a) WHERE t1.a = 0 ORDER BY t1.b, t2.a
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+ALIAS: "t1"="prt2_adv"
+ALIAS: "t2"="prt1_adv"
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 293
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 294
+SELECT t1.* FROM prt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 295
+-- anti join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt2_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt1_adv t2 WHERE t1.b = t2.a) AND t1.a = 0 ORDER BY t1.b
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+ALIAS: "t1"="prt2_adv"
+ALIAS: "t2"="prt1_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 296
+-- full join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 175 phv, * FROM prt1_adv WHERE prt1_adv.b = 0) t1 FULL JOIN (SELECT 425 phv, * FROM prt2_adv WHERE prt2_adv.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1_adv" column="b"
+FILTER: schema="" table="prt2_adv" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 297
+-- 3-way join where not every pair of relations can do partitioned join
+EXPLAIN (COSTS OFF)
+SELECT t1.b, t1.c, t2.a, t2.c, t3.a, t3.c FROM prt2_adv t1 LEFT JOIN prt1_adv t2 ON (t1.b = t2.a) INNER JOIN prt1_adv t3 ON (t1.b = t3.a) WHERE t1.a = 0 ORDER BY t1.b, t2.a, t3.a
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+ALIAS: "t1"="prt2_adv"
+ALIAS: "t2"="prt1_adv"
+ALIAS: "t3"="prt1_adv"
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 298
+SELECT t1.b, t1.c, t2.a, t2.c, t3.a, t3.c FROM prt2_adv t1 LEFT JOIN prt1_adv t2 ON (t1.b = t2.a) INNER JOIN prt1_adv t3 ON (t1.b = t3.a) WHERE t1.a = 0 ORDER BY t1.b, t2.a, t3.a
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+ALIAS: "t1"="prt2_adv"
+ALIAS: "t2"="prt1_adv"
+ALIAS: "t3"="prt1_adv"
+FILTER: schema="" table="t1" column="a"
+STMT: SelectStmt
+== 299
+DROP TABLE prt2_adv_extra
+--
+TABLE: name="prt2_adv_extra" schema="" table="prt2_adv_extra" ctx=DDL
+STMT: DropStmt
+== 300
+-- Test cases where a partition on one side matches multiple partitions on
+-- the other side; we currently can't do partitioned join in such cases
+ALTER TABLE prt2_adv DETACH PARTITION prt2_adv_p3
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 301
+-- Split prt2_adv_p3 into two partitions so that prt1_adv_p3 matches both
+CREATE TABLE prt2_adv_p3_1 PARTITION OF prt2_adv FOR VALUES FROM (350) TO (375)
+--
+TABLE: name="prt2_adv_p3_1" schema="" table="prt2_adv_p3_1" ctx=DDL
+STMT: CreateStmt
+== 302
+CREATE TABLE prt2_adv_p3_2 PARTITION OF prt2_adv FOR VALUES FROM (375) TO (500)
+--
+TABLE: name="prt2_adv_p3_2" schema="" table="prt2_adv_p3_2" ctx=DDL
+STMT: CreateStmt
+== 303
+INSERT INTO prt2_adv SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(350, 499) i
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 304
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 305
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 306
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 307
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 308
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM prt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM prt2_adv t2 WHERE t1.a = t2.b) AND t1.b = 0 ORDER BY t1.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 309
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 175 phv, * FROM prt1_adv WHERE prt1_adv.b = 0) t1 FULL JOIN (SELECT 425 phv, * FROM prt2_adv WHERE prt2_adv.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+FILTER: schema="" table="t1" column="phv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="phv"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="prt1_adv" column="b"
+FILTER: schema="" table="prt2_adv" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 310
+DROP TABLE prt2_adv_p3_1
+--
+TABLE: name="prt2_adv_p3_1" schema="" table="prt2_adv_p3_1" ctx=DDL
+STMT: DropStmt
+== 311
+DROP TABLE prt2_adv_p3_2
+--
+TABLE: name="prt2_adv_p3_2" schema="" table="prt2_adv_p3_2" ctx=DDL
+STMT: DropStmt
+== 312
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 313
+-- Test default partitions
+ALTER TABLE prt1_adv DETACH PARTITION prt1_adv_p1
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 314
+-- Change prt1_adv_p1 to the default partition
+ALTER TABLE prt1_adv ATTACH PARTITION prt1_adv_p1 DEFAULT
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 315
+ALTER TABLE prt1_adv DETACH PARTITION prt1_adv_p3
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 316
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 317
+-- We can do partitioned join even if only one of relations has the default
+-- partition
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 318
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 319
+-- Restore prt1_adv_p3
+ALTER TABLE prt1_adv ATTACH PARTITION prt1_adv_p3 FOR VALUES FROM (300) TO (400)
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 320
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 321
+-- Restore prt2_adv_p3
+ALTER TABLE prt2_adv ATTACH PARTITION prt2_adv_p3 FOR VALUES FROM (350) TO (500)
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 322
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 323
+-- Partitioned join can't be applied because the default partition of prt1_adv
+-- matches prt2_adv_p1 and prt2_adv_p3
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 324
+ALTER TABLE prt2_adv DETACH PARTITION prt2_adv_p3
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 325
+-- Change prt2_adv_p3 to the default partition
+ALTER TABLE prt2_adv ATTACH PARTITION prt2_adv_p3 DEFAULT
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 326
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 327
+-- Partitioned join can't be applied because the default partition of prt1_adv
+-- matches prt2_adv_p1 and prt2_adv_p3
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 328
+DROP TABLE prt1_adv_p3
+--
+TABLE: name="prt1_adv_p3" schema="" table="prt1_adv_p3" ctx=DDL
+STMT: DropStmt
+== 329
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 330
+DROP TABLE prt2_adv_p3
+--
+TABLE: name="prt2_adv_p3" schema="" table="prt2_adv_p3" ctx=DDL
+STMT: DropStmt
+== 331
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 332
+CREATE TABLE prt3_adv (a int, b int, c varchar) PARTITION BY RANGE (a)
+--
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=DDL
+STMT: CreateStmt
+== 333
+CREATE TABLE prt3_adv_p1 PARTITION OF prt3_adv FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="prt3_adv_p1" schema="" table="prt3_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 334
+CREATE TABLE prt3_adv_p2 PARTITION OF prt3_adv FOR VALUES FROM (300) TO (400)
+--
+TABLE: name="prt3_adv_p2" schema="" table="prt3_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 335
+CREATE INDEX prt3_adv_a_idx ON prt3_adv (a)
+--
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=DDL
+STMT: IndexStmt
+== 336
+INSERT INTO prt3_adv SELECT i, i % 25, to_char(i, 'FM0000') FROM generate_series(200, 399) i
+--
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 337
+ANALYZE prt3_adv
+--
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=DDL
+STMT: VacuumStmt
+== 338
+-- 3-way join to test the default partition of a join relation
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a, t3.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) LEFT JOIN prt3_adv t3 ON (t1.a = t3.a) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+ALIAS: "t3"="prt3_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 339
+SELECT t1.a, t1.c, t2.b, t2.c, t3.a, t3.c FROM prt1_adv t1 LEFT JOIN prt2_adv t2 ON (t1.a = t2.b) LEFT JOIN prt3_adv t3 ON (t1.a = t3.a) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+ALIAS: "t3"="prt3_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 340
+DROP TABLE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: DropStmt
+== 341
+DROP TABLE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: DropStmt
+== 342
+DROP TABLE prt3_adv
+--
+TABLE: name="prt3_adv" schema="" table="prt3_adv" ctx=DDL
+STMT: DropStmt
+== 343
+-- Test interaction of partitioned join with partition pruning
+CREATE TABLE prt1_adv (a int, b int, c varchar) PARTITION BY RANGE (a)
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: CreateStmt
+== 344
+CREATE TABLE prt1_adv_p1 PARTITION OF prt1_adv FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="prt1_adv_p1" schema="" table="prt1_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 345
+CREATE TABLE prt1_adv_p2 PARTITION OF prt1_adv FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="prt1_adv_p2" schema="" table="prt1_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 346
+CREATE TABLE prt1_adv_p3 PARTITION OF prt1_adv FOR VALUES FROM (300) TO (400)
+--
+TABLE: name="prt1_adv_p3" schema="" table="prt1_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 347
+CREATE INDEX prt1_adv_a_idx ON prt1_adv (a)
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: IndexStmt
+== 348
+INSERT INTO prt1_adv SELECT i, i % 25, to_char(i, 'FM0000') FROM generate_series(100, 399) i
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 349
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 350
+CREATE TABLE prt2_adv (a int, b int, c varchar) PARTITION BY RANGE (b)
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: CreateStmt
+== 351
+CREATE TABLE prt2_adv_p1 PARTITION OF prt2_adv FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="prt2_adv_p1" schema="" table="prt2_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 352
+CREATE TABLE prt2_adv_p2 PARTITION OF prt2_adv FOR VALUES FROM (200) TO (400)
+--
+TABLE: name="prt2_adv_p2" schema="" table="prt2_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 353
+CREATE INDEX prt2_adv_b_idx ON prt2_adv (b)
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: IndexStmt
+== 354
+INSERT INTO prt2_adv SELECT i % 25, i, to_char(i, 'FM0000') FROM generate_series(100, 399) i
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 355
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 356
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.a < 300 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 357
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.a < 300 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 358
+DROP TABLE prt1_adv_p3
+--
+TABLE: name="prt1_adv_p3" schema="" table="prt1_adv_p3" ctx=DDL
+STMT: DropStmt
+== 359
+CREATE TABLE prt1_adv_default PARTITION OF prt1_adv DEFAULT
+--
+TABLE: name="prt1_adv_default" schema="" table="prt1_adv_default" ctx=DDL
+STMT: CreateStmt
+== 360
+ANALYZE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 361
+CREATE TABLE prt2_adv_default PARTITION OF prt2_adv DEFAULT
+--
+TABLE: name="prt2_adv_default" schema="" table="prt2_adv_default" ctx=DDL
+STMT: CreateStmt
+== 362
+ANALYZE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 363
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.a >= 100 AND t1.a < 300 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 364
+SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_adv t1 INNER JOIN prt2_adv t2 ON (t1.a = t2.b) WHERE t1.a >= 100 AND t1.a < 300 AND t1.b = 0 ORDER BY t1.a, t2.b
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=Select
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=Select
+ALIAS: "t1"="prt1_adv"
+ALIAS: "t2"="prt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 365
+DROP TABLE prt1_adv
+--
+TABLE: name="prt1_adv" schema="" table="prt1_adv" ctx=DDL
+STMT: DropStmt
+== 366
+DROP TABLE prt2_adv
+--
+TABLE: name="prt2_adv" schema="" table="prt2_adv" ctx=DDL
+STMT: DropStmt
+== 367
+-- Tests for list-partitioned tables
+CREATE TABLE plt1_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: CreateStmt
+== 368
+CREATE TABLE plt1_adv_p1 PARTITION OF plt1_adv FOR VALUES IN ('0001', '0003')
+--
+TABLE: name="plt1_adv_p1" schema="" table="plt1_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 369
+CREATE TABLE plt1_adv_p2 PARTITION OF plt1_adv FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="plt1_adv_p2" schema="" table="plt1_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 370
+CREATE TABLE plt1_adv_p3 PARTITION OF plt1_adv FOR VALUES IN ('0008', '0009')
+--
+TABLE: name="plt1_adv_p3" schema="" table="plt1_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 371
+INSERT INTO plt1_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (1, 3, 4, 6, 8, 9)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 372
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 373
+CREATE TABLE plt2_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: CreateStmt
+== 374
+CREATE TABLE plt2_adv_p1 PARTITION OF plt2_adv FOR VALUES IN ('0002', '0003')
+--
+TABLE: name="plt2_adv_p1" schema="" table="plt2_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 375
+CREATE TABLE plt2_adv_p2 PARTITION OF plt2_adv FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="plt2_adv_p2" schema="" table="plt2_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 376
+CREATE TABLE plt2_adv_p3 PARTITION OF plt2_adv FOR VALUES IN ('0007', '0009')
+--
+TABLE: name="plt2_adv_p3" schema="" table="plt2_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 377
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 378
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 379
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 380
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 381
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 382
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 383
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 384
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 385
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 386
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 387
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 388
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 389
+-- Test cases where one side has an extra partition
+CREATE TABLE plt2_adv_extra PARTITION OF plt2_adv FOR VALUES IN ('0000')
+--
+TABLE: name="plt2_adv_extra" schema="" table="plt2_adv_extra" ctx=DDL
+STMT: CreateStmt
+== 390
+INSERT INTO plt2_adv_extra VALUES (0, 0, '0000')
+--
+TABLE: name="plt2_adv_extra" schema="" table="plt2_adv_extra" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 391
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 392
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 393
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 394
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 395
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 396
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 397
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 398
+-- left join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt2_adv t1 LEFT JOIN plt1_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+ALIAS: "t1"="plt2_adv"
+ALIAS: "t2"="plt1_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 399
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 400
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 401
+-- anti join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt2_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt1_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+ALIAS: "t1"="plt2_adv"
+ALIAS: "t2"="plt1_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 402
+-- full join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 403
+DROP TABLE plt2_adv_extra
+--
+TABLE: name="plt2_adv_extra" schema="" table="plt2_adv_extra" ctx=DDL
+STMT: DropStmt
+== 404
+-- Test cases where a partition on one side matches multiple partitions on
+-- the other side; we currently can't do partitioned join in such cases
+ALTER TABLE plt2_adv DETACH PARTITION plt2_adv_p2
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 405
+-- Split plt2_adv_p2 into two partitions so that plt1_adv_p2 matches both
+CREATE TABLE plt2_adv_p2_1 PARTITION OF plt2_adv FOR VALUES IN ('0004')
+--
+TABLE: name="plt2_adv_p2_1" schema="" table="plt2_adv_p2_1" ctx=DDL
+STMT: CreateStmt
+== 406
+CREATE TABLE plt2_adv_p2_2 PARTITION OF plt2_adv FOR VALUES IN ('0006')
+--
+TABLE: name="plt2_adv_p2_2" schema="" table="plt2_adv_p2_2" ctx=DDL
+STMT: CreateStmt
+== 407
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (4, 6)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 408
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 409
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 410
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 411
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 412
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 413
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 414
+DROP TABLE plt2_adv_p2_1
+--
+TABLE: name="plt2_adv_p2_1" schema="" table="plt2_adv_p2_1" ctx=DDL
+STMT: DropStmt
+== 415
+DROP TABLE plt2_adv_p2_2
+--
+TABLE: name="plt2_adv_p2_2" schema="" table="plt2_adv_p2_2" ctx=DDL
+STMT: DropStmt
+== 416
+-- Restore plt2_adv_p2
+ALTER TABLE plt2_adv ATTACH PARTITION plt2_adv_p2 FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 417
+-- Test NULL partitions
+ALTER TABLE plt1_adv DETACH PARTITION plt1_adv_p1
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 418
+-- Change plt1_adv_p1 to the NULL partition
+CREATE TABLE plt1_adv_p1_null PARTITION OF plt1_adv FOR VALUES IN (NULL, '0001', '0003')
+--
+TABLE: name="plt1_adv_p1_null" schema="" table="plt1_adv_p1_null" ctx=DDL
+STMT: CreateStmt
+== 419
+INSERT INTO plt1_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (1, 3)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 420
+INSERT INTO plt1_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 421
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 422
+ALTER TABLE plt2_adv DETACH PARTITION plt2_adv_p3
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 423
+-- Change plt2_adv_p3 to the NULL partition
+CREATE TABLE plt2_adv_p3_null PARTITION OF plt2_adv FOR VALUES IN (NULL, '0007', '0009')
+--
+TABLE: name="plt2_adv_p3_null" schema="" table="plt2_adv_p3_null" ctx=DDL
+STMT: CreateStmt
+== 424
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (7, 9)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 425
+INSERT INTO plt2_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 426
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 427
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 428
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 429
+-- semi join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 430
+SELECT t1.* FROM plt1_adv t1 WHERE EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 431
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 432
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 433
+-- anti join
+EXPLAIN (COSTS OFF)
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 434
+SELECT t1.* FROM plt1_adv t1 WHERE NOT EXISTS (SELECT 1 FROM plt2_adv t2 WHERE t1.a = t2.a AND t1.c = t2.c) AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t2" column="a"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t2" column="c"
+STMT: SelectStmt
+== 435
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 436
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 437
+DROP TABLE plt1_adv_p1_null
+--
+TABLE: name="plt1_adv_p1_null" schema="" table="plt1_adv_p1_null" ctx=DDL
+STMT: DropStmt
+== 438
+-- Restore plt1_adv_p1
+ALTER TABLE plt1_adv ATTACH PARTITION plt1_adv_p1 FOR VALUES IN ('0001', '0003')
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 439
+-- Add to plt1_adv the extra NULL partition containing only NULL values as the
+-- key values
+CREATE TABLE plt1_adv_extra PARTITION OF plt1_adv FOR VALUES IN (NULL)
+--
+TABLE: name="plt1_adv_extra" schema="" table="plt1_adv_extra" ctx=DDL
+STMT: CreateStmt
+== 440
+INSERT INTO plt1_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 441
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 442
+DROP TABLE plt2_adv_p3_null
+--
+TABLE: name="plt2_adv_p3_null" schema="" table="plt2_adv_p3_null" ctx=DDL
+STMT: DropStmt
+== 443
+-- Restore plt2_adv_p3
+ALTER TABLE plt2_adv ATTACH PARTITION plt2_adv_p3 FOR VALUES IN ('0007', '0009')
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 444
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 445
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 446
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 447
+-- left join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 448
+-- full join; currently we can't do partitioned join if there are no matched
+-- partitions on the nullable side
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 449
+-- Add to plt2_adv the extra NULL partition containing only NULL values as the
+-- key values
+CREATE TABLE plt2_adv_extra PARTITION OF plt2_adv FOR VALUES IN (NULL)
+--
+TABLE: name="plt2_adv_extra" schema="" table="plt2_adv_extra" ctx=DDL
+STMT: CreateStmt
+== 450
+INSERT INTO plt2_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 451
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 452
+-- inner join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 453
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 454
+-- left join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 455
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 456
+-- full join
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 457
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 FULL JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE coalesce(t1.b, 0) < 10 AND coalesce(t2.b, 0) < 10 ORDER BY t1.a, t2.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+STMT: SelectStmt
+== 458
+-- 3-way join to test the NULL partition of a join relation
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) LEFT JOIN plt1_adv t3 ON (t1.a = t3.a AND t1.c = t3.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt1_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 459
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) LEFT JOIN plt1_adv t3 ON (t1.a = t3.a AND t1.c = t3.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt1_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 460
+DROP TABLE plt1_adv_extra
+--
+TABLE: name="plt1_adv_extra" schema="" table="plt1_adv_extra" ctx=DDL
+STMT: DropStmt
+== 461
+DROP TABLE plt2_adv_extra
+--
+TABLE: name="plt2_adv_extra" schema="" table="plt2_adv_extra" ctx=DDL
+STMT: DropStmt
+== 462
+-- Test default partitions
+ALTER TABLE plt1_adv DETACH PARTITION plt1_adv_p1
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 463
+-- Change plt1_adv_p1 to the default partition
+ALTER TABLE plt1_adv ATTACH PARTITION plt1_adv_p1 DEFAULT
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: AlterTableStmt
+== 464
+DROP TABLE plt1_adv_p3
+--
+TABLE: name="plt1_adv_p3" schema="" table="plt1_adv_p3" ctx=DDL
+STMT: DropStmt
+== 465
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 466
+DROP TABLE plt2_adv_p3
+--
+TABLE: name="plt2_adv_p3" schema="" table="plt2_adv_p3" ctx=DDL
+STMT: DropStmt
+== 467
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 468
+-- We can do partitioned join even if only one of relations has the default
+-- partition
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 469
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 470
+ALTER TABLE plt2_adv DETACH PARTITION plt2_adv_p2
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 471
+-- Change plt2_adv_p2 to contain '0005' in addition to '0004' and '0006' as
+-- the key values
+CREATE TABLE plt2_adv_p2_ext PARTITION OF plt2_adv FOR VALUES IN ('0004', '0005', '0006')
+--
+TABLE: name="plt2_adv_p2_ext" schema="" table="plt2_adv_p2_ext" ctx=DDL
+STMT: CreateStmt
+== 472
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (4, 5, 6)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 473
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 474
+-- Partitioned join can't be applied because the default partition of plt1_adv
+-- matches plt2_adv_p1 and plt2_adv_p2_ext
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 475
+ALTER TABLE plt2_adv DETACH PARTITION plt2_adv_p2_ext
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 476
+-- Change plt2_adv_p2_ext to the default partition
+ALTER TABLE plt2_adv ATTACH PARTITION plt2_adv_p2_ext DEFAULT
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 477
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 478
+-- Partitioned join can't be applied because the default partition of plt1_adv
+-- matches plt2_adv_p1 and plt2_adv_p2_ext
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 479
+DROP TABLE plt2_adv_p2_ext
+--
+TABLE: name="plt2_adv_p2_ext" schema="" table="plt2_adv_p2_ext" ctx=DDL
+STMT: DropStmt
+== 480
+-- Restore plt2_adv_p2
+ALTER TABLE plt2_adv ATTACH PARTITION plt2_adv_p2 FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: AlterTableStmt
+== 481
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 482
+CREATE TABLE plt3_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: CreateStmt
+== 483
+CREATE TABLE plt3_adv_p1 PARTITION OF plt3_adv FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="plt3_adv_p1" schema="" table="plt3_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 484
+CREATE TABLE plt3_adv_p2 PARTITION OF plt3_adv FOR VALUES IN ('0007', '0009')
+--
+TABLE: name="plt3_adv_p2" schema="" table="plt3_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 485
+INSERT INTO plt3_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (4, 6, 7, 9)
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 486
+ANALYZE plt3_adv
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: VacuumStmt
+== 487
+-- 3-way join to test the default partition of a join relation
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) LEFT JOIN plt3_adv t3 ON (t1.a = t3.a AND t1.c = t3.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt3_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 488
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) LEFT JOIN plt3_adv t3 ON (t1.a = t3.a AND t1.c = t3.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt3_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 489
+-- Test cases where one side has the default partition while the other side
+-- has the NULL partition
+DROP TABLE plt2_adv_p1
+--
+TABLE: name="plt2_adv_p1" schema="" table="plt2_adv_p1" ctx=DDL
+STMT: DropStmt
+== 490
+-- Add the NULL partition to plt2_adv
+CREATE TABLE plt2_adv_p1_null PARTITION OF plt2_adv FOR VALUES IN (NULL, '0001', '0003')
+--
+TABLE: name="plt2_adv_p1_null" schema="" table="plt2_adv_p1_null" ctx=DDL
+STMT: CreateStmt
+== 491
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (1, 3)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 492
+INSERT INTO plt2_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 493
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 494
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 495
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 496
+DROP TABLE plt2_adv_p1_null
+--
+TABLE: name="plt2_adv_p1_null" schema="" table="plt2_adv_p1_null" ctx=DDL
+STMT: DropStmt
+== 497
+-- Add the NULL partition that contains only NULL values as the key values
+CREATE TABLE plt2_adv_p1_null PARTITION OF plt2_adv FOR VALUES IN (NULL)
+--
+TABLE: name="plt2_adv_p1_null" schema="" table="plt2_adv_p1_null" ctx=DDL
+STMT: CreateStmt
+== 498
+INSERT INTO plt2_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 499
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 500
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 501
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 502
+DROP TABLE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: DropStmt
+== 503
+DROP TABLE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: DropStmt
+== 504
+DROP TABLE plt3_adv
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: DropStmt
+== 505
+-- Test interaction of partitioned join with partition pruning
+CREATE TABLE plt1_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: CreateStmt
+== 506
+CREATE TABLE plt1_adv_p1 PARTITION OF plt1_adv FOR VALUES IN ('0001')
+--
+TABLE: name="plt1_adv_p1" schema="" table="plt1_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 507
+CREATE TABLE plt1_adv_p2 PARTITION OF plt1_adv FOR VALUES IN ('0002')
+--
+TABLE: name="plt1_adv_p2" schema="" table="plt1_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 508
+CREATE TABLE plt1_adv_p3 PARTITION OF plt1_adv FOR VALUES IN ('0003')
+--
+TABLE: name="plt1_adv_p3" schema="" table="plt1_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 509
+CREATE TABLE plt1_adv_p4 PARTITION OF plt1_adv FOR VALUES IN (NULL, '0004', '0005')
+--
+TABLE: name="plt1_adv_p4" schema="" table="plt1_adv_p4" ctx=DDL
+STMT: CreateStmt
+== 510
+INSERT INTO plt1_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (1, 2, 3, 4, 5)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 511
+INSERT INTO plt1_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 512
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 513
+CREATE TABLE plt2_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: CreateStmt
+== 514
+CREATE TABLE plt2_adv_p1 PARTITION OF plt2_adv FOR VALUES IN ('0001', '0002')
+--
+TABLE: name="plt2_adv_p1" schema="" table="plt2_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 515
+CREATE TABLE plt2_adv_p2 PARTITION OF plt2_adv FOR VALUES IN (NULL)
+--
+TABLE: name="plt2_adv_p2" schema="" table="plt2_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 516
+CREATE TABLE plt2_adv_p3 PARTITION OF plt2_adv FOR VALUES IN ('0003')
+--
+TABLE: name="plt2_adv_p3" schema="" table="plt2_adv_p3" ctx=DDL
+STMT: CreateStmt
+== 517
+CREATE TABLE plt2_adv_p4 PARTITION OF plt2_adv FOR VALUES IN ('0004', '0005')
+--
+TABLE: name="plt2_adv_p4" schema="" table="plt2_adv_p4" ctx=DDL
+STMT: CreateStmt
+== 518
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 10, 'FM0000') FROM generate_series(1, 299) i WHERE i % 10 IN (1, 2, 3, 4, 5)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 519
+INSERT INTO plt2_adv VALUES (-1, -1, NULL)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 520
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 521
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IN ('0003', '0004', '0005') AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 522
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IN ('0003', '0004', '0005') AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 523
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IS NULL AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 524
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IS NULL AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 525
+CREATE TABLE plt1_adv_default PARTITION OF plt1_adv DEFAULT
+--
+TABLE: name="plt1_adv_default" schema="" table="plt1_adv_default" ctx=DDL
+STMT: CreateStmt
+== 526
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 527
+CREATE TABLE plt2_adv_default PARTITION OF plt2_adv DEFAULT
+--
+TABLE: name="plt2_adv_default" schema="" table="plt2_adv_default" ctx=DDL
+STMT: CreateStmt
+== 528
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 529
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IN ('0003', '0004', '0005') AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 530
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 INNER JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IN ('0003', '0004', '0005') AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 531
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IS NULL AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 532
+SELECT t1.a, t1.c, t2.a, t2.c FROM plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE t1.c IS NULL AND t1.b < 10 ORDER BY t1.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+FILTER: schema="" table="t1" column="c"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 533
+DROP TABLE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: DropStmt
+== 534
+DROP TABLE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: DropStmt
+== 535
+-- Test the process_outer_partition() code path
+CREATE TABLE plt1_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: CreateStmt
+== 536
+CREATE TABLE plt1_adv_p1 PARTITION OF plt1_adv FOR VALUES IN ('0000', '0001', '0002')
+--
+TABLE: name="plt1_adv_p1" schema="" table="plt1_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 537
+CREATE TABLE plt1_adv_p2 PARTITION OF plt1_adv FOR VALUES IN ('0003', '0004')
+--
+TABLE: name="plt1_adv_p2" schema="" table="plt1_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 538
+INSERT INTO plt1_adv SELECT i, i, to_char(i % 5, 'FM0000') FROM generate_series(0, 24) i
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 539
+ANALYZE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: VacuumStmt
+== 540
+CREATE TABLE plt2_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: CreateStmt
+== 541
+CREATE TABLE plt2_adv_p1 PARTITION OF plt2_adv FOR VALUES IN ('0002')
+--
+TABLE: name="plt2_adv_p1" schema="" table="plt2_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 542
+CREATE TABLE plt2_adv_p2 PARTITION OF plt2_adv FOR VALUES IN ('0003', '0004')
+--
+TABLE: name="plt2_adv_p2" schema="" table="plt2_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 543
+INSERT INTO plt2_adv SELECT i, i, to_char(i % 5, 'FM0000') FROM generate_series(0, 24) i WHERE i % 5 IN (2, 3, 4)
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 544
+ANALYZE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: VacuumStmt
+== 545
+CREATE TABLE plt3_adv (a int, b int, c text) PARTITION BY LIST (c)
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: CreateStmt
+== 546
+CREATE TABLE plt3_adv_p1 PARTITION OF plt3_adv FOR VALUES IN ('0001')
+--
+TABLE: name="plt3_adv_p1" schema="" table="plt3_adv_p1" ctx=DDL
+STMT: CreateStmt
+== 547
+CREATE TABLE plt3_adv_p2 PARTITION OF plt3_adv FOR VALUES IN ('0003', '0004')
+--
+TABLE: name="plt3_adv_p2" schema="" table="plt3_adv_p2" ctx=DDL
+STMT: CreateStmt
+== 548
+INSERT INTO plt3_adv SELECT i, i, to_char(i % 5, 'FM0000') FROM generate_series(0, 24) i WHERE i % 5 IN (1, 3, 4)
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 549
+ANALYZE plt3_adv
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: VacuumStmt
+== 550
+-- This tests that when merging partitions from plt1_adv and plt2_adv in
+-- merge_list_bounds(), process_outer_partition() returns an already-assigned
+-- merged partition when re-called with plt1_adv_p1 for the second list value
+-- '0001' of that partition
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM (plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.c = t2.c)) FULL JOIN plt3_adv t3 ON (t1.c = t3.c) WHERE coalesce(t1.a, 0) % 5 != 3 AND coalesce(t1.a, 0) % 5 != 4 ORDER BY t1.c, t1.a, t2.a, t3.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt3_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 551
+SELECT t1.a, t1.c, t2.a, t2.c, t3.a, t3.c FROM (plt1_adv t1 LEFT JOIN plt2_adv t2 ON (t1.c = t2.c)) FULL JOIN plt3_adv t3 ON (t1.c = t3.c) WHERE coalesce(t1.a, 0) % 5 != 3 AND coalesce(t1.a, 0) % 5 != 4 ORDER BY t1.c, t1.a, t2.a, t3.a
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=Select
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=Select
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=Select
+ALIAS: "t1"="plt1_adv"
+ALIAS: "t2"="plt2_adv"
+ALIAS: "t3"="plt3_adv"
+FILTER: schema="" table="t1" column="a"
+FILTER: schema="" table="t1" column="a"
+STMT: SelectStmt
+== 552
+DROP TABLE plt1_adv
+--
+TABLE: name="plt1_adv" schema="" table="plt1_adv" ctx=DDL
+STMT: DropStmt
+== 553
+DROP TABLE plt2_adv
+--
+TABLE: name="plt2_adv" schema="" table="plt2_adv" ctx=DDL
+STMT: DropStmt
+== 554
+DROP TABLE plt3_adv
+--
+TABLE: name="plt3_adv" schema="" table="plt3_adv" ctx=DDL
+STMT: DropStmt
+== 555
+-- Tests for multi-level partitioned tables
+CREATE TABLE alpha (a double precision, b int, c text) PARTITION BY RANGE (a)
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=DDL
+STMT: CreateStmt
+== 556
+CREATE TABLE alpha_neg PARTITION OF alpha FOR VALUES FROM ('-Infinity') TO (0) PARTITION BY RANGE (b)
+--
+TABLE: name="alpha_neg" schema="" table="alpha_neg" ctx=DDL
+STMT: CreateStmt
+== 557
+CREATE TABLE alpha_pos PARTITION OF alpha FOR VALUES FROM (0) TO (10.0) PARTITION BY LIST (c)
+--
+TABLE: name="alpha_pos" schema="" table="alpha_pos" ctx=DDL
+STMT: CreateStmt
+== 558
+CREATE TABLE alpha_neg_p1 PARTITION OF alpha_neg FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="alpha_neg_p1" schema="" table="alpha_neg_p1" ctx=DDL
+STMT: CreateStmt
+== 559
+CREATE TABLE alpha_neg_p2 PARTITION OF alpha_neg FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="alpha_neg_p2" schema="" table="alpha_neg_p2" ctx=DDL
+STMT: CreateStmt
+== 560
+CREATE TABLE alpha_neg_p3 PARTITION OF alpha_neg FOR VALUES FROM (300) TO (400)
+--
+TABLE: name="alpha_neg_p3" schema="" table="alpha_neg_p3" ctx=DDL
+STMT: CreateStmt
+== 561
+CREATE TABLE alpha_pos_p1 PARTITION OF alpha_pos FOR VALUES IN ('0001', '0003')
+--
+TABLE: name="alpha_pos_p1" schema="" table="alpha_pos_p1" ctx=DDL
+STMT: CreateStmt
+== 562
+CREATE TABLE alpha_pos_p2 PARTITION OF alpha_pos FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="alpha_pos_p2" schema="" table="alpha_pos_p2" ctx=DDL
+STMT: CreateStmt
+== 563
+CREATE TABLE alpha_pos_p3 PARTITION OF alpha_pos FOR VALUES IN ('0008', '0009')
+--
+TABLE: name="alpha_pos_p3" schema="" table="alpha_pos_p3" ctx=DDL
+STMT: CreateStmt
+== 564
+INSERT INTO alpha_neg SELECT -1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(100, 399) i WHERE i % 10 IN (1, 3, 4, 6, 8, 9)
+--
+TABLE: name="alpha_neg" schema="" table="alpha_neg" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 565
+INSERT INTO alpha_pos SELECT  1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(100, 399) i WHERE i % 10 IN (1, 3, 4, 6, 8, 9)
+--
+TABLE: name="alpha_pos" schema="" table="alpha_pos" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 566
+ANALYZE alpha
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=DDL
+STMT: VacuumStmt
+== 567
+CREATE TABLE beta (a double precision, b int, c text) PARTITION BY RANGE (a)
+--
+TABLE: name="beta" schema="" table="beta" ctx=DDL
+STMT: CreateStmt
+== 568
+CREATE TABLE beta_neg PARTITION OF beta FOR VALUES FROM (-10.0) TO (0) PARTITION BY RANGE (b)
+--
+TABLE: name="beta_neg" schema="" table="beta_neg" ctx=DDL
+STMT: CreateStmt
+== 569
+CREATE TABLE beta_pos PARTITION OF beta FOR VALUES FROM (0) TO ('Infinity') PARTITION BY LIST (c)
+--
+TABLE: name="beta_pos" schema="" table="beta_pos" ctx=DDL
+STMT: CreateStmt
+== 570
+CREATE TABLE beta_neg_p1 PARTITION OF beta_neg FOR VALUES FROM (100) TO (150)
+--
+TABLE: name="beta_neg_p1" schema="" table="beta_neg_p1" ctx=DDL
+STMT: CreateStmt
+== 571
+CREATE TABLE beta_neg_p2 PARTITION OF beta_neg FOR VALUES FROM (200) TO (300)
+--
+TABLE: name="beta_neg_p2" schema="" table="beta_neg_p2" ctx=DDL
+STMT: CreateStmt
+== 572
+CREATE TABLE beta_neg_p3 PARTITION OF beta_neg FOR VALUES FROM (350) TO (500)
+--
+TABLE: name="beta_neg_p3" schema="" table="beta_neg_p3" ctx=DDL
+STMT: CreateStmt
+== 573
+CREATE TABLE beta_pos_p1 PARTITION OF beta_pos FOR VALUES IN ('0002', '0003')
+--
+TABLE: name="beta_pos_p1" schema="" table="beta_pos_p1" ctx=DDL
+STMT: CreateStmt
+== 574
+CREATE TABLE beta_pos_p2 PARTITION OF beta_pos FOR VALUES IN ('0004', '0006')
+--
+TABLE: name="beta_pos_p2" schema="" table="beta_pos_p2" ctx=DDL
+STMT: CreateStmt
+== 575
+CREATE TABLE beta_pos_p3 PARTITION OF beta_pos FOR VALUES IN ('0007', '0009')
+--
+TABLE: name="beta_pos_p3" schema="" table="beta_pos_p3" ctx=DDL
+STMT: CreateStmt
+== 576
+INSERT INTO beta_neg SELECT -1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(100, 149) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_neg" schema="" table="beta_neg" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 577
+INSERT INTO beta_neg SELECT -1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(200, 299) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_neg" schema="" table="beta_neg" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 578
+INSERT INTO beta_neg SELECT -1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(350, 499) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_neg" schema="" table="beta_neg" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 579
+INSERT INTO beta_pos SELECT  1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(100, 149) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_pos" schema="" table="beta_pos" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 580
+INSERT INTO beta_pos SELECT  1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(200, 299) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_pos" schema="" table="beta_pos" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 581
+INSERT INTO beta_pos SELECT  1.0, i, to_char(i % 10, 'FM0000') FROM generate_series(350, 499) i WHERE i % 10 IN (2, 3, 4, 6, 7, 9)
+--
+TABLE: name="beta_pos" schema="" table="beta_pos" ctx=DML
+FUNCTION: name="to_char" function="to_char" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: InsertStmt
+STMT: SelectStmt
+== 582
+ANALYZE beta
+--
+TABLE: name="beta" schema="" table="beta" ctx=DDL
+STMT: VacuumStmt
+== 583
+EXPLAIN (COSTS OFF)
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.b = t2.b) WHERE t1.b >= 125 AND t1.b < 225 ORDER BY t1.a, t1.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 584
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.b = t2.b) WHERE t1.b >= 125 AND t1.b < 225 ORDER BY t1.a, t1.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+STMT: SelectStmt
+== 585
+EXPLAIN (COSTS OFF)
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE ((t1.b >= 100 AND t1.b < 110) OR (t1.b >= 200 AND t1.b < 210)) AND ((t2.b >= 100 AND t2.b < 110) OR (t2.b >= 200 AND t2.b < 210)) AND t1.c IN ('0004', '0009') ORDER BY t1.a, t1.b, t2.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 586
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.c = t2.c) WHERE ((t1.b >= 100 AND t1.b < 110) OR (t1.b >= 200 AND t1.b < 210)) AND ((t2.b >= 100 AND t2.b < 110) OR (t2.b >= 200 AND t2.b < 210)) AND t1.c IN ('0004', '0009') ORDER BY t1.a, t1.b, t2.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 587
+EXPLAIN (COSTS OFF)
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.b = t2.b AND t1.c = t2.c) WHERE ((t1.b >= 100 AND t1.b < 110) OR (t1.b >= 200 AND t1.b < 210)) AND ((t2.b >= 100 AND t2.b < 110) OR (t2.b >= 200 AND t2.b < 210)) AND t1.c IN ('0004', '0009') ORDER BY t1.a, t1.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 588
+SELECT t1.*, t2.* FROM alpha t1 INNER JOIN beta t2 ON (t1.a = t2.a AND t1.b = t2.b AND t1.c = t2.c) WHERE ((t1.b >= 100 AND t1.b < 110) OR (t1.b >= 200 AND t1.b < 210)) AND ((t2.b >= 100 AND t2.b < 110) OR (t2.b >= 200 AND t2.b < 210)) AND t1.c IN ('0004', '0009') ORDER BY t1.a, t1.b
+--
+TABLE: name="alpha" schema="" table="alpha" ctx=Select
+TABLE: name="beta" schema="" table="beta" ctx=Select
+ALIAS: "t1"="alpha"
+ALIAS: "t2"="beta"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t1" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t2" column="b"
+FILTER: schema="" table="t1" column="c"
+STMT: SelectStmt
+== 589
+-- partitionwise join with fractional paths
+CREATE TABLE fract_t (id BIGINT, PRIMARY KEY (id)) PARTITION BY RANGE (id)
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=DDL
+STMT: CreateStmt
+== 590
+CREATE TABLE fract_t0 PARTITION OF fract_t FOR VALUES FROM ('0') TO ('1000')
+--
+TABLE: name="fract_t0" schema="" table="fract_t0" ctx=DDL
+STMT: CreateStmt
+== 591
+CREATE TABLE fract_t1 PARTITION OF fract_t FOR VALUES FROM ('1000') TO ('2000')
+--
+TABLE: name="fract_t1" schema="" table="fract_t1" ctx=DDL
+STMT: CreateStmt
+== 592
+-- insert data
+INSERT INTO fract_t (id) (SELECT generate_series(0, 1999))
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 593
+ANALYZE fract_t
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=DDL
+STMT: VacuumStmt
+== 594
+-- verify plan; nested index only scans
+SET max_parallel_workers_per_gather = 0
+--
+STMT: VariableSetStmt
+== 595
+SET enable_partitionwise_join = on
+--
+STMT: VariableSetStmt
+== 596
+EXPLAIN (COSTS OFF)
+SELECT x.id, y.id FROM fract_t x LEFT JOIN fract_t y USING (id) ORDER BY x.id ASC LIMIT 10
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=Select
+TABLE: name="fract_t" schema="" table="fract_t" ctx=Select
+ALIAS: "x"="fract_t"
+ALIAS: "y"="fract_t"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 597
+EXPLAIN (COSTS OFF)
+SELECT x.id, y.id FROM fract_t x LEFT JOIN fract_t y USING (id) ORDER BY x.id DESC LIMIT 10
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=Select
+TABLE: name="fract_t" schema="" table="fract_t" ctx=Select
+ALIAS: "x"="fract_t"
+ALIAS: "y"="fract_t"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 598
+-- cleanup
+DROP TABLE fract_t
+--
+TABLE: name="fract_t" schema="" table="fract_t" ctx=DDL
+STMT: DropStmt
+== 599
+RESET max_parallel_workers_per_gather
+--
+STMT: VariableSetStmt
+== 600
+RESET enable_partitionwise_join
+--
+STMT: VariableSetStmt

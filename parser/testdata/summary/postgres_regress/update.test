@@ -1,0 +1,1678 @@
+== 001
+|--
+-- UPDATE syntax tests
+|--
+
+CREATE TABLE update_test (
+    a   INT DEFAULT 10,
+    b   INT,
+    c   TEXT
+)
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DDL
+STMT: CreateStmt
+== 002
+CREATE TABLE upsert_test (
+    a   INT PRIMARY KEY,
+    b   TEXT
+)
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DDL
+STMT: CreateStmt
+== 003
+INSERT INTO update_test VALUES (5, 10, 'foo')
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 004
+INSERT INTO update_test(b, a) VALUES (15, 10)
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 006
+UPDATE update_test SET a = DEFAULT, b = DEFAULT
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+== 007
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 008
+-- aliases for the UPDATE target table
+UPDATE update_test AS t SET b = 10 WHERE t.a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+ALIAS: "t"="update_test"
+STMT: UpdateStmt
+== 009
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 010
+UPDATE update_test t SET b = t.b + 10 WHERE t.a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+ALIAS: "t"="update_test"
+STMT: UpdateStmt
+== 011
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 012
+-- error, you're not supposed to qualify the target column
+UPDATE update_test t SET t.b = t.b + 10 WHERE t.a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+ALIAS: "t"="update_test"
+STMT: UpdateStmt
+== 013
+|--
+-- Test VALUES in FROM
+|--
+
+UPDATE update_test SET a=v.i FROM (VALUES(100, 20)) AS v(i, j)
+  WHERE update_test.b = v.j
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+STMT: SelectStmt
+== 014
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 015
+-- fail, wrong data type:
+UPDATE update_test SET a = v.* FROM (VALUES(100, 20)) AS v(i, j)
+  WHERE update_test.b = v.j
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+STMT: SelectStmt
+== 016
+|--
+-- Test multiple-set-clause syntax
+|--
+
+INSERT INTO update_test SELECT a,b+1,c FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 018
+UPDATE update_test SET (c,b,a) = ('bugle', b+11, DEFAULT) WHERE c = 'foo'
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+== 019
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 020
+UPDATE update_test SET (c,b) = ('car', a+b), a = a + 1 WHERE a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+== 021
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 022
+-- fail, multi assignment to same column:
+UPDATE update_test SET (c,b) = ('car', a+b), b = a + 1 WHERE a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+== 023
+-- uncorrelated sub-select:
+UPDATE update_test
+  SET (b,a) = (select a,b from update_test where b = 41 and c = 'car')
+  WHERE a = 100 AND b = 20
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+FILTER: schema="" table="" column="b"
+FILTER: schema="" table="" column="c"
+FILTER: schema="" table="" column="b"
+FILTER: schema="" table="" column="c"
+STMT: UpdateStmt
+STMT: SelectStmt
+== 024
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 025
+-- correlated sub-select:
+UPDATE update_test o
+  SET (b,a) = (select a+1,b from update_test i
+               where i.a=o.a and i.b=o.b and i.c is not distinct from o.c)
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+ALIAS: "i"="update_test"
+ALIAS: "o"="update_test"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="o" column="a"
+FILTER: schema="" table="i" column="b"
+FILTER: schema="" table="o" column="b"
+FILTER: schema="" table="i" column="c"
+FILTER: schema="" table="o" column="c"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="o" column="a"
+FILTER: schema="" table="i" column="b"
+FILTER: schema="" table="o" column="b"
+FILTER: schema="" table="i" column="c"
+FILTER: schema="" table="o" column="c"
+STMT: UpdateStmt
+STMT: SelectStmt
+== 026
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 027
+-- fail, multiple rows supplied:
+UPDATE update_test SET (b,a) = (select a+1,b from update_test)
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: UpdateStmt
+STMT: SelectStmt
+== 028
+-- set to null if no rows supplied:
+UPDATE update_test SET (b,a) = (select a+1,b from update_test where a = 1000)
+  WHERE a = 11
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: UpdateStmt
+STMT: SelectStmt
+== 029
+SELECT * FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+STMT: SelectStmt
+== 030
+-- *-expansion should work in this context:
+UPDATE update_test SET (a,b) = ROW(v.*) FROM (VALUES(21, 100)) AS v(i, j)
+  WHERE update_test.a = v.i
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+STMT: SelectStmt
+== 031
+-- you might expect this to work, but syntactically it's not a RowExpr:
+UPDATE update_test SET (a,b) = (v.*) FROM (VALUES(21, 101)) AS v(i, j)
+  WHERE update_test.a = v.i
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+STMT: UpdateStmt
+STMT: SelectStmt
+== 032
+-- if an alias for the target table is specified, don't allow references
+-- to the original table name
+UPDATE update_test AS t SET b = update_test.b + 10 WHERE t.a = 10
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+ALIAS: "t"="update_test"
+STMT: UpdateStmt
+== 033
+-- Make sure that we can update to a TOASTed value.
+UPDATE update_test SET c = repeat('x', 10000) WHERE c = 'car'
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: UpdateStmt
+== 034
+SELECT a, b, char_length(c) FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+FUNCTION: name="char_length" function="char_length" schema="" ctx=Call
+STMT: SelectStmt
+== 035
+-- Check multi-assignment with a Result node to handle a one-time filter.
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE update_test t
+  SET (a, b) = (SELECT b, a FROM update_test s WHERE s.a = t.a)
+  WHERE CURRENT_USER = SESSION_USER
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+ALIAS: "s"="update_test"
+ALIAS: "t"="update_test"
+FILTER: schema="" table="s" column="a"
+FILTER: schema="" table="t" column="a"
+FILTER: schema="" table="s" column="a"
+FILTER: schema="" table="t" column="a"
+STMT: ExplainStmt
+STMT: UpdateStmt
+STMT: SelectStmt
+== 036
+UPDATE update_test t
+  SET (a, b) = (SELECT b, a FROM update_test s WHERE s.a = t.a)
+  WHERE CURRENT_USER = SESSION_USER
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DML
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+ALIAS: "s"="update_test"
+ALIAS: "t"="update_test"
+FILTER: schema="" table="s" column="a"
+FILTER: schema="" table="t" column="a"
+FILTER: schema="" table="s" column="a"
+FILTER: schema="" table="t" column="a"
+STMT: UpdateStmt
+STMT: SelectStmt
+== 037
+SELECT a, b, char_length(c) FROM update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=Select
+FUNCTION: name="char_length" function="char_length" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+-- Test ON CONFLICT DO UPDATE
+
+INSERT INTO upsert_test VALUES(1, 'Boo'), (3, 'Zoo')
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 039
+-- uncorrelated  sub-select:
+WITH aaa AS (SELECT 1 AS a, 'Foo' AS b) INSERT INTO upsert_test
+  VALUES (1, 'Bar') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b, a FROM aaa) RETURNING *
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+CTE: "aaa"
+STMT: InsertStmt
+STMT: SelectStmt
+== 040
+-- correlated sub-select:
+INSERT INTO upsert_test VALUES (1, 'Baz'), (3, 'Zaz') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Correlated', a from upsert_test i WHERE i.a = upsert_test.a)
+  RETURNING *
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+ALIAS: "i"="upsert_test"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="upsert_test" column="a"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="upsert_test" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+== 041
+-- correlated sub-select (EXCLUDED.* alias):
+INSERT INTO upsert_test VALUES (1, 'Bat'), (3, 'Zot') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING *
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+ALIAS: "i"="upsert_test"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+== 042
+-- ON CONFLICT using system attributes in RETURNING, testing both the
+-- inserting and updating paths. See bug report at:
+-- https://www.postgresql.org/message-id/73436355-6432-49B1-92ED-1FE4F7E7E100%40finefun.com.au
+INSERT INTO upsert_test VALUES (2, 'Beeble') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING tableoid::regclass, xmin = pg_current_xact_id()::xid AS xmin_correct, xmax = 0 AS xmax_correct
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+ALIAS: "i"="upsert_test"
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+== 043
+-- currently xmax is set after a conflict - that's probably not good,
+-- but it seems worthwhile to have to be explicit if that changes.
+INSERT INTO upsert_test VALUES (2, 'Brox') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b || ', Excluded', a from upsert_test i WHERE i.a = excluded.a)
+  RETURNING tableoid::regclass, xmin = pg_current_xact_id()::xid AS xmin_correct, xmax = pg_current_xact_id()::xid AS xmax_correct
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=Select
+ALIAS: "i"="upsert_test"
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+FILTER: schema="" table="i" column="a"
+FILTER: schema="" table="excluded" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+== 044
+DROP TABLE update_test
+--
+TABLE: name="update_test" schema="" table="update_test" ctx=DDL
+STMT: DropStmt
+== 045
+DROP TABLE upsert_test
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DDL
+STMT: DropStmt
+== 046
+-- Test ON CONFLICT DO UPDATE with partitioned table and non-identical children
+
+CREATE TABLE upsert_test (
+    a   INT PRIMARY KEY,
+    b   TEXT
+) PARTITION BY LIST (a)
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DDL
+STMT: CreateStmt
+== 047
+CREATE TABLE upsert_test_1 PARTITION OF upsert_test FOR VALUES IN (1)
+--
+TABLE: name="upsert_test_1" schema="" table="upsert_test_1" ctx=DDL
+STMT: CreateStmt
+== 048
+CREATE TABLE upsert_test_2 (b TEXT, a INT PRIMARY KEY)
+--
+TABLE: name="upsert_test_2" schema="" table="upsert_test_2" ctx=DDL
+STMT: CreateStmt
+== 049
+ALTER TABLE upsert_test ATTACH PARTITION upsert_test_2 FOR VALUES IN (2)
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DDL
+STMT: AlterTableStmt
+== 050
+INSERT INTO upsert_test VALUES(1, 'Boo'), (2, 'Zoo')
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 051
+-- uncorrelated sub-select:
+WITH aaa AS (SELECT 1 AS a, 'Foo' AS b) INSERT INTO upsert_test
+  VALUES (1, 'Bar') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT b, a FROM aaa) RETURNING *
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+CTE: "aaa"
+STMT: InsertStmt
+STMT: SelectStmt
+== 052
+-- correlated sub-select:
+WITH aaa AS (SELECT 1 AS ctea, ' Foo' AS cteb) INSERT INTO upsert_test
+  VALUES (1, 'Bar'), (2, 'Baz') ON CONFLICT(a)
+  DO UPDATE SET (b, a) = (SELECT upsert_test.b||cteb, upsert_test.a FROM aaa) RETURNING *
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DML
+CTE: "aaa"
+STMT: InsertStmt
+STMT: SelectStmt
+== 053
+DROP TABLE upsert_test
+--
+TABLE: name="upsert_test" schema="" table="upsert_test" ctx=DDL
+STMT: DropStmt
+== 054
+---------------------------
+-- UPDATE with row movement
+---------------------------
+
+-- When a partitioned table receives an UPDATE to the partitioned key and the
+-- new values no longer meet the partition's bound, the row must be moved to
+-- the correct partition for the new partition key (if one exists). We must
+-- also ensure that updatable views on partitioned tables properly enforce any
+-- WITH CHECK OPTION that is defined. The situation with triggers in this case
+-- also requires thorough testing as partition key updates causing row
+-- movement convert UPDATEs into DELETE+INSERT.
+
+CREATE TABLE range_parted (
+	a text,
+	b bigint,
+	c numeric,
+	d int,
+	e varchar
+) PARTITION BY RANGE (a, b)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateStmt
+== 055
+-- Create partitions intentionally in descending bound order, so as to test
+-- that update-row-movement works with the leaf partitions not in bound order.
+CREATE TABLE part_b_20_b_30 (e varchar, c numeric, a text, b bigint, d int)
+--
+TABLE: name="part_b_20_b_30" schema="" table="part_b_20_b_30" ctx=DDL
+STMT: CreateStmt
+== 056
+ALTER TABLE range_parted ATTACH PARTITION part_b_20_b_30 FOR VALUES FROM ('b', 20) TO ('b', 30)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: AlterTableStmt
+== 057
+CREATE TABLE part_b_10_b_20 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY RANGE (c)
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DDL
+STMT: CreateStmt
+== 058
+CREATE TABLE part_b_1_b_10 PARTITION OF range_parted FOR VALUES FROM ('b', 1) TO ('b', 10)
+--
+TABLE: name="part_b_1_b_10" schema="" table="part_b_1_b_10" ctx=DDL
+STMT: CreateStmt
+== 059
+ALTER TABLE range_parted ATTACH PARTITION part_b_10_b_20 FOR VALUES FROM ('b', 10) TO ('b', 20)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: AlterTableStmt
+== 060
+CREATE TABLE part_a_10_a_20 PARTITION OF range_parted FOR VALUES FROM ('a', 10) TO ('a', 20)
+--
+TABLE: name="part_a_10_a_20" schema="" table="part_a_10_a_20" ctx=DDL
+STMT: CreateStmt
+== 061
+CREATE TABLE part_a_1_a_10 PARTITION OF range_parted FOR VALUES FROM ('a', 1) TO ('a', 10)
+--
+TABLE: name="part_a_1_a_10" schema="" table="part_a_1_a_10" ctx=DDL
+STMT: CreateStmt
+== 062
+-- Check that partition-key UPDATE works sanely on a partitioned table that
+-- does not have any child partitions.
+UPDATE part_b_10_b_20 set b = b - 6
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DML
+STMT: UpdateStmt
+== 063
+-- Create some more partitions following the above pattern of descending bound
+-- order, but let's make the situation a bit more complex by having the
+-- attribute numbers of the columns vary from their parent partition.
+CREATE TABLE part_c_100_200 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY range (abs(d))
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DDL
+STMT: CreateStmt
+== 064
+ALTER TABLE part_c_100_200 DROP COLUMN e, DROP COLUMN c, DROP COLUMN a
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DDL
+STMT: AlterTableStmt
+== 065
+ALTER TABLE part_c_100_200 ADD COLUMN c numeric, ADD COLUMN e varchar, ADD COLUMN a text
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DDL
+STMT: AlterTableStmt
+== 066
+ALTER TABLE part_c_100_200 DROP COLUMN b
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DDL
+STMT: AlterTableStmt
+== 067
+ALTER TABLE part_c_100_200 ADD COLUMN b bigint
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DDL
+STMT: AlterTableStmt
+== 068
+CREATE TABLE part_d_1_15 PARTITION OF part_c_100_200 FOR VALUES FROM (1) TO (15)
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateStmt
+== 069
+CREATE TABLE part_d_15_20 PARTITION OF part_c_100_200 FOR VALUES FROM (15) TO (20)
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: CreateStmt
+== 070
+ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_100_200 FOR VALUES FROM (100) TO (200)
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DDL
+STMT: AlterTableStmt
+== 071
+CREATE TABLE part_c_1_100 (e varchar, d int, c numeric, b bigint, a text)
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: CreateStmt
+== 072
+ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_1_100 FOR VALUES FROM (1) TO (100)
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DDL
+STMT: AlterTableStmt
+== 073
+-- The order of subplans should be in bound order
+EXPLAIN (costs off) UPDATE range_parted set c = c - 50 WHERE c > 97
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: ExplainStmt
+STMT: UpdateStmt
+== 074
+-- fail, row movement happens only within the partition subtree.
+UPDATE part_c_100_200 set c = c - 20, d = c WHERE c = 105
+--
+TABLE: name="part_c_100_200" schema="" table="part_c_100_200" ctx=DML
+STMT: UpdateStmt
+== 075
+-- fail, no partition key update, so no attempt to move tuple,
+-- but "a = 'a'" violates partition constraint enforced by root partition)
+UPDATE part_b_10_b_20 set a = 'a'
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DML
+STMT: UpdateStmt
+== 076
+-- ok, partition key update, no constraint violation
+UPDATE range_parted set d = d - 10 WHERE d > 10
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 077
+-- ok, no partition key update, no constraint violation
+UPDATE range_parted set e = d
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 078
+-- No row found
+UPDATE part_c_1_100 set c = c + 20 WHERE c = 98
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DML
+STMT: UpdateStmt
+== 079
+-- ok, row movement
+UPDATE part_b_10_b_20 set c = c + 20 returning c, b, a
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DML
+STMT: UpdateStmt
+== 080
+-- fail, row movement happens only within the partition subtree.
+UPDATE part_b_10_b_20 set b = b - 6 WHERE c > 116 returning *
+--
+TABLE: name="part_b_10_b_20" schema="" table="part_b_10_b_20" ctx=DML
+STMT: UpdateStmt
+== 081
+-- ok, row movement, with subset of rows moved into different partition.
+UPDATE range_parted set b = b - 6 WHERE c > 116 returning a, b + c
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 082
+-- Common table needed for multiple test scenarios.
+CREATE TABLE mintab(c1 int)
+--
+TABLE: name="mintab" schema="" table="mintab" ctx=DDL
+STMT: CreateStmt
+== 083
+INSERT into mintab VALUES (120)
+--
+TABLE: name="mintab" schema="" table="mintab" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 084
+-- update partition key using updatable view.
+CREATE VIEW upview AS SELECT * FROM range_parted WHERE (select c > c1 FROM mintab) WITH CHECK OPTION
+--
+TABLE: name="upview" schema="" table="upview" ctx=DDL
+TABLE: name="range_parted" schema="" table="range_parted" ctx=Select
+TABLE: name="mintab" schema="" table="mintab" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 085
+-- ok
+UPDATE upview set c = 199 WHERE b = 4
+--
+TABLE: name="upview" schema="" table="upview" ctx=DML
+STMT: UpdateStmt
+== 086
+-- fail, check option violation
+UPDATE upview set c = 120 WHERE b = 4
+--
+TABLE: name="upview" schema="" table="upview" ctx=DML
+STMT: UpdateStmt
+== 087
+-- fail, row movement with check option violation
+UPDATE upview set a = 'b', b = 15, c = 120 WHERE b = 4
+--
+TABLE: name="upview" schema="" table="upview" ctx=DML
+STMT: UpdateStmt
+== 088
+-- ok, row movement, check option passes
+UPDATE upview set a = 'b', b = 15 WHERE b = 4
+--
+TABLE: name="upview" schema="" table="upview" ctx=DML
+STMT: UpdateStmt
+== 089
+-- cleanup
+DROP VIEW upview
+--
+STMT: DropStmt
+== 090
+UPDATE range_parted set c = 95 WHERE a = 'b' and b > 10 and c > 100 returning (range_parted), *
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 091
+CREATE FUNCTION trans_updatetrigfunc() RETURNS trigger LANGUAGE plpgsql AS
+$$
+  begin
+    raise notice 'trigger = %, old table = %, new table = %',
+                 TG_NAME,
+                 (select string_agg(old_table::text, ', ' ORDER BY a) FROM old_table),
+                 (select string_agg(new_table::text, ', ' ORDER BY a) FROM new_table);
+    return null;
+  end;
+$$
+--
+FUNCTION: name="trans_updatetrigfunc" function="trans_updatetrigfunc" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 092
+CREATE TRIGGER trans_updatetrig
+  AFTER UPDATE ON range_parted REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 093
+UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end ) WHERE a = 'b' and b > 10 and c >= 96
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 094
+-- Enabling OLD TABLE capture for both DELETE as well as UPDATE stmt triggers
+-- should not cause DELETEd rows to be captured twice. Similar thing for
+-- INSERT triggers and inserted rows.
+CREATE TRIGGER trans_deletetrig
+  AFTER DELETE ON range_parted REFERENCING OLD TABLE AS old_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 095
+CREATE TRIGGER trans_inserttrig
+  AFTER INSERT ON range_parted REFERENCING NEW TABLE AS new_table
+  FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 096
+UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 097
+DROP TRIGGER trans_deletetrig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 098
+DROP TRIGGER trans_inserttrig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 099
+-- Don't drop trans_updatetrig yet. It is required below.
+
+-- Test with transition tuple conversion happening for rows moved into the
+-- new partition. This requires a trigger that references transition table
+-- (we already have trans_updatetrig). For inserted rows, the conversion
+-- is not usually needed, because the original tuple is already compatible with
+-- the desired transition tuple format. But conversion happens when there is a
+-- BR trigger because the trigger can change the inserted row. So install a
+-- BR triggers on those child partitions where the rows will be moved.
+CREATE FUNCTION func_parted_mod_b() RETURNS trigger AS $$
+BEGIN
+   NEW.b = NEW.b + 1;
+   return NEW;
+END $$ language plpgsql
+--
+FUNCTION: name="func_parted_mod_b" function="func_parted_mod_b" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 100
+CREATE TRIGGER trig_c1_100 BEFORE UPDATE OR INSERT ON part_c_1_100
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: CreateTrigStmt
+== 101
+CREATE TRIGGER trig_d1_15 BEFORE UPDATE OR INSERT ON part_d_1_15
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateTrigStmt
+== 102
+CREATE TRIGGER trig_d15_20 BEFORE UPDATE OR INSERT ON part_d_15_20
+   FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b()
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: CreateTrigStmt
+== 103
+UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end) WHERE a = 'b' and b > 10 and c >= 96
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 104
+UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 105
+UPDATE range_parted set b = 15 WHERE b = 1
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 106
+DROP TRIGGER trans_updatetrig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 107
+DROP TRIGGER trig_c1_100 ON part_c_1_100
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: DropStmt
+== 108
+DROP TRIGGER trig_d1_15 ON part_d_1_15
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: DropStmt
+== 109
+DROP TRIGGER trig_d15_20 ON part_d_15_20
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: DropStmt
+== 110
+DROP FUNCTION func_parted_mod_b()
+--
+FUNCTION: name="func_parted_mod_b" function="func_parted_mod_b" schema="" ctx=DDL
+STMT: DropStmt
+== 111
+-- RLS policies with update-row-movement
+-----------------------------------------
+
+ALTER TABLE range_parted ENABLE ROW LEVEL SECURITY
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: AlterTableStmt
+== 112
+CREATE USER regress_range_parted_user
+--
+STMT: CreateRoleStmt
+== 113
+GRANT ALL ON range_parted, mintab TO regress_range_parted_user
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+TABLE: name="mintab" schema="" table="mintab" ctx=DDL
+STMT: GrantStmt
+== 114
+CREATE POLICY seeall ON range_parted AS PERMISSIVE FOR SELECT USING (true)
+--
+STMT: CreatePolicyStmt
+== 115
+CREATE POLICY policy_range_parted ON range_parted for UPDATE USING (true) WITH CHECK (c % 2 = 0)
+--
+STMT: CreatePolicyStmt
+== 116
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 117
+-- This should fail with RLS violation error while moving row from
+-- part_a_10_a_20 to part_d_1_15, because we are setting 'c' to an odd number.
+UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 118
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 119
+-- Create a trigger on part_d_1_15
+CREATE FUNCTION func_d_1_15() RETURNS trigger AS $$
+BEGIN
+   NEW.c = NEW.c + 1; -- Make even numbers odd, or vice versa
+   return NEW;
+END $$ LANGUAGE plpgsql
+--
+FUNCTION: name="func_d_1_15" function="func_d_1_15" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 120
+CREATE TRIGGER trig_d_1_15 BEFORE INSERT ON part_d_1_15
+   FOR EACH ROW EXECUTE PROCEDURE func_d_1_15()
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateTrigStmt
+== 121
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 122
+-- Here, RLS checks should succeed while moving row from part_a_10_a_20 to
+-- part_d_1_15. Even though the UPDATE is setting 'c' to an odd number, the
+-- trigger at the destination partition again makes it an even number.
+UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 123
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 124
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 125
+-- This should fail with RLS violation error. Even though the UPDATE is setting
+-- 'c' to an even number, the trigger at the destination partition again makes
+-- it an odd number.
+UPDATE range_parted set a = 'b', c = 150 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 126
+-- Cleanup
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 127
+DROP TRIGGER trig_d_1_15 ON part_d_1_15
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: DropStmt
+== 128
+DROP FUNCTION func_d_1_15()
+--
+FUNCTION: name="func_d_1_15" function="func_d_1_15" schema="" ctx=DDL
+STMT: DropStmt
+== 129
+-- Policy expression contains SubPlan
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 130
+CREATE POLICY policy_range_parted_subplan on range_parted
+    AS RESTRICTIVE for UPDATE USING (true)
+    WITH CHECK ((SELECT range_parted.c <= c1 FROM mintab))
+--
+STMT: CreatePolicyStmt
+== 131
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 132
+-- fail, mintab has row with c1 = 120
+UPDATE range_parted set a = 'b', c = 122 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 133
+-- ok
+UPDATE range_parted set a = 'b', c = 120 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 134
+-- RLS policy expression contains whole row.
+
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 135
+CREATE POLICY policy_range_parted_wholerow on range_parted AS RESTRICTIVE for UPDATE USING (true)
+   WITH CHECK (range_parted = row('b', 10, 112, 1, NULL)::range_parted)
+--
+STMT: CreatePolicyStmt
+== 136
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 137
+-- ok, should pass the RLS check
+UPDATE range_parted set a = 'b', c = 112 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 138
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 139
+SET SESSION AUTHORIZATION regress_range_parted_user
+--
+STMT: VariableSetStmt
+== 140
+-- fail, the whole row RLS check should fail
+UPDATE range_parted set a = 'b', c = 116 WHERE a = 'a' and c = 200
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 141
+-- Cleanup
+RESET SESSION AUTHORIZATION
+--
+STMT: VariableSetStmt
+== 142
+DROP POLICY policy_range_parted ON range_parted
+--
+STMT: DropStmt
+== 143
+DROP POLICY policy_range_parted_subplan ON range_parted
+--
+STMT: DropStmt
+== 144
+DROP POLICY policy_range_parted_wholerow ON range_parted
+--
+STMT: DropStmt
+== 145
+REVOKE ALL ON range_parted, mintab FROM regress_range_parted_user
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+TABLE: name="mintab" schema="" table="mintab" ctx=DDL
+STMT: GrantStmt
+== 146
+DROP USER regress_range_parted_user
+--
+STMT: DropRoleStmt
+== 147
+DROP TABLE mintab
+--
+TABLE: name="mintab" schema="" table="mintab" ctx=DDL
+STMT: DropStmt
+== 148
+CREATE FUNCTION trigfunc() returns trigger language plpgsql as
+$$
+  begin
+    raise notice 'trigger = % fired on table % during %',
+                 TG_NAME, TG_TABLE_NAME, TG_OP;
+    return null;
+  end;
+$$
+--
+FUNCTION: name="trigfunc" function="trigfunc" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 149
+-- Triggers on root partition
+CREATE TRIGGER parent_delete_trig
+  AFTER DELETE ON range_parted for each statement execute procedure trigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 150
+CREATE TRIGGER parent_update_trig
+  AFTER UPDATE ON range_parted for each statement execute procedure trigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 151
+CREATE TRIGGER parent_insert_trig
+  AFTER INSERT ON range_parted for each statement execute procedure trigfunc()
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateTrigStmt
+== 152
+-- Triggers on leaf partition part_c_1_100
+CREATE TRIGGER c1_delete_trig
+  AFTER DELETE ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: CreateTrigStmt
+== 153
+CREATE TRIGGER c1_update_trig
+  AFTER UPDATE ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: CreateTrigStmt
+== 154
+CREATE TRIGGER c1_insert_trig
+  AFTER INSERT ON part_c_1_100 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: CreateTrigStmt
+== 155
+-- Triggers on leaf partition part_d_1_15
+CREATE TRIGGER d1_delete_trig
+  AFTER DELETE ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateTrigStmt
+== 156
+CREATE TRIGGER d1_update_trig
+  AFTER UPDATE ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateTrigStmt
+== 157
+CREATE TRIGGER d1_insert_trig
+  AFTER INSERT ON part_d_1_15 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: CreateTrigStmt
+== 158
+-- Triggers on leaf partition part_d_15_20
+CREATE TRIGGER d15_delete_trig
+  AFTER DELETE ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: CreateTrigStmt
+== 159
+CREATE TRIGGER d15_update_trig
+  AFTER UPDATE ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: CreateTrigStmt
+== 160
+CREATE TRIGGER d15_insert_trig
+  AFTER INSERT ON part_d_15_20 for each statement execute procedure trigfunc()
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: CreateTrigStmt
+== 161
+-- Move all rows from part_c_100_200 to part_c_1_100. None of the delete or
+-- insert statement triggers should be fired.
+UPDATE range_parted set c = c - 50 WHERE c > 97
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 162
+DROP TRIGGER parent_delete_trig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 163
+DROP TRIGGER parent_update_trig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 164
+DROP TRIGGER parent_insert_trig ON range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 165
+DROP TRIGGER c1_delete_trig ON part_c_1_100
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: DropStmt
+== 166
+DROP TRIGGER c1_update_trig ON part_c_1_100
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: DropStmt
+== 167
+DROP TRIGGER c1_insert_trig ON part_c_1_100
+--
+TABLE: name="part_c_1_100" schema="" table="part_c_1_100" ctx=DDL
+STMT: DropStmt
+== 168
+DROP TRIGGER d1_delete_trig ON part_d_1_15
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: DropStmt
+== 169
+DROP TRIGGER d1_update_trig ON part_d_1_15
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: DropStmt
+== 170
+DROP TRIGGER d1_insert_trig ON part_d_1_15
+--
+TABLE: name="part_d_1_15" schema="" table="part_d_1_15" ctx=DDL
+STMT: DropStmt
+== 171
+DROP TRIGGER d15_delete_trig ON part_d_15_20
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: DropStmt
+== 172
+DROP TRIGGER d15_update_trig ON part_d_15_20
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: DropStmt
+== 173
+DROP TRIGGER d15_insert_trig ON part_d_15_20
+--
+TABLE: name="part_d_15_20" schema="" table="part_d_15_20" ctx=DDL
+STMT: DropStmt
+== 174
+create table part_def partition of range_parted default
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DDL
+STMT: CreateStmt
+== 175
+insert into range_parted values ('c', 9)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 176
+-- ok
+update part_def set a = 'd' where a = 'c'
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DML
+STMT: UpdateStmt
+== 177
+-- fail
+update part_def set a = 'a' where a = 'd'
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DML
+STMT: UpdateStmt
+== 178
+-- Update row movement from non-default to default partition.
+-- fail, default partition is not under part_a_10_a_20;
+UPDATE part_a_10_a_20 set a = 'ad' WHERE a = 'a'
+--
+TABLE: name="part_a_10_a_20" schema="" table="part_a_10_a_20" ctx=DML
+STMT: UpdateStmt
+== 179
+-- ok
+UPDATE range_parted set a = 'ad' WHERE a = 'a'
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 180
+UPDATE range_parted set a = 'bd' WHERE a = 'b'
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 181
+-- Update row movement from default to non-default partitions.
+-- ok
+UPDATE range_parted set a = 'a' WHERE a = 'ad'
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 182
+UPDATE range_parted set a = 'b' WHERE a = 'bd'
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: UpdateStmt
+== 183
+-- Cleanup: range_parted no longer needed.
+DROP TABLE range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: DropStmt
+== 184
+CREATE TABLE list_parted (
+	a text,
+	b int
+) PARTITION BY list (a)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: CreateStmt
+== 185
+CREATE TABLE list_part1  PARTITION OF list_parted for VALUES in ('a', 'b')
+--
+TABLE: name="list_part1" schema="" table="list_part1" ctx=DDL
+STMT: CreateStmt
+== 186
+CREATE TABLE list_default PARTITION OF list_parted default
+--
+TABLE: name="list_default" schema="" table="list_default" ctx=DDL
+STMT: CreateStmt
+== 187
+INSERT into list_part1 VALUES ('a', 1)
+--
+TABLE: name="list_part1" schema="" table="list_part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 188
+INSERT into list_default VALUES ('d', 10)
+--
+TABLE: name="list_default" schema="" table="list_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 189
+-- fail
+UPDATE list_default set a = 'a' WHERE a = 'd'
+--
+TABLE: name="list_default" schema="" table="list_default" ctx=DML
+STMT: UpdateStmt
+== 190
+-- ok
+UPDATE list_default set a = 'x' WHERE a = 'd'
+--
+TABLE: name="list_default" schema="" table="list_default" ctx=DML
+STMT: UpdateStmt
+== 191
+DROP TABLE list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: DropStmt
+== 192
+-- Test retrieval of system columns with non-consistent partition row types.
+-- This is only partially supported, as seen in the results.
+
+create table utrtest (a int, b text) partition by list (a)
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DDL
+STMT: CreateStmt
+== 193
+create table utr1 (a int check (a in (1)), q text, b text)
+--
+TABLE: name="utr1" schema="" table="utr1" ctx=DDL
+STMT: CreateStmt
+== 194
+create table utr2 (a int check (a in (2)), b text)
+--
+TABLE: name="utr2" schema="" table="utr2" ctx=DDL
+STMT: CreateStmt
+== 195
+alter table utr1 drop column q
+--
+TABLE: name="utr1" schema="" table="utr1" ctx=DDL
+STMT: AlterTableStmt
+== 196
+alter table utrtest attach partition utr1 for values in (1)
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DDL
+STMT: AlterTableStmt
+== 197
+alter table utrtest attach partition utr2 for values in (2)
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DDL
+STMT: AlterTableStmt
+== 198
+insert into utrtest values (1, 'foo')
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 199
+insert into utrtest values (2, 'bar')
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 200
+-- fails
+insert into utrtest values (2, 'bar')
+  returning *, tableoid::regclass
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 201
+update utrtest set b = b || b from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+STMT: UpdateStmt
+STMT: SelectStmt
+== 202
+update utrtest set a = 3 - a from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass, xmin = pg_current_xact_id()::xid as xmin_ok
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+STMT: UpdateStmt
+STMT: SelectStmt
+== 203
+-- fails
+
+update utrtest set a = 3 - a from (values (1), (2)) s(x) where a = s.x
+  returning *, tableoid::regclass
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+STMT: UpdateStmt
+STMT: SelectStmt
+== 204
+delete from utrtest
+  returning *, tableoid::regclass, xmax = pg_current_xact_id()::xid as xmax_ok
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DML
+FUNCTION: name="pg_current_xact_id" function="pg_current_xact_id" schema="" ctx=Call
+STMT: DeleteStmt
+== 205
+drop table utrtest
+--
+TABLE: name="utrtest" schema="" table="utrtest" ctx=DDL
+STMT: DropStmt
+== 206
+--------------
+-- Some more update-partition-key test scenarios below. This time use list
+-- partitions.
+--------------
+
+-- Setup for list partitions
+CREATE TABLE list_parted (a numeric, b int, c int8) PARTITION BY list (a)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: CreateStmt
+== 207
+CREATE TABLE sub_parted PARTITION OF list_parted for VALUES in (1) PARTITION BY list (b)
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DDL
+STMT: CreateStmt
+== 208
+CREATE TABLE sub_part1(b int, c int8, a numeric)
+--
+TABLE: name="sub_part1" schema="" table="sub_part1" ctx=DDL
+STMT: CreateStmt
+== 209
+ALTER TABLE sub_parted ATTACH PARTITION sub_part1 for VALUES in (1)
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DDL
+STMT: AlterTableStmt
+== 210
+CREATE TABLE sub_part2(b int, c int8, a numeric)
+--
+TABLE: name="sub_part2" schema="" table="sub_part2" ctx=DDL
+STMT: CreateStmt
+== 211
+ALTER TABLE sub_parted ATTACH PARTITION sub_part2 for VALUES in (2)
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DDL
+STMT: AlterTableStmt
+== 212
+CREATE TABLE list_part1(a numeric, b int, c int8)
+--
+TABLE: name="list_part1" schema="" table="list_part1" ctx=DDL
+STMT: CreateStmt
+== 213
+ALTER TABLE list_parted ATTACH PARTITION list_part1 for VALUES in (2,3)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: AlterTableStmt
+== 214
+INSERT into list_parted VALUES (2,5,50)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 215
+INSERT into list_parted VALUES (3,6,60)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 216
+INSERT into sub_parted VALUES (1,1,60)
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 217
+INSERT into sub_parted VALUES (1,2,10)
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 218
+-- Test partition constraint violation when intermediate ancestor is used and
+-- constraint is inherited from upper root.
+UPDATE sub_parted set a = 2 WHERE c = 10
+--
+TABLE: name="sub_parted" schema="" table="sub_parted" ctx=DML
+STMT: UpdateStmt
+== 219
+-- Test update-partition-key, where the unpruned partitions do not have their
+-- partition keys updated.
+SELECT tableoid::regclass::text, * FROM list_parted WHERE a = 2 ORDER BY 1
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 220
+UPDATE list_parted set b = c + a WHERE a = 2
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: UpdateStmt
+== 221
+SELECT tableoid::regclass::text, * FROM list_parted WHERE a = 2 ORDER BY 1
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 222
+-- Test the case where BR UPDATE triggers change the partition key.
+CREATE FUNCTION func_parted_mod_b() returns trigger as $$
+BEGIN
+   NEW.b = 2; -- This is changing partition key column.
+   return NEW;
+END $$ LANGUAGE plpgsql
+--
+FUNCTION: name="func_parted_mod_b" function="func_parted_mod_b" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 223
+CREATE TRIGGER parted_mod_b before update on sub_part1
+   for each row execute procedure func_parted_mod_b()
+--
+TABLE: name="sub_part1" schema="" table="sub_part1" ctx=DDL
+STMT: CreateTrigStmt
+== 224
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 225
+-- This should do the tuple routing even though there is no explicit
+-- partition-key update, because there is a trigger on sub_part1.
+UPDATE list_parted set c = 70 WHERE b  = 1
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: UpdateStmt
+== 226
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 227
+DROP TRIGGER parted_mod_b ON sub_part1
+--
+TABLE: name="sub_part1" schema="" table="sub_part1" ctx=DDL
+STMT: DropStmt
+== 228
+-- If BR DELETE trigger prevented DELETE from happening, we should also skip
+-- the INSERT if that delete is part of UPDATE=>DELETE+INSERT.
+CREATE OR REPLACE FUNCTION func_parted_mod_b() returns trigger as $$
+BEGIN
+   raise notice 'Trigger: Got OLD row %, but returning NULL', OLD;
+   return NULL;
+END $$ LANGUAGE plpgsql
+--
+FUNCTION: name="func_parted_mod_b" function="func_parted_mod_b" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 229
+CREATE TRIGGER trig_skip_delete before delete on sub_part2
+   for each row execute procedure func_parted_mod_b()
+--
+TABLE: name="sub_part2" schema="" table="sub_part2" ctx=DDL
+STMT: CreateTrigStmt
+== 230
+UPDATE list_parted set b = 1 WHERE c = 70
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: UpdateStmt
+== 231
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 232
+-- Drop the trigger. Now the row should be moved.
+DROP TRIGGER trig_skip_delete ON sub_part2
+--
+TABLE: name="sub_part2" schema="" table="sub_part2" ctx=DDL
+STMT: DropStmt
+== 233
+UPDATE list_parted set b = 1 WHERE c = 70
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: UpdateStmt
+== 234
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 235
+DROP FUNCTION func_parted_mod_b()
+--
+FUNCTION: name="func_parted_mod_b" function="func_parted_mod_b" schema="" ctx=DDL
+STMT: DropStmt
+== 236
+-- UPDATE partition-key with FROM clause. If join produces multiple output
+-- rows for the same row to be modified, we should tuple-route the row only
+-- once. There should not be any rows inserted.
+CREATE TABLE non_parted (id int)
+--
+TABLE: name="non_parted" schema="" table="non_parted" ctx=DDL
+STMT: CreateStmt
+== 237
+INSERT into non_parted VALUES (1), (1), (1), (2), (2), (2), (3), (3), (3)
+--
+TABLE: name="non_parted" schema="" table="non_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 238
+UPDATE list_parted t1 set a = 2 FROM non_parted t2 WHERE t1.a = t2.id and a = 1
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+TABLE: name="non_parted" schema="" table="non_parted" ctx=Select
+ALIAS: "t1"="list_parted"
+ALIAS: "t2"="non_parted"
+STMT: UpdateStmt
+== 239
+SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 240
+DROP TABLE non_parted
+--
+TABLE: name="non_parted" schema="" table="non_parted" ctx=DDL
+STMT: DropStmt
+== 241
+-- Cleanup: list_parted no longer needed.
+DROP TABLE list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: DropStmt
+== 242
+-- create custom operator class and hash function, for the same reason
+-- explained in alter_table.sql
+create or replace function dummy_hashint4(a int4, seed int8) returns int8 as
+$$ begin return (a + seed); end; $$ language 'plpgsql' immutable
+--
+FUNCTION: name="dummy_hashint4" function="dummy_hashint4" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 243
+create operator class custom_opclass for type int4 using hash as
+operator 1 = , function 2 dummy_hashint4(int4, int8)
+--
+STMT: CreateOpClassStmt
+== 244
+create table hash_parted (
+	a int,
+	b int
+) partition by hash (a custom_opclass, b custom_opclass)
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DDL
+STMT: CreateStmt
+== 245
+create table hpart1 partition of hash_parted for values with (modulus 2, remainder 1)
+--
+TABLE: name="hpart1" schema="" table="hpart1" ctx=DDL
+STMT: CreateStmt
+== 246
+create table hpart2 partition of hash_parted for values with (modulus 4, remainder 2)
+--
+TABLE: name="hpart2" schema="" table="hpart2" ctx=DDL
+STMT: CreateStmt
+== 247
+create table hpart3 partition of hash_parted for values with (modulus 8, remainder 0)
+--
+TABLE: name="hpart3" schema="" table="hpart3" ctx=DDL
+STMT: CreateStmt
+== 248
+create table hpart4 partition of hash_parted for values with (modulus 8, remainder 4)
+--
+TABLE: name="hpart4" schema="" table="hpart4" ctx=DDL
+STMT: CreateStmt
+== 249
+insert into hpart1 values (1, 1)
+--
+TABLE: name="hpart1" schema="" table="hpart1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 250
+insert into hpart2 values (2, 5)
+--
+TABLE: name="hpart2" schema="" table="hpart2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 251
+insert into hpart4 values (3, 4)
+--
+TABLE: name="hpart4" schema="" table="hpart4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 252
+-- fail
+update hpart1 set a = 3, b=4 where a = 1
+--
+TABLE: name="hpart1" schema="" table="hpart1" ctx=DML
+STMT: UpdateStmt
+== 253
+-- ok, row movement
+update hash_parted set b = b - 1 where b = 1
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DML
+STMT: UpdateStmt
+== 254
+-- ok
+update hash_parted set b = b + 8 where b = 1
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DML
+STMT: UpdateStmt
+== 255
+-- cleanup
+drop table hash_parted
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DDL
+STMT: DropStmt
+== 256
+drop operator class custom_opclass using hash
+--
+STMT: DropStmt
+== 257
+drop function dummy_hashint4(a int4, seed int8)
+--
+FUNCTION: name="dummy_hashint4" function="dummy_hashint4" schema="" ctx=DDL
+STMT: DropStmt

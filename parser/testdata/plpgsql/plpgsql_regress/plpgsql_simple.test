@@ -1,0 +1,186 @@
+== 001
+|--
+-- Tests for plpgsql's handling of "simple" expressions
+|--
+
+-- Check that changes to an inline-able function are handled correctly
+create function simplesql(int) returns int language sql
+as 'select $1'
+--
+[
+{"PLpgSQL_function":{"datums":[]}}
+]
+== 002
+create function simplecaller() returns int language plpgsql
+as $$
+declare
+  sum int := 0;
+begin
+  for n in 1..10 loop
+    sum := sum + simplesql(n);
+    if n = 5 then
+      create or replace function simplesql(int) returns int language sql
+      as 'select $1 + 100';
+    end if;
+  end loop;
+  return sum;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"sum","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"int "}},"default_val":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}},{"PLpgSQL_var":{"refname":"n","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_fori":{"lineno":5,"var":{"PLpgSQL_var":{"refname":"n","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},"lower":{"PLpgSQL_expr":{"query":"1","parseMode":2}},"upper":{"PLpgSQL_expr":{"query":"10","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":6,"varno":1,"expr":{"PLpgSQL_expr":{"query":"sum := sum + simplesql(n)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":7,"cond":{"PLpgSQL_expr":{"query":"n = 5","parseMode":2}},"then_body":[{"PLpgSQL_stmt_execsql":{"lineno":8,"sqlstmt":{"PLpgSQL_expr":{"query":"create or replace function simplesql(int) returns int language sql\n      as 'select $1 + 100'","parseMode":0}}}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":12,"expr":{"PLpgSQL_expr":{"query":"sum","parseMode":2}}}}]}}}}
+]
+== 003
+select simplecaller()
+--
+[]
+== 004
+-- Check that changes in search path are dealt with correctly
+create schema simple1
+--
+[]
+== 005
+create function simple1.simpletarget(int) returns int language plpgsql
+as $$begin return $1; end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":1,"body":[{"PLpgSQL_stmt_return":{"lineno":1,"expr":{"PLpgSQL_expr":{"query":"$1","parseMode":2}}}}]}}}}
+]
+== 006
+create function simpletarget(int) returns int language plpgsql
+as $$begin return $1 + 100; end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"$1","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.int4"}}}},{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":1,"body":[{"PLpgSQL_stmt_return":{"lineno":1,"expr":{"PLpgSQL_expr":{"query":"$1 + 100","parseMode":2}}}}]}}}}
+]
+== 007
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare
+  sum int := 0;
+begin
+  for n in 1..10 loop
+    sum := sum + simpletarget(n);
+    if n = 5 then
+      set local search_path = 'simple1';
+    end if;
+  end loop;
+  return sum;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"sum","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"int "}},"default_val":{"PLpgSQL_expr":{"query":"0","parseMode":2}}}},{"PLpgSQL_var":{"refname":"n","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":4,"body":[{"PLpgSQL_stmt_fori":{"lineno":5,"var":{"PLpgSQL_var":{"refname":"n","lineno":5,"datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"integer\""}}}},"lower":{"PLpgSQL_expr":{"query":"1","parseMode":2}},"upper":{"PLpgSQL_expr":{"query":"10","parseMode":2}},"body":[{"PLpgSQL_stmt_assign":{"lineno":6,"varno":1,"expr":{"PLpgSQL_expr":{"query":"sum := sum + simpletarget(n)","parseMode":3}}}},{"PLpgSQL_stmt_if":{"lineno":7,"cond":{"PLpgSQL_expr":{"query":"n = 5","parseMode":2}},"then_body":[{"PLpgSQL_stmt_execsql":{"lineno":8,"sqlstmt":{"PLpgSQL_expr":{"query":"set local search_path = 'simple1'","parseMode":0}}}}]}}]}},{"PLpgSQL_stmt_return":{"lineno":11,"expr":{"PLpgSQL_expr":{"query":"sum","parseMode":2}}}}]}}}}
+]
+== 008
+select simplecaller()
+--
+[]
+== 009
+-- try it with non-volatile functions, too
+alter function simple1.simpletarget(int) immutable
+--
+[]
+== 010
+alter function simpletarget(int) immutable
+--
+[]
+== 011
+select simplecaller()
+--
+[]
+== 012
+-- make sure flushing local caches changes nothing
+
+select simplecaller()
+--
+[]
+== 013
+-- Check case where first attempt to determine if it's simple fails
+
+create function simplesql() returns int language sql
+as $$select 1 / 0$$
+--
+[
+{"PLpgSQL_function":{"datums":[]}}
+]
+== 014
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare x int;
+begin
+  select simplesql() into x;
+  return x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":4,"fields":[{"name":"x","varno":1}]}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_execsql":{"lineno":4,"sqlstmt":{"PLpgSQL_expr":{"query":"select simplesql()","parseMode":0}},"into":true,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":4,"fields":[{"name":"x","varno":1}]}}}},{"PLpgSQL_stmt_return":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 015
+select simplecaller()
+--
+[]
+== 016
+-- division by zero occurs during simple-expr check
+
+create or replace function simplesql() returns int language sql
+as $$select 2 + 2$$
+--
+[
+{"PLpgSQL_function":{"datums":[]}}
+]
+== 017
+select simplecaller()
+--
+[]
+== 018
+-- Check case where called function changes from non-SRF to SRF (bug #18497)
+
+create or replace function simplecaller() returns int language plpgsql
+as $$
+declare x int;
+begin
+  x := simplesql();
+  return x;
+end$$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"x","lineno":2,"datatype":{"PLpgSQL_type":{"typname":"int"}}}}],"action":{"PLpgSQL_stmt_block":{"lineno":3,"body":[{"PLpgSQL_stmt_assign":{"lineno":4,"varno":1,"expr":{"PLpgSQL_expr":{"query":"x := simplesql()","parseMode":3}}}},{"PLpgSQL_stmt_return":{"lineno":5,"expr":{"PLpgSQL_expr":{"query":"x","parseMode":2}}}}]}}}}
+]
+== 019
+select simplecaller()
+--
+[]
+== 020
+drop function simplesql()
+--
+[]
+== 021
+create function simplesql() returns setof int language sql
+as $$select 22 + 22$$
+--
+[
+{"PLpgSQL_function":{"datums":[]}}
+]
+== 022
+select simplecaller()
+--
+[]
+== 023
+select simplecaller()
+--
+[]
+== 024
+-- Check handling of simple expression in a scrollable cursor (bug #18859)
+
+do $$
+declare
+ p_CurData refcursor;
+ val int;
+begin
+ open p_CurData scroll for select 42;
+ fetch p_CurData into val;
+ raise notice 'val = %', val;
+end; $$
+--
+[
+{"PLpgSQL_function":{"datums":[{"PLpgSQL_var":{"refname":"found","datatype":{"PLpgSQL_type":{"typname":"pg_catalog.\"boolean\""}}}},{"PLpgSQL_var":{"refname":"p_curdata","lineno":3,"datatype":{"PLpgSQL_type":{"typname":"refcursor"}}}},{"PLpgSQL_var":{"refname":"val","lineno":4,"datatype":{"PLpgSQL_type":{"typname":"int"}}}},{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"val","varno":2}]}}],"action":{"PLpgSQL_stmt_block":{"lineno":5,"body":[{"PLpgSQL_stmt_open":{"lineno":6,"curvar":1,"cursor_options":258,"query":{"PLpgSQL_expr":{"query":"select 42","parseMode":0}}}},{"PLpgSQL_stmt_fetch":{"lineno":7,"target":{"PLpgSQL_row":{"refname":"(unnamed row)","lineno":7,"fields":[{"name":"val","varno":2}]}},"curvar":1,"direction":0,"how_many":1}},{"PLpgSQL_stmt_raise":{"lineno":8,"elog_level":18,"message":"val = %","params":[{"PLpgSQL_expr":{"query":"val","parseMode":2}}]}},{"PLpgSQL_stmt_return":{}}]}}}}
+]

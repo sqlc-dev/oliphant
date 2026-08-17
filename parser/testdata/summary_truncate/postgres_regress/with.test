@@ -1,0 +1,3894 @@
+== 001
+-- truncate_limit: 100
+|--
+-- Tests for common table expressions (WITH query, ... SELECT ...)
+|--
+
+-- Basic WITH
+WITH q1(x,y) AS (SELECT 1,2)
+SELECT * FROM q1, q1 AS q2
+--
+ALIAS: "q2"="q1"
+CTE: "q1"
+STMT: SelectStmt
+TRUNCATED: "WITH q1(x, y) AS (SELECT 1, 2) SELECT * FROM q1, q1 q2"
+== 002
+-- truncate_limit: 100
+-- Multiple uses are evaluated only once
+SELECT count(*) FROM (
+  WITH q1(x) AS (SELECT random() FROM generate_series(1, 5))
+    SELECT * FROM q1
+  UNION
+    SELECT * FROM q1
+) ss
+--
+CTE: "q1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="random" function="random" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM (WITH q1(x) AS (...) SELECT * FROM q1 UNION SELECT * FROM q1) ss"
+== 003
+-- truncate_limit: 100
+-- WITH RECURSIVE
+
+-- sum of 1..100
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 100
+)
+SELECT sum(n) FROM t
+--
+CTE: "t"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 100) SELECT sum(n) FROM t"
+== 004
+-- truncate_limit: 100
+WITH RECURSIVE t(n) AS (
+    SELECT (VALUES(1))
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 5
+)
+SELECT * FROM t
+--
+CTE: "t"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (SELECT ... UNION ALL SELECT n + 1 FROM t WHERE n < 5) SELECT * FROM t"
+== 005
+-- truncate_limit: 100
+-- UNION DISTINCT requires hashable type
+WITH RECURSIVE t(n) AS (
+    VALUES ('01'::varbit)
+UNION
+    SELECT n || '10'::varbit FROM t WHERE n < '100'::varbit
+)
+SELECT n FROM t
+--
+CTE: "t"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (VALUES ('01'::varbit) UNION SELECT ... FROM t WHERE ...) SELECT n FROM t"
+== 006
+-- truncate_limit: 100
+-- recursive view
+CREATE RECURSIVE VIEW nums (n) AS
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM nums WHERE n < 5
+--
+CTE: "nums"
+FILTER: schema="" table="" column="n"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE VIEW nums (n) AS WITH RECURSIVE nums(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM nums WH..."
+== 007
+-- truncate_limit: 100
+SELECT * FROM nums
+--
+TABLE: name="nums" schema="" table="nums" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM nums"
+== 008
+-- truncate_limit: 100
+CREATE OR REPLACE RECURSIVE VIEW nums (n) AS
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM nums WHERE n < 6
+--
+CTE: "nums"
+FILTER: schema="" table="" column="n"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE OR REPLACE VIEW nums (n) AS WITH RECURSIVE nums(n) AS (VALUES (1) UNION ALL SELECT n + 1 F..."
+== 009
+-- truncate_limit: 100
+SELECT * FROM nums
+--
+TABLE: name="nums" schema="" table="nums" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM nums"
+== 010
+-- truncate_limit: 100
+-- This is an infinite loop with UNION ALL, but not with UNION
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+UNION
+    SELECT 10-n FROM t)
+SELECT * FROM t
+--
+CTE: "t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (SELECT 1 UNION SELECT 10 - n FROM t) SELECT * FROM t"
+== 011
+-- truncate_limit: 100
+-- This'd be an infinite loop, but outside query reads only as much as needed
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t)
+SELECT * FROM t LIMIT 10
+--
+CTE: "t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t) SELECT * FROM t LIMIT 10"
+== 012
+-- truncate_limit: 100
+-- UNION case should have same property
+WITH RECURSIVE t(n) AS (
+    SELECT 1
+UNION
+    SELECT n+1 FROM t)
+SELECT * FROM t LIMIT 10
+--
+CTE: "t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (SELECT 1 UNION SELECT n + 1 FROM t) SELECT * FROM t LIMIT 10"
+== 013
+-- truncate_limit: 100
+-- Test behavior with an unknown-type literal in the WITH
+WITH q AS (SELECT 'foo' AS x)
+SELECT x, pg_typeof(x) FROM q
+--
+CTE: "q"
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "WITH q AS (SELECT 'foo' AS x) SELECT x, pg_typeof(x) FROM q"
+== 014
+-- truncate_limit: 100
+WITH RECURSIVE t(n) AS (
+    SELECT 'foo'
+UNION ALL
+    SELECT n || ' bar' FROM t WHERE length(n) < 20
+)
+SELECT n, pg_typeof(n) FROM t
+--
+CTE: "t"
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (...) SELECT n, pg_typeof(n) FROM t"
+== 015
+-- truncate_limit: 100
+-- In a perfect world, this would work and resolve the literal as int ...
+-- but for now, we have to be content with resolving to text too soon.
+WITH RECURSIVE t(n) AS (
+    SELECT '7'
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 10
+)
+SELECT n, pg_typeof(n) FROM t
+--
+CTE: "t"
+FUNCTION: name="pg_typeof" function="pg_typeof" schema="" ctx=Call
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(n) AS (...) SELECT n, pg_typeof(n) FROM t"
+== 016
+-- truncate_limit: 100
+-- Deeply nested WITH caused a list-munging problem in v13
+-- Detection of cross-references and self-references
+WITH RECURSIVE w1(c1) AS
+ (WITH w2(c2) AS
+  (WITH w3(c3) AS
+   (WITH w4(c4) AS
+    (WITH w5(c5) AS
+     (WITH RECURSIVE w6(c6) AS
+      (WITH w6(c6) AS
+       (WITH w8(c8) AS
+        (SELECT 1)
+        SELECT * FROM w8)
+       SELECT * FROM w6)
+      SELECT * FROM w6)
+     SELECT * FROM w5)
+    SELECT * FROM w4)
+   SELECT * FROM w3)
+  SELECT * FROM w2)
+SELECT * FROM w1
+--
+CTE: "w1"
+CTE: "w2"
+CTE: "w3"
+CTE: "w4"
+CTE: "w5"
+CTE: "w6"
+CTE: "w6"
+CTE: "w8"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE w1(c1) AS (WITH w2(c2) AS (...) SELECT * FROM w2) SELECT * FROM w1"
+== 017
+-- truncate_limit: 100
+-- Detection of invalid self-references
+WITH RECURSIVE outermost(x) AS (
+ SELECT 1
+ UNION (WITH innermost1 AS (
+  SELECT 2
+  UNION (WITH innermost2 AS (
+   SELECT 3
+   UNION (WITH innermost3 AS (
+    SELECT 4
+    UNION (WITH innermost4 AS (
+     SELECT 5
+     UNION (WITH innermost5 AS (
+      SELECT 6
+      UNION (WITH innermost6 AS
+       (SELECT 7)
+       SELECT * FROM innermost6))
+      SELECT * FROM innermost5))
+     SELECT * FROM innermost4))
+    SELECT * FROM innermost3))
+   SELECT * FROM innermost2))
+  SELECT * FROM outermost
+  UNION SELECT * FROM innermost1)
+ )
+ SELECT * FROM outermost ORDER BY 1
+--
+CTE: "outermost"
+CTE: "innermost1"
+CTE: "innermost2"
+CTE: "innermost3"
+CTE: "innermost4"
+CTE: "innermost5"
+CTE: "innermost6"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE outermost(x) AS (...) SELECT * FROM outermost ORDER BY 1"
+== 018
+-- truncate_limit: 100
+|--
+-- Some examples with a tree
+|--
+-- department structure represented here is as follows:
+|--
+-- ROOT-+->A-+->B-+->C
+--      |         |
+--      |         +->D-+->F
+--      +->E-+->G
+
+CREATE TEMP TABLE department (
+	id INTEGER PRIMARY KEY,  -- department ID
+	parent_department INTEGER REFERENCES department, -- upper department ID
+	name TEXT -- department name
+)
+--
+TABLE: name="department" schema="" table="department" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE department (id int PRIMARY KEY, parent_department int REFERENCES departmen..."
+== 019
+-- truncate_limit: 100
+INSERT INTO department VALUES (0, NULL, 'ROOT')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (0, NULL, 'ROOT')"
+== 020
+-- truncate_limit: 100
+INSERT INTO department VALUES (1, 0, 'A')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (1, 0, 'A')"
+== 021
+-- truncate_limit: 100
+INSERT INTO department VALUES (2, 1, 'B')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (2, 1, 'B')"
+== 022
+-- truncate_limit: 100
+INSERT INTO department VALUES (3, 2, 'C')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (3, 2, 'C')"
+== 023
+-- truncate_limit: 100
+INSERT INTO department VALUES (4, 2, 'D')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (4, 2, 'D')"
+== 024
+-- truncate_limit: 100
+INSERT INTO department VALUES (5, 0, 'E')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (5, 0, 'E')"
+== 025
+-- truncate_limit: 100
+INSERT INTO department VALUES (6, 4, 'F')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (6, 4, 'F')"
+== 026
+-- truncate_limit: 100
+INSERT INTO department VALUES (7, 5, 'G')
+--
+TABLE: name="department" schema="" table="department" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO department VALUES (7, 5, 'G')"
+== 027
+-- truncate_limit: 100
+-- extract all departments under 'A'. Result should be A, B, C, D and F
+WITH RECURSIVE subdepartment AS
+(
+	-- non recursive term
+	SELECT name as root_name, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.root_name, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+TABLE: name="department" schema="" table="department" ctx=Select
+ALIAS: "d"="department"
+ALIAS: "sd"="subdepartment"
+CTE: "subdepartment"
+FILTER: schema="" table="" column="name"
+FILTER: schema="" table="d" column="parent_department"
+FILTER: schema="" table="sd" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE subdepartment AS (...) SELECT * FROM subdepartment ORDER BY name"
+== 028
+-- truncate_limit: 100
+-- extract all departments under 'A' with "level" number
+WITH RECURSIVE subdepartment(level, id, parent_department, name) AS
+(
+	-- non recursive term
+	SELECT 1, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.level + 1, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+TABLE: name="department" schema="" table="department" ctx=Select
+ALIAS: "d"="department"
+ALIAS: "sd"="subdepartment"
+CTE: "subdepartment"
+FILTER: schema="" table="" column="name"
+FILTER: schema="" table="d" column="parent_department"
+FILTER: schema="" table="sd" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE subdepartment(level, id, parent_department, name) AS (...) SELECT * FROM subdepart..."
+== 029
+-- truncate_limit: 100
+-- extract all departments under 'A' with "level" number.
+-- Only shows level 2 or more
+WITH RECURSIVE subdepartment(level, id, parent_department, name) AS
+(
+	-- non recursive term
+	SELECT 1, * FROM department WHERE name = 'A'
+
+	UNION ALL
+
+	-- recursive term
+	SELECT sd.level + 1, d.* FROM department AS d, subdepartment AS sd
+		WHERE d.parent_department = sd.id
+)
+SELECT * FROM subdepartment WHERE level >= 2 ORDER BY name
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+TABLE: name="department" schema="" table="department" ctx=Select
+ALIAS: "d"="department"
+ALIAS: "sd"="subdepartment"
+CTE: "subdepartment"
+FILTER: schema="" table="" column="level"
+FILTER: schema="" table="" column="name"
+FILTER: schema="" table="d" column="parent_department"
+FILTER: schema="" table="sd" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE subdepartment(level, id, parent_department, name) AS (...) SELECT * FROM subdepart..."
+== 030
+-- truncate_limit: 100
+-- "RECURSIVE" is ignored if the query has no self-reference
+WITH RECURSIVE subdepartment AS
+(
+	-- note lack of recursive UNION structure
+	SELECT * FROM department WHERE name = 'A'
+)
+SELECT * FROM subdepartment ORDER BY name
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+CTE: "subdepartment"
+FILTER: schema="" table="" column="name"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE subdepartment AS (...) SELECT * FROM subdepartment ORDER BY name"
+== 031
+-- truncate_limit: 100
+-- inside subqueries
+SELECT count(*) FROM (
+    WITH RECURSIVE t(n) AS (
+        SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 500
+    )
+    SELECT * FROM t) AS t WHERE n < (
+        SELECT count(*) FROM (
+            WITH RECURSIVE t(n) AS (
+                   SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 100
+                )
+            SELECT * FROM t WHERE n < 50000
+         ) AS t WHERE n < 100)
+--
+CTE: "t"
+CTE: "t"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="n"
+FILTER: schema="" table="" column="n"
+FILTER: schema="" table="" column="n"
+FILTER: schema="" table="" column="n"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM (WITH RECURSIVE t(n) AS (...) SELECT * FROM t) t WHERE ..."
+== 032
+-- truncate_limit: 100
+-- use same CTE twice at different subquery levels
+WITH q1(x,y) AS (
+    SELECT hundred, sum(ten) FROM tenk1 GROUP BY hundred
+  )
+SELECT count(*) FROM q1 WHERE y > (SELECT sum(y)/100 FROM q1 qsub)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "qsub"="q1"
+CTE: "q1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="y"
+STMT: SelectStmt
+TRUNCATED: "WITH q1(x, y) AS (...) SELECT count(*) FROM q1 WHERE y > (SELECT sum(y) / 100 FROM q1 qsub)"
+== 033
+-- truncate_limit: 100
+-- via a VIEW
+CREATE TEMPORARY VIEW vsubdepartment AS
+	WITH RECURSIVE subdepartment AS
+	(
+		 -- non recursive term
+		SELECT * FROM department WHERE name = 'A'
+		UNION ALL
+		-- recursive term
+		SELECT d.* FROM department AS d, subdepartment AS sd
+			WHERE d.parent_department = sd.id
+	)
+	SELECT * FROM subdepartment
+--
+TABLE: name="vsubdepartment" schema="" table="vsubdepartment" ctx=DDL
+TABLE: name="department" schema="" table="department" ctx=Select
+TABLE: name="department" schema="" table="department" ctx=Select
+ALIAS: "d"="department"
+ALIAS: "sd"="subdepartment"
+CTE: "subdepartment"
+FILTER: schema="" table="" column="name"
+FILTER: schema="" table="d" column="parent_department"
+FILTER: schema="" table="sd" column="id"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY VIEW vsubdepartment AS WITH RECURSIVE subdepartment AS (SELECT * FROM department..."
+== 034
+-- truncate_limit: 100
+SELECT * FROM vsubdepartment ORDER BY name
+--
+TABLE: name="vsubdepartment" schema="" table="vsubdepartment" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM vsubdepartment ORDER BY name"
+== 035
+-- truncate_limit: 100
+-- Check reverse listing
+SELECT pg_get_viewdef('vsubdepartment'::regclass)
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT pg_get_viewdef('vsubdepartment'::regclass)"
+== 036
+-- truncate_limit: 100
+SELECT pg_get_viewdef('vsubdepartment'::regclass, true)
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT pg_get_viewdef('vsubdepartment'::regclass, true)"
+== 037
+-- truncate_limit: 100
+-- Another reverse-listing example
+CREATE VIEW sums_1_100 AS
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 100
+)
+SELECT sum(n) FROM t
+--
+TABLE: name="sums_1_100" schema="" table="sums_1_100" ctx=DDL
+CTE: "t"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+FILTER: schema="" table="" column="n"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE VIEW sums_1_100 AS WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE ..."
+== 038
+-- truncate_limit: 100
+-- corner case in which sub-WITH gets initialized first
+with recursive q as (
+      select * from department
+    union all
+      (with x as (select * from q)
+       select * from x)
+    )
+select * from q limit 24
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+CTE: "q"
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE q AS (...) SELECT * FROM q LIMIT 24"
+== 039
+-- truncate_limit: 100
+with recursive q as (
+      select * from department
+    union all
+      (with recursive x as (
+           select * from department
+         union all
+           (select * from q union all select * from x)
+        )
+       select * from x)
+    )
+select * from q limit 32
+--
+TABLE: name="department" schema="" table="department" ctx=Select
+TABLE: name="department" schema="" table="department" ctx=Select
+CTE: "q"
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE q AS (...) SELECT * FROM q LIMIT 32"
+== 040
+-- truncate_limit: 100
+-- recursive term has sub-UNION
+WITH RECURSIVE t(i,j) AS (
+	VALUES (1,2)
+	UNION ALL
+	SELECT t2.i, t.j+1 FROM
+		(SELECT 2 AS i UNION ALL SELECT 3 AS i) AS t2
+		JOIN t ON (t2.i = t.i+1))
+
+	SELECT * FROM t
+--
+CTE: "t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(i, j) AS (...) SELECT * FROM t"
+== 041
+-- truncate_limit: 100
+|--
+-- different tree example
+|--
+CREATE TEMPORARY TABLE tree(
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER REFERENCES tree(id)
+)
+--
+TABLE: name="tree" schema="" table="tree" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE tree (id int PRIMARY KEY, parent_id int REFERENCES tree (id))"
+== 042
+-- truncate_limit: 100
+INSERT INTO tree
+VALUES (1, NULL), (2, 1), (3,1), (4,2), (5,2), (6,2), (7,3), (8,3),
+       (9,4), (10,4), (11,7), (12,7), (13,7), (14, 9), (15,11), (16,11)
+--
+TABLE: name="tree" schema="" table="tree" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO tree VALUES (...)"
+== 043
+-- truncate_limit: 100
+|--
+-- get all paths from "second level" nodes to leaf nodes
+|--
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.*, t2.* FROM t AS t1 JOIN t AS t2 ON
+	(t1.path[1] = t2.path[1] AND
+	array_upper(t1.path,1) = 1 AND
+	array_upper(t2.path,1) > 1)
+	ORDER BY t1.id, t2.id
+--
+TABLE: name="tree" schema="" table="tree" ctx=Select
+ALIAS: "t1"="t"
+ALIAS: "t2"="t"
+CTE: "t"
+FUNCTION: name="array_upper" function="array_upper" schema="" ctx=Call
+FUNCTION: name="array_upper" function="array_upper" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(id, path) AS (...) SELECT ... FROM t t1 JOIN t t2 ON t1.path[1] = t2.path[1] AND..."
+== 044
+-- truncate_limit: 100
+-- just count 'em
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.id, count(t2.*) FROM t AS t1 JOIN t AS t2 ON
+	(t1.path[1] = t2.path[1] AND
+	array_upper(t1.path,1) = 1 AND
+	array_upper(t2.path,1) > 1)
+	GROUP BY t1.id
+	ORDER BY t1.id
+--
+TABLE: name="tree" schema="" table="tree" ctx=Select
+ALIAS: "t1"="t"
+ALIAS: "t2"="t"
+CTE: "t"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FUNCTION: name="array_upper" function="array_upper" schema="" ctx=Call
+FUNCTION: name="array_upper" function="array_upper" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(id, path) AS (...) SELECT ... FROM t t1 JOIN t t2 ON t1.path[1] = t2.path[1] AND..."
+== 045
+-- truncate_limit: 100
+-- this variant tickled a whole-row-variable bug in 8.4devel
+WITH RECURSIVE t(id, path) AS (
+    VALUES(1,ARRAY[]::integer[])
+UNION ALL
+    SELECT tree.id, t.path || tree.id
+    FROM tree JOIN t ON (tree.parent_id = t.id)
+)
+SELECT t1.id, t2.path, t2 FROM t AS t1 JOIN t AS t2 ON
+(t1.id=t2.id)
+--
+TABLE: name="tree" schema="" table="tree" ctx=Select
+ALIAS: "t1"="t"
+ALIAS: "t2"="t"
+CTE: "t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(id, path) AS (...) SELECT t1.id, t2.path, t2 FROM t t1 JOIN t t2 ON t1.id = t2.id"
+== 046
+-- truncate_limit: 100
+CREATE TEMP TABLE duplicates (a INT NOT NULL)
+--
+TABLE: name="duplicates" schema="" table="duplicates" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE duplicates (a int NOT NULL)"
+== 047
+-- truncate_limit: 100
+INSERT INTO duplicates VALUES(1), (1)
+--
+TABLE: name="duplicates" schema="" table="duplicates" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO duplicates VALUES (1), (1)"
+== 048
+-- truncate_limit: 100
+-- Try out a recursive UNION case where the non-recursive part's table slot
+-- uses TTSOpsBufferHeapTuple and contains duplicate rows.
+WITH RECURSIVE cte (a) as (
+	SELECT a FROM duplicates
+	UNION
+	SELECT a FROM cte
+)
+SELECT a FROM cte
+--
+TABLE: name="duplicates" schema="" table="duplicates" ctx=Select
+CTE: "cte"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE cte(a) AS (SELECT a FROM duplicates UNION SELECT a FROM cte) SELECT a FROM cte"
+== 049
+-- truncate_limit: 100
+-- test that column statistics from a materialized CTE are available
+-- to upper planner (otherwise, we'd get a stupider plan)
+explain (costs off)
+with x as materialized (select unique1 from tenk1 b)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+CTE: "x"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) WITH x AS MATERIALIZED (SELECT unique1 FROM tenk1 b) SELECT count(*) FROM ten..."
+== 050
+-- truncate_limit: 100
+explain (costs off)
+with x as materialized (insert into tenk1 default values returning unique1)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=DML
+ALIAS: "a"="tenk1"
+CTE: "x"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: ExplainStmt
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) WITH x AS MATERIALIZED (INSERT INTO tenk1 DEFAULT VALUES RETURNING unique1) S..."
+== 051
+-- truncate_limit: 100
+-- test that pathkeys from a materialized CTE are propagated up to the
+-- outer query
+explain (costs off)
+with x as materialized (select unique1 from tenk1 b order by unique1)
+select count(*) from tenk1 a
+  where unique1 in (select * from x)
+--
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+TABLE: name="tenk1" schema="" table="tenk1" ctx=Select
+ALIAS: "a"="tenk1"
+ALIAS: "b"="tenk1"
+CTE: "x"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="unique1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) WITH x AS MATERIALIZED (SELECT unique1 FROM tenk1 b ORDER BY unique1) SELECT ..."
+== 052
+-- truncate_limit: 100
+-- SEARCH clause
+
+create temp table graph0( f int, t int, label text )
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE graph0 (f int, t int, label text)"
+== 053
+-- truncate_limit: 100
+insert into graph0 values
+	(1, 2, 'arc 1 -> 2'),
+	(1, 3, 'arc 1 -> 3'),
+	(2, 3, 'arc 2 -> 3'),
+	(1, 4, 'arc 1 -> 4'),
+	(4, 5, 'arc 4 -> 5')
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO graph0 VALUES (...)"
+== 054
+-- truncate_limit: 100
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM graph0 g ..."
+== 055
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET seq SELECT * FRO..."
+== 056
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union distinct
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET seq SELECT * FRO..."
+== 057
+-- truncate_limit: 100
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM graph0 g ..."
+== 058
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH BREADTH FIRST BY f, t SET seq SELECT * F..."
+== 059
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union distinct
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH BREADTH FIRST BY f, t SET seq SELECT * F..."
+== 060
+-- truncate_limit: 100
+-- a constant initial value causes issues for EXPLAIN
+explain (verbose, costs off)
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search depth first by x set y
+select * from test limit 5
+--
+CTE: "test"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE test AS (SELECT 1 AS x UNION ALL SELECT x + 1 FROM te..."
+== 061
+-- truncate_limit: 100
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search depth first by x set y
+select * from test limit 5
+--
+CTE: "test"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE test AS (...) SEARCH DEPTH FIRST BY x SET y SELECT * FROM test LIMIT 5"
+== 062
+-- truncate_limit: 100
+explain (verbose, costs off)
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search breadth first by x set y
+select * from test limit 5
+--
+CTE: "test"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE test AS (SELECT 1 AS x UNION ALL SELECT x + 1 FROM te..."
+== 063
+-- truncate_limit: 100
+with recursive test as (
+  select 1 as x
+  union all
+  select x + 1
+  from test
+) search breadth first by x set y
+select * from test limit 5
+--
+CTE: "test"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE test AS (...) SEARCH BREADTH FIRST BY x SET y SELECT * FROM test LIMIT 5"
+== 064
+-- truncate_limit: 100
+-- various syntax errors
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by foo, tar set seq
+select * from search_graph
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY foo, tar SET seq SELECT *..."
+== 065
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set label
+select * from search_graph
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET label SELECT * F..."
+== 066
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t, f set seq
+select * from search_graph
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t, f SET seq SELECT * ..."
+== 067
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET seq SELECT * FRO..."
+== 068
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	(select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t)
+) search depth first by f, t set seq
+select * from search_graph order by seq
+--
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET seq SELECT * FRO..."
+== 069
+-- truncate_limit: 100
+-- check that we distinguish same CTE name used at different levels
+-- (this case could be supported, perhaps, but it isn't today)
+with recursive x(col) as (
+	select 1
+	union
+	(with x as (select * from x)
+	 select * from x)
+) search depth first by col set seq
+select * from x
+--
+CTE: "x"
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(col) AS (...) SEARCH DEPTH FIRST BY col SET seq SELECT * FROM x"
+== 070
+-- truncate_limit: 100
+-- test ruleutils and view expansion
+create temp view v_search as
+with recursive search_graph(f, t, label) as (
+	select * from graph0 g
+	union all
+	select g.*
+	from graph0 g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+select f, t, label from search_graph
+--
+TABLE: name="v_search" schema="" table="v_search" ctx=DDL
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+TABLE: name="graph0" schema="" table="graph0" ctx=Select
+ALIAS: "g"="graph0"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY VIEW v_search AS WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM grap..."
+== 071
+-- truncate_limit: 100
+select pg_get_viewdef('v_search')
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT pg_get_viewdef('v_search')"
+== 072
+-- truncate_limit: 100
+select * from v_search
+--
+TABLE: name="v_search" schema="" table="v_search" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM v_search"
+== 073
+-- truncate_limit: 100
+|--
+-- test cycle detection
+|--
+create temp table graph( f int, t int, label text )
+--
+TABLE: name="graph" schema="" table="graph" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE graph (f int, t int, label text)"
+== 074
+-- truncate_limit: 100
+insert into graph values
+	(1, 2, 'arc 1 -> 2'),
+	(1, 3, 'arc 1 -> 3'),
+	(2, 3, 'arc 2 -> 3'),
+	(1, 4, 'arc 1 -> 4'),
+	(4, 5, 'arc 4 -> 5'),
+	(5, 1, 'arc 5 -> 1')
+--
+TABLE: name="graph" schema="" table="graph" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO graph VALUES (...)"
+== 075
+-- truncate_limit: 100
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union all
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+FILTER: schema="" table="" column="is_cycle"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label, is_cycle, path) AS (...) SELECT * FROM search_graph"
+== 076
+-- truncate_limit: 100
+-- UNION DISTINCT exercises row type hashing support
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union distinct
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+FILTER: schema="" table="" column="is_cycle"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label, is_cycle, path) AS (...) SELECT * FROM search_graph"
+== 077
+-- truncate_limit: 100
+-- ordering by the path column has same effect as SEARCH DEPTH FIRST
+with recursive search_graph(f, t, label, is_cycle, path) as (
+	select *, false, array[row(g.f, g.t)] from graph g
+	union all
+	select g.*, row(g.f, g.t) = any(path), path || row(g.f, g.t)
+	from graph g, search_graph sg
+	where g.f = sg.t and not is_cycle
+)
+select * from search_graph order by path
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+FILTER: schema="" table="" column="is_cycle"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label, is_cycle, path) AS (...) SELECT * FROM search_graph ORDE..."
+== 078
+-- truncate_limit: 100
+-- CYCLE clause
+
+explain (verbose, costs off)
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM graph g U..."
+== 079
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET is_cycle TO true DEFAULT false U..."
+== 080
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union distinct
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to 'Y' default 'N' using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET is_cycle TO 'Y' DEFAULT 'N' USIN..."
+== 081
+-- truncate_limit: 100
+explain (verbose, costs off)
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+) cycle x set is_cycle using path
+select * from test
+--
+CTE: "test"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH RECURSIVE test AS (SELECT 0 AS x UNION ALL SELECT (x + 1) % 10 ..."
+== 082
+-- truncate_limit: 100
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+) cycle x set is_cycle using path
+select * from test
+--
+CTE: "test"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE test AS (...) CYCLE x SET is_cycle TO true DEFAULT false USING path SELECT * FROM ..."
+== 083
+-- truncate_limit: 100
+with recursive test as (
+  select 0 as x
+  union all
+  select (x + 1) % 10
+  from test
+    where not is_cycle  -- redundant, but legal
+) cycle x set is_cycle using path
+select * from test
+--
+CTE: "test"
+FILTER: schema="" table="" column="is_cycle"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE test AS (...) CYCLE x SET is_cycle TO true DEFAULT false USING path SELECT * FROM ..."
+== 084
+-- truncate_limit: 100
+-- multiple CTEs
+with recursive
+graph(f, t, label) as (
+  values (1, 2, 'arc 1 -> 2'),
+         (1, 3, 'arc 1 -> 3'),
+         (2, 3, 'arc 2 -> 3'),
+         (1, 4, 'arc 1 -> 4'),
+         (4, 5, 'arc 4 -> 5'),
+         (5, 1, 'arc 5 -> 1')
+),
+search_graph(f, t, label) as (
+        select * from graph g
+        union all
+        select g.*
+        from graph g, search_graph sg
+        where g.f = sg.t
+) cycle f, t set is_cycle to true default false using path
+select f, t, label from search_graph
+--
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE graph(f, t, label) AS (...), search_graph(f, t, label) AS (...) CYCLE f, t SET is_..."
+== 085
+-- truncate_limit: 100
+-- star expansion
+with recursive a as (
+	select 1 as b
+	union all
+	select * from a
+) cycle b set c using p
+select * from a
+--
+CTE: "a"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE a AS (...) CYCLE b SET c TO true DEFAULT false USING p SELECT * FROM a"
+== 086
+-- truncate_limit: 100
+-- search+cycle
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set seq
+  cycle f, t set is_cycle using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET seq CYCLE f, t S..."
+== 087
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search breadth first by f, t set seq
+  cycle f, t set is_cycle using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH BREADTH FIRST BY f, t SET seq CYCLE f, t..."
+== 088
+-- truncate_limit: 100
+-- various syntax errors
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle foo, tar set is_cycle using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE foo, tar SET is_cycle TO true DEFAULT fal..."
+== 089
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to true default 55 using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET is_cycle TO true DEFAULT 55 USIN..."
+== 090
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to point '(1,1)' default point '(0,0)' using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET is_cycle TO  point '(1,1)' DEFAU..."
+== 091
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set label to true default false using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET label TO true DEFAULT false USIN..."
+== 092
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to true default false using label
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET is_cycle TO true DEFAULT false U..."
+== 093
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set foo to true default false using foo
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t SET foo TO true DEFAULT false USING ..."
+== 094
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t, f set is_cycle to true default false using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) CYCLE f, t, f SET is_cycle TO true DEFAULT fals..."
+== 095
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set foo
+  cycle f, t set foo to true default false using path
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET foo CYCLE f, t S..."
+== 096
+-- truncate_limit: 100
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) search depth first by f, t set foo
+  cycle f, t set is_cycle to true default false using foo
+select * from search_graph
+--
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE search_graph(f, t, label) AS (...) SEARCH DEPTH FIRST BY f, t SET foo CYCLE f, t S..."
+== 097
+-- truncate_limit: 100
+-- test ruleutils and view expansion
+create temp view v_cycle1 as
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle using path
+select f, t, label from search_graph
+--
+TABLE: name="v_cycle1" schema="" table="v_cycle1" ctx=DDL
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY VIEW v_cycle1 AS WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM grap..."
+== 098
+-- truncate_limit: 100
+create temp view v_cycle2 as
+with recursive search_graph(f, t, label) as (
+	select * from graph g
+	union all
+	select g.*
+	from graph g, search_graph sg
+	where g.f = sg.t
+) cycle f, t set is_cycle to 'Y' default 'N' using path
+select f, t, label from search_graph
+--
+TABLE: name="v_cycle2" schema="" table="v_cycle2" ctx=DDL
+TABLE: name="graph" schema="" table="graph" ctx=Select
+TABLE: name="graph" schema="" table="graph" ctx=Select
+ALIAS: "g"="graph"
+ALIAS: "sg"="search_graph"
+CTE: "search_graph"
+FILTER: schema="" table="g" column="f"
+FILTER: schema="" table="sg" column="t"
+STMT: ViewStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY VIEW v_cycle2 AS WITH RECURSIVE search_graph(f, t, label) AS (SELECT * FROM grap..."
+== 099
+-- truncate_limit: 100
+select pg_get_viewdef('v_cycle1')
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT pg_get_viewdef('v_cycle1')"
+== 100
+-- truncate_limit: 100
+select pg_get_viewdef('v_cycle2')
+--
+FUNCTION: name="pg_get_viewdef" function="pg_get_viewdef" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT pg_get_viewdef('v_cycle2')"
+== 101
+-- truncate_limit: 100
+select * from v_cycle1
+--
+TABLE: name="v_cycle1" schema="" table="v_cycle1" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM v_cycle1"
+== 102
+-- truncate_limit: 100
+select * from v_cycle2
+--
+TABLE: name="v_cycle2" schema="" table="v_cycle2" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM v_cycle2"
+== 103
+-- truncate_limit: 100
+|--
+-- test multiple WITH queries
+|--
+WITH RECURSIVE
+  y (id) AS (VALUES (1)),
+  x (id) AS (SELECT * FROM y UNION ALL SELECT id+1 FROM x WHERE id < 5)
+SELECT * FROM x
+--
+CTE: "y"
+CTE: "x"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE y(id) AS (VALUES (1)), x(id) AS (...) SELECT * FROM x"
+== 104
+-- truncate_limit: 100
+-- forward reference OK
+WITH RECURSIVE
+    x(id) AS (SELECT * FROM y UNION ALL SELECT id+1 FROM x WHERE id < 5),
+    y(id) AS (values (1))
+ SELECT * FROM x
+--
+CTE: "x"
+CTE: "y"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (VALUES (1)) SELECT * FROM x"
+== 105
+-- truncate_limit: 100
+WITH RECURSIVE
+   x(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 5),
+   y(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM y WHERE id < 10)
+ SELECT y.*, x.* FROM y LEFT JOIN x USING (id)
+--
+CTE: "x"
+CTE: "y"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (...) SELECT y.*, x.* FROM y LEFT JOIN x USING (id)"
+== 106
+-- truncate_limit: 100
+WITH RECURSIVE
+   x(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 5),
+   y(id) AS
+     (VALUES (1) UNION ALL SELECT id+1 FROM x WHERE id < 10)
+ SELECT y.*, x.* FROM y LEFT JOIN x USING (id)
+--
+CTE: "x"
+CTE: "y"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (...) SELECT y.*, x.* FROM y LEFT JOIN x USING (id)"
+== 107
+-- truncate_limit: 100
+WITH RECURSIVE
+   x(id) AS
+     (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 3 ),
+   y(id) AS
+     (SELECT * FROM x UNION ALL SELECT * FROM x),
+   z(id) AS
+     (SELECT * FROM x UNION ALL SELECT id+1 FROM z WHERE id < 10)
+ SELECT * FROM z
+--
+CTE: "x"
+CTE: "y"
+CTE: "z"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (...), z(id) AS (...) SELECT * FROM z"
+== 108
+-- truncate_limit: 100
+WITH RECURSIVE
+   x(id) AS
+     (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 3 ),
+   y(id) AS
+     (SELECT * FROM x UNION ALL SELECT * FROM x),
+   z(id) AS
+     (SELECT * FROM y UNION ALL SELECT id+1 FROM z WHERE id < 10)
+ SELECT * FROM z
+--
+CTE: "x"
+CTE: "y"
+CTE: "z"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (...), z(id) AS (...) SELECT * FROM z"
+== 109
+-- truncate_limit: 100
+|--
+-- Test WITH attached to a data-modifying statement
+|--
+
+CREATE TEMPORARY TABLE y (a INTEGER)
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE y (a int)"
+== 110
+-- truncate_limit: 100
+INSERT INTO y SELECT generate_series(1, 10)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO y SELECT generate_series(1, 10)"
+== 111
+-- truncate_limit: 100
+WITH t AS (
+	SELECT a FROM y
+)
+INSERT INTO y
+SELECT a+20 FROM t RETURNING *
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "t"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH t AS (SELECT a FROM y) INSERT INTO y SELECT a + 20 FROM t RETURNING *"
+== 112
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 113
+-- truncate_limit: 100
+WITH t AS (
+	SELECT a FROM y
+)
+UPDATE y SET a = y.a-10 FROM t WHERE y.a > 20 AND t.a = y.a RETURNING y.a
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "t"
+STMT: UpdateStmt
+STMT: SelectStmt
+TRUNCATED: "WITH t AS (...) UPDATE y SET a = y.a - 10 FROM t WHERE y.a > 20 AND t.a = y.a RETURNING y.a"
+== 114
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 115
+-- truncate_limit: 100
+WITH RECURSIVE t(a) AS (
+	SELECT 11
+	UNION ALL
+	SELECT a+1 FROM t WHERE a < 50
+)
+DELETE FROM y USING t WHERE t.a = y.a RETURNING y.a
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+FILTER: schema="" table="" column="a"
+STMT: DeleteStmt
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(a) AS (...) DELETE FROM y USING t WHERE t.a = y.a RETURNING y.a"
+== 116
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 117
+-- truncate_limit: 100
+DROP TABLE y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE y"
+== 118
+-- truncate_limit: 100
+|--
+-- error cases
+|--
+
+WITH x(n, b) AS (SELECT 1)
+SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH x(n, b) AS (SELECT 1) SELECT * FROM x"
+== 119
+-- truncate_limit: 100
+-- INTERSECT
+WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT SELECT n + 1 FROM x) SELECT * FROM x"
+== 120
+-- truncate_limit: 100
+WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT ALL SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 INTERSECT ALL SELECT n + 1 FROM x) SELECT * FROM x"
+== 121
+-- truncate_limit: 100
+-- EXCEPT
+WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT SELECT n + 1 FROM x) SELECT * FROM x"
+== 122
+-- truncate_limit: 100
+WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT ALL SELECT n+1 FROM x)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 EXCEPT ALL SELECT n + 1 FROM x) SELECT * FROM x"
+== 123
+-- truncate_limit: 100
+-- no non-recursive term
+WITH RECURSIVE x(n) AS (SELECT n FROM x)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT n FROM x) SELECT * FROM x"
+== 124
+-- truncate_limit: 100
+-- recursive term in the left hand side (strictly speaking, should allow this)
+WITH RECURSIVE x(n) AS (SELECT n FROM x UNION ALL SELECT 1)
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT n FROM x UNION ALL SELECT 1) SELECT * FROM x"
+== 125
+-- truncate_limit: 100
+-- allow this, because we historically have
+WITH RECURSIVE x(n) AS (
+  WITH x1 AS (SELECT 1 AS n)
+    SELECT 0
+    UNION
+    SELECT * FROM x1)
+	SELECT * FROM x
+--
+CTE: "x"
+CTE: "x1"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (WITH x1 AS (SELECT 1 AS n) SELECT 0 UNION SELECT * FROM x1) SELECT * FROM x"
+== 126
+-- truncate_limit: 100
+-- but this should be rejected
+WITH RECURSIVE x(n) AS (
+  WITH x1 AS (SELECT 1 FROM x)
+    SELECT 0
+    UNION
+    SELECT * FROM x1)
+	SELECT * FROM x
+--
+CTE: "x"
+CTE: "x1"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (WITH x1 AS (...) SELECT 0 UNION SELECT * FROM x1) SELECT * FROM x"
+== 127
+-- truncate_limit: 100
+-- and this too
+WITH RECURSIVE x(n) AS (
+  (WITH x1 AS (SELECT 1 FROM x) SELECT * FROM x1)
+  UNION
+  SELECT 0)
+	SELECT * FROM x
+--
+CTE: "x"
+CTE: "x1"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS ((WITH x1 AS (...) SELECT * FROM x1) UNION SELECT 0) SELECT * FROM x"
+== 128
+-- truncate_limit: 100
+-- and this
+WITH RECURSIVE x(n) AS (
+  SELECT 0 UNION SELECT 1
+  ORDER BY (SELECT n FROM x))
+	SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 0 UNION SELECT 1 ORDER BY (SELECT n FROM x)) SELECT * FROM x"
+== 129
+-- truncate_limit: 100
+-- and this
+WITH RECURSIVE x(n) AS (
+  WITH sub_cte AS (SELECT * FROM x)
+  DELETE FROM graph RETURNING f)
+	SELECT * FROM x
+--
+TABLE: name="graph" schema="" table="graph" ctx=DML
+CTE: "x"
+CTE: "sub_cte"
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (WITH sub_cte AS (...) DELETE FROM graph RETURNING f) SELECT * FROM x"
+== 130
+-- truncate_limit: 100
+CREATE TEMPORARY TABLE y (a INTEGER)
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE y (a int)"
+== 131
+-- truncate_limit: 100
+INSERT INTO y SELECT generate_series(1, 10)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO y SELECT generate_series(1, 10)"
+== 132
+-- truncate_limit: 100
+-- LEFT JOIN
+
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM y LEFT JOIN x ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (...) SELECT * FROM x"
+== 133
+-- truncate_limit: 100
+-- RIGHT JOIN
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM x RIGHT JOIN y ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (...) SELECT * FROM x"
+== 134
+-- truncate_limit: 100
+-- FULL JOIN
+WITH RECURSIVE x(n) AS (SELECT a FROM y WHERE a = 1
+	UNION ALL
+	SELECT x.n+1 FROM x FULL JOIN y ON x.n = y.a WHERE n < 10)
+SELECT * FROM x
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "x"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (...) SELECT * FROM x"
+== 135
+-- truncate_limit: 100
+-- subquery
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x
+                          WHERE n IN (SELECT * FROM x))
+  SELECT * FROM x
+--
+CTE: "x"
+FILTER: schema="" table="" column="n"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE ...) SELECT * FROM x"
+== 136
+-- truncate_limit: 100
+-- aggregate functions
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT count(*) FROM x)
+  SELECT * FROM x
+--
+CTE: "x"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT count(*) FROM x) SELECT * FROM x"
+== 137
+-- truncate_limit: 100
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT sum(n) FROM x)
+  SELECT * FROM x
+--
+CTE: "x"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT sum(n) FROM x) SELECT * FROM x"
+== 138
+-- truncate_limit: 100
+-- ORDER BY
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x ORDER BY 1)
+  SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM x ORDER BY 1) SELECT * FROM x"
+== 139
+-- truncate_limit: 100
+-- LIMIT/OFFSET
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x LIMIT 10 OFFSET 1)
+  SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM x LIMIT 10 OFFSET 1) SELECT * FROM x"
+== 140
+-- truncate_limit: 100
+-- FOR UPDATE
+WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x FOR UPDATE)
+  SELECT * FROM x
+--
+CTE: "x"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM x FOR UPDATE) SELECT * FROM x"
+== 141
+-- truncate_limit: 100
+-- target list has a recursive query name
+WITH RECURSIVE x(id) AS (values (1)
+    UNION ALL
+    SELECT (SELECT * FROM x) FROM x WHERE id < 5
+) SELECT * FROM x
+--
+CTE: "x"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (VALUES (1) UNION ALL SELECT ... FROM x WHERE id < 5) SELECT * FROM x"
+== 142
+-- truncate_limit: 100
+-- mutual recursive query (not implemented)
+WITH RECURSIVE
+  x (id) AS (SELECT 1 UNION ALL SELECT id+1 FROM y WHERE id < 5),
+  y (id) AS (SELECT 1 UNION ALL SELECT id+1 FROM x WHERE id < 5)
+SELECT * FROM x
+--
+CTE: "x"
+CTE: "y"
+FILTER: schema="" table="" column="id"
+FILTER: schema="" table="" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE x(id) AS (...), y(id) AS (...) SELECT * FROM x"
+== 143
+-- truncate_limit: 100
+-- non-linear recursion is not allowed
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          UNION ALL
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 144
+-- truncate_limit: 100
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+	   SELECT * FROM
+       (SELECT i+1 FROM foo WHERE i < 10
+          UNION ALL
+       SELECT i+1 FROM foo WHERE i < 5) AS t
+) SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 145
+-- truncate_limit: 100
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          EXCEPT
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 146
+-- truncate_limit: 100
+WITH RECURSIVE foo(i) AS
+    (values (1)
+    UNION ALL
+       (SELECT i+1 FROM foo WHERE i < 10
+          INTERSECT
+       SELECT i+1 FROM foo WHERE i < 5)
+) SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 147
+-- truncate_limit: 100
+-- Wrong type induced from non-recursive term
+WITH RECURSIVE foo(i) AS
+   (SELECT i FROM (VALUES(1),(2)) t(i)
+   UNION ALL
+   SELECT (i+1)::numeric(10,0) FROM foo WHERE i < 10)
+SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 148
+-- truncate_limit: 100
+-- rejects different typmod, too (should we allow this?)
+WITH RECURSIVE foo(i) AS
+   (SELECT i::numeric(3,0) FROM (VALUES(1),(2)) t(i)
+   UNION ALL
+   SELECT (i+1)::numeric(10,0) FROM foo WHERE i < 10)
+SELECT * FROM foo
+--
+CTE: "foo"
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE foo(i) AS (...) SELECT * FROM foo"
+== 149
+-- truncate_limit: 100
+-- disallow OLD/NEW reference in CTE
+CREATE TEMPORARY TABLE x (n integer)
+--
+TABLE: name="x" schema="" table="x" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE x (n int)"
+== 150
+-- truncate_limit: 100
+CREATE RULE r2 AS ON UPDATE TO x DO INSTEAD
+    WITH t AS (SELECT OLD.*) UPDATE y SET a = t.n FROM t
+--
+TABLE: name="x" schema="" table="x" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE RULE r2 AS ON UPDATE TO x DO INSTEAD WITH t AS (SELECT old.*) UPDATE y SET a = t.n FROM t"
+== 151
+-- truncate_limit: 100
+|--
+-- test for bug #4902
+|--
+with cte(foo) as ( values(42) ) values((select foo from cte))
+--
+CTE: "cte"
+STMT: SelectStmt
+TRUNCATED: "WITH cte(foo) AS (VALUES (42)) VALUES ((SELECT foo FROM cte))"
+== 152
+-- truncate_limit: 100
+with cte(foo) as ( select 42 ) select * from ((select foo from cte)) q
+--
+CTE: "cte"
+STMT: SelectStmt
+TRUNCATED: "WITH cte(foo) AS (SELECT 42) SELECT * FROM (SELECT foo FROM cte) q"
+== 153
+-- truncate_limit: 100
+-- test CTE referencing an outer-level variable (to see that changed-parameter
+-- signaling still works properly after fixing this bug)
+select ( with cte(foo) as ( values(f1) )
+         select (select foo from cte) )
+from int4_tbl
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "cte"
+STMT: SelectStmt
+TRUNCATED: "SELECT (WITH cte(foo) AS (VALUES (f1)) SELECT (SELECT foo FROM cte)) FROM int4_tbl"
+== 154
+-- truncate_limit: 100
+select ( with cte(foo) as ( values(f1) )
+          values((select foo from cte)) )
+from int4_tbl
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+CTE: "cte"
+STMT: SelectStmt
+TRUNCATED: "SELECT (WITH cte(foo) AS (VALUES (f1)) VALUES ((SELECT foo FROM cte))) FROM int4_tbl"
+== 155
+-- truncate_limit: 100
+|--
+-- test for bug #19055: interaction of WITH with aggregates
+|--
+-- The reference to cte1 must determine the aggregate's level,
+-- even though it contains no Vars referencing cte1
+explain (verbose, costs off)
+select f1, (with cte1(x,y) as (select 1,2)
+            select count((select i4.f1 from cte1))) as ss
+from int4_tbl i4
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+CTE: "cte1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) SELECT f1, (WITH cte1(x, y) AS (SELECT 1, 2) SELECT count((SELECT i4..."
+== 156
+-- truncate_limit: 100
+select f1, (with cte1(x,y) as (select 1,2)
+            select count((select i4.f1 from cte1))) as ss
+from int4_tbl i4
+--
+TABLE: name="int4_tbl" schema="" table="int4_tbl" ctx=Select
+ALIAS: "i4"="int4_tbl"
+CTE: "cte1"
+FUNCTION: name="count" function="count" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT f1, (WITH cte1(x, y) AS (...) SELECT count((SELECT ... FROM cte1))) AS ss FROM int4_tbl i4"
+== 157
+-- truncate_limit: 100
+|--
+-- test for nested-recursive-WITH bug
+|--
+WITH RECURSIVE t(j) AS (
+    WITH RECURSIVE s(i) AS (
+        VALUES (1)
+        UNION ALL
+        SELECT i+1 FROM s WHERE i < 10
+    )
+    SELECT i FROM s
+    UNION ALL
+    SELECT j+1 FROM t WHERE j < 10
+)
+SELECT * FROM t
+--
+CTE: "t"
+CTE: "s"
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE t(j) AS (...) SELECT * FROM t"
+== 158
+-- truncate_limit: 100
+|--
+-- test WITH attached to intermediate-level set operation
+|--
+
+WITH outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM innermost
+         UNION SELECT 3)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+CTE: "outermost"
+CTE: "innermost"
+STMT: SelectStmt
+TRUNCATED: "WITH outermost(x) AS (...) SELECT * FROM outermost ORDER BY 1"
+== 159
+-- truncate_limit: 100
+WITH outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM outermost  -- fail
+         UNION SELECT * FROM innermost)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+CTE: "outermost"
+CTE: "innermost"
+STMT: SelectStmt
+TRUNCATED: "WITH outermost(x) AS (...) SELECT * FROM outermost ORDER BY 1"
+== 160
+-- truncate_limit: 100
+WITH RECURSIVE outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM outermost
+         UNION SELECT * FROM innermost)
+)
+SELECT * FROM outermost ORDER BY 1
+--
+CTE: "outermost"
+CTE: "innermost"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE outermost(x) AS (...) SELECT * FROM outermost ORDER BY 1"
+== 161
+-- truncate_limit: 100
+WITH RECURSIVE outermost(x) AS (
+  WITH innermost as (SELECT 2 FROM outermost) -- fail
+    SELECT * FROM innermost
+    UNION SELECT * from outermost
+)
+SELECT * FROM outermost ORDER BY 1
+--
+CTE: "outermost"
+CTE: "innermost"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE outermost(x) AS (...) SELECT * FROM outermost ORDER BY 1"
+== 162
+-- truncate_limit: 100
+|--
+-- This test will fail with the old implementation of PARAM_EXEC parameter
+-- assignment, because the "q1" Var passed down to A's targetlist subselect
+-- looks exactly like the "A.id" Var passed down to C's subselect, causing
+-- the old code to give them the same runtime PARAM_EXEC slot.  But the
+-- lifespans of the two parameters overlap, thanks to B also reading A.
+|--
+
+with
+A as ( select q2 as id, (select q1) as x from int8_tbl ),
+B as ( select id, row_number() over (partition by id) as r from A ),
+C as ( select A.id, array(select B.id from B where B.id = A.id) from A )
+select * from C
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+CTE: "a"
+CTE: "b"
+CTE: "c"
+FUNCTION: name="row_number" function="row_number" schema="" ctx=Call
+FILTER: schema="" table="b" column="id"
+FILTER: schema="" table="a" column="id"
+STMT: SelectStmt
+TRUNCATED: "WITH a AS (SELECT ... FROM int8_tbl), b AS (SELECT ... FROM a), c AS (...) SELECT * FROM c"
+== 163
+-- truncate_limit: 100
+|--
+-- Test CTEs read in non-initialization orders
+|--
+
+WITH RECURSIVE
+  tab(id_key,link) AS (VALUES (1,17), (2,17), (3,17), (4,17), (6,17), (5,17)),
+  iter (id_key, row_type, link) AS (
+      SELECT 0, 'base', 17
+    UNION ALL (
+      WITH remaining(id_key, row_type, link, min) AS (
+        SELECT tab.id_key, 'true'::text, iter.link, MIN(tab.id_key) OVER ()
+        FROM tab INNER JOIN iter USING (link)
+        WHERE tab.id_key > iter.id_key
+      ),
+      first_remaining AS (
+        SELECT id_key, row_type, link
+        FROM remaining
+        WHERE id_key=min
+      ),
+      effect AS (
+        SELECT tab.id_key, 'new'::text, tab.link
+        FROM first_remaining e INNER JOIN tab ON e.id_key=tab.id_key
+        WHERE e.row_type = 'false'
+      )
+      SELECT * FROM first_remaining
+      UNION ALL SELECT * FROM effect
+    )
+  )
+SELECT * FROM iter
+--
+ALIAS: "e"="first_remaining"
+CTE: "tab"
+CTE: "iter"
+CTE: "remaining"
+CTE: "first_remaining"
+CTE: "effect"
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FILTER: schema="" table="tab" column="id_key"
+FILTER: schema="" table="iter" column="id_key"
+FILTER: schema="" table="" column="id_key"
+FILTER: schema="" table="" column="min"
+FILTER: schema="" table="e" column="row_type"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE tab(id_key, link) AS (...), iter(id_key, row_type, link) AS (...) SELECT * FROM iter"
+== 164
+-- truncate_limit: 100
+WITH RECURSIVE
+  tab(id_key,link) AS (VALUES (1,17), (2,17), (3,17), (4,17), (6,17), (5,17)),
+  iter (id_key, row_type, link) AS (
+      SELECT 0, 'base', 17
+    UNION (
+      WITH remaining(id_key, row_type, link, min) AS (
+        SELECT tab.id_key, 'true'::text, iter.link, MIN(tab.id_key) OVER ()
+        FROM tab INNER JOIN iter USING (link)
+        WHERE tab.id_key > iter.id_key
+      ),
+      first_remaining AS (
+        SELECT id_key, row_type, link
+        FROM remaining
+        WHERE id_key=min
+      ),
+      effect AS (
+        SELECT tab.id_key, 'new'::text, tab.link
+        FROM first_remaining e INNER JOIN tab ON e.id_key=tab.id_key
+        WHERE e.row_type = 'false'
+      )
+      SELECT * FROM first_remaining
+      UNION ALL SELECT * FROM effect
+    )
+  )
+SELECT * FROM iter
+--
+ALIAS: "e"="first_remaining"
+CTE: "tab"
+CTE: "iter"
+CTE: "remaining"
+CTE: "first_remaining"
+CTE: "effect"
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FILTER: schema="" table="tab" column="id_key"
+FILTER: schema="" table="iter" column="id_key"
+FILTER: schema="" table="" column="id_key"
+FILTER: schema="" table="" column="min"
+FILTER: schema="" table="e" column="row_type"
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE tab(id_key, link) AS (...), iter(id_key, row_type, link) AS (...) SELECT * FROM iter"
+== 165
+-- truncate_limit: 100
+|--
+-- Data-modifying statements in WITH
+|--
+
+-- INSERT ... RETURNING
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (11),
+        (12),
+        (13),
+        (14),
+        (15),
+        (16),
+        (17),
+        (18),
+        (19),
+        (20)
+    RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (...) RETURNING *) SELECT * FROM t"
+== 166
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 167
+-- truncate_limit: 100
+-- UPDATE ... RETURNING
+WITH t AS (
+    UPDATE y
+    SET a=a+1
+    RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: UpdateStmt
+TRUNCATED: "WITH t AS (UPDATE y SET a = a + 1 RETURNING *) SELECT * FROM t"
+== 168
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 169
+-- truncate_limit: 100
+-- DELETE ... RETURNING
+WITH t AS (
+    DELETE FROM y
+    WHERE a <= 10
+    RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t AS (DELETE FROM y WHERE a <= 10 RETURNING *) SELECT * FROM t"
+== 170
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 171
+-- truncate_limit: 100
+-- forward reference
+WITH RECURSIVE t AS (
+	INSERT INTO y
+		SELECT a+5 FROM t2 WHERE a > 5
+	RETURNING *
+), t2 AS (
+	UPDATE y SET a=a-11 RETURNING *
+)
+SELECT * FROM t
+UNION ALL
+SELECT * FROM t2
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+CTE: "t2"
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+STMT: InsertStmt
+STMT: UpdateStmt
+TRUNCATED: "WITH RECURSIVE t AS (...), t2 AS (...) SELECT * FROM t UNION ALL SELECT * FROM t2"
+== 172
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 173
+-- truncate_limit: 100
+-- unconditional DO INSTEAD rule
+CREATE RULE y_rule AS ON DELETE TO y DO INSTEAD
+  INSERT INTO y VALUES(42) RETURNING *
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE RULE y_rule AS ON DELETE TO y DO INSTEAD INSERT INTO y VALUES (42) RETURNING *"
+== 174
+-- truncate_limit: 100
+WITH t AS (
+	DELETE FROM y RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t AS (DELETE FROM y RETURNING *) SELECT * FROM t"
+== 175
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 176
+-- truncate_limit: 100
+DROP RULE y_rule ON y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP RULE y_rule ON y"
+== 177
+-- truncate_limit: 100
+-- check merging of outer CTE with CTE in a rule action
+CREATE TEMP TABLE bug6051 AS
+  select i from generate_series(1,3) as t(i)
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY TABLE bug6051 AS SELECT i FROM generate_series(1, 3) t(i)"
+== 178
+-- truncate_limit: 100
+SELECT * FROM bug6051
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM bug6051"
+== 179
+-- truncate_limit: 100
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+CTE: "t1"
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t1 AS (DELETE FROM bug6051 RETURNING *) INSERT INTO bug6051 SELECT * FROM t1"
+== 180
+-- truncate_limit: 100
+SELECT * FROM bug6051
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM bug6051"
+== 181
+-- truncate_limit: 100
+CREATE TEMP TABLE bug6051_2 (i int)
+--
+TABLE: name="bug6051_2" schema="" table="bug6051_2" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE bug6051_2 (i int)"
+== 182
+-- truncate_limit: 100
+CREATE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD
+ INSERT INTO bug6051_2
+ VALUES(NEW.i)
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD INSERT INTO bug6051_2 VALUES (new.i)"
+== 183
+-- truncate_limit: 100
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+CTE: "t1"
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t1 AS (DELETE FROM bug6051 RETURNING *) INSERT INTO bug6051 SELECT * FROM t1"
+== 184
+-- truncate_limit: 100
+SELECT * FROM bug6051
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM bug6051"
+== 185
+-- truncate_limit: 100
+SELECT * FROM bug6051_2
+--
+TABLE: name="bug6051_2" schema="" table="bug6051_2" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM bug6051_2"
+== 186
+-- truncate_limit: 100
+-- check INSERT ... SELECT rule actions are disallowed on commands
+-- that have modifyingCTEs
+CREATE OR REPLACE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD
+ INSERT INTO bug6051_2
+ SELECT NEW.i
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE OR REPLACE RULE bug6051_ins AS ON INSERT TO bug6051 DO INSTEAD INSERT INTO bug6051_2 SELEC..."
+== 187
+-- truncate_limit: 100
+WITH t1 AS ( DELETE FROM bug6051 RETURNING * )
+INSERT INTO bug6051 SELECT * FROM t1
+--
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+TABLE: name="bug6051" schema="" table="bug6051" ctx=DML
+CTE: "t1"
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t1 AS (DELETE FROM bug6051 RETURNING *) INSERT INTO bug6051 SELECT * FROM t1"
+== 188
+-- truncate_limit: 100
+-- silly example to verify that hasModifyingCTE flag is propagated
+CREATE TEMP TABLE bug6051_3 AS
+  SELECT a FROM generate_series(11,13) AS a
+--
+TABLE: name="bug6051_3" schema="" table="bug6051_3" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TEMPORARY TABLE bug6051_3 AS SELECT a FROM generate_series(11, 13) a"
+== 189
+-- truncate_limit: 100
+CREATE RULE bug6051_3_ins AS ON INSERT TO bug6051_3 DO INSTEAD
+  SELECT i FROM bug6051_2
+--
+TABLE: name="bug6051_3" schema="" table="bug6051_3" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE RULE bug6051_3_ins AS ON INSERT TO bug6051_3 DO INSTEAD SELECT i FROM bug6051_2"
+== 190
+-- truncate_limit: 100
+BEGIN
+--
+STMT: TransactionStmt
+TRUNCATED: "BEGIN"
+== 191
+-- truncate_limit: 100
+SET LOCAL debug_parallel_query = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET LOCAL debug_parallel_query TO ON"
+== 192
+-- truncate_limit: 100
+WITH t1 AS ( DELETE FROM bug6051_3 RETURNING * )
+  INSERT INTO bug6051_3 SELECT * FROM t1
+--
+TABLE: name="bug6051_3" schema="" table="bug6051_3" ctx=DML
+TABLE: name="bug6051_3" schema="" table="bug6051_3" ctx=DML
+CTE: "t1"
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t1 AS (DELETE FROM bug6051_3 RETURNING *) INSERT INTO bug6051_3 SELECT * FROM t1"
+== 193
+-- truncate_limit: 100
+COMMIT
+--
+STMT: TransactionStmt
+TRUNCATED: "COMMIT"
+== 194
+-- truncate_limit: 100
+SELECT * FROM bug6051_3
+--
+TABLE: name="bug6051_3" schema="" table="bug6051_3" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM bug6051_3"
+== 195
+-- truncate_limit: 100
+-- check case where CTE reference is removed due to optimization
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT q1 FROM
+(
+  WITH t_cte AS (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t"="int8_tbl"
+CTE: "t_cte"
+FILTER: schema="" table="t_cte" column="q1"
+FILTER: schema="" table="i8" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) SELECT q1 FROM (WITH t_cte AS (SELECT * FROM int8_tbl t) SELECT q1, ..."
+== 196
+-- truncate_limit: 100
+SELECT q1 FROM
+(
+  WITH t_cte AS (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t"="int8_tbl"
+CTE: "t_cte"
+FILTER: schema="" table="t_cte" column="q1"
+FILTER: schema="" table="i8" column="q1"
+STMT: SelectStmt
+TRUNCATED: "SELECT q1 FROM (WITH t_cte AS (...) SELECT ... FROM int8_tbl i8) ss"
+== 197
+-- truncate_limit: 100
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT q1 FROM
+(
+  WITH t_cte AS MATERIALIZED (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t"="int8_tbl"
+CTE: "t_cte"
+FILTER: schema="" table="t_cte" column="q1"
+FILTER: schema="" table="i8" column="q1"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) SELECT q1 FROM (WITH t_cte AS MATERIALIZED (SELECT * FROM int8_tbl t..."
+== 198
+-- truncate_limit: 100
+SELECT q1 FROM
+(
+  WITH t_cte AS MATERIALIZED (SELECT * FROM int8_tbl t)
+  SELECT q1, (SELECT q2 FROM t_cte WHERE t_cte.q1 = i8.q1) AS t_sub
+  FROM int8_tbl i8
+) ss
+--
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=Select
+ALIAS: "i8"="int8_tbl"
+ALIAS: "t"="int8_tbl"
+CTE: "t_cte"
+FILTER: schema="" table="t_cte" column="q1"
+FILTER: schema="" table="i8" column="q1"
+STMT: SelectStmt
+TRUNCATED: "SELECT q1 FROM (WITH t_cte AS MATERIALIZED (...) SELECT ... FROM int8_tbl i8) ss"
+== 199
+-- truncate_limit: 100
+-- a truly recursive CTE in the same list
+WITH RECURSIVE t(a) AS (
+	SELECT 0
+		UNION ALL
+	SELECT a+1 FROM t WHERE a+1 < 5
+), t2 as (
+	INSERT INTO y
+		SELECT * FROM t RETURNING *
+)
+SELECT * FROM t2 JOIN y USING (a) ORDER BY a
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+CTE: "t2"
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH RECURSIVE t(a) AS (...), t2 AS (...) SELECT * FROM t2 JOIN y USING (a) ORDER BY a"
+== 200
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 201
+-- truncate_limit: 100
+-- data-modifying WITH in a modifying statement
+WITH t AS (
+    DELETE FROM y
+    WHERE a <= 10
+    RETURNING *
+)
+INSERT INTO y SELECT -a FROM t RETURNING *
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: InsertStmt
+STMT: SelectStmt
+STMT: DeleteStmt
+TRUNCATED: "WITH t AS (DELETE FROM y WHERE a <= 10 RETURNING *) INSERT INTO y SELECT - a FROM t RETURNING *"
+== 202
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 203
+-- truncate_limit: 100
+-- check that WITH query is run to completion even if outer query isn't
+WITH t AS (
+    UPDATE y SET a = a * 100 RETURNING *
+)
+SELECT * FROM t LIMIT 10
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: UpdateStmt
+TRUNCATED: "WITH t AS (UPDATE y SET a = a * 100 RETURNING *) SELECT * FROM t LIMIT 10"
+== 204
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 205
+-- truncate_limit: 100
+-- data-modifying WITH containing INSERT...ON CONFLICT DO UPDATE
+CREATE TABLE withz AS SELECT i AS k, (i || ' v')::text v FROM generate_series(1, 16, 3) i
+--
+TABLE: name="withz" schema="" table="withz" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE withz AS SELECT i AS k, (i || ' v')::text AS v FROM generate_series(1, 16, 3) i"
+== 206
+-- truncate_limit: 100
+ALTER TABLE withz ADD UNIQUE (k)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE withz ADD UNIQUE (k)"
+== 207
+-- truncate_limit: 100
+WITH t AS (
+    INSERT INTO withz SELECT i, 'insert'
+    FROM generate_series(0, 16) i
+    ON CONFLICT (k) DO UPDATE SET v = withz.v || ', now update'
+    RETURNING *
+)
+SELECT * FROM t JOIN y ON t.k = y.a ORDER BY a, k
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "t"
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (...) SELECT * FROM t JOIN y ON t.k = y.a ORDER BY a, k"
+== 208
+-- truncate_limit: 100
+-- Test EXCLUDED.* reference within CTE
+WITH aa AS (
+    INSERT INTO withz VALUES(1, 5) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v
+    WHERE withz.k != EXCLUDED.k
+    RETURNING *
+)
+SELECT * FROM aa
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH aa AS (...) SELECT * FROM aa"
+== 209
+-- truncate_limit: 100
+-- New query/snapshot demonstrates side-effects of previous query.
+SELECT * FROM withz ORDER BY k
+--
+TABLE: name="withz" schema="" table="withz" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM withz ORDER BY k"
+== 210
+-- truncate_limit: 100
+|--
+-- Ensure subqueries within the update clause work, even if they
+-- reference outside values
+|--
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+FILTER: schema="" table="" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH aa AS (...) INSERT INTO withz VALUES (1, 'insert') ON CONFLICT (k) DO UPDATE SET ... = ..."
+== 211
+-- truncate_limit: 100
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = ' update' WHERE withz.k = (SELECT a FROM aa)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH aa AS (...) INSERT INTO withz VALUES (...) ON CONFLICT (k) DO UPDATE SET ... = ... WHERE ..."
+== 212
+-- truncate_limit: 100
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+FILTER: schema="" table="" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH aa AS (...) INSERT INTO withz VALUES (1, 'insert') ON CONFLICT (k) DO UPDATE SET ... = ..."
+== 213
+-- truncate_limit: 100
+WITH aa AS (SELECT 'a' a, 'b' b UNION ALL SELECT 'a' a, 'b' b)
+INSERT INTO withz VALUES(1, 'insert')
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 'a' LIMIT 1)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+FILTER: schema="" table="" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH aa AS (...) INSERT INTO withz VALUES (1, 'insert') ON CONFLICT (k) DO UPDATE SET ... = ..."
+== 214
+-- truncate_limit: 100
+WITH aa AS (SELECT 1 a, 2 b)
+INSERT INTO withz VALUES(1, (SELECT b || ' insert' FROM aa WHERE a = 1 ))
+ON CONFLICT (k) DO UPDATE SET v = (SELECT b || ' update' FROM aa WHERE a = 1 LIMIT 1)
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "aa"
+FILTER: schema="" table="" column="a"
+FILTER: schema="" table="" column="a"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH aa AS (...) INSERT INTO withz VALUES (...) ON CONFLICT (k) DO UPDATE SET ... = ..."
+== 215
+-- truncate_limit: 100
+-- Update a row more than once, in different parts of a wCTE. That is
+-- an allowed, presumably very rare, edge case, but since it was
+-- broken in the past, having a test seems worthwhile.
+WITH simpletup AS (
+  SELECT 2 k, 'Green' v),
+upsert_cte AS (
+  INSERT INTO withz VALUES(2, 'Blue') ON CONFLICT (k) DO
+    UPDATE SET (k, v) = (SELECT k, v FROM simpletup WHERE simpletup.k = withz.k)
+    RETURNING k, v)
+INSERT INTO withz VALUES(2, 'Red') ON CONFLICT (k) DO
+UPDATE SET (k, v) = (SELECT k, v FROM upsert_cte WHERE upsert_cte.k = withz.k)
+RETURNING k, v
+--
+TABLE: name="withz" schema="" table="withz" ctx=DML
+TABLE: name="withz" schema="" table="withz" ctx=DML
+CTE: "simpletup"
+CTE: "upsert_cte"
+FILTER: schema="" table="upsert_cte" column="k"
+FILTER: schema="" table="withz" column="k"
+FILTER: schema="" table="upsert_cte" column="k"
+FILTER: schema="" table="withz" column="k"
+FILTER: schema="" table="simpletup" column="k"
+FILTER: schema="" table="withz" column="k"
+FILTER: schema="" table="simpletup" column="k"
+FILTER: schema="" table="withz" column="k"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH simpletup AS (...), upsert_cte AS (...) INSERT INTO withz VALUES (...) ON CONFLICT (k) DO UP..."
+== 216
+-- truncate_limit: 100
+DROP TABLE withz
+--
+TABLE: name="withz" schema="" table="withz" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE withz"
+== 217
+-- truncate_limit: 100
+-- WITH referenced by MERGE statement
+CREATE TABLE m AS SELECT i AS k, (i || ' v')::text v FROM generate_series(1, 16, 3) i
+--
+TABLE: name="m" schema="" table="m" ctx=DDL
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: CreateTableAsStmt
+STMT: SelectStmt
+TRUNCATED: "CREATE TABLE m AS SELECT i AS k, (i || ' v')::text AS v FROM generate_series(1, 16, 3) i"
+== 218
+-- truncate_limit: 100
+ALTER TABLE m ADD UNIQUE (k)
+--
+TABLE: name="m" schema="" table="m" ctx=DDL
+STMT: AlterTableStmt
+TRUNCATED: "ALTER TABLE m ADD UNIQUE (k)"
+== 219
+-- truncate_limit: 100
+WITH RECURSIVE cte_basic AS (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "cte_basic"
+FILTER: schema="" table="cte_basic" column="a"
+FILTER: schema="" table="m" column="k"
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "WITH RECURSIVE cte_basic AS (...) MERGE INTO m USING (SELECT ...) o ON m.k = o.k WHEN MATCHED THE..."
+== 220
+-- truncate_limit: 100
+-- Basic:
+WITH cte_basic AS MATERIALIZED (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "cte_basic"
+FILTER: schema="" table="cte_basic" column="a"
+FILTER: schema="" table="m" column="k"
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "WITH cte_basic AS MATERIALIZED (...) MERGE INTO m USING (SELECT ... OFFSET 0) o ON m.k = o.k WHEN..."
+== 221
+-- truncate_limit: 100
+-- Examine
+SELECT * FROM m where k = 0
+--
+TABLE: name="m" schema="" table="m" ctx=Select
+FILTER: schema="" table="" column="k"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM m WHERE k = 0"
+== 222
+-- truncate_limit: 100
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH cte_basic AS MATERIALIZED (SELECT 1 a, 'cte_basic val' b)
+MERGE INTO m USING (select 0 k, 'merge source SubPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_basic WHERE cte_basic.a = m.k LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "cte_basic"
+FILTER: schema="" table="cte_basic" column="a"
+FILTER: schema="" table="m" column="k"
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH cte_basic AS MATERIALIZED (SELECT 1 AS a, 'cte_basic val' AS b)..."
+== 223
+-- truncate_limit: 100
+-- InitPlan
+WITH cte_init AS MATERIALIZED (SELECT 1 a, 'cte_init val' b)
+MERGE INTO m USING (select 1 k, 'merge source InitPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_init WHERE a = 1 LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "cte_init"
+FILTER: schema="" table="" column="a"
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "WITH cte_init AS MATERIALIZED (...) MERGE INTO m USING (SELECT ... OFFSET 0) o ON m.k = o.k WHEN ..."
+== 224
+-- truncate_limit: 100
+-- Examine
+SELECT * FROM m where k = 1
+--
+TABLE: name="m" schema="" table="m" ctx=Select
+FILTER: schema="" table="" column="k"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM m WHERE k = 1"
+== 225
+-- truncate_limit: 100
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH cte_init AS MATERIALIZED (SELECT 1 a, 'cte_init val' b)
+MERGE INTO m USING (select 1 k, 'merge source InitPlan' v offset 0) o ON m.k=o.k
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || ' merge update' FROM cte_init WHERE a = 1 LIMIT 1)
+WHEN NOT MATCHED THEN INSERT VALUES(o.k, o.v)
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "cte_init"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH cte_init AS MATERIALIZED (SELECT 1 AS a, 'cte_init val' AS b) M..."
+== 226
+-- truncate_limit: 100
+-- MERGE source comes from CTE:
+WITH merge_source_cte AS MATERIALIZED (SELECT 15 a, 'merge_source_cte val' b)
+MERGE INTO m USING (select * from merge_source_cte) o ON m.k=o.a
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || merge_source_cte.*::text || ' merge update' FROM merge_source_cte WHERE a = 15)
+WHEN NOT MATCHED THEN INSERT VALUES(o.a, o.b || (SELECT merge_source_cte.*::text || ' merge insert' FROM merge_source_cte))
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "merge_source_cte"
+FILTER: schema="" table="" column="a"
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "WITH merge_source_cte AS MATERIALIZED (...) MERGE INTO m USING (SELECT * FROM merge_source_cte) o..."
+== 227
+-- truncate_limit: 100
+-- Examine
+SELECT * FROM m where k = 15
+--
+TABLE: name="m" schema="" table="m" ctx=Select
+FILTER: schema="" table="" column="k"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM m WHERE k = 15"
+== 228
+-- truncate_limit: 100
+-- See EXPLAIN output for same query:
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH merge_source_cte AS MATERIALIZED (SELECT 15 a, 'merge_source_cte val' b)
+MERGE INTO m USING (select * from merge_source_cte) o ON m.k=o.a
+WHEN MATCHED THEN UPDATE SET v = (SELECT b || merge_source_cte.*::text || ' merge update' FROM merge_source_cte WHERE a = 15)
+WHEN NOT MATCHED THEN INSERT VALUES(o.a, o.b || (SELECT merge_source_cte.*::text || ' merge insert' FROM merge_source_cte))
+--
+TABLE: name="m" schema="" table="m" ctx=DML
+CTE: "merge_source_cte"
+FILTER: schema="" table="" column="a"
+STMT: ExplainStmt
+STMT: MergeStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH merge_source_cte AS MATERIALIZED (SELECT 15 AS a, 'merge_source..."
+== 229
+-- truncate_limit: 100
+DROP TABLE m
+--
+TABLE: name="m" schema="" table="m" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE m"
+== 230
+-- truncate_limit: 100
+-- check that run to completion happens in proper ordering
+
+TRUNCATE TABLE y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: TruncateStmt
+TRUNCATED: "TRUNCATE y"
+== 231
+-- truncate_limit: 100
+INSERT INTO y SELECT generate_series(1, 3)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO y SELECT generate_series(1, 3)"
+== 232
+-- truncate_limit: 100
+CREATE TEMPORARY TABLE yy (a INTEGER)
+--
+TABLE: name="yy" schema="" table="yy" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE yy (a int)"
+== 233
+-- truncate_limit: 100
+WITH RECURSIVE t1 AS (
+  INSERT INTO y SELECT * FROM y RETURNING *
+), t2 AS (
+  INSERT INTO yy SELECT * FROM t1 RETURNING *
+)
+SELECT 1
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=Select
+TABLE: name="yy" schema="" table="yy" ctx=DML
+CTE: "t1"
+CTE: "t2"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH RECURSIVE t1 AS (INSERT INTO y SELECT * FROM y RETURNING *), t2 AS (...) SELECT 1"
+== 234
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 235
+-- truncate_limit: 100
+SELECT * FROM yy
+--
+TABLE: name="yy" schema="" table="yy" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM yy"
+== 236
+-- truncate_limit: 100
+WITH RECURSIVE t1 AS (
+  INSERT INTO yy SELECT * FROM t2 RETURNING *
+), t2 AS (
+  INSERT INTO y SELECT * FROM y RETURNING *
+)
+SELECT 1
+--
+TABLE: name="yy" schema="" table="yy" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=DML
+TABLE: name="y" schema="" table="y" ctx=Select
+CTE: "t1"
+CTE: "t2"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH RECURSIVE t1 AS (...), t2 AS (INSERT INTO y SELECT * FROM y RETURNING *) SELECT 1"
+== 237
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 238
+-- truncate_limit: 100
+SELECT * FROM yy
+--
+TABLE: name="yy" schema="" table="yy" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM yy"
+== 239
+-- truncate_limit: 100
+-- triggers
+
+TRUNCATE TABLE y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: TruncateStmt
+TRUNCATED: "TRUNCATE y"
+== 240
+-- truncate_limit: 100
+INSERT INTO y SELECT generate_series(1, 10)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO y SELECT generate_series(1, 10)"
+== 241
+-- truncate_limit: 100
+CREATE FUNCTION y_trigger() RETURNS trigger AS $$
+begin
+  raise notice 'y_trigger: a = %', new.a;
+  return new;
+end;
+$$ LANGUAGE plpgsql
+--
+FUNCTION: name="y_trigger" function="y_trigger" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION y_trigger() RETURNS trigger AS $$\nbegin\n  raise notice 'y_trigger: a = %', new.a;..."
+== 242
+-- truncate_limit: 100
+CREATE TRIGGER y_trig BEFORE INSERT ON y FOR EACH ROW
+    EXECUTE PROCEDURE y_trigger()
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: CreateTrigStmt
+TRUNCATED: "CREATE TRIGGER y_trig BEFORE INSERT ON y FOR EACH ROW EXECUTE FUNCTION y_trigger()"
+== 243
+-- truncate_limit: 100
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (21),
+        (22),
+        (23)
+    RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (21), (22), (23) RETURNING *) SELECT * FROM t"
+== 244
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 245
+-- truncate_limit: 100
+DROP TRIGGER y_trig ON y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TRIGGER y_trig ON y"
+== 246
+-- truncate_limit: 100
+CREATE TRIGGER y_trig AFTER INSERT ON y FOR EACH ROW
+    EXECUTE PROCEDURE y_trigger()
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: CreateTrigStmt
+TRUNCATED: "CREATE TRIGGER y_trig AFTER INSERT ON y FOR EACH ROW EXECUTE FUNCTION y_trigger()"
+== 247
+-- truncate_limit: 100
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (31),
+        (32),
+        (33)
+    RETURNING *
+)
+SELECT * FROM t LIMIT 1
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (31), (32), (33) RETURNING *) SELECT * FROM t LIMIT 1"
+== 248
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 249
+-- truncate_limit: 100
+DROP TRIGGER y_trig ON y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TRIGGER y_trig ON y"
+== 250
+-- truncate_limit: 100
+CREATE OR REPLACE FUNCTION y_trigger() RETURNS trigger AS $$
+begin
+  raise notice 'y_trigger';
+  return null;
+end;
+$$ LANGUAGE plpgsql
+--
+FUNCTION: name="y_trigger" function="y_trigger" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE OR REPLACE FUNCTION y_trigger() RETURNS trigger AS $$\nbegin\n  raise notice 'y_trigger';\n  ..."
+== 251
+-- truncate_limit: 100
+CREATE TRIGGER y_trig AFTER INSERT ON y FOR EACH STATEMENT
+    EXECUTE PROCEDURE y_trigger()
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: CreateTrigStmt
+TRUNCATED: "CREATE TRIGGER y_trig AFTER INSERT ON y EXECUTE FUNCTION y_trigger()"
+== 252
+-- truncate_limit: 100
+WITH t AS (
+    INSERT INTO y
+    VALUES
+        (41),
+        (42),
+        (43)
+    RETURNING *
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (41), (42), (43) RETURNING *) SELECT * FROM t"
+== 253
+-- truncate_limit: 100
+SELECT * FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM y"
+== 254
+-- truncate_limit: 100
+DROP TRIGGER y_trig ON y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TRIGGER y_trig ON y"
+== 255
+-- truncate_limit: 100
+DROP FUNCTION y_trigger()
+--
+FUNCTION: name="y_trigger" function="y_trigger" schema="" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP FUNCTION y_trigger()"
+== 256
+-- truncate_limit: 100
+-- WITH attached to inherited UPDATE or DELETE
+
+CREATE TEMP TABLE parent ( id int, val text )
+--
+TABLE: name="parent" schema="" table="parent" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE parent (id int, val text)"
+== 257
+-- truncate_limit: 100
+CREATE TEMP TABLE child1 ( ) INHERITS ( parent )
+--
+TABLE: name="child1" schema="" table="child1" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE child1 () INHERITS (parent)"
+== 258
+-- truncate_limit: 100
+CREATE TEMP TABLE child2 ( ) INHERITS ( parent )
+--
+TABLE: name="child2" schema="" table="child2" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE child2 () INHERITS (parent)"
+== 259
+-- truncate_limit: 100
+INSERT INTO parent VALUES ( 1, 'p1' )
+--
+TABLE: name="parent" schema="" table="parent" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO parent VALUES (1, 'p1')"
+== 260
+-- truncate_limit: 100
+INSERT INTO child1 VALUES ( 11, 'c11' ),( 12, 'c12' )
+--
+TABLE: name="child1" schema="" table="child1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO child1 VALUES (11, 'c11'), (12, 'c12')"
+== 261
+-- truncate_limit: 100
+INSERT INTO child2 VALUES ( 23, 'c21' ),( 24, 'c22' )
+--
+TABLE: name="child2" schema="" table="child2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO child2 VALUES (23, 'c21'), (24, 'c22')"
+== 262
+-- truncate_limit: 100
+WITH rcte AS ( SELECT sum(id) AS totalid FROM parent )
+UPDATE parent SET id = id + totalid FROM rcte
+--
+TABLE: name="parent" schema="" table="parent" ctx=DML
+TABLE: name="parent" schema="" table="parent" ctx=Select
+CTE: "rcte"
+FUNCTION: name="sum" function="sum" schema="" ctx=Call
+STMT: UpdateStmt
+STMT: SelectStmt
+TRUNCATED: "WITH rcte AS (SELECT sum(id) AS totalid FROM parent) UPDATE parent SET id = id + totalid FROM rcte"
+== 263
+-- truncate_limit: 100
+SELECT * FROM parent
+--
+TABLE: name="parent" schema="" table="parent" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM parent"
+== 264
+-- truncate_limit: 100
+WITH wcte AS ( INSERT INTO child1 VALUES ( 42, 'new' ) RETURNING id AS newid )
+UPDATE parent SET id = id + newid FROM wcte
+--
+TABLE: name="parent" schema="" table="parent" ctx=DML
+TABLE: name="child1" schema="" table="child1" ctx=DML
+CTE: "wcte"
+STMT: UpdateStmt
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH wcte AS (...) UPDATE parent SET id = id + newid FROM wcte"
+== 265
+-- truncate_limit: 100
+SELECT * FROM parent
+--
+TABLE: name="parent" schema="" table="parent" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM parent"
+== 266
+-- truncate_limit: 100
+WITH rcte AS ( SELECT max(id) AS maxid FROM parent )
+DELETE FROM parent USING rcte WHERE id = maxid
+--
+TABLE: name="parent" schema="" table="parent" ctx=DML
+TABLE: name="parent" schema="" table="parent" ctx=Select
+CTE: "rcte"
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: DeleteStmt
+STMT: SelectStmt
+TRUNCATED: "WITH rcte AS (SELECT max(id) AS maxid FROM parent) DELETE FROM parent USING rcte WHERE id = maxid"
+== 267
+-- truncate_limit: 100
+SELECT * FROM parent
+--
+TABLE: name="parent" schema="" table="parent" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM parent"
+== 268
+-- truncate_limit: 100
+WITH wcte AS ( INSERT INTO child2 VALUES ( 42, 'new2' ) RETURNING id AS newid )
+DELETE FROM parent USING wcte WHERE id = newid
+--
+TABLE: name="parent" schema="" table="parent" ctx=DML
+TABLE: name="child2" schema="" table="child2" ctx=DML
+CTE: "wcte"
+STMT: DeleteStmt
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH wcte AS (...) DELETE FROM parent USING wcte WHERE id = newid"
+== 269
+-- truncate_limit: 100
+SELECT * FROM parent
+--
+TABLE: name="parent" schema="" table="parent" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM parent"
+== 270
+-- truncate_limit: 100
+-- check EXPLAIN VERBOSE for a wCTE with RETURNING
+
+EXPLAIN (VERBOSE, COSTS OFF)
+WITH wcte AS ( INSERT INTO int8_tbl VALUES ( 42, 47 ) RETURNING q2 )
+DELETE FROM a_star USING wcte WHERE aa = q2
+--
+TABLE: name="a_star" schema="" table="a_star" ctx=DML
+TABLE: name="int8_tbl" schema="" table="int8_tbl" ctx=DML
+CTE: "wcte"
+STMT: ExplainStmt
+STMT: DeleteStmt
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (VERBOSE, COSTS OFF) WITH wcte AS (INSERT INTO int8_tbl VALUES (42, 47) RETURNING q2) DEL..."
+== 271
+-- truncate_limit: 100
+-- error cases
+
+-- data-modifying WITH tries to use its own output
+WITH RECURSIVE t AS (
+	INSERT INTO y
+		SELECT * FROM t
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH RECURSIVE t AS (INSERT INTO y SELECT * FROM t) VALUES (false)"
+== 272
+-- truncate_limit: 100
+-- no RETURNING in a referenced data-modifying WITH
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) SELECT * FROM t"
+== 273
+-- truncate_limit: 100
+-- RETURNING tries to return its own output
+WITH RECURSIVE t(action, a) AS (
+	MERGE INTO y USING (VALUES (11)) v(a) ON y.a = v.a
+		WHEN NOT MATCHED THEN INSERT VALUES (v.a)
+		RETURNING merge_action(), (SELECT a FROM t)
+)
+SELECT * FROM t
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: MergeStmt
+TRUNCATED: "WITH RECURSIVE t(action, a) AS (...) SELECT * FROM t"
+== 274
+-- truncate_limit: 100
+-- data-modifying WITH allowed only at the top level
+SELECT * FROM (
+	WITH t AS (UPDATE y SET a=a+1 RETURNING *)
+	SELECT * FROM t
+) ss
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: UpdateStmt
+TRUNCATED: "SELECT * FROM (WITH t AS (UPDATE y SET a = a + 1 RETURNING *) SELECT * FROM t) ss"
+== 275
+-- truncate_limit: 100
+-- most variants of rules aren't allowed
+CREATE RULE y_rule AS ON INSERT TO y WHERE a=0 DO INSTEAD DELETE FROM y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE RULE y_rule AS ON INSERT TO y WHERE a = 0 DO INSTEAD DELETE FROM y"
+== 276
+-- truncate_limit: 100
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) VALUES (false)"
+== 277
+-- truncate_limit: 100
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTHING
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTHING"
+== 278
+-- truncate_limit: 100
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) VALUES (false)"
+== 279
+-- truncate_limit: 100
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTIFY foo
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD NOTIFY foo"
+== 280
+-- truncate_limit: 100
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) VALUES (false)"
+== 281
+-- truncate_limit: 100
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO ALSO NOTIFY foo
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO NOTIFY foo"
+== 282
+-- truncate_limit: 100
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) VALUES (false)"
+== 283
+-- truncate_limit: 100
+CREATE OR REPLACE RULE y_rule AS ON INSERT TO y
+  DO INSTEAD (NOTIFY foo; NOTIFY bar)
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: RuleStmt
+TRUNCATED: "CREATE OR REPLACE RULE y_rule AS ON INSERT TO y DO INSTEAD (NOTIFY foo; NOTIFY bar)"
+== 284
+-- truncate_limit: 100
+WITH t AS (
+	INSERT INTO y VALUES(0)
+)
+VALUES(FALSE)
+--
+TABLE: name="y" schema="" table="y" ctx=DML
+CTE: "t"
+STMT: SelectStmt
+STMT: InsertStmt
+TRUNCATED: "WITH t AS (INSERT INTO y VALUES (0)) VALUES (false)"
+== 285
+-- truncate_limit: 100
+DROP RULE y_rule ON y
+--
+TABLE: name="y" schema="" table="y" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP RULE y_rule ON y"
+== 286
+-- truncate_limit: 100
+-- check that parser lookahead for WITH doesn't cause any odd behavior
+create table foo (with baz)
+--
+ERROR: syntax error at or near "with"
+CURSORPOS: 90
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 287
+-- truncate_limit: 100
+-- fail, WITH is a reserved word
+create table foo (with ordinality)
+--
+ERROR: syntax error at or near "with"
+CURSORPOS: 52
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 288
+-- truncate_limit: 100
+-- fail, WITH is a reserved word
+with ordinality as (select 1 as x) select * from ordinality
+--
+CTE: "ordinality"
+STMT: SelectStmt
+TRUNCATED: "WITH ordinality AS (SELECT 1 AS x) SELECT * FROM ordinality"
+== 289
+-- truncate_limit: 100
+-- check sane response to attempt to modify CTE relation
+WITH with_test AS (SELECT 42) INSERT INTO with_test VALUES (1)
+--
+CTE: "with_test"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH with_test AS (SELECT 42) INSERT INTO with_test VALUES (1)"
+== 290
+-- truncate_limit: 100
+-- check response to attempt to modify table with same name as a CTE (perhaps
+-- surprisingly it works, because CTEs don't hide tables from data-modifying
+-- statements)
+create temp table with_test (i int)
+--
+TABLE: name="with_test" schema="" table="with_test" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE with_test (i int)"
+== 291
+-- truncate_limit: 100
+with with_test as (select 42) insert into with_test select * from with_test
+--
+CTE: "with_test"
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "WITH with_test AS (SELECT 42) INSERT INTO with_test SELECT * FROM with_test"
+== 292
+-- truncate_limit: 100
+select * from with_test
+--
+TABLE: name="with_test" schema="" table="with_test" ctx=Select
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM with_test"
+== 293
+-- truncate_limit: 100
+drop table with_test
+--
+TABLE: name="with_test" schema="" table="with_test" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE with_test"

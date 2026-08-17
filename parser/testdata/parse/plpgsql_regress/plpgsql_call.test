@@ -1,0 +1,748 @@
+== 001
+|--
+-- Tests for procedures / CALL syntax
+|--
+
+CREATE PROCEDURE test_proc1()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NULL;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc1"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":75}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    NULL;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":92}}]}}}]}
+== 002
+CALL test_proc1()
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc1"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 003
+-- error: can't return non-NULL
+CREATE PROCEDURE test_proc2()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN 5;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc2"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":62}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    RETURN 5;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":79}}]}}}]}
+== 004
+CREATE TABLE test1 (a int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"test1","inh":true,"relpersistence":"p","location":13},"tableElts":[{"ColumnDef":{"colname":"a","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":22},"is_local":true,"location":20}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 005
+CREATE PROCEDURE test_proc3(x int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO test1 VALUES (x);
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc3"}}],"parameters":[{"FunctionParameter":{"name":"x","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":30},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":35}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    INSERT INTO test1 VALUES (x);\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":52}}]}}}]}
+== 006
+CALL test_proc3(55)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc3"}}],"args":[{"A_Const":{"ival":{"ival":55},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 007
+SELECT * FROM test1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 008
+-- Check that plan revalidation doesn't prevent setting transaction properties
+-- (bug #18059).  This test must include the first temp-object creation in
+-- this script, or it won't exercise the bug scenario.  Hence we put it early.
+CREATE PROCEDURE test_proc3a()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+   COMMIT;
+   SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+   RAISE NOTICE 'done';
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc3a"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":264}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n   COMMIT;\n   SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;\n   RAISE NOTICE 'done';\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":281}}]}}}]}
+== 009
+CALL test_proc3a()
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc3a"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 010
+CREATE TEMP TABLE tt1(f1 int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"tt1","inh":true,"relpersistence":"t","location":18},"tableElts":[{"ColumnDef":{"colname":"f1","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":25},"is_local":true,"location":22}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 011
+CALL test_proc3a()
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc3a"}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 012
+-- nested CALL
+TRUNCATE TABLE test1
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":30}}],"behavior":"DROP_RESTRICT"}}}]}
+== 013
+CREATE PROCEDURE test_proc4(y int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    CALL test_proc3(y);
+    CALL test_proc3($1);
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc4"}}],"parameters":[{"FunctionParameter":{"name":"y","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":30},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":35}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    CALL test_proc3(y);\n    CALL test_proc3($1);\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":52}}]}}}]}
+== 014
+CALL test_proc4(66)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc4"}}],"args":[{"A_Const":{"ival":{"ival":66},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 015
+SELECT * FROM test1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 016
+CALL test_proc4(66)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc4"}}],"args":[{"A_Const":{"ival":{"ival":66},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 017
+SELECT * FROM test1
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":14}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 018
+-- output arguments
+
+CREATE PROCEDURE test_proc5(INOUT a text)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    a := a || '+' || a;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc5"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":57},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":63}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    a := a || '+' || a;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":80}}]}}}]}
+== 019
+CALL test_proc5('abc')
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc5"}}],"args":[{"A_Const":{"sval":{"sval":"abc"},"location":16}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 020
+CREATE PROCEDURE test_proc6(a int, INOUT b int, INOUT c int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    b := b * a;
+    c := c * a;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc6"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":30},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":43},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"c","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":56},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":61}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n    b := b * a;\n    c := c * a;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":78}}]}}}]}
+== 021
+CALL test_proc6(2, 3, 4)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc6"}}],"args":[{"A_Const":{"ival":{"ival":2},"location":16}},{"A_Const":{"ival":{"ival":3},"location":19}},{"A_Const":{"ival":{"ival":4},"location":22}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 022
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);
+    RAISE INFO 'x = %, y = %', x, y;
+    CALL test_proc6(2, c => y, b => x);
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":3}},{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n    x int := 3;\n    y int := 4;\nBEGIN\n    CALL test_proc6(2, x, y);\n    RAISE INFO 'x = %, y = %', x, y;\n    CALL test_proc6(2, c =\u003e y, b =\u003e x);\n    RAISE INFO 'x = %, y = %', x, y;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 023
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x + 1, y);  -- error
+    RAISE INFO 'x = %, y = %', x, y;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":3}},{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n    x int := 3;\n    y int := 4;\nBEGIN\n    CALL test_proc6(2, x + 1, y);  -- error\n    RAISE INFO 'x = %, y = %', x, y;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 024
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x constant int := 3;
+    y int := 4;
+BEGIN
+    CALL test_proc6(2, x, y);  -- error because x is constant
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":3}},{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n    x constant int := 3;\n    y int := 4;\nBEGIN\n    CALL test_proc6(2, x, y);  -- error because x is constant\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 025
+DO
+LANGUAGE plpgsql
+$$
+DECLARE
+    x int := 3;
+    y int := 4;
+BEGIN
+    FOR i IN 1..5 LOOP
+        CALL test_proc6(i, x, y);
+        RAISE INFO 'x = %, y = %', x, y;
+    END LOOP;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":3}},{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n    x int := 3;\n    y int := 4;\nBEGIN\n    FOR i IN 1..5 LOOP\n        CALL test_proc6(i, x, y);\n        RAISE INFO 'x = %, y = %', x, y;\n    END LOOP;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":20}}]}}}]}
+== 026
+-- recursive with output arguments
+
+CREATE PROCEDURE test_proc7(x int, INOUT a int, INOUT b numeric)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+IF x > 1 THEN
+    a := x / 10;
+    b := x / 2;
+    CALL test_proc7(b::int, a, b);
+END IF;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc7"}}],"parameters":[{"FunctionParameter":{"name":"x","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":66},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":79},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":92},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":101}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\nIF x \u003e 1 THEN\n    a := x / 10;\n    b := x / 2;\n    CALL test_proc7(b::int, a, b);\nEND IF;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":118}}]}}}]}
+== 027
+CALL test_proc7(100, -1, -1)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc7"}}],"args":[{"A_Const":{"ival":{"ival":100},"location":16}},{"A_Const":{"ival":{"ival":-1},"location":21}},{"A_Const":{"ival":{"ival":-1},"location":25}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 028
+-- inner COMMIT with output arguments
+
+CREATE PROCEDURE test_proc7c(x int, INOUT a int, INOUT b numeric)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  a := x / 10;
+  b := x / 2;
+  COMMIT;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc7c"}}],"parameters":[{"FunctionParameter":{"name":"x","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":70},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":83},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"numeric"}}],"typemod":-1,"location":96},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":105}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  a := x / 10;\n  b := x / 2;\n  COMMIT;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":122}}]}}}]}
+== 029
+CREATE PROCEDURE test_proc7cc(_x int)
+LANGUAGE plpgsql
+AS $$
+DECLARE _a int; _b numeric;
+BEGIN
+  CALL test_proc7c(_x, _a, _b);
+  RAISE NOTICE '_x: %,_a: %, _b: %', _x, _a, _b;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc7cc"}}],"parameters":[{"FunctionParameter":{"name":"_x","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":33},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":38}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE _a int; _b numeric;\nBEGIN\n  CALL test_proc7c(_x, _a, _b);\n  RAISE NOTICE '_x: %,_a: %, _b: %', _x, _a, _b;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":55}}]}}}]}
+== 030
+CALL test_proc7cc(10)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc7cc"}}],"args":[{"A_Const":{"ival":{"ival":10},"location":18}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 031
+-- named parameters and defaults
+
+CREATE PROCEDURE test_proc8a(INOUT a int, INOUT b int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := a * 10;
+  b := b + 10;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc8a"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":71},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":84},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":89}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %', a, b;\n  a := a * 10;\n  b := b + 10;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":106}}]}}}]}
+== 032
+CALL test_proc8a(10, 20)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc8a"}}],"args":[{"A_Const":{"ival":{"ival":10},"location":17}},{"A_Const":{"ival":{"ival":20},"location":21}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 033
+CALL test_proc8a(b => 20, a => 10)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"test_proc8a"}}],"args":[{"NamedArgExpr":{"arg":{"A_Const":{"ival":{"ival":20},"location":22}},"name":"b","argnumber":-1,"location":17}},{"NamedArgExpr":{"arg":{"A_Const":{"ival":{"ival":10},"location":31}},"name":"a","argnumber":-1,"location":26}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 034
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc8a(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+  CALL test_proc8a(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int;\nBEGIN\n  _a := 10; _b := 30;\n  CALL test_proc8a(_a, _b);\n  RAISE NOTICE '_a: %, _b: %', _a, _b;\n  CALL test_proc8a(b =\u003e _b, a =\u003e _a);\n  RAISE NOTICE '_a: %, _b: %', _a, _b;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 035
+CREATE PROCEDURE test_proc8b(INOUT a int, INOUT b int, INOUT c int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc8b"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":37},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":50},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"c","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":63},"mode":"FUNC_PARAM_INOUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":68}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;\n  a := a * 10;\n  b := b + 10;\n  c := c * -10;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":85}}]}}}]}
+== 036
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8b(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  CALL test_proc8b(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8b(_a, _b, _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n  CALL test_proc8b(_a, c =\u003e _c, b =\u003e _b);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 037
+CREATE PROCEDURE test_proc8c(INOUT a int, INOUT b int, INOUT c int DEFAULT 11)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  a := a * 10;
+  b := b + 10;
+  c := c * -10;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc8c"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":37},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":50},"mode":"FUNC_PARAM_INOUT"}},{"FunctionParameter":{"name":"c","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":63},"mode":"FUNC_PARAM_INOUT","defexpr":{"A_Const":{"ival":{"ival":11},"location":75}}}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":79}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;\n  a := a * 10;\n  b := b + 10;\n  c := c * -10;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":96}}]}}}]}
+== 038
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(c => _c, b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8c(_a, _b, _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8c(_a, c =\u003e _c, b =\u003e _b);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8c(c =\u003e _c, b =\u003e _b, a =\u003e _a);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 039
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8c(_a, _b);  -- fail, no output argument for c\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 040
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 50;
+  CALL test_proc8c(_a, b => _b);  -- fail, no output argument for c
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 50;\n  CALL test_proc8c(_a, b =\u003e _b);  -- fail, no output argument for c\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 041
+-- OUT parameters
+
+CREATE PROCEDURE test_proc9(IN a int, OUT b int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  b := a * 2;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc9"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":52},"mode":"FUNC_PARAM_IN"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":63},"mode":"FUNC_PARAM_OUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":68}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %', a, b;\n  b := a * 2;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":85}}]}}}]}
+== 042
+DO $$
+DECLARE _a int; _b int;
+BEGIN
+  _a := 10; _b := 30;
+  CALL test_proc9(_a, _b);
+  RAISE NOTICE '_a: %, _b: %', _a, _b;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int;\nBEGIN\n  _a := 10; _b := 30;\n  CALL test_proc9(_a, _b);\n  RAISE NOTICE '_a: %, _b: %', _a, _b;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 043
+CREATE PROCEDURE test_proc10(IN a int, OUT b int, IN c int DEFAULT 11)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;
+  b := a - c;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc10"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":34},"mode":"FUNC_PARAM_IN"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":45},"mode":"FUNC_PARAM_OUT"}},{"FunctionParameter":{"name":"c","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":55},"mode":"FUNC_PARAM_IN","defexpr":{"A_Const":{"ival":{"ival":11},"location":67}}}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":71}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %, c: %', a, b, c;\n  b := a - c;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":88}}]}}}]}
+== 044
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(a => _a, b => _b, c => _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, c => _c, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(_a, b => _b);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc10(b => _b, a => _a);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(_a, _b, _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(_a, _b, c =\u003e _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(a =\u003e _a, b =\u003e _b, c =\u003e _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(_a, c =\u003e _c, b =\u003e _b);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(_a, _b);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(_a, b =\u003e _b);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\n\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc10(b =\u003e _b, a =\u003e _a);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 045
+-- OUT + VARIADIC
+
+CREATE PROCEDURE test_proc11(a OUT int, VARIADIC b int[])
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %, b: %', a, b;
+  a := b[1] + b[2];
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc11"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":54},"mode":"FUNC_PARAM_OUT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"arrayBounds":[{"Integer":{"ival":-1}}],"location":70},"mode":"FUNC_PARAM_VARIADIC"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":77}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %, b: %', a, b;\n  a := b[1] + b[2];\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":94}}]}}}]}
+== 046
+DO $$
+DECLARE _a int; _b int; _c int;
+BEGIN
+  _a := 10; _b := 30; _c := 7;
+  CALL test_proc11(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int;\nBEGIN\n  _a := 10; _b := 30; _c := 7;\n  CALL test_proc11(_a, _b, _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 047
+-- polymorphic OUT arguments
+
+CREATE PROCEDURE test_proc12(a anyelement, OUT b anyelement, OUT c anyarray)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE NOTICE 'a: %', a;
+  b := a;
+  c := array[a];
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"test_proc12"}}],"parameters":[{"FunctionParameter":{"name":"a","argType":{"names":[{"String":{"sval":"anyelement"}}],"typemod":-1,"location":61},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"b","argType":{"names":[{"String":{"sval":"anyelement"}}],"typemod":-1,"location":79},"mode":"FUNC_PARAM_OUT"}},{"FunctionParameter":{"name":"c","argType":{"names":[{"String":{"sval":"anyarray"}}],"typemod":-1,"location":97},"mode":"FUNC_PARAM_OUT"}}],"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":107}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'a: %', a;\n  b := a;\n  c := array[a];\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":124}}]}}}]}
+== 048
+DO $$
+DECLARE _a int; _b int; _c int[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c int[];\nBEGIN\n  _a := 10;\n  CALL test_proc12(_a, _b, _c);\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 049
+DO $$
+DECLARE _a int; _b int; _c text[];
+BEGIN
+  _a := 10;
+  CALL test_proc12(_a, _b, _c);  -- error
+  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE _a int; _b int; _c text[];\nBEGIN\n  _a := 10;\n  CALL test_proc12(_a, _b, _c);  -- error\n  RAISE NOTICE '_a: %, _b: %, _c: %', _a, _b, _c;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 050
+-- transition variable assignment
+
+TRUNCATE test1
+--
+{"version":170007,"stmts":[{"stmt":{"TruncateStmt":{"relations":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":44}}],"behavior":"DROP_RESTRICT"}}}]}
+== 051
+CREATE FUNCTION triggerfunc1() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    z int := 0;
+BEGIN
+    CALL test_proc6(2, NEW.a, NEW.a);
+    RETURN NEW;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"triggerfunc1"}}],"returnType":{"names":[{"String":{"sval":"trigger"}}],"typemod":-1,"location":39},"options":[{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":47}},{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE\n    z int := 0;\nBEGIN\n    CALL test_proc6(2, NEW.a, NEW.a);\n    RETURN NEW;\nEND;\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":64}}]}}}]}
+== 052
+CREATE TRIGGER t1 BEFORE INSERT ON test1 EXECUTE PROCEDURE triggerfunc1()
+--
+{"version":170007,"stmts":[{"stmt":{"CreateTrigStmt":{"trigname":"t1","relation":{"relname":"test1","inh":true,"relpersistence":"p","location":35},"funcname":[{"String":{"sval":"triggerfunc1"}}],"timing":2,"events":4}}}]}
+== 053
+INSERT INTO test1 VALUES (1), (2), (3)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"test1","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{"ival":1},"location":26}}]}},{"List":{"items":[{"A_Const":{"ival":{"ival":2},"location":31}}]}},{"List":{"items":[{"A_Const":{"ival":{"ival":3},"location":36}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 054
+UPDATE test1 SET a = 22 WHERE a = 2
+--
+{"version":170007,"stmts":[{"stmt":{"UpdateStmt":{"relation":{"relname":"test1","inh":true,"relpersistence":"p","location":7},"targetList":[{"ResTarget":{"name":"a","val":{"A_Const":{"ival":{"ival":22},"location":21}},"location":17}}],"whereClause":{"A_Expr":{"kind":"AEXPR_OP","name":[{"String":{"sval":"="}}],"lexpr":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":30}},"rexpr":{"A_Const":{"ival":{"ival":2},"location":34}},"location":32}}}}}]}
+== 055
+SELECT * FROM test1 ORDER BY a
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"ColumnRef":{"fields":[{"A_Star":{}}],"location":7}},"location":7}}],"fromClause":[{"RangeVar":{"relname":"test1","inh":true,"relpersistence":"p","location":14}}],"sortClause":[{"SortBy":{"node":{"ColumnRef":{"fields":[{"String":{"sval":"a"}}],"location":29}},"sortby_dir":"SORTBY_DEFAULT","sortby_nulls":"SORTBY_NULLS_DEFAULT","location":-1}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 056
+DROP PROCEDURE test_proc1
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"test_proc1"}}],"args_unspecified":true}}],"removeType":"OBJECT_PROCEDURE","behavior":"DROP_RESTRICT"}}}]}
+== 057
+DROP PROCEDURE test_proc3
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"test_proc3"}}],"args_unspecified":true}}],"removeType":"OBJECT_PROCEDURE","behavior":"DROP_RESTRICT"}}}]}
+== 058
+DROP PROCEDURE test_proc4
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"test_proc4"}}],"args_unspecified":true}}],"removeType":"OBJECT_PROCEDURE","behavior":"DROP_RESTRICT"}}}]}
+== 059
+DROP TABLE test1
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"List":{"items":[{"String":{"sval":"test1"}}]}}],"removeType":"OBJECT_TABLE","behavior":"DROP_RESTRICT"}}}]}
+== 060
+-- more checks for named-parameter handling
+
+CREATE PROCEDURE p1(v_cnt int, v_Text inout text = NULL)
+AS $$
+BEGIN
+  v_Text := 'v_cnt = ' || v_cnt;
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"p1"}}],"parameters":[{"FunctionParameter":{"name":"v_cnt","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":71},"mode":"FUNC_PARAM_DEFAULT"}},{"FunctionParameter":{"name":"v_text","argType":{"names":[{"String":{"sval":"text"}}],"typemod":-1,"location":89},"mode":"FUNC_PARAM_INOUT","defexpr":{"A_Const":{"isnull":true,"location":96}}}}],"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  v_Text := 'v_cnt = ' || v_cnt;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":102}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":154}}]}}}]}
+== 061
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt);  -- error, must supply something for v_Text
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n  v_Text text;\n  v_cnt  integer := 42;\nBEGIN\n  CALL p1(v_cnt := v_cnt);  -- error, must supply something for v_Text\n  RAISE NOTICE '%', v_Text;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 062
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer := 42;
+BEGIN
+  CALL p1(v_cnt := v_cnt, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n  v_Text text;\n  v_cnt  integer := 42;\nBEGIN\n  CALL p1(v_cnt := v_cnt, v_Text := v_Text);\n  RAISE NOTICE '%', v_Text;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 063
+DO $$
+DECLARE
+  v_Text text;
+BEGIN
+  CALL p1(10, v_Text := v_Text);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n  v_Text text;\nBEGIN\n  CALL p1(10, v_Text := v_Text);\n  RAISE NOTICE '%', v_Text;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 064
+DO $$
+DECLARE
+  v_Text text;
+  v_cnt  integer;
+BEGIN
+  CALL p1(v_Text := v_Text, v_cnt := v_cnt);
+  RAISE NOTICE '%', v_Text;
+END;
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nDECLARE\n  v_Text text;\n  v_cnt  integer;\nBEGIN\n  CALL p1(v_Text := v_Text, v_cnt := v_cnt);\n  RAISE NOTICE '%', v_Text;\nEND;\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 065
+-- check that we detect change of dependencies in CALL
+-- atomic and non-atomic call sites used to do this differently, so check both
+
+CREATE PROCEDURE inner_p (f1 int)
+AS $$
+BEGIN
+  RAISE NOTICE 'inner_p(%)', f1;
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"inner_p"}}],"parameters":[{"FunctionParameter":{"name":"f1","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":164},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'inner_p(%)', f1;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":169}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":221}}]}}}]}
+== 066
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 1 $$ LANGUAGE sql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"f"}}],"parameters":[{"FunctionParameter":{"argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":18},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":31},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":" SELECT $1 + 1 "}}]}},"defaction":"DEFELEM_UNSPEC","location":35}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"sql"}},"defaction":"DEFELEM_UNSPEC","location":58}}]}}}]}
+== 067
+CREATE PROCEDURE outer_p (f1 int)
+AS $$
+BEGIN
+  RAISE NOTICE 'outer_p(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"outer_p"}}],"parameters":[{"FunctionParameter":{"name":"f1","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":29},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'outer_p(%)', f1;\n  CALL inner_p(f(f1));\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":34}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":109}}]}}}]}
+== 068
+CREATE FUNCTION outer_f (f1 int) RETURNS void
+AS $$
+BEGIN
+  RAISE NOTICE 'outer_f(%)', f1;
+  CALL inner_p(f(f1));
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"outer_f"}}],"parameters":[{"FunctionParameter":{"name":"f1","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":28},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"void"}}],"typemod":-1,"location":41},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'outer_f(%)', f1;\n  CALL inner_p(f(f1));\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":46}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":121}}]}}}]}
+== 069
+CALL outer_p(42)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"outer_p"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":13}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 070
+SELECT outer_f(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"outer_f"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 071
+DROP FUNCTION f(int)
+--
+{"version":170007,"stmts":[{"stmt":{"DropStmt":{"objects":[{"ObjectWithArgs":{"objname":[{"String":{"sval":"f"}}],"objargs":[{"TypeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":16}}],"objfuncargs":[{"FunctionParameter":{"argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":16},"mode":"FUNC_PARAM_DEFAULT"}}]}}],"removeType":"OBJECT_FUNCTION","behavior":"DROP_RESTRICT"}}}]}
+== 072
+CREATE FUNCTION f(int) RETURNS int AS $$ SELECT $1 + 2 $$ LANGUAGE sql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"f"}}],"parameters":[{"FunctionParameter":{"argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":18},"mode":"FUNC_PARAM_DEFAULT"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":31},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":" SELECT $1 + 2 "}}]}},"defaction":"DEFELEM_UNSPEC","location":35}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"sql"}},"defaction":"DEFELEM_UNSPEC","location":58}}]}}}]}
+== 073
+CALL outer_p(42)
+--
+{"version":170007,"stmts":[{"stmt":{"CallStmt":{"funccall":{"funcname":[{"String":{"sval":"outer_p"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":13}}],"funcformat":"COERCE_EXPLICIT_CALL","location":5}}}}]}
+== 074
+SELECT outer_f(42)
+--
+{"version":170007,"stmts":[{"stmt":{"SelectStmt":{"targetList":[{"ResTarget":{"val":{"FuncCall":{"funcname":[{"String":{"sval":"outer_f"}}],"args":[{"A_Const":{"ival":{"ival":42},"location":15}}],"funcformat":"COERCE_EXPLICIT_CALL","location":7}},"location":7}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}}}]}
+== 075
+-- Check that stable functions in CALL see the correct snapshot
+
+CREATE TABLE t_test (x int)
+--
+{"version":170007,"stmts":[{"stmt":{"CreateStmt":{"relation":{"relname":"t_test","inh":true,"relpersistence":"p","location":78},"tableElts":[{"ColumnDef":{"colname":"x","typeName":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":88},"is_local":true,"location":86}}],"oncommit":"ONCOMMIT_NOOP"}}}]}
+== 076
+INSERT INTO t_test VALUES (0)
+--
+{"version":170007,"stmts":[{"stmt":{"InsertStmt":{"relation":{"relname":"t_test","inh":true,"relpersistence":"p","location":12},"selectStmt":{"SelectStmt":{"valuesLists":[{"List":{"items":[{"A_Const":{"ival":{},"location":27}}]}}],"limitOption":"LIMIT_OPTION_DEFAULT","op":"SETOP_NONE"}},"override":"OVERRIDING_NOT_SET"}}}]}
+== 077
+CREATE FUNCTION f_get_x () RETURNS int
+AS $$
+DECLARE l_result int;
+BEGIN
+  SELECT x INTO l_result FROM t_test;
+  RETURN l_result;
+END
+$$ LANGUAGE plpgsql STABLE
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"funcname":[{"String":{"sval":"f_get_x"}}],"returnType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":35},"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nDECLARE l_result int;\nBEGIN\n  SELECT x INTO l_result FROM t_test;\n  RETURN l_result;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":39}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":137}},{"DefElem":{"defname":"volatility","arg":{"String":{"sval":"stable"}},"defaction":"DEFELEM_UNSPEC","location":154}}]}}}]}
+== 078
+CREATE PROCEDURE f_print_x (x int)
+AS $$
+BEGIN
+  RAISE NOTICE 'f_print_x(%)', x;
+END
+$$ LANGUAGE plpgsql
+--
+{"version":170007,"stmts":[{"stmt":{"CreateFunctionStmt":{"is_procedure":true,"funcname":[{"String":{"sval":"f_print_x"}}],"parameters":[{"FunctionParameter":{"name":"x","argType":{"names":[{"String":{"sval":"pg_catalog"}},{"String":{"sval":"int4"}}],"typemod":-1,"location":30},"mode":"FUNC_PARAM_DEFAULT"}}],"options":[{"DefElem":{"defname":"as","arg":{"List":{"items":[{"String":{"sval":"\nBEGIN\n  RAISE NOTICE 'f_print_x(%)', x;\nEND\n"}}]}},"defaction":"DEFELEM_UNSPEC","location":35}},{"DefElem":{"defname":"language","arg":{"String":{"sval":"plpgsql"}},"defaction":"DEFELEM_UNSPEC","location":88}}]}}}]}
+== 079
+-- test in non-atomic context
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  ROLLBACK;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nBEGIN\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\n  ROLLBACK;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":33}}]}}}]}
+== 080
+-- test in non-atomic context, except exception block is locally atomic
+DO $$
+BEGIN
+ BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+ EXCEPTION WHEN division_by_zero THEN
+   RAISE NOTICE '%', SQLERRM;
+ END;
+  ROLLBACK;
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nBEGIN\n BEGIN\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\n EXCEPTION WHEN division_by_zero THEN\n   RAISE NOTICE '%', SQLERRM;\n END;\n  ROLLBACK;\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":75}}]}}}]}
+== 081
+-- test in atomic context
+BEGIN
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_BEGIN","location":-1}}}]}
+== 082
+DO $$
+BEGIN
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+  UPDATE t_test SET x = x + 1;
+  RAISE NOTICE 'f_get_x(%)', f_get_x();
+  CALL f_print_x(f_get_x());
+END
+$$
+--
+{"version":170007,"stmts":[{"stmt":{"DoStmt":{"args":[{"DefElem":{"defname":"as","arg":{"String":{"sval":"\nBEGIN\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\n  UPDATE t_test SET x = x + 1;\n  RAISE NOTICE 'f_get_x(%)', f_get_x();\n  CALL f_print_x(f_get_x());\nEND\n"}},"defaction":"DEFELEM_UNSPEC","location":3}}]}}}]}
+== 083
+ROLLBACK
+--
+{"version":170007,"stmts":[{"stmt":{"TransactionStmt":{"kind":"TRANS_STMT_ROLLBACK","location":-1}}}]}

@@ -1,0 +1,556 @@
+== 001
+-- truncate_limit: 100
+|--
+-- Test GIN indexes.
+|--
+-- There are other tests to test different GIN opclasses. This is for testing
+-- GIN itself.
+
+-- Create and populate a test table with a GIN index.
+create table gin_test_tbl(i int4[]) with (autovacuum_enabled = off)
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TABLE gin_test_tbl (i int4[]) WITH (autovacuum_enabled=off)"
+== 002
+-- truncate_limit: 100
+create index gin_test_idx on gin_test_tbl using gin (i)
+  with (fastupdate = on, gin_pending_list_limit = 4096)
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DDL
+STMT: IndexStmt
+TRUNCATED: "CREATE INDEX gin_test_idx ON gin_test_tbl USING gin (i) WITH (fastupdate=on, gin_pending_list_lim..."
+== 003
+-- truncate_limit: 100
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 20000) g
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO gin_test_tbl SELECT ARRAY[1, 2, g] FROM generate_series(1, 20000) g"
+== 004
+-- truncate_limit: 100
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO gin_test_tbl SELECT ARRAY[1, 3, g] FROM generate_series(1, 1000) g"
+== 005
+-- truncate_limit: 100
+select gin_clean_pending_list('gin_test_idx')>10 as many
+--
+FUNCTION: name="gin_clean_pending_list" function="gin_clean_pending_list" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT gin_clean_pending_list('gin_test_idx') > 10 AS many"
+== 006
+-- truncate_limit: 100
+-- flush the fastupdate buffers
+
+insert into gin_test_tbl select array[3, 1, g] from generate_series(1, 1000) g
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO gin_test_tbl SELECT ARRAY[3, 1, g] FROM generate_series(1, 1000) g"
+== 007
+-- truncate_limit: 100
+vacuum gin_test_tbl
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM gin_test_tbl"
+== 008
+-- truncate_limit: 100
+-- flush the fastupdate buffers
+
+select gin_clean_pending_list('gin_test_idx')
+--
+FUNCTION: name="gin_clean_pending_list" function="gin_clean_pending_list" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT gin_clean_pending_list('gin_test_idx')"
+== 009
+-- truncate_limit: 100
+-- nothing to flush
+
+-- Test vacuuming
+delete from gin_test_tbl where i @> array[2]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+STMT: DeleteStmt
+TRUNCATED: "DELETE FROM gin_test_tbl WHERE i @> ARRAY[2]"
+== 010
+-- truncate_limit: 100
+vacuum gin_test_tbl
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM gin_test_tbl"
+== 011
+-- truncate_limit: 100
+-- Disable fastupdate, and do more insertions. With fastupdate enabled, most
+-- insertions (by flushing the list pages) cause page splits. Without
+-- fastupdate, we get more churn in the GIN data leaf pages, and exercise the
+-- recompression codepaths.
+alter index gin_test_idx set (fastupdate = off)
+--
+STMT: AlterTableStmt
+TRUNCATED: "ALTER INDEX gin_test_idx SET (fastupdate=off)"
+== 012
+-- truncate_limit: 100
+insert into gin_test_tbl select array[1, 2, g] from generate_series(1, 1000) g
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO gin_test_tbl SELECT ARRAY[1, 2, g] FROM generate_series(1, 1000) g"
+== 013
+-- truncate_limit: 100
+insert into gin_test_tbl select array[1, 3, g] from generate_series(1, 1000) g
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO gin_test_tbl SELECT ARRAY[1, 3, g] FROM generate_series(1, 1000) g"
+== 014
+-- truncate_limit: 100
+delete from gin_test_tbl where i @> array[2]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DML
+STMT: DeleteStmt
+TRUNCATED: "DELETE FROM gin_test_tbl WHERE i @> ARRAY[2]"
+== 015
+-- truncate_limit: 100
+vacuum gin_test_tbl
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM gin_test_tbl"
+== 016
+-- truncate_limit: 100
+-- Test for "rare && frequent" searches
+explain (costs off)
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM gin_test_tbl WHERE i @> ARRAY[1, 999]"
+== 017
+-- truncate_limit: 100
+select count(*) from gin_test_tbl where i @> array[1, 999]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM gin_test_tbl WHERE i @> ARRAY[1, 999]"
+== 018
+-- truncate_limit: 100
+-- Very weak test for gin_fuzzy_search_limit
+set gin_fuzzy_search_limit = 1000
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET gin_fuzzy_search_limit TO 1000"
+== 019
+-- truncate_limit: 100
+explain (costs off)
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) > 0 AS ok FROM gin_test_tbl WHERE i @> ARRAY[1]"
+== 020
+-- truncate_limit: 100
+select count(*) > 0 as ok from gin_test_tbl where i @> array[1]
+--
+TABLE: name="gin_test_tbl" schema="" table="gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) > 0 AS ok FROM gin_test_tbl WHERE i @> ARRAY[1]"
+== 021
+-- truncate_limit: 100
+reset gin_fuzzy_search_limit
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET gin_fuzzy_search_limit"
+== 022
+-- truncate_limit: 100
+-- Test optimization of empty queries
+create temp table t_gin_test_tbl(i int4[], j int4[])
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE TEMPORARY TABLE t_gin_test_tbl (i int4[], j int4[])"
+== 023
+-- truncate_limit: 100
+create index on t_gin_test_tbl using gin (i, j)
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: IndexStmt
+TRUNCATED: "CREATE INDEX ON t_gin_test_tbl USING gin (i, j)"
+== 024
+-- truncate_limit: 100
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   null),
+  ('{1,2}', null),
+  (null,    '{}'),
+  (null,    '{10}'),
+  ('{1,2}', '{10}'),
+  ('{2}',   '{10}'),
+  ('{1,3}', '{}'),
+  ('{1,1}', '{10}')
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO t_gin_test_tbl VALUES (...)"
+== 025
+-- truncate_limit: 100
+set enable_seqscan = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_seqscan TO OFF"
+== 026
+-- truncate_limit: 100
+explain (costs off)
+select * from t_gin_test_tbl where array[0] <@ i
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FILTER: schema="" table="" column="i"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i"
+== 027
+-- truncate_limit: 100
+select * from t_gin_test_tbl where array[0] <@ i
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i"
+== 028
+-- truncate_limit: 100
+select * from t_gin_test_tbl where array[0] <@ i and '{}'::int4[] <@ j
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FILTER: schema="" table="" column="i"
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM t_gin_test_tbl WHERE ARRAY[0] <@ i AND '{}'::int4[] <@ j"
+== 029
+-- truncate_limit: 100
+explain (costs off)
+select * from t_gin_test_tbl where i @> '{}'
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FILTER: schema="" table="" column="i"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT * FROM t_gin_test_tbl WHERE i @> '{}'"
+== 030
+-- truncate_limit: 100
+select * from t_gin_test_tbl where i @> '{}'
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FILTER: schema="" table="" column="i"
+STMT: SelectStmt
+TRUNCATED: "SELECT * FROM t_gin_test_tbl WHERE i @> '{}'"
+== 031
+-- truncate_limit: 100
+create function explain_query_json(query_sql text)
+returns table (explain_line json)
+language plpgsql as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute 'EXPLAIN (ANALYZE, FORMAT json) ' || query_sql;
+end;
+$$
+--
+FUNCTION: name="explain_query_json" function="explain_query_json" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION explain_query_json(query_sql text) RETURNS TABLE (explain_line pg_catalog.json) L..."
+== 032
+-- truncate_limit: 100
+create function execute_text_query_index(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = off;
+  set enable_bitmapscan = on;
+  return query execute query_sql;
+end;
+$$
+--
+FUNCTION: name="execute_text_query_index" function="execute_text_query_index" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION execute_text_query_index(query_sql text) RETURNS SETOF text LANGUAGE plpgsql AS $..."
+== 033
+-- truncate_limit: 100
+create function execute_text_query_heap(query_sql text)
+returns setof text
+language plpgsql
+as
+$$
+begin
+  set enable_seqscan = on;
+  set enable_bitmapscan = off;
+  return query execute query_sql;
+end;
+$$
+--
+FUNCTION: name="execute_text_query_heap" function="execute_text_query_heap" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+TRUNCATED: "CREATE FUNCTION execute_text_query_heap(query_sql text) RETURNS SETOF text LANGUAGE plpgsql AS $$..."
+== 034
+-- truncate_limit: 100
+-- check number of rows returned by index and removed by recheck
+select
+  query,
+  js->0->'Plan'->'Plans'->0->'Actual Rows' as "return by index",
+  js->0->'Plan'->'Rows Removed by Index Recheck' as "removed by recheck",
+  (res_index = res_heap) as "match"
+from
+  (values
+    ($$ i @> '{}' $$),
+    ($$ j @> '{}' $$),
+    ($$ i @> '{}' and j @> '{}' $$),
+    ($$ i @> '{1}' $$),
+    ($$ i @> '{1}' and j @> '{}' $$),
+    ($$ i @> '{1}' and i @> '{}' and j @> '{}' $$),
+    ($$ j @> '{10}' $$),
+    ($$ j @> '{10}' and i @> '{}' $$),
+    ($$ j @> '{10}' and j @> '{}' and i @> '{}' $$),
+    ($$ i @> '{1}' and j @> '{10}' $$)
+  ) q(query),
+  lateral explain_query_json($$select * from t_gin_test_tbl where $$ || query) js,
+  lateral execute_text_query_index($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_index,
+  lateral execute_text_query_heap($$select string_agg((i, j)::text, ' ') from t_gin_test_tbl where $$ || query) res_heap
+--
+FUNCTION: name="explain_query_json" function="explain_query_json" schema="" ctx=Call
+FUNCTION: name="execute_text_query_index" function="execute_text_query_index" schema="" ctx=Call
+FUNCTION: name="execute_text_query_heap" function="execute_text_query_heap" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT ... FROM (VALUES (...)) q(query), LATERAL explain_query_json('select * from t_gin_test_tbl..."
+== 035
+-- truncate_limit: 100
+reset enable_seqscan
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_seqscan"
+== 036
+-- truncate_limit: 100
+reset enable_bitmapscan
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_bitmapscan"
+== 037
+-- truncate_limit: 100
+-- re-purpose t_gin_test_tbl to test scans involving posting trees
+insert into t_gin_test_tbl select array[1, g, g/10], array[2, g, g/10]
+  from generate_series(1, 20000) g
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO t_gin_test_tbl SELECT ... FROM generate_series(1, 20000) g"
+== 038
+-- truncate_limit: 100
+select gin_clean_pending_list('t_gin_test_tbl_i_j_idx') is not null
+--
+FUNCTION: name="gin_clean_pending_list" function="gin_clean_pending_list" schema="" ctx=Call
+STMT: SelectStmt
+TRUNCATED: "SELECT gin_clean_pending_list('t_gin_test_tbl_i_j_idx') IS NOT NULL"
+== 039
+-- truncate_limit: 100
+analyze t_gin_test_tbl
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "ANALYZE t_gin_test_tbl"
+== 040
+-- truncate_limit: 100
+set enable_seqscan = off
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_seqscan TO OFF"
+== 041
+-- truncate_limit: 100
+set enable_bitmapscan = on
+--
+STMT: VariableSetStmt
+TRUNCATED: "SET enable_bitmapscan TO ON"
+== 042
+-- truncate_limit: 100
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]"
+== 043
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]"
+== 044
+-- truncate_limit: 100
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]"
+== 045
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]"
+== 046
+-- truncate_limit: 100
+explain (costs off)
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: ExplainStmt
+STMT: SelectStmt
+TRUNCATED: "EXPLAIN (COSTS OFF) SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]"
+== 047
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]"
+== 048
+-- truncate_limit: 100
+-- test vacuuming of posting trees
+delete from t_gin_test_tbl where j @> array[2]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DML
+STMT: DeleteStmt
+TRUNCATED: "DELETE FROM t_gin_test_tbl WHERE j @> ARRAY[2]"
+== 049
+-- truncate_limit: 100
+vacuum t_gin_test_tbl
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: VacuumStmt
+TRUNCATED: "VACUUM t_gin_test_tbl"
+== 050
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> array[50]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[50]"
+== 051
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> array[2]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> ARRAY[2]"
+== 052
+-- truncate_limit: 100
+select count(*) from t_gin_test_tbl where j @> '{}'::int[]
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=Select
+FUNCTION: name="count" function="count" schema="" ctx=Call
+FILTER: schema="" table="" column="j"
+STMT: SelectStmt
+TRUNCATED: "SELECT count(*) FROM t_gin_test_tbl WHERE j @> '{}'::int[]"
+== 053
+-- truncate_limit: 100
+reset enable_seqscan
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_seqscan"
+== 054
+-- truncate_limit: 100
+reset enable_bitmapscan
+--
+STMT: VariableSetStmt
+TRUNCATED: "RESET enable_bitmapscan"
+== 055
+-- truncate_limit: 100
+drop table t_gin_test_tbl
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE t_gin_test_tbl"
+== 056
+-- truncate_limit: 100
+-- test an unlogged table, mostly to get coverage of ginbuildempty
+create unlogged table t_gin_test_tbl(i int4[], j int4[])
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: CreateStmt
+TRUNCATED: "CREATE UNLOGGED TABLE t_gin_test_tbl (i int4[], j int4[])"
+== 057
+-- truncate_limit: 100
+create index on t_gin_test_tbl using gin (i, j)
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: IndexStmt
+TRUNCATED: "CREATE INDEX ON t_gin_test_tbl USING gin (i, j)"
+== 058
+-- truncate_limit: 100
+insert into t_gin_test_tbl
+values
+  (null,    null),
+  ('{}',    null),
+  ('{1}',   '{2,3}')
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+TRUNCATED: "INSERT INTO t_gin_test_tbl VALUES (NULL, NULL), ('{}', NULL), ('{1}', '{2,3}')"
+== 059
+-- truncate_limit: 100
+drop table t_gin_test_tbl
+--
+TABLE: name="t_gin_test_tbl" schema="" table="t_gin_test_tbl" ctx=DDL
+STMT: DropStmt
+TRUNCATED: "DROP TABLE t_gin_test_tbl"

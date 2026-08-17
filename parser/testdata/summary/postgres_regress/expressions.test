@@ -1,0 +1,452 @@
+== 001
+|--
+-- expression evaluation tests that don't fit into a more specific file
+|--
+
+|--
+-- Tests for SQLValueFunction
+|--
+
+
+-- current_date  (always matches because of transactional behaviour)
+SELECT date(now())::text = current_date::text
+--
+FUNCTION: name="date" function="date" schema="" ctx=Call
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 002
+-- current_time / localtime
+SELECT now()::timetz::text = current_time::text
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 003
+SELECT now()::timetz(4)::text = current_time(4)::text
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 004
+SELECT now()::time::text = localtime::text
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 005
+SELECT now()::time(3)::text = localtime(3)::text
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 006
+-- current_time[stamp]/ localtime[stamp] (always matches because of transactional behaviour)
+SELECT current_timestamp = NOW()
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 007
+-- precision
+SELECT length(current_timestamp::text) >= length(current_timestamp(0)::text)
+--
+FUNCTION: name="length" function="length" schema="" ctx=Call
+FUNCTION: name="length" function="length" schema="" ctx=Call
+STMT: SelectStmt
+== 008
+-- localtimestamp
+SELECT now()::timestamp::text = localtimestamp::text
+--
+FUNCTION: name="now" function="now" schema="" ctx=Call
+STMT: SelectStmt
+== 009
+-- precision overflow
+SELECT current_time = current_time(7)
+--
+STMT: SelectStmt
+== 010
+SELECT current_timestamp = current_timestamp(7)
+--
+STMT: SelectStmt
+== 011
+SELECT localtime = localtime(7)
+--
+STMT: SelectStmt
+== 012
+SELECT localtimestamp = localtimestamp(7)
+--
+STMT: SelectStmt
+== 013
+-- current_role/user/user is tested in rolenames.sql
+
+-- current database / catalog
+SELECT current_catalog = current_database()
+--
+FUNCTION: name="current_database" function="current_database" schema="" ctx=Call
+STMT: SelectStmt
+== 014
+-- current_schema
+SELECT current_schema
+--
+STMT: SelectStmt
+== 015
+SET search_path = 'notme'
+--
+STMT: VariableSetStmt
+== 016
+SELECT current_schema
+--
+STMT: SelectStmt
+== 017
+SET search_path = 'pg_catalog'
+--
+STMT: VariableSetStmt
+== 018
+SELECT current_schema
+--
+STMT: SelectStmt
+== 019
+RESET search_path
+--
+STMT: VariableSetStmt
+== 020
+|--
+-- Test parsing of a no-op cast to a type with unspecified typmod
+|--
+begin
+--
+STMT: TransactionStmt
+== 021
+create table numeric_tbl (f1 numeric(18,3), f2 numeric)
+--
+TABLE: name="numeric_tbl" schema="" table="numeric_tbl" ctx=DDL
+STMT: CreateStmt
+== 022
+create view numeric_view as
+  select
+    f1, f1::numeric(16,4) as f1164, f1::numeric as f1n,
+    f2, f2::numeric(16,4) as f2164, f2::numeric as f2n
+  from numeric_tbl
+--
+TABLE: name="numeric_view" schema="" table="numeric_view" ctx=DDL
+TABLE: name="numeric_tbl" schema="" table="numeric_tbl" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 023
+explain (verbose, costs off) select * from numeric_view
+--
+TABLE: name="numeric_view" schema="" table="numeric_view" ctx=Select
+STMT: ExplainStmt
+STMT: SelectStmt
+== 024
+-- bpchar, lacking planner support for its length coercion function,
+-- could behave differently
+
+create table bpchar_tbl (f1 character(16) unique, f2 bpchar)
+--
+TABLE: name="bpchar_tbl" schema="" table="bpchar_tbl" ctx=DDL
+STMT: CreateStmt
+== 025
+create view bpchar_view as
+  select
+    f1, f1::character(14) as f114, f1::bpchar as f1n,
+    f2, f2::character(14) as f214, f2::bpchar as f2n
+  from bpchar_tbl
+--
+TABLE: name="bpchar_view" schema="" table="bpchar_view" ctx=DDL
+TABLE: name="bpchar_tbl" schema="" table="bpchar_tbl" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 026
+explain (verbose, costs off) select * from bpchar_view
+  where f1::bpchar = 'foo'
+--
+TABLE: name="bpchar_view" schema="" table="bpchar_view" ctx=Select
+FILTER: schema="" table="" column="f1"
+STMT: ExplainStmt
+STMT: SelectStmt
+== 027
+rollback
+--
+STMT: TransactionStmt
+== 028
+|--
+-- Ordinarily, IN/NOT IN can be converted to a ScalarArrayOpExpr
+-- with a suitably-chosen array type.
+|--
+explain (verbose, costs off)
+select random() IN (1, 4, 8.0)
+--
+FUNCTION: name="random" function="random" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 029
+explain (verbose, costs off)
+select random()::int IN (1, 4, 8.0)
+--
+FUNCTION: name="random" function="random" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: SelectStmt
+== 030
+-- However, if there's not a common supertype for the IN elements,
+-- we should instead try to produce "x = v1 OR x = v2 OR ...".
+-- In most cases that'll fail for lack of all the requisite = operators,
+-- but it can succeed sometimes.  So this should complain about lack of
+-- an = operator, not about cast failure.
+select '(0,0)'::point in ('(0,0,0,0)'::box, point(0,0))
+--
+FUNCTION: name="point" function="point" schema="" ctx=Call
+STMT: SelectStmt
+== 031
+|--
+-- Tests for ScalarArrayOpExpr with a hashfn
+|--
+
+-- create a stable function so that the tests below are not
+-- evaluated using the planner's constant folding.
+begin
+--
+STMT: TransactionStmt
+== 032
+create function return_int_input(int) returns int as $$
+begin
+	return $1;
+end;
+$$ language plpgsql stable
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 033
+create function return_text_input(text) returns text as $$
+begin
+	return $1;
+end;
+$$ language plpgsql stable
+--
+FUNCTION: name="return_text_input" function="return_text_input" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 034
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 035
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 036
+select return_int_input(1) in (null, null, null, null, null, null, null, null, null, null, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 037
+select return_int_input(1) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 038
+select return_int_input(null::int) in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 039
+select return_int_input(null::int) in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 040
+select return_text_input('a') in ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j')
+--
+FUNCTION: name="return_text_input" function="return_text_input" schema="" ctx=Call
+STMT: SelectStmt
+== 041
+-- NOT IN
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 042
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 0)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 043
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 2, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 044
+select return_int_input(1) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 045
+select return_int_input(1) not in (null, null, null, null, null, null, null, null, null, null, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 046
+select return_int_input(null::int) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, 1)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 047
+select return_int_input(null::int) not in (10, 9, 2, 8, 3, 7, 4, 6, 5, null)
+--
+FUNCTION: name="return_int_input" function="return_int_input" schema="" ctx=Call
+STMT: SelectStmt
+== 048
+select return_text_input('a') not in ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j')
+--
+FUNCTION: name="return_text_input" function="return_text_input" schema="" ctx=Call
+STMT: SelectStmt
+== 049
+rollback
+--
+STMT: TransactionStmt
+== 050
+-- Test with non-strict equality function.
+-- We need to create our own type for this.
+
+begin
+--
+STMT: TransactionStmt
+== 051
+create type myint
+--
+STMT: DefineStmt
+== 052
+create function myintin(cstring) returns myint strict immutable language
+  internal as 'int4in'
+--
+FUNCTION: name="myintin" function="myintin" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 053
+create function myintout(myint) returns cstring strict immutable language
+  internal as 'int4out'
+--
+FUNCTION: name="myintout" function="myintout" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 054
+create function myinthash(myint) returns integer strict immutable language
+  internal as 'hashint4'
+--
+FUNCTION: name="myinthash" function="myinthash" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 055
+create type myint (input = myintin, output = myintout, like = int4)
+--
+STMT: DefineStmt
+== 056
+create cast (int4 as myint) without function
+--
+STMT: CreateCastStmt
+== 057
+create cast (myint as int4) without function
+--
+STMT: CreateCastStmt
+== 058
+create function myinteq(myint, myint) returns bool as $$
+begin
+  if $1 is null and $2 is null then
+    return true;
+  else
+    return $1::int = $2::int;
+  end if;
+end;
+$$ language plpgsql immutable
+--
+FUNCTION: name="myinteq" function="myinteq" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 059
+create function myintne(myint, myint) returns bool as $$
+begin
+  return not myinteq($1, $2);
+end;
+$$ language plpgsql immutable
+--
+FUNCTION: name="myintne" function="myintne" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 060
+create operator = (
+  leftarg    = myint,
+  rightarg   = myint,
+  commutator = =,
+  negator    = <>,
+  procedure  = myinteq,
+  restrict   = eqsel,
+  join       = eqjoinsel,
+  merges
+)
+--
+STMT: DefineStmt
+== 061
+create operator <> (
+  leftarg    = myint,
+  rightarg   = myint,
+  commutator = <>,
+  negator    = =,
+  procedure  = myintne,
+  restrict   = eqsel,
+  join       = eqjoinsel,
+  merges
+)
+--
+STMT: DefineStmt
+== 062
+create operator class myint_ops
+default for type myint using hash as
+  operator    1   =  (myint, myint),
+  function    1   myinthash(myint)
+--
+STMT: CreateOpClassStmt
+== 063
+create table inttest (a myint)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=DDL
+STMT: CreateStmt
+== 064
+insert into inttest values(1::myint),(null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 065
+-- try an array with enough elements to cause hashing
+select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 066
+select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 067
+select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 068
+-- ensure the result matched with the non-hashed version.  We simply remove
+-- some array elements so that we don't reach the hashing threshold.
+select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 069
+select * from inttest where a not in (1::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 070
+select * from inttest where a not in (0::myint,2::myint,3::myint,4::myint,5::myint, null)
+--
+TABLE: name="inttest" schema="" table="inttest" ctx=Select
+FILTER: schema="" table="" column="a"
+STMT: SelectStmt
+== 071
+rollback
+--
+STMT: TransactionStmt

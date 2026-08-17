@@ -1,0 +1,168 @@
+== 001
+|--
+-- Cache-behavior-dependent test cases
+|--
+-- These tests logically belong in plpgsql_record.sql, and perhaps someday
+-- can be merged back into it.  For now, however, their results are different
+-- depending on debug_discard_caches, so we must have two expected-output
+-- files to cover both cases.  To minimize the maintenance effort resulting
+-- from that, this file should contain only tests that do have different
+-- results under debug_discard_caches.
+|--
+
+-- check behavior with changes of a named rowtype
+create table c_mutable(f1 int, f2 text)
+--
+0 2 SQL_COMMENT NO_KEYWORD
+3 41 SQL_COMMENT NO_KEYWORD
+42 44 SQL_COMMENT NO_KEYWORD
+45 119 SQL_COMMENT NO_KEYWORD
+120 197 SQL_COMMENT NO_KEYWORD
+198 271 SQL_COMMENT NO_KEYWORD
+272 347 SQL_COMMENT NO_KEYWORD
+348 420 SQL_COMMENT NO_KEYWORD
+421 459 SQL_COMMENT NO_KEYWORD
+460 462 SQL_COMMENT NO_KEYWORD
+464 513 SQL_COMMENT NO_KEYWORD
+514 520 CREATE RESERVED_KEYWORD
+521 526 TABLE RESERVED_KEYWORD
+527 536 IDENT NO_KEYWORD
+536 537 ASCII_40 NO_KEYWORD
+537 539 IDENT NO_KEYWORD
+540 543 INT_P COL_NAME_KEYWORD
+543 544 ASCII_44 NO_KEYWORD
+545 547 IDENT NO_KEYWORD
+548 552 TEXT_P UNRESERVED_KEYWORD
+552 553 ASCII_41 NO_KEYWORD
+== 002
+create function c_sillyaddone(int) returns int language plpgsql as
+$$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+0 6 CREATE RESERVED_KEYWORD
+7 15 FUNCTION UNRESERVED_KEYWORD
+16 29 IDENT NO_KEYWORD
+29 30 ASCII_40 NO_KEYWORD
+30 33 INT_P COL_NAME_KEYWORD
+33 34 ASCII_41 NO_KEYWORD
+35 42 RETURNS UNRESERVED_KEYWORD
+43 46 INT_P COL_NAME_KEYWORD
+47 55 LANGUAGE UNRESERVED_KEYWORD
+56 63 IDENT NO_KEYWORD
+64 66 AS RESERVED_KEYWORD
+67 132 SCONST NO_KEYWORD
+== 003
+select c_sillyaddone(42)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 20 IDENT NO_KEYWORD
+20 21 ASCII_40 NO_KEYWORD
+21 23 ICONST NO_KEYWORD
+23 24 ASCII_41 NO_KEYWORD
+== 004
+alter table c_mutable drop column f1
+--
+0 5 ALTER UNRESERVED_KEYWORD
+6 11 TABLE RESERVED_KEYWORD
+12 21 IDENT NO_KEYWORD
+22 26 DROP UNRESERVED_KEYWORD
+27 33 COLUMN RESERVED_KEYWORD
+34 36 IDENT NO_KEYWORD
+== 005
+alter table c_mutable add column f1 float8
+--
+0 5 ALTER UNRESERVED_KEYWORD
+6 11 TABLE RESERVED_KEYWORD
+12 21 IDENT NO_KEYWORD
+22 25 ADD_P UNRESERVED_KEYWORD
+26 32 COLUMN RESERVED_KEYWORD
+33 35 IDENT NO_KEYWORD
+36 42 IDENT NO_KEYWORD
+== 006
+-- currently, this fails due to cached plan for "r.f1 + 1" expression
+-- (but if debug_discard_caches is on, it will succeed)
+select c_sillyaddone(42)
+--
+0 69 SQL_COMMENT NO_KEYWORD
+70 125 SQL_COMMENT NO_KEYWORD
+126 132 SELECT RESERVED_KEYWORD
+133 146 IDENT NO_KEYWORD
+146 147 ASCII_40 NO_KEYWORD
+147 149 ICONST NO_KEYWORD
+149 150 ASCII_41 NO_KEYWORD
+== 007
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+0 42 SQL_COMMENT NO_KEYWORD
+43 50 DISCARD UNRESERVED_KEYWORD
+51 56 PLANS UNRESERVED_KEYWORD
+== 008
+select c_sillyaddone(42)
+--
+0 6 SELECT RESERVED_KEYWORD
+7 20 IDENT NO_KEYWORD
+20 21 ASCII_40 NO_KEYWORD
+21 23 ICONST NO_KEYWORD
+23 24 ASCII_41 NO_KEYWORD
+== 009
+-- check behavior with changes in a record rowtype
+create function show_result_type(text) returns text language plpgsql as
+$$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+--
+0 50 SQL_COMMENT NO_KEYWORD
+51 57 CREATE RESERVED_KEYWORD
+58 66 FUNCTION UNRESERVED_KEYWORD
+67 83 IDENT NO_KEYWORD
+83 84 ASCII_40 NO_KEYWORD
+84 88 TEXT_P UNRESERVED_KEYWORD
+88 89 ASCII_41 NO_KEYWORD
+90 97 RETURNS UNRESERVED_KEYWORD
+98 102 TEXT_P UNRESERVED_KEYWORD
+103 111 LANGUAGE UNRESERVED_KEYWORD
+112 119 IDENT NO_KEYWORD
+120 122 AS RESERVED_KEYWORD
+123 315 SCONST NO_KEYWORD
+== 010
+select show_result_type('select 1 as a')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 39 SCONST NO_KEYWORD
+39 40 ASCII_41 NO_KEYWORD
+== 011
+-- currently this fails due to cached plan for pg_typeof expression
+-- (but if debug_discard_caches is on, it will succeed)
+select show_result_type('select 2.0 as a')
+--
+0 67 SQL_COMMENT NO_KEYWORD
+68 123 SQL_COMMENT NO_KEYWORD
+124 130 SELECT RESERVED_KEYWORD
+131 147 IDENT NO_KEYWORD
+147 148 ASCII_40 NO_KEYWORD
+148 165 SCONST NO_KEYWORD
+165 166 ASCII_41 NO_KEYWORD
+== 012
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+0 42 SQL_COMMENT NO_KEYWORD
+43 50 DISCARD UNRESERVED_KEYWORD
+51 56 PLANS UNRESERVED_KEYWORD
+== 013
+select show_result_type('select 2.0 as a')
+--
+0 6 SELECT RESERVED_KEYWORD
+7 23 IDENT NO_KEYWORD
+23 24 ASCII_40 NO_KEYWORD
+24 41 SCONST NO_KEYWORD
+41 42 ASCII_41 NO_KEYWORD

@@ -1,0 +1,1691 @@
+== 001
+|--
+-- insert...on conflict do unique index inference
+|--
+create table insertconflicttest(key int4, fruit text)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: CreateStmt
+== 002
+-- These things should work through a view, as well
+create view insertconflictview as select * from insertconflicttest
+--
+TABLE: name="insertconflictview" schema="" table="insertconflictview" ctx=DDL
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 003
+|--
+-- Test unique index inference with operator class specifications and
+-- named collations
+|--
+create unique index op_index_key on insertconflicttest(key, fruit text_pattern_ops)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 004
+create unique index collation_index_key on insertconflicttest(key, fruit collate "C")
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 005
+create unique index both_index_key on insertconflicttest(key, fruit collate "C" text_pattern_ops)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 006
+create unique index both_index_expr_key on insertconflicttest(key, lower(fruit) collate "C" text_pattern_ops)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: IndexStmt
+== 007
+-- fails
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 008
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 009
+-- succeeds
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 010
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit, key, fruit, key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 011
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit), key, lower(fruit), key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 012
+explain (costs off) insert into insertconflictview values(0, 'Crowberry') on conflict (lower(fruit), key, lower(fruit), key) do nothing
+--
+TABLE: name="insertconflictview" schema="" table="insertconflictview" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 013
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do update set fruit = excluded.fruit
+  where exists (select 1 from insertconflicttest ii where ii.key = excluded.key)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=Select
+ALIAS: "ii"="insertconflicttest"
+FILTER: schema="" table="ii" column="key"
+FILTER: schema="" table="excluded" column="key"
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 014
+-- Neither collation nor operator class specifications are required --
+-- supplying them merely *limits* matches to indexes with matching opclasses
+-- used for relevant indexes
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit text_pattern_ops) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 015
+-- Okay, arbitrates using both index where text_pattern_ops opclass does and
+-- does not appear.
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit collate "C") do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+-- Okay, but only accepts the single index where both opclass and collation are
+-- specified
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit collate "C" text_pattern_ops, key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 017
+-- Okay, but only accepts the single index where both opclass and collation are
+-- specified (plus expression variant)
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C", key, key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 018
+-- Attribute appears twice, while not all attributes/expressions on attributes
+-- appearing within index definition match in terms of both opclass and
+-- collation.
+|--
+-- Works because every attribute in inference specification needs to be
+-- satisfied once or more by cataloged index attribute, and as always when an
+-- attribute in the cataloged definition has a non-default opclass/collation,
+-- it still satisfied some inference attribute lacking any particular
+-- opclass/collation specification.
+|--
+-- The implementation is liberal in accepting inference specifications on the
+-- assumption that multiple inferred unique indexes will prevent problematic
+-- cases.  It rolls with unique indexes where attributes redundantly appear
+-- multiple times, too (which is not tested here).
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit, key, fruit text_pattern_ops, key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 019
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C" text_pattern_ops, key, key) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 020
+drop index op_index_key
+--
+STMT: DropStmt
+== 021
+drop index collation_index_key
+--
+STMT: DropStmt
+== 022
+drop index both_index_key
+--
+STMT: DropStmt
+== 023
+drop index both_index_expr_key
+--
+STMT: DropStmt
+== 024
+|--
+-- Make sure that cross matching of attribute opclass/collation does not occur
+|--
+create unique index cross_match on insertconflicttest(lower(fruit) collate "C", upper(fruit) text_pattern_ops)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: IndexStmt
+== 025
+-- fails:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) text_pattern_ops, upper(fruit) collate "C") do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 026
+-- works:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (lower(fruit) collate "C", upper(fruit) text_pattern_ops) do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 027
+drop index cross_match
+--
+STMT: DropStmt
+== 028
+|--
+-- Single key tests
+|--
+create unique index key_index on insertconflicttest(key)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 029
+|--
+-- Explain tests
+|--
+explain (costs off) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 030
+-- Should display qual actually attributable to internal sequential scan:
+explain (costs off) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit where insertconflicttest.fruit != 'Cawesh'
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 031
+-- With EXCLUDED.* expression in scan node:
+explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key) do update set fruit = excluded.fruit where excluded.fruit != 'Elderberry'
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 032
+-- Does the same, but JSON format shows "Conflict Arbiter Index" as JSON array:
+explain (costs off, format json) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit where insertconflicttest.fruit != 'Lime' returning *
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 033
+-- Fails (no unique index inference specification, required for do update variant):
+insert into insertconflicttest values (1, 'Apple') on conflict do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 034
+-- inference succeeds:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 035
+insert into insertconflicttest values (2, 'Orange') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 036
+-- Succeed, since multi-assignment does not involve subquery:
+insert into insertconflicttest
+values (1, 'Apple'), (2, 'Orange')
+on conflict (key) do update set (fruit, key) = (excluded.fruit, excluded.key)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 037
+-- Give good diagnostic message when EXCLUDED.* spuriously referenced from
+-- RETURNING:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruit RETURNING excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 038
+-- Only suggest <table>.* column when inference element misspelled:
+insert into insertconflicttest values (1, 'Apple') on conflict (keyy) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 039
+-- Have useful HINT for EXCLUDED.* RTE within UPDATE:
+insert into insertconflicttest values (1, 'Apple') on conflict (key) do update set fruit = excluded.fruitt
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 040
+-- inference fails:
+insert into insertconflicttest values (3, 'Kiwi') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 041
+insert into insertconflicttest values (4, 'Mango') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 042
+insert into insertconflicttest values (5, 'Lemon') on conflict (fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 043
+insert into insertconflicttest values (6, 'Passionfruit') on conflict (lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 044
+-- Check the target relation can be aliased
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "ict"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 045
+-- ok, no reference to target table
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = ict.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "ict"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 046
+-- ok, alias
+insert into insertconflicttest AS ict values (6, 'Passionfruit') on conflict (key) do update set fruit = insertconflicttest.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "ict"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 047
+-- error, references aliased away name
+
+-- Check helpful hint when qualifying set column with target table
+insert into insertconflicttest values (3, 'Kiwi') on conflict (key, fruit) do update set insertconflicttest.fruit = 'Mango'
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 048
+drop index key_index
+--
+STMT: DropStmt
+== 049
+|--
+-- Composite key tests
+|--
+create unique index comp_key_index on insertconflicttest(key, fruit)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 050
+-- inference succeeds:
+insert into insertconflicttest values (7, 'Raspberry') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 051
+insert into insertconflicttest values (8, 'Lime') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 052
+-- inference fails:
+insert into insertconflicttest values (9, 'Banana') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 053
+insert into insertconflicttest values (10, 'Blueberry') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 054
+insert into insertconflicttest values (11, 'Cherry') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 055
+insert into insertconflicttest values (12, 'Date') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 056
+drop index comp_key_index
+--
+STMT: DropStmt
+== 057
+|--
+-- Partial index tests, no inference predicate specified
+|--
+create unique index part_comp_key_index on insertconflicttest(key, fruit) where key < 5
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 058
+create unique index expr_part_comp_key_index on insertconflicttest(key, lower(fruit)) where key < 5
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: IndexStmt
+== 059
+-- inference fails:
+insert into insertconflicttest values (13, 'Grape') on conflict (key, fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 060
+insert into insertconflicttest values (14, 'Raisin') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 061
+insert into insertconflicttest values (15, 'Cranberry') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+insert into insertconflicttest values (16, 'Melon') on conflict (key, key, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+insert into insertconflicttest values (17, 'Mulberry') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 064
+insert into insertconflicttest values (18, 'Pineapple') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 065
+drop index part_comp_key_index
+--
+STMT: DropStmt
+== 066
+drop index expr_part_comp_key_index
+--
+STMT: DropStmt
+== 067
+|--
+-- Expression index tests
+|--
+create unique index expr_key_index on insertconflicttest(lower(fruit))
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: IndexStmt
+== 068
+-- inference succeeds:
+insert into insertconflicttest values (20, 'Quince') on conflict (lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 069
+insert into insertconflicttest values (21, 'Pomegranate') on conflict (lower(fruit), lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 070
+-- inference fails:
+insert into insertconflicttest values (22, 'Apricot') on conflict (upper(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 071
+insert into insertconflicttest values (23, 'Blackberry') on conflict (fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 072
+drop index expr_key_index
+--
+STMT: DropStmt
+== 073
+|--
+-- Expression index tests (with regular column)
+|--
+create unique index expr_comp_key_index on insertconflicttest(key, lower(fruit))
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: IndexStmt
+== 074
+create unique index tricky_expr_comp_key_index on insertconflicttest(key, lower(fruit), upper(fruit))
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: IndexStmt
+== 075
+-- inference succeeds:
+insert into insertconflicttest values (24, 'Plum') on conflict (key, lower(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 076
+insert into insertconflicttest values (25, 'Peach') on conflict (lower(fruit), key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 077
+-- Should not infer "tricky_expr_comp_key_index" index:
+explain (costs off) insert into insertconflicttest values (26, 'Fig') on conflict (lower(fruit), key, lower(fruit), key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+FUNCTION: name="lower" function="lower" schema="" ctx=Call
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 078
+-- inference fails:
+insert into insertconflicttest values (27, 'Prune') on conflict (key, upper(fruit)) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+FUNCTION: name="upper" function="upper" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 079
+insert into insertconflicttest values (28, 'Redcurrant') on conflict (fruit, key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 080
+insert into insertconflicttest values (29, 'Nectarine') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 081
+drop index expr_comp_key_index
+--
+STMT: DropStmt
+== 082
+drop index tricky_expr_comp_key_index
+--
+STMT: DropStmt
+== 083
+|--
+-- Non-spurious duplicate violation tests
+|--
+create unique index key_index on insertconflicttest(key)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 084
+create unique index fruit_index on insertconflicttest(fruit)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 085
+-- succeeds, since UPDATE happens to update "fruit" to existing value:
+insert into insertconflicttest values (26, 'Fig') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 086
+-- fails, since UPDATE is to row with key value 26, and we're updating "fruit"
+-- to a value that happens to exist in another row ('peach'):
+insert into insertconflicttest values (26, 'Peach') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 087
+-- succeeds, since "key" isn't repeated/referenced in UPDATE, and "fruit"
+-- arbitrates that statement updates existing "Fig" row:
+insert into insertconflicttest values (25, 'Fig') on conflict (fruit) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 088
+drop index key_index
+--
+STMT: DropStmt
+== 089
+drop index fruit_index
+--
+STMT: DropStmt
+== 090
+|--
+-- Test partial unique index inference
+|--
+create unique index partial_key_index on insertconflicttest(key) where fruit like '%berry'
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 091
+-- Succeeds
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where fruit like '%berry' do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 092
+insert into insertconflicttest as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "t"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 093
+insert into insertconflictview as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing
+--
+TABLE: name="insertconflictview" schema="" table="insertconflictview" ctx=DML
+ALIAS: "t"="insertconflictview"
+STMT: InsertStmt
+STMT: SelectStmt
+== 094
+-- fails
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 095
+insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where fruit like '%berry' or fruit = 'consequential' do nothing
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 096
+insert into insertconflicttest values (23, 'Blackberry') on conflict (fruit) where fruit like '%berry' do update set fruit = excluded.fruit
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 097
+drop index partial_key_index
+--
+STMT: DropStmt
+== 098
+|--
+-- Test that wholerow references to ON CONFLICT's EXCLUDED work
+|--
+create unique index plain on insertconflicttest(key)
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: IndexStmt
+== 099
+-- Succeeds, updates existing row:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* != excluded.* returning *
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 100
+-- No update this time, though:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* != excluded.* returning *
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 101
+-- Predicate changed to require match rather than non-match, so updates once more:
+insert into insertconflicttest as i values (23, 'Jackfruit') on conflict (key) do update set fruit = excluded.fruit
+  where i.* = excluded.* returning *
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 102
+-- Assign:
+insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.*::text
+  returning *
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: InsertStmt
+STMT: SelectStmt
+== 103
+-- deparse whole row var in WHERE and SET clauses:
+explain (costs off) insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.fruit where excluded.* is null
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 104
+explain (costs off) insert into insertconflicttest as i values (23, 'Avocado') on conflict (key) do update set fruit = excluded.*::text
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DML
+ALIAS: "i"="insertconflicttest"
+STMT: ExplainStmt
+STMT: InsertStmt
+STMT: SelectStmt
+== 105
+drop index plain
+--
+STMT: DropStmt
+== 106
+-- Cleanup
+drop view insertconflictview
+--
+STMT: DropStmt
+== 107
+drop table insertconflicttest
+--
+TABLE: name="insertconflicttest" schema="" table="insertconflicttest" ctx=DDL
+STMT: DropStmt
+== 108
+|--
+-- Verify that EXCLUDED does not allow system column references. These
+-- do not make sense because EXCLUDED isn't an already stored tuple
+-- (and thus doesn't have a ctid etc).
+|--
+create table syscolconflicttest(key int4, data text)
+--
+TABLE: name="syscolconflicttest" schema="" table="syscolconflicttest" ctx=DDL
+STMT: CreateStmt
+== 109
+insert into syscolconflicttest values (1)
+--
+TABLE: name="syscolconflicttest" schema="" table="syscolconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 110
+insert into syscolconflicttest values (1) on conflict (key) do update set data = excluded.ctid::text
+--
+TABLE: name="syscolconflicttest" schema="" table="syscolconflicttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 111
+drop table syscolconflicttest
+--
+TABLE: name="syscolconflicttest" schema="" table="syscolconflicttest" ctx=DDL
+STMT: DropStmt
+== 112
+|--
+-- Previous tests all managed to not test any expressions requiring
+-- planner preprocessing ...
+|--
+create table insertconflict (a bigint, b bigint)
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: CreateStmt
+== 113
+create unique index insertconflicti1 on insertconflict(coalesce(a, 0))
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: IndexStmt
+== 114
+create unique index insertconflicti2 on insertconflict(b)
+  where coalesce(a, 1) > 0
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: IndexStmt
+== 115
+insert into insertconflict values (1, 2)
+on conflict (coalesce(a, 0)) do nothing
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 116
+insert into insertconflict values (1, 2)
+on conflict (b) where coalesce(a, 1) > 0 do nothing
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 117
+insert into insertconflict values (1, 2)
+on conflict (b) where coalesce(a, 1) > 1 do nothing
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 118
+drop table insertconflict
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: DropStmt
+== 119
+|--
+-- test insertion through view
+|--
+
+create table insertconflict (f1 int primary key, f2 text)
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: CreateStmt
+== 120
+create view insertconflictv as
+  select * from insertconflict with cascaded check option
+--
+TABLE: name="insertconflictv" schema="" table="insertconflictv" ctx=DDL
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=Select
+STMT: ViewStmt
+STMT: SelectStmt
+== 121
+insert into insertconflictv values (1,'foo')
+  on conflict (f1) do update set f2 = excluded.f2
+--
+TABLE: name="insertconflictv" schema="" table="insertconflictv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 122
+select * from insertconflict
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=Select
+STMT: SelectStmt
+== 123
+insert into insertconflictv values (1,'bar')
+  on conflict (f1) do update set f2 = excluded.f2
+--
+TABLE: name="insertconflictv" schema="" table="insertconflictv" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 124
+select * from insertconflict
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=Select
+STMT: SelectStmt
+== 125
+drop view insertconflictv
+--
+STMT: DropStmt
+== 126
+drop table insertconflict
+--
+TABLE: name="insertconflict" schema="" table="insertconflict" ctx=DDL
+STMT: DropStmt
+== 127
+-- ******************************************************************
+-- *                                                                *
+-- * Test inheritance (example taken from tutorial)                 *
+-- *                                                                *
+-- ******************************************************************
+create table cities (
+	name		text,
+	population	float8,
+	altitude	int		-- (in ft)
+)
+--
+TABLE: name="cities" schema="" table="cities" ctx=DDL
+STMT: CreateStmt
+== 128
+create table capitals (
+	state		char(2)
+) inherits (cities)
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DDL
+STMT: CreateStmt
+== 129
+-- Create unique indexes.  Due to a general limitation of inheritance,
+-- uniqueness is only enforced per-relation.  Unique index inference
+-- specification will do the right thing, though.
+create unique index cities_names_unique on cities (name)
+--
+TABLE: name="cities" schema="" table="cities" ctx=DDL
+STMT: IndexStmt
+== 130
+create unique index capitals_names_unique on capitals (name)
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DDL
+STMT: IndexStmt
+== 131
+-- prepopulate the tables.
+insert into cities values ('San Francisco', 7.24E+5, 63)
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 132
+insert into cities values ('Las Vegas', 2.583E+5, 2174)
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 133
+insert into cities values ('Mariposa', 1200, 1953)
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 134
+insert into capitals values ('Sacramento', 3.694E+5, 30, 'CA')
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 135
+insert into capitals values ('Madison', 1.913E+5, 845, 'WI')
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 136
+-- Tests proper for inheritance:
+select * from capitals
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=Select
+STMT: SelectStmt
+== 137
+-- Succeeds:
+insert into cities values ('Las Vegas', 2.583E+5, 2174) on conflict do nothing
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 138
+insert into capitals values ('Sacramento', 4664.E+5, 30, 'CA') on conflict (name) do update set population = excluded.population
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 139
+-- Wrong "Sacramento", so do nothing:
+insert into capitals values ('Sacramento', 50, 2267, 'NE') on conflict (name) do nothing
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 140
+select * from capitals
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=Select
+STMT: SelectStmt
+== 141
+insert into cities values ('Las Vegas', 5.83E+5, 2001) on conflict (name) do update set population = excluded.population, altitude = excluded.altitude
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 142
+select tableoid::regclass, * from cities
+--
+TABLE: name="cities" schema="" table="cities" ctx=Select
+STMT: SelectStmt
+== 143
+insert into capitals values ('Las Vegas', 5.83E+5, 2222, 'NV') on conflict (name) do update set population = excluded.population
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 144
+-- Capitals will contain new capital, Las Vegas:
+select * from capitals
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=Select
+STMT: SelectStmt
+== 145
+-- Cities contains two instances of "Las Vegas", since unique constraints don't
+-- work across inheritance:
+select tableoid::regclass, * from cities
+--
+TABLE: name="cities" schema="" table="cities" ctx=Select
+STMT: SelectStmt
+== 146
+-- This only affects "cities" version of "Las Vegas":
+insert into cities values ('Las Vegas', 5.86E+5, 2223) on conflict (name) do update set population = excluded.population, altitude = excluded.altitude
+--
+TABLE: name="cities" schema="" table="cities" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 147
+select tableoid::regclass, * from cities
+--
+TABLE: name="cities" schema="" table="cities" ctx=Select
+STMT: SelectStmt
+== 148
+-- clean up
+drop table capitals
+--
+TABLE: name="capitals" schema="" table="capitals" ctx=DDL
+STMT: DropStmt
+== 149
+drop table cities
+--
+TABLE: name="cities" schema="" table="cities" ctx=DDL
+STMT: DropStmt
+== 150
+-- Make sure a table named excluded is handled properly
+create table excluded(key int primary key, data text)
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DDL
+STMT: CreateStmt
+== 151
+insert into excluded values(1, '1')
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 152
+-- error, ambiguous
+insert into excluded values(1, '2') on conflict (key) do update set data = excluded.data RETURNING *
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 153
+-- ok, aliased
+insert into excluded AS target values(1, '2') on conflict (key) do update set data = excluded.data RETURNING *
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DML
+ALIAS: "target"="excluded"
+STMT: InsertStmt
+STMT: SelectStmt
+== 154
+-- ok, aliased
+insert into excluded AS target values(1, '2') on conflict (key) do update set data = target.data RETURNING *
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DML
+ALIAS: "target"="excluded"
+STMT: InsertStmt
+STMT: SelectStmt
+== 155
+-- make sure excluded isn't a problem in returning clause
+insert into excluded values(1, '2') on conflict (key) do update set data = 3 RETURNING excluded.*
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 156
+-- clean up
+drop table excluded
+--
+TABLE: name="excluded" schema="" table="excluded" ctx=DDL
+STMT: DropStmt
+== 157
+-- check that references to columns after dropped columns are handled correctly
+create table dropcol(key int primary key, drop1 int, keep1 text, drop2 numeric, keep2 float)
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DDL
+STMT: CreateStmt
+== 158
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 1, '1', '1', 1)
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 159
+-- set using excluded
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 2, '2', '2', 2) on conflict(key)
+    do update set drop1 = excluded.drop1, keep1 = excluded.keep1, drop2 = excluded.drop2, keep2 = excluded.keep2
+    where excluded.drop1 is not null and excluded.keep1 is not null and excluded.drop2 is not null and excluded.keep2 is not null
+          and dropcol.drop1 is not null and dropcol.keep1 is not null and dropcol.drop2 is not null and dropcol.keep2 is not null
+    returning *
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 160
+-- set using existing table
+insert into dropcol(key, drop1, keep1, drop2, keep2) values(1, 3, '3', '3', 3) on conflict(key)
+    do update set drop1 = dropcol.drop1, keep1 = dropcol.keep1, drop2 = dropcol.drop2, keep2 = dropcol.keep2
+    returning *
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 161
+alter table dropcol drop column drop1, drop column drop2
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DDL
+STMT: AlterTableStmt
+== 162
+-- set using excluded
+insert into dropcol(key, keep1, keep2) values(1, '4', 4) on conflict(key)
+    do update set keep1 = excluded.keep1, keep2 = excluded.keep2
+    where excluded.keep1 is not null and excluded.keep2 is not null
+          and dropcol.keep1 is not null and dropcol.keep2 is not null
+    returning *
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 163
+-- set using existing table
+insert into dropcol(key, keep1, keep2) values(1, '5', 5) on conflict(key)
+    do update set keep1 = dropcol.keep1, keep2 = dropcol.keep2
+    returning *
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 164
+DROP TABLE dropcol
+--
+TABLE: name="dropcol" schema="" table="dropcol" ctx=DDL
+STMT: DropStmt
+== 165
+-- check handling of regular btree constraint along with gist constraint
+
+create table twoconstraints (f1 int unique, f2 box,
+                             exclude using gist(f2 with &&))
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DDL
+STMT: CreateStmt
+== 166
+insert into twoconstraints values(1, '((0,0),(1,1))')
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 167
+insert into twoconstraints values(1, '((2,2),(3,3))')
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 168
+-- fail on f1
+insert into twoconstraints values(2, '((0,0),(1,2))')
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 169
+-- fail on f2
+insert into twoconstraints values(2, '((0,0),(1,2))')
+  on conflict on constraint twoconstraints_f1_key do nothing
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 170
+-- fail on f2
+insert into twoconstraints values(2, '((0,0),(1,2))')
+  on conflict on constraint twoconstraints_f2_excl do nothing
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 171
+-- do nothing
+select * from twoconstraints
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=Select
+STMT: SelectStmt
+== 172
+drop table twoconstraints
+--
+TABLE: name="twoconstraints" schema="" table="twoconstraints" ctx=DDL
+STMT: DropStmt
+== 173
+-- check handling of self-conflicts at various isolation levels
+
+create table selfconflict (f1 int primary key, f2 int)
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DDL
+STMT: CreateStmt
+== 174
+begin transaction isolation level read committed
+--
+STMT: TransactionStmt
+== 175
+insert into selfconflict values (1,1), (1,2) on conflict do nothing
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 176
+commit
+--
+STMT: TransactionStmt
+== 177
+begin transaction isolation level repeatable read
+--
+STMT: TransactionStmt
+== 178
+insert into selfconflict values (2,1), (2,2) on conflict do nothing
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 179
+commit
+--
+STMT: TransactionStmt
+== 180
+begin transaction isolation level serializable
+--
+STMT: TransactionStmt
+== 181
+insert into selfconflict values (3,1), (3,2) on conflict do nothing
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 182
+commit
+--
+STMT: TransactionStmt
+== 183
+begin transaction isolation level read committed
+--
+STMT: TransactionStmt
+== 184
+insert into selfconflict values (4,1), (4,2) on conflict(f1) do update set f2 = 0
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 185
+commit
+--
+STMT: TransactionStmt
+== 186
+begin transaction isolation level repeatable read
+--
+STMT: TransactionStmt
+== 187
+insert into selfconflict values (5,1), (5,2) on conflict(f1) do update set f2 = 0
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 188
+commit
+--
+STMT: TransactionStmt
+== 189
+begin transaction isolation level serializable
+--
+STMT: TransactionStmt
+== 190
+insert into selfconflict values (6,1), (6,2) on conflict(f1) do update set f2 = 0
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 191
+commit
+--
+STMT: TransactionStmt
+== 192
+select * from selfconflict
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=Select
+STMT: SelectStmt
+== 193
+drop table selfconflict
+--
+TABLE: name="selfconflict" schema="" table="selfconflict" ctx=DDL
+STMT: DropStmt
+== 194
+-- check ON CONFLICT handling with partitioned tables
+create table parted_conflict_test (a int unique, b char) partition by list (a)
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: CreateStmt
+== 195
+create table parted_conflict_test_1 partition of parted_conflict_test (b unique) for values in (1, 2)
+--
+TABLE: name="parted_conflict_test_1" schema="" table="parted_conflict_test_1" ctx=DDL
+STMT: CreateStmt
+== 196
+-- no indexes required here
+insert into parted_conflict_test values (1, 'a') on conflict do nothing
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 197
+-- index on a required, which does exist in parent
+insert into parted_conflict_test values (1, 'a') on conflict (a) do nothing
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 198
+insert into parted_conflict_test values (1, 'a') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 199
+-- targeting partition directly will work
+insert into parted_conflict_test_1 values (1, 'a') on conflict (a) do nothing
+--
+TABLE: name="parted_conflict_test_1" schema="" table="parted_conflict_test_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 200
+insert into parted_conflict_test_1 values (1, 'b') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test_1" schema="" table="parted_conflict_test_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 201
+-- index on b required, which doesn't exist in parent
+insert into parted_conflict_test values (2, 'b') on conflict (b) do update set a = excluded.a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 202
+-- targeting partition directly will work
+insert into parted_conflict_test_1 values (2, 'b') on conflict (b) do update set a = excluded.a
+--
+TABLE: name="parted_conflict_test_1" schema="" table="parted_conflict_test_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 203
+-- should see (2, 'b')
+select * from parted_conflict_test order by a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=Select
+STMT: SelectStmt
+== 204
+-- now check that DO UPDATE works correctly for target partition with
+-- different attribute numbers
+create table parted_conflict_test_2 (b char, a int unique)
+--
+TABLE: name="parted_conflict_test_2" schema="" table="parted_conflict_test_2" ctx=DDL
+STMT: CreateStmt
+== 205
+alter table parted_conflict_test attach partition parted_conflict_test_2 for values in (3)
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: AlterTableStmt
+== 206
+truncate parted_conflict_test
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: TruncateStmt
+== 207
+insert into parted_conflict_test values (3, 'a') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 208
+insert into parted_conflict_test values (3, 'b') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 209
+-- should see (3, 'b')
+select * from parted_conflict_test order by a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=Select
+STMT: SelectStmt
+== 210
+-- case where parent will have a dropped column, but the partition won't
+alter table parted_conflict_test drop b, add b char
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: AlterTableStmt
+== 211
+create table parted_conflict_test_3 partition of parted_conflict_test for values in (4)
+--
+TABLE: name="parted_conflict_test_3" schema="" table="parted_conflict_test_3" ctx=DDL
+STMT: CreateStmt
+== 212
+truncate parted_conflict_test
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: TruncateStmt
+== 213
+insert into parted_conflict_test (a, b) values (4, 'a') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 214
+insert into parted_conflict_test (a, b) values (4, 'b') on conflict (a) do update set b = excluded.b where parted_conflict_test.b = 'a'
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 215
+-- should see (4, 'b')
+select * from parted_conflict_test order by a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=Select
+STMT: SelectStmt
+== 216
+-- case with multi-level partitioning
+create table parted_conflict_test_4 partition of parted_conflict_test for values in (5) partition by list (a)
+--
+TABLE: name="parted_conflict_test_4" schema="" table="parted_conflict_test_4" ctx=DDL
+STMT: CreateStmt
+== 217
+create table parted_conflict_test_4_1 partition of parted_conflict_test_4 for values in (5)
+--
+TABLE: name="parted_conflict_test_4_1" schema="" table="parted_conflict_test_4_1" ctx=DDL
+STMT: CreateStmt
+== 218
+truncate parted_conflict_test
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: TruncateStmt
+== 219
+insert into parted_conflict_test (a, b) values (5, 'a') on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 220
+insert into parted_conflict_test (a, b) values (5, 'b') on conflict (a) do update set b = excluded.b where parted_conflict_test.b = 'a'
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 221
+-- should see (5, 'b')
+select * from parted_conflict_test order by a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=Select
+STMT: SelectStmt
+== 222
+-- test with multiple rows
+truncate parted_conflict_test
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: TruncateStmt
+== 223
+insert into parted_conflict_test (a, b) values (1, 'a'), (2, 'a'), (4, 'a') on conflict (a) do update set b = excluded.b where excluded.b = 'b'
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 224
+insert into parted_conflict_test (a, b) values (1, 'b'), (2, 'c'), (4, 'b') on conflict (a) do update set b = excluded.b where excluded.b = 'b'
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 225
+-- should see (1, 'b'), (2, 'a'), (4, 'b')
+select * from parted_conflict_test order by a
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=Select
+STMT: SelectStmt
+== 226
+drop table parted_conflict_test
+--
+TABLE: name="parted_conflict_test" schema="" table="parted_conflict_test" ctx=DDL
+STMT: DropStmt
+== 227
+-- test behavior of inserting a conflicting tuple into an intermediate
+-- partitioning level
+create table parted_conflict (a int primary key, b text) partition by range (a)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: CreateStmt
+== 228
+create table parted_conflict_1 partition of parted_conflict for values from (0) to (1000) partition by range (a)
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DDL
+STMT: CreateStmt
+== 229
+create table parted_conflict_1_1 partition of parted_conflict_1 for values from (0) to (500)
+--
+TABLE: name="parted_conflict_1_1" schema="" table="parted_conflict_1_1" ctx=DDL
+STMT: CreateStmt
+== 230
+insert into parted_conflict values (40, 'forty')
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 231
+insert into parted_conflict_1 values (40, 'cuarenta')
+  on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 232
+drop table parted_conflict
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: DropStmt
+== 233
+-- same thing, but this time try to use an index that's created not in the
+-- partition
+create table parted_conflict (a int, b text) partition by range (a)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: CreateStmt
+== 234
+create table parted_conflict_1 partition of parted_conflict for values from (0) to (1000) partition by range (a)
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DDL
+STMT: CreateStmt
+== 235
+create table parted_conflict_1_1 partition of parted_conflict_1 for values from (0) to (500)
+--
+TABLE: name="parted_conflict_1_1" schema="" table="parted_conflict_1_1" ctx=DDL
+STMT: CreateStmt
+== 236
+create unique index on only parted_conflict_1 (a)
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DDL
+STMT: IndexStmt
+== 237
+create unique index on only parted_conflict (a)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: IndexStmt
+== 238
+alter index parted_conflict_a_idx attach partition parted_conflict_1_a_idx
+--
+STMT: AlterTableStmt
+== 239
+insert into parted_conflict values (40, 'forty')
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 240
+insert into parted_conflict_1 values (40, 'cuarenta')
+  on conflict (a) do update set b = excluded.b
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 241
+drop table parted_conflict
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: DropStmt
+== 242
+-- test whole-row Vars in ON CONFLICT expressions
+create table parted_conflict (a int, b text, c int) partition by range (a)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: CreateStmt
+== 243
+create table parted_conflict_1 (drp text, c int, a int, b text)
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DDL
+STMT: CreateStmt
+== 244
+alter table parted_conflict_1 drop column drp
+--
+TABLE: name="parted_conflict_1" schema="" table="parted_conflict_1" ctx=DDL
+STMT: AlterTableStmt
+== 245
+create unique index on parted_conflict (a, b)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: IndexStmt
+== 246
+alter table parted_conflict attach partition parted_conflict_1 for values from (0) to (1000)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: AlterTableStmt
+== 247
+truncate parted_conflict
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: TruncateStmt
+== 248
+insert into parted_conflict values (50, 'cincuenta', 1)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 249
+insert into parted_conflict values (50, 'cincuenta', 2)
+  on conflict (a, b) do update set (a, b, c) = row(excluded.*)
+  where parted_conflict = (50, text 'cincuenta', 1) and
+        excluded = (50, text 'cincuenta', 2)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 250
+-- should see (50, 'cincuenta', 2)
+select * from parted_conflict order by a
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=Select
+STMT: SelectStmt
+== 251
+-- test with statement level triggers
+create or replace function parted_conflict_update_func() returns trigger as $$
+declare
+    r record;
+begin
+ for r in select * from inserted loop
+	raise notice 'a = %, b = %, c = %', r.a, r.b, r.c;
+ end loop;
+ return new;
+end;
+$$ language plpgsql
+--
+FUNCTION: name="parted_conflict_update_func" function="parted_conflict_update_func" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 252
+create trigger parted_conflict_update
+    after update on parted_conflict
+    referencing new table as inserted
+    for each statement
+    execute procedure parted_conflict_update_func()
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: CreateTrigStmt
+== 253
+truncate parted_conflict
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: TruncateStmt
+== 254
+insert into parted_conflict values (0, 'cero', 1)
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 255
+insert into parted_conflict values(0, 'cero', 1)
+  on conflict (a,b) do update set c = parted_conflict.c + 1
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 256
+drop table parted_conflict
+--
+TABLE: name="parted_conflict" schema="" table="parted_conflict" ctx=DDL
+STMT: DropStmt
+== 257
+drop function parted_conflict_update_func()
+--
+FUNCTION: name="parted_conflict_update_func" function="parted_conflict_update_func" schema="" ctx=DDL
+STMT: DropStmt

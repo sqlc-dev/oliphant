@@ -1,0 +1,93 @@
+== 001
+|--
+-- Cache-behavior-dependent test cases
+|--
+-- These tests logically belong in plpgsql_record.sql, and perhaps someday
+-- can be merged back into it.  For now, however, their results are different
+-- depending on debug_discard_caches, so we must have two expected-output
+-- files to cover both cases.  To minimize the maintenance effort resulting
+-- from that, this file should contain only tests that do have different
+-- results under debug_discard_caches.
+|--
+
+-- check behavior with changes of a named rowtype
+create table c_mutable(f1 int, f2 text)
+--
+TABLE: name="c_mutable" schema="" table="c_mutable" ctx=DDL
+STMT: CreateStmt
+== 002
+create function c_sillyaddone(int) returns int language plpgsql as
+$$ declare r c_mutable; begin r.f1 := $1; return r.f1 + 1; end $$
+--
+FUNCTION: name="c_sillyaddone" function="c_sillyaddone" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 003
+select c_sillyaddone(42)
+--
+FUNCTION: name="c_sillyaddone" function="c_sillyaddone" schema="" ctx=Call
+STMT: SelectStmt
+== 004
+alter table c_mutable drop column f1
+--
+TABLE: name="c_mutable" schema="" table="c_mutable" ctx=DDL
+STMT: AlterTableStmt
+== 005
+alter table c_mutable add column f1 float8
+--
+TABLE: name="c_mutable" schema="" table="c_mutable" ctx=DDL
+STMT: AlterTableStmt
+== 006
+-- currently, this fails due to cached plan for "r.f1 + 1" expression
+-- (but if debug_discard_caches is on, it will succeed)
+select c_sillyaddone(42)
+--
+FUNCTION: name="c_sillyaddone" function="c_sillyaddone" schema="" ctx=Call
+STMT: SelectStmt
+== 007
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+STMT: DiscardStmt
+== 008
+select c_sillyaddone(42)
+--
+FUNCTION: name="c_sillyaddone" function="c_sillyaddone" schema="" ctx=Call
+STMT: SelectStmt
+== 009
+-- check behavior with changes in a record rowtype
+create function show_result_type(text) returns text language plpgsql as
+$$
+    declare
+        r record;
+        t text;
+    begin
+        execute $1 into r;
+        select pg_typeof(r.a) into t;
+        return format('type %s value %s', t, r.a::text);
+    end;
+$$
+--
+FUNCTION: name="show_result_type" function="show_result_type" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 010
+select show_result_type('select 1 as a')
+--
+FUNCTION: name="show_result_type" function="show_result_type" schema="" ctx=Call
+STMT: SelectStmt
+== 011
+-- currently this fails due to cached plan for pg_typeof expression
+-- (but if debug_discard_caches is on, it will succeed)
+select show_result_type('select 2.0 as a')
+--
+FUNCTION: name="show_result_type" function="show_result_type" schema="" ctx=Call
+STMT: SelectStmt
+== 012
+-- but it's OK if we force plan rebuilding
+discard plans
+--
+STMT: DiscardStmt
+== 013
+select show_result_type('select 2.0 as a')
+--
+FUNCTION: name="show_result_type" function="show_result_type" schema="" ctx=Call
+STMT: SelectStmt

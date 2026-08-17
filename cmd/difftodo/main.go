@@ -23,7 +23,8 @@ func main() {
 	}
 	suite := "parse"
 	for _, s := range []string{"parse", "scan", "normalize", "normalize_utility",
-		"fingerprint", "deparse", "split_scanner", "split_parser"} {
+		"fingerprint", "deparse", "split_scanner", "split_parser",
+		"summary", "summary_truncate", "plpgsql"} {
 		if strings.Contains(path, "/"+s+"/") {
 			suite = s
 		}
@@ -76,6 +77,42 @@ func evaluate(suite, input string) string {
 		if err == nil {
 			out, err = pg_query.Deparse(tree)
 		}
+	case "summary", "summary_truncate":
+		limit, sql := -1, input
+		if suite == "summary_truncate" {
+			limit, sql, err = testfile.SplitTruncateLimit(input)
+			if err != nil {
+				return "BAD CASE: " + err.Error()
+			}
+		}
+		var res *pg_query.SummaryResult
+		res, err = pg_query.Summary(sql, limit)
+		if err == nil {
+			e := testfile.SummaryExpectation{
+				Aliases:        res.Aliases,
+				CteNames:       res.CteNames,
+				StatementTypes: res.StatementTypes,
+				TruncatedQuery: res.TruncatedQuery,
+			}
+			for _, t := range res.Tables {
+				e.Tables = append(e.Tables, testfile.SummaryTable{
+					Name: t.Name, SchemaName: t.SchemaName, TableName: t.TableName, Context: t.Context.String(),
+				})
+			}
+			for _, f := range res.Functions {
+				e.Functions = append(e.Functions, testfile.SummaryFunction{
+					Name: f.Name, FunctionName: f.FunctionName, SchemaName: f.SchemaName, Context: f.Context.String(),
+				})
+			}
+			for _, f := range res.FilterColumns {
+				e.FilterColumns = append(e.FilterColumns, testfile.SummaryFilterColumn{
+					SchemaName: f.SchemaName, TableName: f.TableName, Column: f.Column,
+				})
+			}
+			out = testfile.RenderSummary(e)
+		}
+	case "plpgsql":
+		out, err = pg_query.ParsePlPgSqlToJSON(input)
 	default:
 		panic("difftodo: unsupported suite " + suite)
 	}

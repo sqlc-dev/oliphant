@@ -1,0 +1,2298 @@
+== 001
+|--
+-- insert with DEFAULT in the target_list
+|--
+create table inserttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DDL
+STMT: CreateStmt
+== 002
+insert into inserttest (col1, col2, col3) values (DEFAULT, DEFAULT, DEFAULT)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 003
+insert into inserttest (col2, col3) values (3, DEFAULT)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 004
+insert into inserttest (col1, col2, col3) values (DEFAULT, 5, DEFAULT)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 005
+insert into inserttest values (DEFAULT, 5, 'test')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 006
+insert into inserttest values (DEFAULT, 7)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 007
+select * from inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=Select
+STMT: SelectStmt
+== 008
+|--
+-- insert with similar expression / target_list values (all fail)
+|--
+insert into inserttest (col1, col2, col3) values (DEFAULT, DEFAULT)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 009
+insert into inserttest (col1, col2, col3) values (1, 2)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 010
+insert into inserttest (col1) values (1, 2)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 011
+insert into inserttest (col1) values (DEFAULT, DEFAULT)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 012
+select * from inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=Select
+STMT: SelectStmt
+== 013
+|--
+-- VALUES test
+|--
+insert into inserttest values(10, 20, '40'), (-1, 2, DEFAULT),
+    ((select 2), (select i from (values(3)) as foo (i)), 'values are fun!')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 014
+select * from inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=Select
+STMT: SelectStmt
+== 015
+|--
+-- TOASTed value test
+|--
+insert into inserttest values(30, 50, repeat('x', 10000))
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 016
+select col1, col2, char_length(col3) from inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=Select
+FUNCTION: name="char_length" function="char_length" schema="" ctx=Call
+STMT: SelectStmt
+== 017
+drop table inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DDL
+STMT: DropStmt
+== 018
+|--
+-- tuple larger than fillfactor
+|--
+CREATE TABLE large_tuple_test (a int, b text) WITH (fillfactor = 10)
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DDL
+STMT: CreateStmt
+== 019
+ALTER TABLE large_tuple_test ALTER COLUMN b SET STORAGE plain
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DDL
+STMT: AlterTableStmt
+== 020
+-- create page w/ free space in range [nearlyEmptyFreeSpace, MaxHeapTupleSize)
+INSERT INTO large_tuple_test (select 1, NULL)
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 021
+-- should still fit on the page
+INSERT INTO large_tuple_test (select 2, repeat('a', 1000))
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 022
+SELECT pg_size_pretty(pg_relation_size('large_tuple_test'::regclass, 'main'))
+--
+FUNCTION: name="pg_size_pretty" function="pg_size_pretty" schema="" ctx=Call
+FUNCTION: name="pg_relation_size" function="pg_relation_size" schema="" ctx=Call
+STMT: SelectStmt
+== 023
+-- add small record to the second page
+INSERT INTO large_tuple_test (select 3, NULL)
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 024
+-- now this tuple won't fit on the second page, but the insert should
+-- still succeed by extending the relation
+INSERT INTO large_tuple_test (select 4, repeat('a', 8126))
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DML
+FUNCTION: name="repeat" function="repeat" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 025
+DROP TABLE large_tuple_test
+--
+TABLE: name="large_tuple_test" schema="" table="large_tuple_test" ctx=DDL
+STMT: DropStmt
+== 026
+|--
+-- check indirection (field/array assignment), cf bug #14265
+|--
+-- these tests are aware that transformInsertStmt has 3 separate code paths
+|--
+
+create type insert_test_type as (if1 int, if2 text[])
+--
+STMT: CompositeTypeStmt
+== 027
+create table inserttest (f1 int, f2 int[],
+                         f3 insert_test_type, f4 insert_test_type[])
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DDL
+STMT: CreateStmt
+== 028
+insert into inserttest (f2[1], f2[2]) values (1,2)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 029
+insert into inserttest (f2[1], f2[2]) values (3,4), (5,6)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 030
+insert into inserttest (f2[1], f2[2]) select 7,8
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 031
+insert into inserttest (f2[1], f2[2]) values (1,default)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 032
+-- not supported
+
+insert into inserttest (f3.if1, f3.if2) values (1,array['foo'])
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 033
+insert into inserttest (f3.if1, f3.if2) values (1,'{foo}'), (2,'{bar}')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 034
+insert into inserttest (f3.if1, f3.if2) select 3, '{baz,quux}'
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 035
+insert into inserttest (f3.if1, f3.if2) values (1,default)
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 036
+-- not supported
+
+insert into inserttest (f3.if2[1], f3.if2[2]) values ('foo', 'bar')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 037
+insert into inserttest (f3.if2[1], f3.if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 038
+insert into inserttest (f3.if2[1], f3.if2[2]) select 'bear', 'beer'
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 039
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) values ('foo', 'bar')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 040
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 041
+insert into inserttest (f4[1].if2[1], f4[1].if2[2]) select 'bear', 'beer'
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 042
+select * from inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=Select
+STMT: SelectStmt
+== 043
+-- also check reverse-listing
+create table inserttest2 (f1 bigint, f2 text)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: CreateStmt
+== 044
+create rule irule1 as on insert to inserttest2 do also
+  insert into inserttest (f3.if2[1], f3.if2[2])
+  values (new.f1,new.f2)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 045
+create rule irule2 as on insert to inserttest2 do also
+  insert into inserttest (f4[1].if1, f4[1].if2[2])
+  values (1,'fool'),(new.f1,new.f2)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 046
+create rule irule3 as on insert to inserttest2 do also
+  insert into inserttest (f4[1].if1, f4[1].if2[2])
+  select new.f1, new.f2
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 047
+drop table inserttest2
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: DropStmt
+== 048
+drop table inserttest
+--
+TABLE: name="inserttest" schema="" table="inserttest" ctx=DDL
+STMT: DropStmt
+== 049
+-- Make the same tests with domains over the array and composite fields
+
+create domain insert_pos_ints as int[] check (value[1] > 0)
+--
+STMT: CreateDomainStmt
+== 050
+create domain insert_test_domain as insert_test_type
+  check ((value).if2[1] is not null)
+--
+STMT: CreateDomainStmt
+== 051
+create table inserttesta (f1 int, f2 insert_pos_ints)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DDL
+STMT: CreateStmt
+== 052
+create table inserttestb (f3 insert_test_domain, f4 insert_test_domain[])
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DDL
+STMT: CreateStmt
+== 053
+insert into inserttesta (f2[1], f2[2]) values (1,2)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 054
+insert into inserttesta (f2[1], f2[2]) values (3,4), (5,6)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 055
+insert into inserttesta (f2[1], f2[2]) select 7,8
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 056
+insert into inserttesta (f2[1], f2[2]) values (1,default)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 057
+-- not supported
+insert into inserttesta (f2[1], f2[2]) values (0,2)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 058
+insert into inserttesta (f2[1], f2[2]) values (3,4), (0,6)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 059
+insert into inserttesta (f2[1], f2[2]) select 0,8
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 060
+insert into inserttestb (f3.if1, f3.if2) values (1,array['foo'])
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 061
+insert into inserttestb (f3.if1, f3.if2) values (1,'{foo}'), (2,'{bar}')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 062
+insert into inserttestb (f3.if1, f3.if2) select 3, '{baz,quux}'
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 063
+insert into inserttestb (f3.if1, f3.if2) values (1,default)
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 064
+-- not supported
+insert into inserttestb (f3.if1, f3.if2) values (1,array[null])
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 065
+insert into inserttestb (f3.if1, f3.if2) values (1,'{null}'), (2,'{bar}')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 066
+insert into inserttestb (f3.if1, f3.if2) select 3, '{null,quux}'
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 067
+insert into inserttestb (f3.if2[1], f3.if2[2]) values ('foo', 'bar')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 068
+insert into inserttestb (f3.if2[1], f3.if2[2]) values ('foo', 'bar'), ('baz', 'quux')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 069
+insert into inserttestb (f3.if2[1], f3.if2[2]) select 'bear', 'beer'
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 070
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) values (row(1,'{x}'), 'foo', 'bar')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 071
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) values (row(1,'{x}'), 'foo', 'bar'), (row(2,'{y}'), 'baz', 'quux')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 072
+insert into inserttestb (f3, f4[1].if2[1], f4[1].if2[2]) select row(1,'{x}')::insert_test_domain, 'bear', 'beer'
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 073
+select * from inserttesta
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=Select
+STMT: SelectStmt
+== 074
+select * from inserttestb
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=Select
+STMT: SelectStmt
+== 075
+-- also check reverse-listing
+create table inserttest2 (f1 bigint, f2 text)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: CreateStmt
+== 076
+create rule irule1 as on insert to inserttest2 do also
+  insert into inserttestb (f3.if2[1], f3.if2[2])
+  values (new.f1,new.f2)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 077
+create rule irule2 as on insert to inserttest2 do also
+  insert into inserttestb (f4[1].if1, f4[1].if2[2])
+  values (1,'fool'),(new.f1,new.f2)
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 078
+create rule irule3 as on insert to inserttest2 do also
+  insert into inserttestb (f4[1].if1, f4[1].if2[2])
+  select new.f1, new.f2
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: RuleStmt
+== 079
+drop table inserttest2
+--
+TABLE: name="inserttest2" schema="" table="inserttest2" ctx=DDL
+STMT: DropStmt
+== 080
+drop table inserttesta
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DDL
+STMT: DropStmt
+== 081
+drop table inserttestb
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DDL
+STMT: DropStmt
+== 082
+drop domain insert_pos_ints
+--
+STMT: DropStmt
+== 083
+drop domain insert_test_domain
+--
+STMT: DropStmt
+== 084
+-- Verify that multiple inserts to subfields of a domain-over-container
+-- check the domain constraints only on the finished value
+
+create domain insert_nnarray as int[]
+  check (value[1] is not null and value[2] is not null)
+--
+STMT: CreateDomainStmt
+== 085
+create domain insert_test_domain as insert_test_type
+  check ((value).if1 is not null and (value).if2 is not null)
+--
+STMT: CreateDomainStmt
+== 086
+create table inserttesta (f1 insert_nnarray)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DDL
+STMT: CreateStmt
+== 087
+insert into inserttesta (f1[1]) values (1)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 088
+-- fail
+insert into inserttesta (f1[1], f1[2]) values (1, 2)
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 089
+create table inserttestb (f1 insert_test_domain)
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DDL
+STMT: CreateStmt
+== 090
+insert into inserttestb (f1.if1) values (1)
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 091
+-- fail
+insert into inserttestb (f1.if1, f1.if2) values (1, '{foo}')
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 092
+drop table inserttesta
+--
+TABLE: name="inserttesta" schema="" table="inserttesta" ctx=DDL
+STMT: DropStmt
+== 093
+drop table inserttestb
+--
+TABLE: name="inserttestb" schema="" table="inserttestb" ctx=DDL
+STMT: DropStmt
+== 094
+drop domain insert_nnarray
+--
+STMT: DropStmt
+== 095
+drop type insert_test_type cascade
+--
+STMT: DropStmt
+== 096
+-- direct partition inserts should check partition bound constraint
+create table range_parted (
+	a text,
+	b int
+) partition by range (a, (b+0))
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+STMT: CreateStmt
+== 097
+-- no partitions, so fail
+insert into range_parted values ('a', 11)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 098
+create table part1 partition of range_parted for values from ('a', 1) to ('a', 10)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DDL
+STMT: CreateStmt
+== 099
+create table part2 partition of range_parted for values from ('a', 10) to ('a', 20)
+--
+TABLE: name="part2" schema="" table="part2" ctx=DDL
+STMT: CreateStmt
+== 100
+create table part3 partition of range_parted for values from ('b', 1) to ('b', 10)
+--
+TABLE: name="part3" schema="" table="part3" ctx=DDL
+STMT: CreateStmt
+== 101
+create table part4 partition of range_parted for values from ('b', 10) to ('b', 20)
+--
+TABLE: name="part4" schema="" table="part4" ctx=DDL
+STMT: CreateStmt
+== 102
+-- fail
+insert into part1 values ('a', 11)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 103
+insert into part1 values ('b', 1)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 104
+-- ok
+insert into part1 values ('a', 1)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 105
+-- fail
+insert into part4 values ('b', 21)
+--
+TABLE: name="part4" schema="" table="part4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 106
+insert into part4 values ('a', 10)
+--
+TABLE: name="part4" schema="" table="part4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 107
+-- ok
+insert into part4 values ('b', 10)
+--
+TABLE: name="part4" schema="" table="part4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 108
+-- fail (partition key a has a NOT NULL constraint)
+insert into part1 values (null)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 109
+-- fail (expression key (b+0) cannot be null either)
+insert into part1 values (1)
+--
+TABLE: name="part1" schema="" table="part1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 110
+create table list_parted (
+	a text,
+	b int
+) partition by list (lower(a))
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: CreateStmt
+== 111
+create table part_aa_bb partition of list_parted FOR VALUES IN ('aa', 'bb')
+--
+TABLE: name="part_aa_bb" schema="" table="part_aa_bb" ctx=DDL
+STMT: CreateStmt
+== 112
+create table part_cc_dd partition of list_parted FOR VALUES IN ('cc', 'dd')
+--
+TABLE: name="part_cc_dd" schema="" table="part_cc_dd" ctx=DDL
+STMT: CreateStmt
+== 113
+create table part_null partition of list_parted FOR VALUES IN (null)
+--
+TABLE: name="part_null" schema="" table="part_null" ctx=DDL
+STMT: CreateStmt
+== 114
+-- fail
+insert into part_aa_bb values ('cc', 1)
+--
+TABLE: name="part_aa_bb" schema="" table="part_aa_bb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 115
+insert into part_aa_bb values ('AAa', 1)
+--
+TABLE: name="part_aa_bb" schema="" table="part_aa_bb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 116
+insert into part_aa_bb values (null)
+--
+TABLE: name="part_aa_bb" schema="" table="part_aa_bb" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 117
+-- ok
+insert into part_cc_dd values ('cC', 1)
+--
+TABLE: name="part_cc_dd" schema="" table="part_cc_dd" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 118
+insert into part_null values (null, 0)
+--
+TABLE: name="part_null" schema="" table="part_null" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 119
+-- check in case of multi-level partitioned table
+create table part_ee_ff partition of list_parted for values in ('ee', 'ff') partition by range (b)
+--
+TABLE: name="part_ee_ff" schema="" table="part_ee_ff" ctx=DDL
+STMT: CreateStmt
+== 120
+create table part_ee_ff1 partition of part_ee_ff for values from (1) to (10)
+--
+TABLE: name="part_ee_ff1" schema="" table="part_ee_ff1" ctx=DDL
+STMT: CreateStmt
+== 121
+create table part_ee_ff2 partition of part_ee_ff for values from (10) to (20)
+--
+TABLE: name="part_ee_ff2" schema="" table="part_ee_ff2" ctx=DDL
+STMT: CreateStmt
+== 122
+-- test default partition
+create table part_default partition of list_parted default
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DDL
+STMT: CreateStmt
+== 123
+-- Negative test: a row, which would fit in other partition, does not fit
+-- default partition, even when inserted directly
+insert into part_default values ('aa', 2)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 124
+insert into part_default values (null, 2)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 125
+-- ok
+insert into part_default values ('Zz', 2)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 126
+-- test if default partition works as expected for multi-level partitioned
+-- table as well as when default partition itself is further partitioned
+drop table part_default
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DDL
+STMT: DropStmt
+== 127
+create table part_xx_yy partition of list_parted for values in ('xx', 'yy') partition by list (a)
+--
+TABLE: name="part_xx_yy" schema="" table="part_xx_yy" ctx=DDL
+STMT: CreateStmt
+== 128
+create table part_xx_yy_p1 partition of part_xx_yy for values in ('xx')
+--
+TABLE: name="part_xx_yy_p1" schema="" table="part_xx_yy_p1" ctx=DDL
+STMT: CreateStmt
+== 129
+create table part_xx_yy_defpart partition of part_xx_yy default
+--
+TABLE: name="part_xx_yy_defpart" schema="" table="part_xx_yy_defpart" ctx=DDL
+STMT: CreateStmt
+== 130
+create table part_default partition of list_parted default partition by range(b)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DDL
+STMT: CreateStmt
+== 131
+create table part_default_p1 partition of part_default for values from (20) to (30)
+--
+TABLE: name="part_default_p1" schema="" table="part_default_p1" ctx=DDL
+STMT: CreateStmt
+== 132
+create table part_default_p2 partition of part_default for values from (30) to (40)
+--
+TABLE: name="part_default_p2" schema="" table="part_default_p2" ctx=DDL
+STMT: CreateStmt
+== 133
+-- fail
+insert into part_ee_ff1 values ('EE', 11)
+--
+TABLE: name="part_ee_ff1" schema="" table="part_ee_ff1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 134
+insert into part_default_p2 values ('gg', 43)
+--
+TABLE: name="part_default_p2" schema="" table="part_default_p2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 135
+-- fail (even the parent's, ie, part_ee_ff's partition constraint applies)
+insert into part_ee_ff1 values ('cc', 1)
+--
+TABLE: name="part_ee_ff1" schema="" table="part_ee_ff1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 136
+insert into part_default values ('gg', 43)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 137
+-- ok
+insert into part_ee_ff1 values ('ff', 1)
+--
+TABLE: name="part_ee_ff1" schema="" table="part_ee_ff1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 138
+insert into part_ee_ff2 values ('ff', 11)
+--
+TABLE: name="part_ee_ff2" schema="" table="part_ee_ff2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 139
+insert into part_default_p1 values ('cd', 25)
+--
+TABLE: name="part_default_p1" schema="" table="part_default_p1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 140
+insert into part_default_p2 values ('de', 35)
+--
+TABLE: name="part_default_p2" schema="" table="part_default_p2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 141
+insert into list_parted values ('ab', 21)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 142
+insert into list_parted values ('xx', 1)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 143
+insert into list_parted values ('yy', 2)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 144
+select tableoid::regclass, * from list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 145
+-- Check tuple routing for partitioned tables
+
+-- fail
+insert into range_parted values ('a', 0)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 146
+-- ok
+insert into range_parted values ('a', 1)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 147
+insert into range_parted values ('a', 10)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 148
+-- fail
+insert into range_parted values ('a', 20)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 149
+-- ok
+insert into range_parted values ('b', 1)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 150
+insert into range_parted values ('b', 10)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 151
+-- fail (partition key (b+0) is null)
+insert into range_parted values ('a')
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 152
+-- Check default partition
+create table part_def partition of range_parted default
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DDL
+STMT: CreateStmt
+== 153
+-- fail
+insert into part_def values ('b', 10)
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 154
+-- ok
+insert into part_def values ('c', 10)
+--
+TABLE: name="part_def" schema="" table="part_def" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 155
+insert into range_parted values (null, null)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 156
+insert into range_parted values ('a', null)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 157
+insert into range_parted values (null, 19)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 158
+insert into range_parted values ('b', 20)
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 159
+select tableoid::regclass, * from range_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=Select
+STMT: SelectStmt
+== 160
+-- ok
+insert into list_parted values (null, 1)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 161
+insert into list_parted (a) values ('aA')
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 162
+-- fail (partition of part_ee_ff not found in both cases)
+insert into list_parted values ('EE', 0)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 163
+insert into part_ee_ff values ('EE', 0)
+--
+TABLE: name="part_ee_ff" schema="" table="part_ee_ff" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 164
+-- ok
+insert into list_parted values ('EE', 1)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 165
+insert into part_ee_ff values ('EE', 10)
+--
+TABLE: name="part_ee_ff" schema="" table="part_ee_ff" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 166
+select tableoid::regclass, * from list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 167
+-- some more tests to exercise tuple-routing with multi-level partitioning
+create table part_gg partition of list_parted for values in ('gg') partition by range (b)
+--
+TABLE: name="part_gg" schema="" table="part_gg" ctx=DDL
+STMT: CreateStmt
+== 168
+create table part_gg1 partition of part_gg for values from (minvalue) to (1)
+--
+TABLE: name="part_gg1" schema="" table="part_gg1" ctx=DDL
+STMT: CreateStmt
+== 169
+create table part_gg2 partition of part_gg for values from (1) to (10) partition by range (b)
+--
+TABLE: name="part_gg2" schema="" table="part_gg2" ctx=DDL
+STMT: CreateStmt
+== 170
+create table part_gg2_1 partition of part_gg2 for values from (1) to (5)
+--
+TABLE: name="part_gg2_1" schema="" table="part_gg2_1" ctx=DDL
+STMT: CreateStmt
+== 171
+create table part_gg2_2 partition of part_gg2 for values from (5) to (10)
+--
+TABLE: name="part_gg2_2" schema="" table="part_gg2_2" ctx=DDL
+STMT: CreateStmt
+== 172
+create table part_ee_ff3 partition of part_ee_ff for values from (20) to (30) partition by range (b)
+--
+TABLE: name="part_ee_ff3" schema="" table="part_ee_ff3" ctx=DDL
+STMT: CreateStmt
+== 173
+create table part_ee_ff3_1 partition of part_ee_ff3 for values from (20) to (25)
+--
+TABLE: name="part_ee_ff3_1" schema="" table="part_ee_ff3_1" ctx=DDL
+STMT: CreateStmt
+== 174
+create table part_ee_ff3_2 partition of part_ee_ff3 for values from (25) to (30)
+--
+TABLE: name="part_ee_ff3_2" schema="" table="part_ee_ff3_2" ctx=DDL
+STMT: CreateStmt
+== 175
+truncate list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: TruncateStmt
+== 176
+insert into list_parted values ('aa'), ('cc')
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 177
+insert into list_parted select 'Ff', s.a from generate_series(1, 29) s(a)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 178
+insert into list_parted select 'gg', s.a from generate_series(1, 9) s(a)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 179
+insert into list_parted (b) values (1)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 180
+select tableoid::regclass::text, a, min(b) as min_b, max(b) as max_b from list_parted group by 1, 2 order by 1
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+STMT: SelectStmt
+== 181
+-- direct partition inserts should check hash partition bound constraint
+
+create table hash_parted (
+	a int
+) partition by hash (a part_test_int4_ops)
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DDL
+STMT: CreateStmt
+== 182
+create table hpart0 partition of hash_parted for values with (modulus 4, remainder 0)
+--
+TABLE: name="hpart0" schema="" table="hpart0" ctx=DDL
+STMT: CreateStmt
+== 183
+create table hpart1 partition of hash_parted for values with (modulus 4, remainder 1)
+--
+TABLE: name="hpart1" schema="" table="hpart1" ctx=DDL
+STMT: CreateStmt
+== 184
+create table hpart2 partition of hash_parted for values with (modulus 4, remainder 2)
+--
+TABLE: name="hpart2" schema="" table="hpart2" ctx=DDL
+STMT: CreateStmt
+== 185
+create table hpart3 partition of hash_parted for values with (modulus 4, remainder 3)
+--
+TABLE: name="hpart3" schema="" table="hpart3" ctx=DDL
+STMT: CreateStmt
+== 186
+insert into hash_parted values(generate_series(1,10))
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DML
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: InsertStmt
+STMT: SelectStmt
+== 187
+-- direct insert of values divisible by 4 - ok;
+insert into hpart0 values(12),(16)
+--
+TABLE: name="hpart0" schema="" table="hpart0" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 188
+-- fail;
+insert into hpart0 values(11)
+--
+TABLE: name="hpart0" schema="" table="hpart0" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 189
+-- 11 % 4 -> 3 remainder i.e. valid data for hpart3 partition
+insert into hpart3 values(11)
+--
+TABLE: name="hpart3" schema="" table="hpart3" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 190
+-- view data
+select tableoid::regclass as part, a, a%4 as "remainder = a % 4"
+from hash_parted order by part
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=Select
+STMT: SelectStmt
+== 191
+-- test \d+ output on a table which has both partitioned and unpartitioned
+-- partitions
+
+-- cleanup
+drop table range_parted, list_parted
+--
+TABLE: name="range_parted" schema="" table="range_parted" ctx=DDL
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: DropStmt
+== 192
+drop table hash_parted
+--
+TABLE: name="hash_parted" schema="" table="hash_parted" ctx=DDL
+STMT: DropStmt
+== 193
+-- test that a default partition added as the first partition accepts any value
+-- including null
+create table list_parted (a int) partition by list (a)
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: CreateStmt
+== 194
+create table part_default partition of list_parted default
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DDL
+STMT: CreateStmt
+== 195
+insert into part_default values (null)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 196
+insert into part_default values (1)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 197
+insert into part_default values (-1)
+--
+TABLE: name="part_default" schema="" table="part_default" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 198
+select tableoid::regclass, a from list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=Select
+STMT: SelectStmt
+== 199
+-- cleanup
+drop table list_parted
+--
+TABLE: name="list_parted" schema="" table="list_parted" ctx=DDL
+STMT: DropStmt
+== 200
+-- more tests for certain multi-level partitioning scenarios
+create table mlparted (a int, b int) partition by range (a, b)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: CreateStmt
+== 201
+create table mlparted1 (b int not null, a int not null) partition by range ((b+0))
+--
+TABLE: name="mlparted1" schema="" table="mlparted1" ctx=DDL
+STMT: CreateStmt
+== 202
+create table mlparted11 (like mlparted1)
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: CreateStmt
+== 203
+alter table mlparted11 drop a
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: AlterTableStmt
+== 204
+alter table mlparted11 add a int
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: AlterTableStmt
+== 205
+alter table mlparted11 drop a
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: AlterTableStmt
+== 206
+alter table mlparted11 add a int not null
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: AlterTableStmt
+== 207
+-- attnum for key attribute 'a' is different in mlparted, mlparted1, and mlparted11
+select attrelid::regclass, attname, attnum
+from pg_attribute
+where attname = 'a'
+ and (attrelid = 'mlparted'::regclass
+   or attrelid = 'mlparted1'::regclass
+   or attrelid = 'mlparted11'::regclass)
+order by attrelid::regclass::text
+--
+TABLE: name="pg_attribute" schema="" table="pg_attribute" ctx=Select
+FILTER: schema="" table="" column="attname"
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attrelid"
+FILTER: schema="" table="" column="attrelid"
+STMT: SelectStmt
+== 208
+alter table mlparted1 attach partition mlparted11 for values from (2) to (5)
+--
+TABLE: name="mlparted1" schema="" table="mlparted1" ctx=DDL
+STMT: AlterTableStmt
+== 209
+alter table mlparted attach partition mlparted1 for values from (1, 2) to (1, 10)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 210
+-- check that "(1, 2)" is correctly routed to mlparted11.
+insert into mlparted values (1, 2)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 211
+select tableoid::regclass, * from mlparted
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=Select
+STMT: SelectStmt
+== 212
+-- check that proper message is shown after failure to route through mlparted1
+insert into mlparted (a, b) values (1, 5)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 213
+truncate mlparted
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: TruncateStmt
+== 214
+alter table mlparted add constraint check_b check (b = 3)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 215
+-- have a BR trigger modify the row such that the check_b is violated
+create function mlparted11_trig_fn()
+returns trigger AS
+$$
+begin
+  NEW.b := 4;
+  return NEW;
+end;
+$$
+language plpgsql
+--
+FUNCTION: name="mlparted11_trig_fn" function="mlparted11_trig_fn" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 216
+create trigger mlparted11_trig before insert ON mlparted11
+  for each row execute procedure mlparted11_trig_fn()
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: CreateTrigStmt
+== 217
+-- check that the correct row is shown when constraint check_b fails after
+-- "(1, 2)" is routed to mlparted11 (actually "(1, 4)" would be shown due
+-- to the BR trigger mlparted11_trig_fn)
+insert into mlparted values (1, 2)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 218
+drop trigger mlparted11_trig on mlparted11
+--
+TABLE: name="mlparted11" schema="" table="mlparted11" ctx=DDL
+STMT: DropStmt
+== 219
+drop function mlparted11_trig_fn()
+--
+FUNCTION: name="mlparted11_trig_fn" function="mlparted11_trig_fn" schema="" ctx=DDL
+STMT: DropStmt
+== 220
+-- check that inserting into an internal partition successfully results in
+-- checking its partition constraint before inserting into the leaf partition
+-- selected by tuple-routing
+insert into mlparted1 (a, b) values (2, 3)
+--
+TABLE: name="mlparted1" schema="" table="mlparted1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 221
+-- check routing error through a list partitioned table when the key is null
+create table lparted_nonullpart (a int, b char) partition by list (b)
+--
+TABLE: name="lparted_nonullpart" schema="" table="lparted_nonullpart" ctx=DDL
+STMT: CreateStmt
+== 222
+create table lparted_nonullpart_a partition of lparted_nonullpart for values in ('a')
+--
+TABLE: name="lparted_nonullpart_a" schema="" table="lparted_nonullpart_a" ctx=DDL
+STMT: CreateStmt
+== 223
+insert into lparted_nonullpart values (1)
+--
+TABLE: name="lparted_nonullpart" schema="" table="lparted_nonullpart" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 224
+drop table lparted_nonullpart
+--
+TABLE: name="lparted_nonullpart" schema="" table="lparted_nonullpart" ctx=DDL
+STMT: DropStmt
+== 225
+-- check that RETURNING works correctly with tuple-routing
+alter table mlparted drop constraint check_b
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 226
+create table mlparted12 partition of mlparted1 for values from (5) to (10)
+--
+TABLE: name="mlparted12" schema="" table="mlparted12" ctx=DDL
+STMT: CreateStmt
+== 227
+create table mlparted2 (b int not null, a int not null)
+--
+TABLE: name="mlparted2" schema="" table="mlparted2" ctx=DDL
+STMT: CreateStmt
+== 228
+alter table mlparted attach partition mlparted2 for values from (1, 10) to (1, 20)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 229
+create table mlparted3 partition of mlparted for values from (1, 20) to (1, 30)
+--
+TABLE: name="mlparted3" schema="" table="mlparted3" ctx=DDL
+STMT: CreateStmt
+== 230
+create table mlparted4 (like mlparted)
+--
+TABLE: name="mlparted4" schema="" table="mlparted4" ctx=DDL
+STMT: CreateStmt
+== 231
+alter table mlparted4 drop a
+--
+TABLE: name="mlparted4" schema="" table="mlparted4" ctx=DDL
+STMT: AlterTableStmt
+== 232
+alter table mlparted4 add a int not null
+--
+TABLE: name="mlparted4" schema="" table="mlparted4" ctx=DDL
+STMT: AlterTableStmt
+== 233
+alter table mlparted attach partition mlparted4 for values from (1, 30) to (1, 40)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 234
+with ins (a, b, c) as
+  (insert into mlparted (b, a) select s.a, 1 from generate_series(2, 39) s(a) returning tableoid::regclass, *)
+  select a, b, min(c), max(c) from ins group by a, b order by 1
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+CTE: "ins"
+FUNCTION: name="min" function="min" schema="" ctx=Call
+FUNCTION: name="max" function="max" schema="" ctx=Call
+FUNCTION: name="generate_series" function="generate_series" schema="" ctx=Call
+STMT: SelectStmt
+STMT: InsertStmt
+== 235
+alter table mlparted add c text
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 236
+create table mlparted5 (c text, a int not null, b int not null) partition by list (c)
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DDL
+STMT: CreateStmt
+== 237
+create table mlparted5a (a int not null, c text, b int not null)
+--
+TABLE: name="mlparted5a" schema="" table="mlparted5a" ctx=DDL
+STMT: CreateStmt
+== 238
+alter table mlparted5 attach partition mlparted5a for values in ('a')
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DDL
+STMT: AlterTableStmt
+== 239
+alter table mlparted attach partition mlparted5 for values from (1, 40) to (1, 50)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 240
+alter table mlparted add constraint check_b check (a = 1 and b < 45)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 241
+insert into mlparted values (1, 45, 'a')
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 242
+create function mlparted5abrtrig_func() returns trigger as $$ begin new.c = 'b'; return new; end; $$ language plpgsql
+--
+FUNCTION: name="mlparted5abrtrig_func" function="mlparted5abrtrig_func" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 243
+create trigger mlparted5abrtrig before insert on mlparted5a for each row execute procedure mlparted5abrtrig_func()
+--
+TABLE: name="mlparted5a" schema="" table="mlparted5a" ctx=DDL
+STMT: CreateTrigStmt
+== 244
+insert into mlparted5 (a, b, c) values (1, 40, 'a')
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 245
+drop table mlparted5
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DDL
+STMT: DropStmt
+== 246
+alter table mlparted drop constraint check_b
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 247
+-- Check multi-level default partition
+create table mlparted_def partition of mlparted default partition by range(a)
+--
+TABLE: name="mlparted_def" schema="" table="mlparted_def" ctx=DDL
+STMT: CreateStmt
+== 248
+create table mlparted_def1 partition of mlparted_def for values from (40) to (50)
+--
+TABLE: name="mlparted_def1" schema="" table="mlparted_def1" ctx=DDL
+STMT: CreateStmt
+== 249
+create table mlparted_def2 partition of mlparted_def for values from (50) to (60)
+--
+TABLE: name="mlparted_def2" schema="" table="mlparted_def2" ctx=DDL
+STMT: CreateStmt
+== 250
+insert into mlparted values (40, 100)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 251
+insert into mlparted_def1 values (42, 100)
+--
+TABLE: name="mlparted_def1" schema="" table="mlparted_def1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 252
+insert into mlparted_def2 values (54, 50)
+--
+TABLE: name="mlparted_def2" schema="" table="mlparted_def2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 253
+-- fail
+insert into mlparted values (70, 100)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 254
+insert into mlparted_def1 values (52, 50)
+--
+TABLE: name="mlparted_def1" schema="" table="mlparted_def1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 255
+insert into mlparted_def2 values (34, 50)
+--
+TABLE: name="mlparted_def2" schema="" table="mlparted_def2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 256
+-- ok
+create table mlparted_defd partition of mlparted_def default
+--
+TABLE: name="mlparted_defd" schema="" table="mlparted_defd" ctx=DDL
+STMT: CreateStmt
+== 257
+insert into mlparted values (70, 100)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 258
+select tableoid::regclass, * from mlparted_def
+--
+TABLE: name="mlparted_def" schema="" table="mlparted_def" ctx=Select
+STMT: SelectStmt
+== 259
+-- Check multi-level tuple routing with attributes dropped from the
+-- top-most parent.  First remove the last attribute.
+alter table mlparted add d int, add e int
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 260
+alter table mlparted drop e
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 261
+create table mlparted5 partition of mlparted
+  for values from (1, 40) to (1, 50) partition by range (c)
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DDL
+STMT: CreateStmt
+== 262
+create table mlparted5_ab partition of mlparted5
+  for values from ('a') to ('c') partition by list (c)
+--
+TABLE: name="mlparted5_ab" schema="" table="mlparted5_ab" ctx=DDL
+STMT: CreateStmt
+== 263
+-- This partitioned table should remain with no partitions.
+create table mlparted5_cd partition of mlparted5
+  for values from ('c') to ('e') partition by list (c)
+--
+TABLE: name="mlparted5_cd" schema="" table="mlparted5_cd" ctx=DDL
+STMT: CreateStmt
+== 264
+create table mlparted5_a partition of mlparted5_ab for values in ('a')
+--
+TABLE: name="mlparted5_a" schema="" table="mlparted5_a" ctx=DDL
+STMT: CreateStmt
+== 265
+create table mlparted5_b (d int, b int, c text, a int)
+--
+TABLE: name="mlparted5_b" schema="" table="mlparted5_b" ctx=DDL
+STMT: CreateStmt
+== 266
+alter table mlparted5_ab attach partition mlparted5_b for values in ('b')
+--
+TABLE: name="mlparted5_ab" schema="" table="mlparted5_ab" ctx=DDL
+STMT: AlterTableStmt
+== 267
+truncate mlparted
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: TruncateStmt
+== 268
+insert into mlparted values (1, 2, 'a', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 269
+insert into mlparted values (1, 40, 'a', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 270
+-- goes to mlparted5_a
+insert into mlparted values (1, 45, 'b', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 271
+-- goes to mlparted5_b
+insert into mlparted values (1, 45, 'c', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 272
+-- goes to mlparted5_cd, fails
+insert into mlparted values (1, 45, 'f', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 273
+-- goes to mlparted5, fails
+select tableoid::regclass, * from mlparted order by a, b, c, d
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=Select
+STMT: SelectStmt
+== 274
+alter table mlparted drop d
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 275
+truncate mlparted
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: TruncateStmt
+== 276
+-- Remove the before last attribute.
+alter table mlparted add e int, add d int
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 277
+alter table mlparted drop e
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 278
+insert into mlparted values (1, 2, 'a', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 279
+insert into mlparted values (1, 40, 'a', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 280
+-- goes to mlparted5_a
+insert into mlparted values (1, 45, 'b', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 281
+-- goes to mlparted5_b
+insert into mlparted values (1, 45, 'c', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 282
+-- goes to mlparted5_cd, fails
+insert into mlparted values (1, 45, 'f', 1)
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 283
+-- goes to mlparted5, fails
+select tableoid::regclass, * from mlparted order by a, b, c, d
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=Select
+STMT: SelectStmt
+== 284
+alter table mlparted drop d
+--
+TABLE: name="mlparted" schema="" table="mlparted" ctx=DDL
+STMT: AlterTableStmt
+== 285
+drop table mlparted5
+--
+TABLE: name="mlparted5" schema="" table="mlparted5" ctx=DDL
+STMT: DropStmt
+== 286
+-- check that message shown after failure to find a partition shows the
+-- appropriate key description (or none) in various situations
+create table key_desc (a int, b int) partition by list ((a+0))
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DDL
+STMT: CreateStmt
+== 287
+create table key_desc_1 partition of key_desc for values in (1) partition by range (b)
+--
+TABLE: name="key_desc_1" schema="" table="key_desc_1" ctx=DDL
+STMT: CreateStmt
+== 288
+create user regress_insert_other_user
+--
+STMT: CreateRoleStmt
+== 289
+grant select (a) on key_desc_1 to regress_insert_other_user
+--
+TABLE: name="key_desc_1" schema="" table="key_desc_1" ctx=DDL
+STMT: GrantStmt
+== 290
+grant insert on key_desc to regress_insert_other_user
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DDL
+STMT: GrantStmt
+== 291
+set role regress_insert_other_user
+--
+STMT: VariableSetStmt
+== 292
+-- no key description is shown
+insert into key_desc values (1, 1)
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 293
+reset role
+--
+STMT: VariableSetStmt
+== 294
+grant select (b) on key_desc_1 to regress_insert_other_user
+--
+TABLE: name="key_desc_1" schema="" table="key_desc_1" ctx=DDL
+STMT: GrantStmt
+== 295
+set role regress_insert_other_user
+--
+STMT: VariableSetStmt
+== 296
+-- key description (b)=(1) is now shown
+insert into key_desc values (1, 1)
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 297
+-- key description is not shown if key contains expression
+insert into key_desc values (2, 1)
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 298
+reset role
+--
+STMT: VariableSetStmt
+== 299
+revoke all on key_desc from regress_insert_other_user
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DDL
+STMT: GrantStmt
+== 300
+revoke all on key_desc_1 from regress_insert_other_user
+--
+TABLE: name="key_desc_1" schema="" table="key_desc_1" ctx=DDL
+STMT: GrantStmt
+== 301
+drop role regress_insert_other_user
+--
+STMT: DropRoleStmt
+== 302
+drop table key_desc, key_desc_1
+--
+TABLE: name="key_desc" schema="" table="key_desc" ctx=DDL
+TABLE: name="key_desc_1" schema="" table="key_desc_1" ctx=DDL
+STMT: DropStmt
+== 303
+-- test minvalue/maxvalue restrictions
+create table mcrparted (a int, b int, c int) partition by range (a, abs(b), c)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DDL
+STMT: CreateStmt
+== 304
+create table mcrparted0 partition of mcrparted for values from (minvalue, 0, 0) to (1, maxvalue, maxvalue)
+--
+TABLE: name="mcrparted0" schema="" table="mcrparted0" ctx=DDL
+STMT: CreateStmt
+== 305
+create table mcrparted2 partition of mcrparted for values from (10, 6, minvalue) to (10, maxvalue, minvalue)
+--
+TABLE: name="mcrparted2" schema="" table="mcrparted2" ctx=DDL
+STMT: CreateStmt
+== 306
+create table mcrparted4 partition of mcrparted for values from (21, minvalue, 0) to (30, 20, minvalue)
+--
+TABLE: name="mcrparted4" schema="" table="mcrparted4" ctx=DDL
+STMT: CreateStmt
+== 307
+-- check multi-column range partitioning expression enforces the same
+-- constraint as what tuple-routing would determine it to be
+create table mcrparted0 partition of mcrparted for values from (minvalue, minvalue, minvalue) to (1, maxvalue, maxvalue)
+--
+TABLE: name="mcrparted0" schema="" table="mcrparted0" ctx=DDL
+STMT: CreateStmt
+== 308
+create table mcrparted1 partition of mcrparted for values from (2, 1, minvalue) to (10, 5, 10)
+--
+TABLE: name="mcrparted1" schema="" table="mcrparted1" ctx=DDL
+STMT: CreateStmt
+== 309
+create table mcrparted2 partition of mcrparted for values from (10, 6, minvalue) to (10, maxvalue, maxvalue)
+--
+TABLE: name="mcrparted2" schema="" table="mcrparted2" ctx=DDL
+STMT: CreateStmt
+== 310
+create table mcrparted3 partition of mcrparted for values from (11, 1, 1) to (20, 10, 10)
+--
+TABLE: name="mcrparted3" schema="" table="mcrparted3" ctx=DDL
+STMT: CreateStmt
+== 311
+create table mcrparted4 partition of mcrparted for values from (21, minvalue, minvalue) to (30, 20, maxvalue)
+--
+TABLE: name="mcrparted4" schema="" table="mcrparted4" ctx=DDL
+STMT: CreateStmt
+== 312
+create table mcrparted5 partition of mcrparted for values from (30, 21, 20) to (maxvalue, maxvalue, maxvalue)
+--
+TABLE: name="mcrparted5" schema="" table="mcrparted5" ctx=DDL
+STMT: CreateStmt
+== 313
+-- null not allowed in range partition
+insert into mcrparted values (null, null, null)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 314
+-- routed to mcrparted0
+insert into mcrparted values (0, 1, 1)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 315
+insert into mcrparted0 values (0, 1, 1)
+--
+TABLE: name="mcrparted0" schema="" table="mcrparted0" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 316
+-- routed to mcparted1
+insert into mcrparted values (9, 1000, 1)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 317
+insert into mcrparted1 values (9, 1000, 1)
+--
+TABLE: name="mcrparted1" schema="" table="mcrparted1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 318
+insert into mcrparted values (10, 5, -1)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 319
+insert into mcrparted1 values (10, 5, -1)
+--
+TABLE: name="mcrparted1" schema="" table="mcrparted1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 320
+insert into mcrparted values (2, 1, 0)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 321
+insert into mcrparted1 values (2, 1, 0)
+--
+TABLE: name="mcrparted1" schema="" table="mcrparted1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 322
+-- routed to mcparted2
+insert into mcrparted values (10, 6, 1000)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 323
+insert into mcrparted2 values (10, 6, 1000)
+--
+TABLE: name="mcrparted2" schema="" table="mcrparted2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 324
+insert into mcrparted values (10, 1000, 1000)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 325
+insert into mcrparted2 values (10, 1000, 1000)
+--
+TABLE: name="mcrparted2" schema="" table="mcrparted2" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 326
+-- no partition exists, nor does mcrparted3 accept it
+insert into mcrparted values (11, 1, -1)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 327
+insert into mcrparted3 values (11, 1, -1)
+--
+TABLE: name="mcrparted3" schema="" table="mcrparted3" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 328
+-- routed to mcrparted5
+insert into mcrparted values (30, 21, 20)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 329
+insert into mcrparted5 values (30, 21, 20)
+--
+TABLE: name="mcrparted5" schema="" table="mcrparted5" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 330
+insert into mcrparted4 values (30, 21, 20)
+--
+TABLE: name="mcrparted4" schema="" table="mcrparted4" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 331
+-- error
+
+-- check rows
+select tableoid::regclass::text, * from mcrparted order by 1
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=Select
+STMT: SelectStmt
+== 332
+-- cleanup
+drop table mcrparted
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DDL
+STMT: DropStmt
+== 333
+-- check that a BR constraint can't make partition contain violating rows
+create table brtrigpartcon (a int, b text) partition by list (a)
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DDL
+STMT: CreateStmt
+== 334
+create table brtrigpartcon1 partition of brtrigpartcon for values in (1)
+--
+TABLE: name="brtrigpartcon1" schema="" table="brtrigpartcon1" ctx=DDL
+STMT: CreateStmt
+== 335
+create or replace function brtrigpartcon1trigf() returns trigger as $$begin new.a := 2; return new; end$$ language plpgsql
+--
+FUNCTION: name="brtrigpartcon1trigf" function="brtrigpartcon1trigf" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 336
+create trigger brtrigpartcon1trig before insert on brtrigpartcon1 for each row execute procedure brtrigpartcon1trigf()
+--
+TABLE: name="brtrigpartcon1" schema="" table="brtrigpartcon1" ctx=DDL
+STMT: CreateTrigStmt
+== 337
+insert into brtrigpartcon values (1, 'hi there')
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 338
+insert into brtrigpartcon1 values (1, 'hi there')
+--
+TABLE: name="brtrigpartcon1" schema="" table="brtrigpartcon1" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 339
+-- check that the message shows the appropriate column description in a
+-- situation where the partitioned table is not the primary ModifyTable node
+create table inserttest3 (f1 text default 'foo', f2 text default 'bar', f3 int)
+--
+TABLE: name="inserttest3" schema="" table="inserttest3" ctx=DDL
+STMT: CreateStmt
+== 340
+create role regress_coldesc_role
+--
+STMT: CreateRoleStmt
+== 341
+grant insert on inserttest3 to regress_coldesc_role
+--
+TABLE: name="inserttest3" schema="" table="inserttest3" ctx=DDL
+STMT: GrantStmt
+== 342
+grant insert on brtrigpartcon to regress_coldesc_role
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DDL
+STMT: GrantStmt
+== 343
+revoke select on brtrigpartcon from regress_coldesc_role
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DDL
+STMT: GrantStmt
+== 344
+set role regress_coldesc_role
+--
+STMT: VariableSetStmt
+== 345
+with result as (insert into brtrigpartcon values (1, 'hi there') returning 1)
+  insert into inserttest3 (f3) select * from result
+--
+TABLE: name="inserttest3" schema="" table="inserttest3" ctx=DML
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DML
+CTE: "result"
+STMT: InsertStmt
+STMT: SelectStmt
+== 346
+reset role
+--
+STMT: VariableSetStmt
+== 347
+-- cleanup
+revoke all on inserttest3 from regress_coldesc_role
+--
+TABLE: name="inserttest3" schema="" table="inserttest3" ctx=DDL
+STMT: GrantStmt
+== 348
+revoke all on brtrigpartcon from regress_coldesc_role
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DDL
+STMT: GrantStmt
+== 349
+drop role regress_coldesc_role
+--
+STMT: DropRoleStmt
+== 350
+drop table inserttest3
+--
+TABLE: name="inserttest3" schema="" table="inserttest3" ctx=DDL
+STMT: DropStmt
+== 351
+drop table brtrigpartcon
+--
+TABLE: name="brtrigpartcon" schema="" table="brtrigpartcon" ctx=DDL
+STMT: DropStmt
+== 352
+drop function brtrigpartcon1trigf()
+--
+FUNCTION: name="brtrigpartcon1trigf" function="brtrigpartcon1trigf" schema="" ctx=DDL
+STMT: DropStmt
+== 353
+-- check that "do nothing" BR triggers work with tuple-routing
+create table donothingbrtrig_test (a int, b text) partition by list (a)
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=DDL
+STMT: CreateStmt
+== 354
+create table donothingbrtrig_test1 (b text, a int)
+--
+TABLE: name="donothingbrtrig_test1" schema="" table="donothingbrtrig_test1" ctx=DDL
+STMT: CreateStmt
+== 355
+create table donothingbrtrig_test2 (c text, b text, a int)
+--
+TABLE: name="donothingbrtrig_test2" schema="" table="donothingbrtrig_test2" ctx=DDL
+STMT: CreateStmt
+== 356
+alter table donothingbrtrig_test2 drop column c
+--
+TABLE: name="donothingbrtrig_test2" schema="" table="donothingbrtrig_test2" ctx=DDL
+STMT: AlterTableStmt
+== 357
+create or replace function donothingbrtrig_func() returns trigger as $$begin raise notice 'b: %', new.b; return NULL; end$$ language plpgsql
+--
+FUNCTION: name="donothingbrtrig_func" function="donothingbrtrig_func" schema="" ctx=DDL
+STMT: CreateFunctionStmt
+== 358
+create trigger donothingbrtrig1 before insert on donothingbrtrig_test1 for each row execute procedure donothingbrtrig_func()
+--
+TABLE: name="donothingbrtrig_test1" schema="" table="donothingbrtrig_test1" ctx=DDL
+STMT: CreateTrigStmt
+== 359
+create trigger donothingbrtrig2 before insert on donothingbrtrig_test2 for each row execute procedure donothingbrtrig_func()
+--
+TABLE: name="donothingbrtrig_test2" schema="" table="donothingbrtrig_test2" ctx=DDL
+STMT: CreateTrigStmt
+== 360
+alter table donothingbrtrig_test attach partition donothingbrtrig_test1 for values in (1)
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=DDL
+STMT: AlterTableStmt
+== 361
+alter table donothingbrtrig_test attach partition donothingbrtrig_test2 for values in (2)
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=DDL
+STMT: AlterTableStmt
+== 362
+insert into donothingbrtrig_test values (1, 'foo'), (2, 'bar')
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 363
+copy donothingbrtrig_test from stdout
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=Select
+STMT: CopyStmt
+== 364
+1	baz
+2	qux
+select tableoid::regclass, * from donothingbrtrig_test
+--
+ERROR: syntax error at or near "1"
+CURSORPOS: 1
+FILENAME: scan.l
+FUNCNAME: scanner_yyerror
+== 365
+-- cleanup
+drop table donothingbrtrig_test
+--
+TABLE: name="donothingbrtrig_test" schema="" table="donothingbrtrig_test" ctx=DDL
+STMT: DropStmt
+== 366
+drop function donothingbrtrig_func()
+--
+FUNCTION: name="donothingbrtrig_func" function="donothingbrtrig_func" schema="" ctx=DDL
+STMT: DropStmt
+== 367
+-- check multi-column range partitioning with minvalue/maxvalue constraints
+create table mcrparted (a text, b int) partition by range(a, b)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DDL
+STMT: CreateStmt
+== 368
+create table mcrparted1_lt_b partition of mcrparted for values from (minvalue, minvalue) to ('b', minvalue)
+--
+TABLE: name="mcrparted1_lt_b" schema="" table="mcrparted1_lt_b" ctx=DDL
+STMT: CreateStmt
+== 369
+create table mcrparted2_b partition of mcrparted for values from ('b', minvalue) to ('c', minvalue)
+--
+TABLE: name="mcrparted2_b" schema="" table="mcrparted2_b" ctx=DDL
+STMT: CreateStmt
+== 370
+create table mcrparted3_c_to_common partition of mcrparted for values from ('c', minvalue) to ('common', minvalue)
+--
+TABLE: name="mcrparted3_c_to_common" schema="" table="mcrparted3_c_to_common" ctx=DDL
+STMT: CreateStmt
+== 371
+create table mcrparted4_common_lt_0 partition of mcrparted for values from ('common', minvalue) to ('common', 0)
+--
+TABLE: name="mcrparted4_common_lt_0" schema="" table="mcrparted4_common_lt_0" ctx=DDL
+STMT: CreateStmt
+== 372
+create table mcrparted5_common_0_to_10 partition of mcrparted for values from ('common', 0) to ('common', 10)
+--
+TABLE: name="mcrparted5_common_0_to_10" schema="" table="mcrparted5_common_0_to_10" ctx=DDL
+STMT: CreateStmt
+== 373
+create table mcrparted6_common_ge_10 partition of mcrparted for values from ('common', 10) to ('common', maxvalue)
+--
+TABLE: name="mcrparted6_common_ge_10" schema="" table="mcrparted6_common_ge_10" ctx=DDL
+STMT: CreateStmt
+== 374
+create table mcrparted7_gt_common_lt_d partition of mcrparted for values from ('common', maxvalue) to ('d', minvalue)
+--
+TABLE: name="mcrparted7_gt_common_lt_d" schema="" table="mcrparted7_gt_common_lt_d" ctx=DDL
+STMT: CreateStmt
+== 375
+create table mcrparted8_ge_d partition of mcrparted for values from ('d', minvalue) to (maxvalue, maxvalue)
+--
+TABLE: name="mcrparted8_ge_d" schema="" table="mcrparted8_ge_d" ctx=DDL
+STMT: CreateStmt
+== 376
+insert into mcrparted values ('aaa', 0), ('b', 0), ('bz', 10), ('c', -10),
+    ('comm', -10), ('common', -10), ('common', 0), ('common', 10),
+    ('commons', 0), ('d', -10), ('e', 0)
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 377
+select tableoid::regclass, * from mcrparted order by a, b
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=Select
+STMT: SelectStmt
+== 378
+drop table mcrparted
+--
+TABLE: name="mcrparted" schema="" table="mcrparted" ctx=DDL
+STMT: DropStmt
+== 379
+-- check that wholerow vars in the RETURNING list work with partitioned tables
+create table returningwrtest (a int) partition by list (a)
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DDL
+STMT: CreateStmt
+== 380
+create table returningwrtest1 partition of returningwrtest for values in (1)
+--
+TABLE: name="returningwrtest1" schema="" table="returningwrtest1" ctx=DDL
+STMT: CreateStmt
+== 381
+insert into returningwrtest values (1) returning returningwrtest
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 382
+-- check also that the wholerow vars in RETURNING list are converted as needed
+alter table returningwrtest add b text
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DDL
+STMT: AlterTableStmt
+== 383
+create table returningwrtest2 (b text, c int, a int)
+--
+TABLE: name="returningwrtest2" schema="" table="returningwrtest2" ctx=DDL
+STMT: CreateStmt
+== 384
+alter table returningwrtest2 drop c
+--
+TABLE: name="returningwrtest2" schema="" table="returningwrtest2" ctx=DDL
+STMT: AlterTableStmt
+== 385
+alter table returningwrtest attach partition returningwrtest2 for values in (2)
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DDL
+STMT: AlterTableStmt
+== 386
+insert into returningwrtest values (2, 'foo') returning returningwrtest
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DML
+STMT: InsertStmt
+STMT: SelectStmt
+== 387
+drop table returningwrtest
+--
+TABLE: name="returningwrtest" schema="" table="returningwrtest" ctx=DDL
+STMT: DropStmt
