@@ -33,17 +33,7 @@ func TestNotImplementedErrors(t *testing.T) {
 		}
 	}
 
-	_, err := pg_query.Deparse(&pg_query.ParseResult{})
-	check("Deparse", err)
-	_, err = pg_query.Normalize("SELECT 1")
-	check("Normalize", err)
-	_, err = pg_query.NormalizeUtility("SELECT 1")
-	check("NormalizeUtility", err)
-	_, err = pg_query.Fingerprint("SELECT 1")
-	check("Fingerprint", err)
-	_, err = pg_query.FingerprintToUInt64("SELECT 1")
-	check("FingerprintToUInt64", err)
-	_, err = pg_query.ParsePlPgSqlToJSON("SELECT 1")
+	_, err := pg_query.ParsePlPgSqlToJSON("SELECT 1")
 	check("ParsePlPgSqlToJSON", err)
 	_, err = pg_query.Summary("SELECT 1", 0)
 	check("Summary", err)

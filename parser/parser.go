@@ -14,8 +14,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/sqlc-dev/oliphant/ast"
+	"github.com/sqlc-dev/oliphant/internal/deparse"
 	"github.com/sqlc-dev/oliphant/internal/emit"
+	"github.com/sqlc-dev/oliphant/internal/fingerprint"
 	"github.com/sqlc-dev/oliphant/internal/lexer"
+	"github.com/sqlc-dev/oliphant/internal/normalize"
 	"github.com/sqlc-dev/oliphant/internal/parse"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
@@ -97,20 +100,43 @@ func ParseToProtobuf(input string) ([]byte, error) {
 	return proto.Marshal(tree)
 }
 
+// DeparseFromProtobuf is pg_query_deparse_protobuf: decode the tree and
+// render it back to SQL, statements joined with "; ".
 func DeparseFromProtobuf(input []byte) (result string, err error) {
-	return "", errNotImplemented("DeparseFromProtobuf")
+	tree := &ast.ParseResult{}
+	if err := proto.Unmarshal(input, tree); err != nil {
+		return "", err
+	}
+	out, derr := deparse.Deparse(tree)
+	if derr != nil {
+		// The C path surfaces elog messages as PgQueryError; only Message is
+		// populated meaningfully here (deparse errors carry no cursor).
+		return "", &Error{Message: derr.Error()}
+	}
+	return out, nil
 }
 
 func ParsePlPgSqlToJSON(input string) (result string, err error) {
 	return "", errNotImplemented("ParsePlPgSqlToJSON")
 }
 
+// Normalize is pg_query_normalize: constants become $n parameter references.
 func Normalize(input string) (result string, err error) {
-	return "", errNotImplemented("Normalize")
+	out, perr := normalize.Normalize(input, false)
+	if perr != nil {
+		return "", scanErr(perr)
+	}
+	return out, nil
 }
 
+// NormalizeUtility is pg_query_normalize_utility: only utility statements
+// are normalized.
 func NormalizeUtility(input string) (result string, err error) {
-	return "", errNotImplemented("NormalizeUtility")
+	out, perr := normalize.Normalize(input, true)
+	if perr != nil {
+		return "", scanErr(perr)
+	}
+	return out, nil
 }
 
 // SplitWithScanner is pg_query_split.c's pg_query_split_with_scanner: a
@@ -174,12 +200,24 @@ func SplitWithParser(input string, trimSpace bool) (result []string, err error) 
 	return result, nil
 }
 
+// FingerprintToUInt64 is pg_query_fingerprint: parse, then hash the raw tree
+// (version-3 fingerprint).
 func FingerprintToUInt64(input string) (result uint64, err error) {
-	return 0, errNotImplemented("FingerprintToUInt64")
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return 0, scanErr(perr)
+	}
+	return fingerprint.Tree(tree), nil
 }
 
+// FingerprintToHexStr renders the fingerprint the way the C implementation
+// prints XXH64_canonical_t: big-endian, zero-padded hex.
 func FingerprintToHexStr(input string) (result string, err error) {
-	return "", errNotImplemented("FingerprintToHexStr")
+	fp, err := FingerprintToUInt64(input)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%016x", fp), nil
 }
 
 // HashXXH3_64 runs the XXH3 hash function (64-bit variant) on the given
