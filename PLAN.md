@@ -434,7 +434,9 @@ gate; the corpus harness exists before the first line of the lexer.
     scheduled CI job; `go test -race` over the parallel corpus run;
     benchmarks vs pg_query_go (cgo) and wasilibs (wasm) — expect wins from
     no cgo crossings and true in-process parallelism; memory profiling on
-    the stress queries.
+    the stress queries. *Benchmarks + memory profiling landed 2026-08-17;
+    see "As-built notes (milestone 12, benchmarks + profiling)". Fuzzing,
+    `-race`, and the wasilibs comparison remain.*
 13. **sqlc integration** (in the sqlc repo). Replace
     `parse_default.go`/`parse_wasi.go` with one unconditional file; swap the
     import path in `convert.go` et al.; drop `wasilibs/go-pgquery`,
@@ -721,6 +723,45 @@ Measured at the pin, where the plan's estimates differ:
   308,561 cases). pg_query_go's `summary_test.go` is ported verbatim and
   `TestParsePlPgSQL` now runs green; no entry point returns
   not-implemented anymore.
+
+### As-built notes (milestone 12, benchmarks + profiling)
+
+- The root `benchmark_test.go` mirrors pg_query_go v6.2.2's benchmark file
+  name-for-name (same queries, same globals trick), with additions: JSON /
+  Scan variants and `*Stress` benchmarks over the corpus's largest input,
+  the 1.1 MB multi-VALUES INSERT (fingerprint suite, case 073).
+  `oracle/benchmark_test.go` is the cgo twin — identical names and inputs
+  against the pinned pg_query_go — so a run of each diffs directly:
+  `benchstat cgo.txt pure.txt` (after normalizing the `pkg:` line, since
+  the two files live in different modules).
+- Measured (4 vCPU Xeon 2.8 GHz, go1.24.7): raw parse is 3–10% *faster*
+  than cgo single-threaded and 29% faster on the stress query; `Scan` is
+  at parity. Small-query parallel parse runs 6–26% *behind* cgo on this
+  box: the Go side pays GC for every AST node while libpg_query's arena
+  allocations are invisible to Go accounting, and the cgo crossing itself
+  parallelizes fine. Normalize is 1.6–3.6× slower, fingerprint 4.3–6.3×,
+  ParseToJSON ~5× — all three are protobuf-reflection-driven walks, so
+  the standing option of generated per-node emitters is where that time
+  would come back if those entry points ever matter to a consumer. (cgo's
+  1 alloc/op in these tables is just the Go-side result copy; C-side
+  allocations are not observable, so allocs/op is only meaningful within
+  the pure-Go column.)
+- Profiling (alloc_space on the stress parse) found two fixable hotspots,
+  both landed with the benchmarks. The parser's token buffer regrew via
+  append doubling — 72% of all bytes allocated — and is now pre-sized to
+  `len(input)/3` (the stress case's ~3 bytes/token is the dense extreme),
+  cutting stress parse from 92 MB to 39 MB and 185 ms to 146 ms per op.
+  The fingerprint walk re-sorted each node's field descriptors on every
+  visit; the per-type order is static and now memoized (−28–31% time,
+  −25% allocs).
+- What remains is the tree itself: ~2 allocations per AST node (the node
+  struct plus its `ast.Node` oneof wrapper) and the final protobuf
+  marshal — 20–138 allocs for the upstream benchmark queries. That is the
+  cost of the pg_query_go-compatible protobuf AST, not overhead to
+  engineer away.
+- Still open from the milestone: difftest mutation fuzzing as a scheduled
+  CI job, `go test -race` over the parallel corpus run, and the wasilibs
+  (wasm) comparison.
 
 ## Regeneration (the PostgreSQL-upgrade story)
 

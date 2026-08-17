@@ -22,12 +22,33 @@ package fingerprint
 import (
 	"sort"
 	"strconv"
+	"sync"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/sqlc-dev/oliphant/ast"
 	"github.com/sqlc-dev/oliphant/internal/xxh3"
 )
+
+// fieldOrderCache memoizes each message type's alphabetical field order
+// (keyed by full name): the order is static per type, and re-sorting on
+// every node visit dominated the fingerprint walk's time and allocations.
+var fieldOrderCache sync.Map // protoreflect.FullName -> []protoreflect.FieldDescriptor
+
+// sortedFields returns d's fields in alphabetical (C generator) order.
+func sortedFields(d protoreflect.MessageDescriptor) []protoreflect.FieldDescriptor {
+	if v, ok := fieldOrderCache.Load(d.FullName()); ok {
+		return v.([]protoreflect.FieldDescriptor)
+	}
+	fds := d.Fields()
+	order := make([]protoreflect.FieldDescriptor, fds.Len())
+	for i := 0; i < fds.Len(); i++ {
+		order[i] = fds.Get(i)
+	}
+	sort.Slice(order, func(a, b int) bool { return order[a].JSONName() < order[b].JSONName() })
+	fieldOrderCache.Store(d.FullName(), order)
+	return order
+}
 
 // fingerprintVersion is PG_QUERY_FINGERPRINT_VERSION, the XXH3 seed.
 const fingerprintVersion = 3
@@ -286,11 +307,7 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 	}
 
 	fds := d.Fields()
-	order := make([]protoreflect.FieldDescriptor, fds.Len())
-	for i := 0; i < fds.Len(); i++ {
-		order[i] = fds.Get(i)
-	}
-	sort.Slice(order, func(a, b int) bool { return order[a].JSONName() < order[b].JSONName() })
+	order := sortedFields(d)
 
 	for _, fd := range order {
 		name := fd.JSONName()

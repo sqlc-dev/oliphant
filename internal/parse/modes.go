@@ -29,7 +29,7 @@ func ParseWithMode(input string, mode Mode) (res *ast.ParseResult, err *lexer.Er
 		return Parse(input)
 	}
 	s := lexer.New(input)
-	p := &parser{src: s.Input(), filter: lexer.NewFilter(s)}
+	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bail); ok {

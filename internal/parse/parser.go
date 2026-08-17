@@ -32,10 +32,20 @@ type parser struct {
 // returns through several hundred productions would bury the grammar.
 type bail struct{ err *lexer.Error }
 
+// tokenCap sizes the token buffer up front: SQL averages a handful of bytes
+// per token, and the dense extreme (large VALUES parameter lists, the corpus
+// stress case) runs ~3 bytes/token, so len/3 keeps even pathological inputs
+// from regrowing the buffer — append-regrowth otherwise dominates
+// alloc_space on large statements — while short queries over-allocate at
+// most a few hundred transient bytes.
+func tokenCap(input string) int {
+	return len(input)/3 + 8
+}
+
 // Parse is raw_parser for RAW_PARSE_DEFAULT: parse_toplevel/stmtmulti.
 func Parse(input string) (res *ast.ParseResult, err *lexer.Error) {
 	s := lexer.New(input)
-	p := &parser{src: s.Input(), filter: lexer.NewFilter(s)}
+	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bail); ok {
