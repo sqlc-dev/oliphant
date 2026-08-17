@@ -1114,9 +1114,9 @@ func (p *parser) parseOptPartitionSpec() *ast.PartitionSpec {
 	case strEqualsFold(strategy, "hash"):
 		n.Strategy = ast.PartitionStrategy_PARTITION_STRATEGY_HASH
 	default:
+		// PG 18: parsePartitionStrategy takes the strategy's location.
 		p.fail(p.filter.ParserError("parsePartitionStrategy",
-			fmt.Sprintf("unrecognized partitioning strategy %q", strategy), -1))
-		_ = stok
+			fmt.Sprintf("unrecognized partitioning strategy %q", strategy), int(stok.Start)))
 	}
 	p.expect(ast.Token('('))
 	n.PartParams = []*ast.Node{p.parsePartElem()}

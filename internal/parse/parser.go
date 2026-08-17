@@ -22,6 +22,13 @@ type parser struct {
 	toks   []lexer.Token
 	pos    int
 
+	// emptyStrings records nodes whose string field was present in the
+	// source but empty (COMMENT ... IS ” / SECURITY LABEL ... IS ”).
+	// proto3 cannot represent C's NULL-vs-"" distinction, but the C
+	// fingerprint sees the original tree and emits the field name for a
+	// non-NULL empty string; the fingerprint walk consults this set.
+	emptyStrings map[any]bool
+
 	// inSubstrList marks that we are parsing substr_list, where SIMILAR
 	// appears without TO (see parseAExprInfix).
 	inSubstrList bool
@@ -44,18 +51,34 @@ func tokenCap(input string) int {
 
 // Parse is raw_parser for RAW_PARSE_DEFAULT: parse_toplevel/stmtmulti.
 func Parse(input string) (res *ast.ParseResult, err *lexer.Error) {
+	res, _, err = ParseTracked(input)
+	return res, err
+}
+
+// ParseTracked is Parse plus the present-but-empty string set (see
+// parser.emptyStrings) for the fingerprint walk.
+func ParseTracked(input string) (res *ast.ParseResult, emptyStrings map[any]bool, err *lexer.Error) {
 	s := lexer.New(input)
 	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bail); ok {
-				res, err = nil, b.err
+				res, emptyStrings, err = nil, nil, b.err
 				return
 			}
 			panic(r)
 		}
 	}()
-	return p.parseToplevel(), nil
+	return p.parseToplevel(), p.emptyStrings, nil
+}
+
+// markEmptyString records a node whose string field was written as ” in
+// the source (non-NULL in the C tree).
+func (p *parser) markEmptyString(node any) {
+	if p.emptyStrings == nil {
+		p.emptyStrings = map[any]bool{}
+	}
+	p.emptyStrings[node] = true
 }
 
 // fail aborts the parse with the given error.

@@ -219,11 +219,11 @@ func SplitWithParser(input string, trimSpace bool) (result []string, err error) 
 // FingerprintToUInt64 is pg_query_fingerprint: parse, then hash the raw tree
 // (version-3 fingerprint).
 func FingerprintToUInt64(input string) (result uint64, err error) {
-	tree, perr := parse.Parse(input)
+	tree, empties, perr := parse.ParseTracked(input)
 	if perr != nil {
 		return 0, scanErr(perr)
 	}
-	return fingerprint.Tree(tree), nil
+	return fingerprint.TreeWithEmpties(tree, empties), nil
 }
 
 // FingerprintToHexStr renders the fingerprint the way the C implementation

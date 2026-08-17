@@ -60,7 +60,15 @@ const maxDepth = 100
 // Tree fingerprints a full parse result (pg_query_fingerprint's
 // _fingerprintNode over the raw statement list).
 func Tree(tree *ast.ParseResult) uint64 {
+	return TreeWithEmpties(tree, nil)
+}
+
+// TreeWithEmpties is Tree with the parser's present-but-empty string set:
+// the C fingerprint emits a field name for a non-NULL empty string
+// (COMMENT ... IS ”), which proto3 cannot represent in the tree alone.
+func TreeWithEmpties(tree *ast.ParseResult, empties map[any]bool) uint64 {
 	ctx := newContext()
+	ctx.empties = empties
 	// The C tree is a List of RawStmt; _fingerprintNode(tree, NULL, NULL, 0)
 	// dispatches to _fingerprintList (no sorted field name), which visits
 	// each element at depth 1.
@@ -97,6 +105,8 @@ type context struct {
 	// sort-fields would be re-hashed once per enclosing sort level, going
 	// exponential on deep trees (the 1.1 MB stress query).
 	listsortCache map[listKey][]sortItem
+	// empties is the parser's present-but-empty string set (TreeWithEmpties).
+	empties map[any]bool
 }
 
 func newContext() *context {
@@ -106,7 +116,7 @@ func newContext() *context {
 // sub creates a scratch context sharing the listsort cache
 // (_fingerprintInitContext with a parent).
 func (ctx *context) sub() *context {
-	return &context{listsortCache: ctx.listsortCache}
+	return &context{listsortCache: ctx.listsortCache, empties: ctx.empties}
 }
 
 func (ctx *context) digest() uint64 {
@@ -429,7 +439,8 @@ func (ctx *context) fields(m protoreflect.Message, parentType, fieldName string,
 				ctx.str("true")
 			}
 		case fd.Kind() == protoreflect.StringKind:
-			if s := v.String(); s != "" || alwaysEmitString[[2]string{msgName, name}] {
+			if s := v.String(); s != "" || alwaysEmitString[[2]string{msgName, name}] ||
+				ctx.empties[m.Interface()] {
 				ctx.str(name)
 				ctx.str(s)
 			}
