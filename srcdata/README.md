@@ -2,7 +2,7 @@
 
 Everything in this directory is vendored **verbatim** from
 [pganalyze/libpg_query](https://github.com/pganalyze/libpg_query) at tag
-**`17-6.2.2`** (PostgreSQL 17.7). Do not edit by hand; re-vendor when the pin
+**`18.0.0`** (PostgreSQL 18.4). Do not edit by hand; re-vendor when the pin
 advances (see `PLAN.md` § Regeneration).
 
 | File | Upstream path | Consumed by |
