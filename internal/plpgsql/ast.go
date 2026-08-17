@@ -197,6 +197,9 @@ type plVar struct {
 	datatype *plType
 	isconst  bool
 	notnull  bool
+	// isPromise marks the trigger/event-trigger special variables whose
+	// dtype do_compile rewrites to PLPGSQL_DTYPE_PROMISE.
+	isPromise bool
 
 	defaultVal           *plExpr
 	cursorExplicitExpr   *plExpr
@@ -204,7 +207,12 @@ type plVar struct {
 	cursorOptions        int
 }
 
-func (*plVar) datumType() datumType { return dtypeVar }
+func (v *plVar) datumType() datumType {
+	if v.isPromise {
+		return dtypePromise
+	}
+	return dtypeVar
+}
 
 // plRow is PLpgSQL_row.
 type plRow struct {
@@ -225,6 +233,7 @@ type plRec struct {
 	datatype   *plType
 	rectypeid  uint32
 	firstfield int
+	isconst    bool
 }
 
 func (*plRec) datumType() datumType { return dtypeRec }
@@ -252,7 +261,7 @@ func (v *plVar) varIsConst() bool   { return v.isconst }
 func (r *plRow) varRefname() string { return r.refname }
 func (r *plRow) varIsConst() bool   { return false }
 func (r *plRec) varRefname() string { return r.refname }
-func (r *plRec) varIsConst() bool   { return false }
+func (r *plRec) varIsConst() bool   { return r.isconst }
 
 // plExpr is PLpgSQL_expr.
 type plExpr struct {
@@ -517,7 +526,11 @@ type stmtRollback struct {
 type plFunction struct {
 	fnSignature string
 	fnRetset    bool
-	fnIsProc    bool // PROKIND_PROCEDURE (unused: driver always compiles as FUNCTION)
+	fnIsProc    bool // PROKIND_PROCEDURE
+	fnRettype   uint32
+	// fnInputCollation is fcinfo->fncollation, always InvalidOid in the
+	// libpg_query driver.
+	fnInputCollation uint32
 
 	newVarno      int
 	oldVarno      int
@@ -530,4 +543,13 @@ type plFunction struct {
 
 	printStrictParams bool
 	resolveOption     resolveOption
+}
+
+// builtinType is one row of pg_query_pg_type.c's inline pg_type data.
+type builtinType struct {
+	oid          uint32
+	name         string
+	typtype      byte
+	typcollation uint32
+	typarray     uint32
 }

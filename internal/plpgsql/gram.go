@@ -238,9 +238,9 @@ func (c *compiler) declStatement(firstTok plToken) {
 			c.ereportGram(`variable "%s" must have a default value, since it's declared NOT NULL`, vr.refname)
 		}
 	} else if rec, ok := v.(*plRec); ok {
-		// PLpgSQL_variable header fields: isconst/notnull/default_val live on
-		// the C supertype; only the NOT NULL check reads them afterwards.
-		_ = rec
+		// PLpgSQL_variable header fields: isconst/notnull/default_val live
+		// on the C supertype; check_assignable reads isconst.
+		rec.isconst = isConst
 		if notnull && defval == nil {
 			c.ereportGram(`variable "%s" must have a default value, since it's declared NOT NULL`, rec.refname)
 		}
@@ -351,7 +351,7 @@ func (c *compiler) declCursor(name string, lineno int, scrollOption int) {
 	c.nsPop()
 
 	nv := c.buildVariable(name, lineno,
-		buildDatatype(oidRefcursor, -1, 0, nil), true).(*plVar)
+		c.plpgsqlBuildDatatype(oidRefcursor, -1, 0, nil), true).(*plVar)
 	nv.cursorExplicitExpr = query
 	if argrow == nil {
 		nv.cursorExplicitArgrow = -1
@@ -1004,7 +1004,7 @@ func (c *compiler) forControl() plStmt {
 
 		// create loop's private variable
 		fvar := c.buildVariable(fv.name, fv.lineno,
-			buildDatatype(oidInt4, -1, 0, nil), true).(*plVar)
+			c.plpgsqlBuildDatatype(oidInt4, -1, 0, nil), true).(*plVar)
 
 		st := &stmtFori{
 			varDat:  fvar,
@@ -1449,12 +1449,12 @@ func (c *compiler) exceptionSect() *exceptionBlock {
 	blk := &exceptionBlock{}
 
 	v := c.buildVariable("sqlstate", lineno,
-		buildDatatype(oidText, -1, 0, nil), true).(*plVar)
+		c.plpgsqlBuildDatatype(oidText, -1, 0, nil), true).(*plVar)
 	v.isconst = true
 	blk.sqlstateVarno = v.dno
 
 	v = c.buildVariable("sqlerrm", lineno,
-		buildDatatype(oidText, -1, 0, nil), true).(*plVar)
+		c.plpgsqlBuildDatatype(oidText, -1, 0, nil), true).(*plVar)
 	v.isconst = true
 	blk.sqlerrmVarno = v.dno
 

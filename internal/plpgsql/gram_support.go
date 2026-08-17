@@ -177,43 +177,44 @@ func (c *compiler) readDatatype(tok plToken, haveTok bool) *plType {
 	parenlevel := 0
 
 	// If we have a simple or composite identifier, check for %TYPE and
-	// %ROWTYPE constructs (mocked to NULL lookups in this build).
+	// %ROWTYPE constructs (stubbed to reference-text typenames here).
 	if tok == T_WORD {
+		dtname := c.cur().word.ident
 		tok = c.lex()
 		if tok == plToken('%') {
 			tok = c.lex()
 			if c.tokIsKeyword(tok, K_TYPE, "type") {
-				result = c.parseWordType("")
+				result = c.parseWordType(dtname)
 			} else if c.tokIsKeyword(tok, K_ROWTYPE, "rowtype") {
-				result = c.parseWordRowType("")
+				result = c.parseWordRowType(dtname)
 			}
 		}
 	} else if tokenIsUnreservedKeyword(tok) {
+		dtname := c.cur().keyword
 		tok = c.lex()
 		if tok == plToken('%') {
 			tok = c.lex()
 			if c.tokIsKeyword(tok, K_TYPE, "type") {
-				result = c.parseWordType("")
+				result = c.parseWordType(dtname)
 			} else if c.tokIsKeyword(tok, K_ROWTYPE, "rowtype") {
-				result = c.parseWordRowType("")
+				result = c.parseWordRowType(dtname)
 			}
 		}
 	} else if tok == T_CWORD {
+		dtnames := c.cur().cword
 		tok = c.lex()
 		if tok == plToken('%') {
 			tok = c.lex()
 			if c.tokIsKeyword(tok, K_TYPE, "type") {
-				result = c.parseCwordType(nil)
+				result = c.parseCwordType(dtnames)
 			} else if c.tokIsKeyword(tok, K_ROWTYPE, "rowtype") {
-				result = c.parseCwordRowType(nil)
+				result = c.parseCwordRowType(dtnames)
 			}
 		}
 	}
 
 	if result != nil {
-		// %TYPE/%ROWTYPE recognized: check for array decoration. (Unreachable
-		// in this build — the lookups above always return NULL — but kept for
-		// shape parity.)
+		// %TYPE/%ROWTYPE recognized: check for array decoration.
 		isArray := false
 		tok = c.lex()
 		if c.tokIsKeyword(tok, K_ARRAY, "array") {
@@ -233,7 +234,7 @@ func (c *compiler) readDatatype(tok plToken, haveTok bool) *plType {
 		}
 		c.scan.pushBackToken(tok)
 		if isArray {
-			result = buildDatatypeArrayof(result)
+			result = c.buildDatatypeArrayof(result)
 		}
 		return result
 	}
@@ -268,7 +269,7 @@ func (c *compiler) readDatatype(tok plToken, haveTok bool) *plType {
 		c.scan.yyerror("missing data type declaration")
 	}
 
-	result = parseDatatype(typeName)
+	result = c.parseDatatypeAt(typeName, startlocation)
 
 	c.scan.pushBackToken(tok)
 	return result
@@ -532,15 +533,40 @@ func (c *compiler) completeDirection(fetch *stmtFetch, checkFROM *bool) {
 	*checkFROM = false
 }
 
-// make_return_stmt — the vendored mock: fn_rettype is always VOID here, so
-// RETURN takes an optional expression and never captures a variable number.
+// make_return_stmt (pl_gram.y, unmocked at 18): RETURN of a simple
+// variable/row/rec datum captures retvarno; SETOF/VOID/OUT-parameter
+// functions reject a parameter with their specific errors.
 func (c *compiler) makeReturnStmt(location int) plStmt {
 	st := &stmtReturn{retvarno: -1}
 	st.lineno = c.scan.locationToLineno(location)
-	tok := c.lex()
-	if tok != plToken(';') {
-		c.scan.pushBackToken(tok)
-		st.expr = c.readSQLExpression(plToken(';'), ";")
+	switch {
+	case c.fn.fnRetset:
+		if c.lex() != plToken(';') {
+			ereportFn("make_return_stmt", "RETURN cannot have a parameter in function returning set")
+		}
+	case c.fn.fnRettype == oidVoid:
+		if c.lex() != plToken(';') {
+			if c.fn.fnIsProc {
+				ereportFn("make_return_stmt", "RETURN cannot have a parameter in a procedure")
+			}
+			ereportFn("make_return_stmt", "RETURN cannot have a parameter in function returning void")
+		}
+	case c.fn.outParamVarno >= 0:
+		if c.lex() != plToken(';') {
+			ereportFn("make_return_stmt", "RETURN cannot have a parameter in function with OUT parameters")
+		}
+		st.retvarno = c.fn.outParamVarno
+	default:
+		// Special-case simple variable references for efficiency.
+		tok := c.lex()
+		if tok == T_DATUM && c.scan.peek() == plToken(';') &&
+			isSimpleReturnDatum(c.cur().wdatum.datum) {
+			st.retvarno = c.cur().wdatum.datum.datumNo()
+			c.lex() // eat the semicolon token that we only peeked at above
+		} else {
+			c.scan.pushBackToken(tok)
+			st.expr = c.readSQLExpression(plToken(';'), ";")
+		}
 	}
 	return st
 }
@@ -947,7 +973,7 @@ func (c *compiler) makeCase(location int, tExpr *plExpr, caseWhenList []*caseWhe
 		varname := fmt.Sprintf("__Case__Variable_%d__", len(c.datums))
 
 		tVar := c.buildVariable(varname, st.lineno,
-			buildDatatype(oidInt4, -1, 0, nil), true).(*plVar)
+			c.plpgsqlBuildDatatype(oidInt4, -1, 0, nil), true).(*plVar)
 		st.tVarno = tVar.dno
 
 		for _, cwt := range caseWhenList {

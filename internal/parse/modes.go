@@ -175,3 +175,25 @@ func (p *parser) parsePLAssignStmt(nnames int32) *ast.Node {
 
 	return &ast.Node{Node: &ast.Node_PlassignStmt{PlassignStmt: n}}
 }
+
+// ParseTypeName is raw_parser for RAW_PARSE_TYPE_NAME:
+// parse_toplevel: MODE_TYPE_NAME Typename. The result is the bare TypeName
+// (libpg_query's plpgsql support calls this through typeStringToTypeName).
+func ParseTypeName(input string) (res *ast.TypeName, err *lexer.Error) {
+	s := lexer.New(input)
+	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
+	defer func() {
+		if r := recover(); r != nil {
+			if b, ok := r.(bail); ok {
+				res, err = nil, b.err
+				return
+			}
+			panic(r)
+		}
+	}()
+	tn := p.parseTypename()
+	if tok := p.peek(); tok.Kind != 0 {
+		p.syntaxError(tok)
+	}
+	return tn, nil
+}
