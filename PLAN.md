@@ -132,6 +132,27 @@ The `parser` subpackage's byte-level entry points (`ParseToProtobuf`,
 thin `proto.Marshal`/`Unmarshal` wrappers — they exist upstream only because
 cgo speaks bytes; here they are conveniences.
 
+Being conveniences, they are not what the root package builds on. Upstream's
+`Parse` decodes `ParseToProtobuf`'s bytes because the tree is built in C and
+protobuf is how it crosses the cgo boundary; encoding a tree the Go parser
+already holds only to decode it back costs about three quarters of `Parse`'s
+running time and doubles its allocations, so `Parse` calls
+**`parser.ParseToTree`** — oliphant's one deliberate addition to pg_query_go's
+surface, and the exception to § *The API does not change*. Two consequences,
+both pinned by `parser/tree_test.go`:
+
+- proto3 string fields must be valid UTF-8, so a tree carrying a raw invalid
+  byte fails to marshal and upstream reports that as an error from `Parse`.
+  Such a byte can only come from the input verbatim — the scanner rejects
+  escapes that would synthesize one, and identifier truncation is
+  `pg_mbcliplen`-equivalent — so `ParseToTree` falls back to the round trip
+  when `utf8.ValidString(input)` is false, and the behavior is unchanged.
+- The tree may share subtrees where the round trip deep-copied them: a
+  multi-column `UPDATE ... SET (a, b, c) = (...)` points every `ResTarget` at
+  one `MultiAssignRef` source, exactly as the C tree does, and protobuf has no
+  pointers. Callers that only read the tree — all pg_query_go's API admits —
+  cannot tell.
+
 ### 2. The AST is the generated protobuf types — one dependency, not zero
 
 The siblings' "zero dependencies, ever" rule bends once: pg_query_go's API

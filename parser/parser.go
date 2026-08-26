@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
 
@@ -93,6 +94,53 @@ func ScanToProtobuf(input string) (result []byte, err error) {
 		})
 	}
 	return proto.Marshal(scan)
+}
+
+// ParseToTree parses the input and returns the tree the Go parser built,
+// without the protobuf round trip Parse would otherwise make.
+//
+// This is oliphant's one addition to pg_query_go's surface (see PLAN.md § 1).
+// Upstream's Parse decodes bytes because the parse tree is built in C and
+// crosses the cgo boundary as protobuf; here the tree is already a Go value,
+// so marshalling it only to unmarshal it back costs about three quarters of
+// Parse's time and doubles its allocations for no observable difference.
+//
+// "No observable difference" holds with one exception, which is why the
+// round trip survives as a fallback: proto3 string fields must be valid
+// UTF-8, so a tree carrying a raw invalid byte fails to marshal and upstream
+// reports that as an error from Parse. Such a byte can only have come from
+// the input verbatim — the scanner rejects escape sequences that would
+// synthesize one (E'\xff' raises "invalid byte sequence for encoding
+// UTF8"), and identifier truncation is pg_mbcliplen-equivalent, so it never
+// splits a character — which makes utf8.ValidString a sufficient guard.
+//
+// One difference remains, and is not observable through pg_query_go's own
+// API: the tree may share subtrees, where the round trip silently deep-copied
+// them (a multi-column UPDATE ... SET (a, b, c) = (...) points every
+// ResTarget at one MultiAssignRef source, exactly as the C tree does).
+// Callers that only read the tree cannot tell; callers that mutate one now
+// can. See TestParseToTreeSharesMultiAssignSource.
+func ParseToTree(input string) (*ast.ParseResult, error) {
+	if !utf8.ValidString(input) {
+		return parseViaProtobuf(input)
+	}
+	tree, perr := parse.Parse(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	return tree, nil
+}
+
+// parseViaProtobuf is upstream's Parse body: marshal the tree and decode it
+// again, so an input that cannot round-trip fails exactly as it does there.
+func parseViaProtobuf(input string) (tree *ast.ParseResult, err error) {
+	protobufTree, err := ParseToProtobuf(input)
+	if err != nil {
+		return
+	}
+	tree = &ast.ParseResult{}
+	err = proto.Unmarshal(protobufTree, tree)
+	return
 }
 
 func ParseToProtobuf(input string) ([]byte, error) {
