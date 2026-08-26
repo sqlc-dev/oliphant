@@ -27,7 +27,9 @@ the main module; the only module allowed to link pg_query_go (cgo) is
   written by `cmd/generate`.
 - The public API mirrors pg_query_go exactly; consumers must migrate by
   changing one import path. Never rename, add, or remove exported symbols
-  without checking pg_query_go v6.2.2.
+  without checking pg_query_go v6.2.2. There is one deliberate addition,
+  `parser.ParseToTree` (PLAN.md § 1): the tree without the protobuf round
+  trip the cgo boundary forces upstream.
 - Location fields must byte-match the reference; when in doubt, check which
   `@N` the `gram.y` action uses.
 

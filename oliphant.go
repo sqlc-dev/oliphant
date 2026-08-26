@@ -33,15 +33,13 @@ func ParseToJSON(input string) (result string, err error) {
 }
 
 // Parse the given SQL statement into a parse tree (Go struct format)
+//
+// Upstream this decodes the protobuf the C parser returns across the cgo
+// boundary; here the parser is Go and hands back the tree itself, so
+// parser.ParseToTree skips the encode/decode. Behavior is unchanged — see
+// its comment for the UTF-8 fallback that keeps it that way.
 func Parse(input string) (tree *ParseResult, err error) {
-	protobufTree, err := parser.ParseToProtobuf(input)
-	if err != nil {
-		return
-	}
-
-	tree = &ParseResult{}
-	err = proto.Unmarshal(protobufTree, tree)
-	return
+	return parser.ParseToTree(input)
 }
 
 // Deparse - Deparses a given Go parse tree into a SQL statement
