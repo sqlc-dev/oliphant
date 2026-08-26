@@ -47,6 +47,14 @@ func (e *Error) Error() string { return e.Message }
 type Scanner struct {
 	input string
 	pos   int
+
+	// comments, when keepComments is set, accumulates every SQL_COMMENT and
+	// C_COMMENT token the scanner produces. The grammar never sees them —
+	// Filter drops them, as base_yylex does — so a consumer that wants them
+	// back (a formatter putting comments where they were written) would
+	// otherwise have to lex the input a second time.
+	keepComments bool
+	comments     []Token
 }
 
 // New returns a Scanner over input. Like the C scanner (which receives a
@@ -61,8 +69,21 @@ func New(input string) *Scanner {
 	return &Scanner{input: input}
 }
 
+// NewKeepingComments returns a Scanner that also records the comment tokens
+// it produces, for Comments to hand back after the scan.
+func NewKeepingComments(input string) *Scanner {
+	s := New(input)
+	s.keepComments = true
+	return s
+}
+
 // Input returns the input string as scanned (truncated at any NUL byte).
 func (s *Scanner) Input() string { return s.input }
+
+// Comments returns the SQL_COMMENT and C_COMMENT tokens scanned so far, in
+// source order, for a Scanner from NewKeepingComments (nil otherwise). They
+// do not overlap, and every one lies within Input.
+func (s *Scanner) Comments() []Token { return s.comments }
 
 // Character classes from scan.l's named patterns.
 
@@ -141,7 +162,16 @@ func (s *Scanner) peek(off int) byte {
 }
 
 func (s *Scanner) token(kind ast.Token, start int) (Token, *Error) {
-	return Token{Kind: kind, Start: int32(start), End: int32(s.pos)}, nil
+	tok := Token{Kind: kind, Start: int32(start), End: int32(s.pos)}
+	if s.keepComments && (kind == ast.Token_SQL_COMMENT || kind == ast.Token_C_COMMENT) {
+		// Recorded where the token is minted, not where Filter drops it.
+		// A successful parse does route every comment through that drop
+		// site, but not every path there goes through Filter.Next — the
+		// UIDENT/UESCAPE resolution pulls tokens off to the side — and this
+		// site cannot be bypassed at all.
+		s.comments = append(s.comments, tok)
+	}
+	return tok, nil
 }
 
 // Next returns the next token, exactly as core_yylex would. At end of input
