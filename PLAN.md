@@ -137,9 +137,15 @@ Being conveniences, they are not what the root package builds on. Upstream's
 protobuf is how it crosses the cgo boundary; encoding a tree the Go parser
 already holds only to decode it back costs about three quarters of `Parse`'s
 running time and doubles its allocations, so `Parse` calls
-**`parser.ParseToTree`** — oliphant's one deliberate addition to pg_query_go's
-surface, and the exception to § *The API does not change*. Two consequences,
-both pinned by `parser/tree_test.go`:
+**`parser.ParseToTree`**.
+
+That is the first of oliphant's two deliberate additions to pg_query_go's
+surface — the exception to § *The API does not change*. Both live in the
+`parser` subpackage, so the root package stays a mirror function-for-function,
+and both exist for the same reason: the Go implementation can hand back what
+the cgo boundary forces upstream to throw away and rebuild.
+
+`ParseToTree` has two consequences, both pinned by `parser/tree_test.go`:
 
 - proto3 string fields must be valid UTF-8, so a tree carrying a raw invalid
   byte fails to marshal and upstream reports that as an error from `Parse`.
@@ -152,6 +158,25 @@ both pinned by `parser/tree_test.go`:
   one `MultiAssignRef` source, exactly as the C tree does, and protobuf has no
   pointers. Callers that only read the tree — all pg_query_go's API admits —
   cannot tell.
+
+**`parser.ParseFile`** is the second: the tree together with the input's
+comments, which the scanner already produces as tokens (libpg_query patch 04)
+and `base_yylex` drops on the way to the grammar. `Scan` exposes them, so
+`Scan` + `Parse` answers the same question — at the cost of lexing twice and
+marshalling the whole token stream to protobuf to recover a handful of
+comments, which measures about twice the time and 1.5× the allocations of
+`ParseFile` on a query file. The consumer is a formatter: comments cannot be
+reprinted where they were written without them. Two notes, pinned by
+`parser/file_test.go`:
+
+- The comments are exactly what `Scan` reports, checked case by case across
+  the corpus, so the oracle-derived scan goldens stand behind them too.
+- `ParseFile` accepts and rejects exactly what `Parse` does, the proto3
+  UTF-8 rejection included. That answer is not a property of the input: an
+  invalid byte only fails when it lands in a *string field*, and a comment is
+  not one — so `SELECT 1 -- \xff` parses for both, which is the case that
+  matters here. `ParseFile` therefore decides on the tree, marshalling it
+  only when `utf8.ValidString(input)` is false.
 
 ### 2. The AST is the generated protobuf types — one dependency, not zero
 

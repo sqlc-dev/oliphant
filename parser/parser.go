@@ -131,6 +131,66 @@ func ParseToTree(input string) (*ast.ParseResult, error) {
 	return tree, nil
 }
 
+// ParseFileResult is a parse tree together with the comments the grammar
+// never sees, both from one pass over the input.
+type ParseFileResult struct {
+	*ast.ParseResult
+
+	// Comments holds the input's SQL_COMMENT and C_COMMENT tokens in source
+	// order, positioned by the same byte offsets the tree's location fields
+	// carry. Token.Start and Token.End bound each comment as written, marker
+	// included and terminating newline excluded; the text is input[Start:End].
+	Comments []*ast.ScanToken
+}
+
+// ParseFile parses the input and returns its tree along with its comments.
+//
+// This is a second oliphant addition to pg_query_go's surface (see PLAN.md
+// § 1), for consumers that need the comments back — a formatter reprinting a
+// query file has to put them where they were written. They are already
+// scanned: libpg_query's patch 04 has the scanner emit them as tokens and
+// base_yylex drop them on the way to the grammar, which is exactly what Scan
+// exposes. Scan and Parse together would answer this, at the cost of lexing
+// the input twice and marshalling the whole token stream to protobuf to
+// recover a handful of comments; ParseFile keeps them from the pass the
+// parse already makes.
+//
+// A parse error returns no comments: the scan stops where the grammar does,
+// so what had been collected covers only part of the input.
+//
+// ParseFile accepts and rejects exactly what Parse does, the proto3 UTF-8
+// rejection included (see ParseToTree). That answer is not a property of the
+// input: an invalid byte inside a comment never reaches a string field, so
+// the tree marshals and Parse returns it — and a comment is the one place
+// ParseFile must not reject one.
+func ParseFile(input string) (*ParseFileResult, error) {
+	tree, comments, perr := parse.ParseWithComments(input)
+	if perr != nil {
+		return nil, scanErr(perr)
+	}
+	if !utf8.ValidString(input) {
+		// Only an input carrying an invalid byte can carry one into a string
+		// field, so the marshal Parse would have made is worth making here
+		// to raise the same error — and only here.
+		if _, err := proto.Marshal(tree); err != nil {
+			return nil, err
+		}
+	}
+	out := &ParseFileResult{ParseResult: tree}
+	if len(comments) > 0 {
+		out.Comments = make([]*ast.ScanToken, 0, len(comments))
+		for _, c := range comments {
+			out.Comments = append(out.Comments, &ast.ScanToken{
+				Start:       c.Start,
+				End:         c.End,
+				Token:       c.Kind,
+				KeywordKind: c.KeywordKind,
+			})
+		}
+	}
+	return out, nil
+}
+
 // parseViaProtobuf is upstream's Parse body: marshal the tree and decode it
 // again, so an input that cannot round-trip fails exactly as it does there.
 func parseViaProtobuf(input string) (tree *ast.ParseResult, err error) {

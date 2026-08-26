@@ -58,8 +58,26 @@ func Parse(input string) (res *ast.ParseResult, err *lexer.Error) {
 // ParseTracked is Parse plus the present-but-empty string set (see
 // parser.emptyStrings) for the fingerprint walk.
 func ParseTracked(input string) (res *ast.ParseResult, emptyStrings map[any]bool, err *lexer.Error) {
-	s := lexer.New(input)
-	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(input))}
+	return parseFrom(lexer.New(input))
+}
+
+// ParseWithComments is Parse plus the comment tokens the scanner produced
+// and the grammar never saw, from the one pass parsing already makes.
+// Comments are returned in source order; a failed parse returns none, since
+// the scan stops where the grammar does.
+func ParseWithComments(input string) (res *ast.ParseResult, comments []lexer.Token, err *lexer.Error) {
+	s := lexer.NewKeepingComments(input)
+	res, _, err = parseFrom(s)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res, s.Comments(), nil
+}
+
+// parseFrom runs parse_toplevel over s, turning the bail a production panics
+// with back into an error.
+func parseFrom(s *lexer.Scanner) (res *ast.ParseResult, emptyStrings map[any]bool, err *lexer.Error) {
+	p := &parser{src: s.Input(), filter: lexer.NewFilter(s), toks: make([]lexer.Token, 0, tokenCap(s.Input()))}
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bail); ok {
