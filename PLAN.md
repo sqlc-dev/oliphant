@@ -171,9 +171,12 @@ reprinted where they were written without them. Two notes, pinned by
 
 - The comments are exactly what `Scan` reports, checked case by case across
   the corpus, so the oracle-derived scan goldens stand behind them too.
-- Unlike `Parse`, `ParseFile` does not reject strings that are not valid
-  UTF-8. That constraint is protobuf's, not the grammar's, and nothing in
-  `ParseFile` encodes the tree.
+- `ParseFile` accepts and rejects exactly what `Parse` does, the proto3
+  UTF-8 rejection included. That answer is not a property of the input: an
+  invalid byte only fails when it lands in a *string field*, and a comment is
+  not one — so `SELECT 1 -- \xff` parses for both, which is the case that
+  matters here. `ParseFile` therefore decides on the tree, marshalling it
+  only when `utf8.ValidString(input)` is false.
 
 ### 2. The AST is the generated protobuf types — one dependency, not zero
 

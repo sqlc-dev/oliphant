@@ -158,14 +158,23 @@ type ParseFileResult struct {
 // A parse error returns no comments: the scan stops where the grammar does,
 // so what had been collected covers only part of the input.
 //
-// Unlike Parse, ParseFile does not reject an input whose strings are not
-// valid UTF-8. That constraint is protobuf's, and upstream surfaces it only
-// because the tree reaches Go over the wire; it is not the grammar's, and
-// nothing here encodes the tree.
+// ParseFile accepts and rejects exactly what Parse does, the proto3 UTF-8
+// rejection included (see ParseToTree). That answer is not a property of the
+// input: an invalid byte inside a comment never reaches a string field, so
+// the tree marshals and Parse returns it — and a comment is the one place
+// ParseFile must not reject one.
 func ParseFile(input string) (*ParseFileResult, error) {
 	tree, comments, perr := parse.ParseWithComments(input)
 	if perr != nil {
 		return nil, scanErr(perr)
+	}
+	if !utf8.ValidString(input) {
+		// Only an input carrying an invalid byte can carry one into a string
+		// field, so the marshal Parse would have made is worth making here
+		// to raise the same error — and only here.
+		if _, err := proto.Marshal(tree); err != nil {
+			return nil, err
+		}
 	}
 	out := &ParseFileResult{ParseResult: tree}
 	if len(comments) > 0 {

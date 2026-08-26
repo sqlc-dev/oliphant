@@ -3,6 +3,7 @@ package parser_test
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -171,6 +172,53 @@ func TestParseFileError(t *testing.T) {
 	}
 	if perr.Cursorpos == 0 {
 		t.Errorf("error carries no cursor position: %+v", perr)
+	}
+}
+
+// TestParseFileInvalidUTF8 pins that ParseFile answers exactly as Parse
+// does. The answer is not a property of the input: an invalid byte only
+// fails when it lands in a string field, and a comment is not one — which
+// is the case that matters, since comments are what ParseFile is for.
+func TestParseFileInvalidUTF8(t *testing.T) {
+	for _, tt := range []struct {
+		input    string
+		wantErr  bool
+		comments int
+	}{
+		{"SELECT '\xff'", true, 0},               // in a string field
+		{"SELECT * FROM \"tab\xffle\"", true, 0}, // in an identifier
+		{"SELECT 1 -- \xff", false, 1},           // only in a line comment
+		{"SELECT 1 /* \xff */", false, 1},        // only in a block comment
+	} {
+		file, err := parser.ParseFile(tt.input)
+		_, parseErr := pg_query.Parse(tt.input)
+
+		if (err == nil) != (parseErr == nil) {
+			t.Errorf("ParseFile(%q) err=%v, Parse err=%v — the two must agree",
+				tt.input, err, parseErr)
+			continue
+		}
+		if err != nil && parseErr != nil && err.Error() != parseErr.Error() {
+			t.Errorf("ParseFile(%q) err %q, Parse err %q", tt.input, err, parseErr)
+		}
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("ParseFile(%q) = %v, want the protobuf UTF-8 error", tt.input, file)
+			} else if !strings.Contains(err.Error(), "invalid UTF-8") {
+				t.Errorf("ParseFile(%q) err = %q, want the protobuf UTF-8 error", tt.input, err)
+			}
+			if file != nil {
+				t.Errorf("ParseFile(%q) returned a result alongside %v", tt.input, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseFile(%q) = %v, want no error", tt.input, err)
+			continue
+		}
+		if len(file.Comments) != tt.comments {
+			t.Errorf("ParseFile(%q) kept %d comments, want %d", tt.input, len(file.Comments), tt.comments)
+		}
 	}
 }
 
