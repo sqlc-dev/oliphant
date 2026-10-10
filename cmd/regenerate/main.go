@@ -14,6 +14,8 @@
 //     (inputs transcribed mechanically; expectations always from the oracle)
 //   - pg_query_go testdata/fingerprint.json → fingerprint suite (includes the
 //     1.1 MB stress insert)
+//   - cmd/regenerate/regressions/*.sql → parse, scan, deparse suites
+//     (oliphant's own inputs for grammar the corpora above miss)
 //
 // Output must be byte-identical across runs — that reproducibility is
 // milestone 2's acceptance gate and is enforced weekly in CI.
@@ -124,6 +126,20 @@ func main() {
 		check(err)
 		base := strings.ReplaceAll(strings.TrimSuffix(strings.ReplaceAll(rel, ".d/", "_"), ".psql"), "/", "_")
 		emitSQLSuites(oracle, *out, "deparse_depesz", base, stmts, []string{"parse", "scan", "deparse"})
+	}
+
+	// Tier: oliphant's own regression inputs (cmd/regenerate/regressions),
+	// for grammar the upstream corpora above never reach. Inputs only; the
+	// oracle writes every expectation, as for every other tier.
+	regressionDir := filepath.Join("cmd", "regenerate", "regressions")
+	regressionFiles := sqlFiles(regressionDir)
+	fmt.Fprintf(os.Stderr, "regenerate: regressions: %d files\n", len(regressionFiles))
+	for _, f := range regressionFiles {
+		src, err := os.ReadFile(filepath.Join(regressionDir, f))
+		check(err)
+		stmts := splitStatements(oracle, string(src))
+		base := strings.TrimSuffix(f, ".sql")
+		emitSQLSuites(oracle, *out, "regressions", base, stmts, []string{"parse", "scan", "deparse"})
 	}
 
 	// Tier: libpg_query inline test tables. Inputs are the even-indexed (or

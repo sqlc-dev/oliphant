@@ -119,15 +119,26 @@ func (p *parser) parseArgClass() (ast.FunctionParameterMode, bool) {
 
 // argNameFollowedByType reports whether the token after the current one
 // continues a func_arg (so the current token is a param_name rather than
-// the argument's type).
+// the argument's type). gram.y's func_arg follows a param_name with an
+// arg_class or a func_type, so it is a param_name exactly when the next
+// token can begin one of those: an arg_class keyword, SETOF, a
+// type_function_name, or a keyword heading one of SimpleTypename's
+// keyword families. Any other token -- PRECISION after DOUBLE_P, ARRAY,
+// '[', ')', DEFAULT -- makes the current token the start of the type.
 func (p *parser) argNameFollowedByType() bool {
-	switch p.kindN(1) {
-	case ast.Token(','), ast.Token(')'), ast.Token('.'), ast.Token('%'),
-		ast.Token('('), ast.Token('['), ast.Token_DEFAULT, ast.Token('='),
-		ast.Token_ORDER, 0:
-		return false
+	next := p.peekN(1)
+	switch next.Kind {
+	case ast.Token_IN_P, ast.Token_OUT_P, ast.Token_INOUT, ast.Token_VARIADIC,
+		ast.Token_SETOF,
+		ast.Token_INT_P, ast.Token_INTEGER, ast.Token_SMALLINT, ast.Token_BIGINT,
+		ast.Token_REAL, ast.Token_FLOAT_P, ast.Token_DOUBLE_P, ast.Token_DECIMAL_P,
+		ast.Token_DEC, ast.Token_NUMERIC, ast.Token_BOOLEAN_P, ast.Token_BIT,
+		ast.Token_CHARACTER, ast.Token_CHAR_P, ast.Token_VARCHAR, ast.Token_NCHAR,
+		ast.Token_NATIONAL, ast.Token_TIMESTAMP, ast.Token_TIME, ast.Token_INTERVAL,
+		ast.Token_JSON:
+		return true
 	}
-	return true
+	return isTypeFunctionNameToken(next)
 }
 
 // extractArgTypes is gram.y's extractArgTypes.
